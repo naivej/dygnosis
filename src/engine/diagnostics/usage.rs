@@ -38,7 +38,13 @@ impl<'a> Usage<'a> {
             }),
         );
         for (context, equations) in trees {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             for eq in equations {
+                if crate::engine::control::cancelled() {
+                    break;
+                }
                 if eq.is_local
                     && model.model_local_action_attempted(eq)
                     && let (Some(lhs), Some(rhs)) = (eq.lhs_expr, eq.rhs_expr)
@@ -49,6 +55,9 @@ impl<'a> Usage<'a> {
                 let mut pending: Vec<_> =
                     [eq.lhs_expr, eq.rhs_expr].into_iter().flatten().collect();
                 while let Some(id) = pending.pop() {
+                    if crate::engine::control::cancelled() {
+                        break;
+                    }
                     if contexts.insert(id, context).is_some() {
                         continue;
                     }
@@ -78,6 +87,9 @@ impl<'a> Usage<'a> {
             )
             .collect();
         while let Some((context, id)) = pending.pop() {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             if contexts.insert(id, context).is_some() {
                 continue;
             }
@@ -116,6 +128,9 @@ impl<'a> Usage<'a> {
             .collect();
         let mut binding_targets = HashSet::new();
         while let Some(id) = pending.pop() {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             if !binding_targets.insert(id) {
                 continue;
             }
@@ -129,6 +144,9 @@ impl<'a> Usage<'a> {
             }
         }
         for (id, expr) in model.exprs.iter() {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             // Path values have a separate persistent DataTree and never form
             // model usage roots. Parse already owns their constructor facts.
             if model.constructor_scopes.get(&id) == Some(&DataTreeScope::ShockPaths) {
@@ -234,6 +252,9 @@ impl<'a> Usage<'a> {
             ),
         );
         for equation in &self.model.steady_state_equations {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             names.extend(
                 equation
                     .steady_state_targets
@@ -252,6 +273,9 @@ impl<'a> Usage<'a> {
             .filter_map(|id| self.normalized.get(&id).copied())
             .collect();
         while let Some(id) = pending.pop() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if !seen.insert(id) {
                 continue;
             }

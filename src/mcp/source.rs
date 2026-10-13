@@ -1,0 +1,1408 @@
+//! Common MCP source acquisition. Each request owns its workspace and checked
+//! input guards; supplied maps cannot consult server-host files.
+
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc, Mutex,
+};
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+
+use crate::engine::language::span::{LineIndex, Span};
+use crate::engine::language::{expand::ExpandReport, model::Model};
+use crate::engine::workspace::include_resolver::{normalize_uri, supplied_path_key};
+use crate::engine::workspace::{InputGuard, Workspace};
+
+const TEXT_ROOT: &str = "dygnosis-text:/root.mod";
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SourceInput {
+    /// Unnamed supplied source. It cannot read includes or companions from disk.
+    Text { text: String },
+    /// Supplied files only. The root and owners must be exact existing keys.
+    Map {
+        root: String,
+        files: BTreeMap<String, String>,
+        #[serde(default)]
+        root_text: Option<String>,
+        #[serde(default)]
+        include_dirs: Vec<String>,
+        #[serde(default)]
+        owner_roots: Vec<String>,
+    },
+    /// Saved server-host files. All root, owner and search-folder paths are absolute.
+    Disk {
+        root: String,
+        #[serde(default)]
+        include_dirs: Vec<String>,
+        #[serde(default)]
+        owner_roots: Vec<String>,
+    },
+}
+
+/// Shared single-model parameters, flattened by tool parameter structs.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+pub struct SourceArgs {
+    /// Explicit text, supplied-map or saved server-host disk input. Exclusive with file_content, active_file and files.
+    pub source: Option<SourceInput>,
+    /// Legacy unnamed text, or an optional overlay of the exact existing map root. An empty string is an overlay.
+    pub file_content: Option<String>,
+    /// Legacy exact root key in a nonempty files map. This path never grants disk access.
+    pub active_file: Option<String>,
+    /// Legacy supplied files only; lookup resolves slash, dot and dot-dot aliases without disk reads or case folding. A nonempty map requires an exact existing active_file key; an empty map uses file_content alone.
+    pub files: Option<HashMap<String, String>>,
+    /// Returned source revision. Required when reusing snapshot-bound selections, proposals or continuation.
+    pub expected_revision: Option<String>,
+}
+
+impl SourceArgs {
+    pub fn input(&self) -> Result<SourceInput, SourceError> {
+        if let Some(source) = &self.source {
+            if self.file_content.is_some() || self.active_file.is_some() || self.files.is_some() {
+                return Err(SourceError::invalid(
+                    "source cannot be combined with file_content, active_file or files",
+                ));
+            }
+            return Ok(source.clone());
+        }
+        resolve_legacy(
+            self.file_content.as_deref(),
+            self.active_file.as_deref(),
+            self.files.as_ref(),
+        )
+    }
+}
+
+pub fn resolve_legacy(
+    text: Option<&str>,
+    active: Option<&str>,
+    files: Option<&HashMap<String, String>>,
+) -> Result<SourceInput, SourceError> {
+    if let Some(files) = files.filter(|files| !files.is_empty()) {
+        let root = active.ok_or_else(|| {
+            SourceError::invalid("active_file is required with a nonempty files map")
+        })?;
+        if !files.contains_key(root) {
+            return Err(SourceError::invalid(format!(
+                "{root:?} is not in the file map"
+            )));
+        }
+        Ok(SourceInput::Map {
+            root: root.to_owned(),
+            files: files
+                .iter()
+                .map(|(key, text)| (key.clone(), text.clone()))
+                .collect(),
+            root_text: text.map(str::to_owned),
+            include_dirs: Vec::new(),
+            owner_roots: Vec::new(),
+        })
+    } else {
+        Ok(SourceInput::Text {
+            text: text
+                .ok_or_else(|| SourceError::invalid("Supply source or file_content"))?
+                .to_owned(),
+        })
+    }
+}
+
+/// Acquisition ceilings. Macro expansion retains its own work/output bounds.
+#[derive(Clone, Debug, Serialize)]
+pub struct SourceLimits {
+    pub max_file_bytes: usize,
+    pub max_source_bytes: usize,
+    pub max_files: usize,
+    pub max_roots: usize,
+}
+
+impl Default for SourceLimits {
+    fn default() -> Self {
+        Self {
+            max_file_bytes: 1_000_000,
+            max_source_bytes: 8 * 1024 * 1024,
+            max_files: 256,
+            max_roots: 64,
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct RequestControl {
+    pub cancelled: Arc<AtomicBool>,
+    pub limits: SourceLimits,
+    pub progress: Arc<ProgressState>,
+}
+
+pub struct ProgressState {
+    pub completed: AtomicUsize,
+    pub phase: Mutex<&'static str>,
+}
+
+impl Default for ProgressState {
+    fn default() -> Self {
+        Self {
+            completed: AtomicUsize::new(0),
+            phase: Mutex::new("Read sources"),
+        }
+    }
+}
+
+impl RequestControl {
+    pub fn complete_phase(&self, phase: &'static str) {
+        if self.cancelled.load(Ordering::Relaxed) {
+            return;
+        }
+        let mut current = self
+            .progress
+            .phase
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        *current = phase;
+        self.progress.completed.fetch_add(1, Ordering::SeqCst);
+    }
+    pub fn check(&self) -> Result<(), SourceError> {
+        if self.cancelled.load(Ordering::Relaxed) {
+            Err(SourceError::failure(
+                "CANCELLED",
+                "The request was cancelled",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SourceError {
+    pub code: &'static str,
+    pub message: String,
+    pub invalid_arguments: bool,
+}
+
+impl SourceError {
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self {
+            code: "INVALID_ARGUMENTS",
+            message: message.into(),
+            invalid_arguments: true,
+        }
+    }
+    pub fn failure(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            invalid_arguments: false,
+        }
+    }
+}
+
+pub struct SourceAnalysis {
+    pub model: Arc<Model>,
+    pub report: Arc<ExpandReport>,
+    pub coverage: Value,
+}
+
+pub struct SourceSnapshot {
+    pub workspace: Workspace,
+    /// Internal selected root. Text mode uses an explicitly synthetic root.
+    pub root: String,
+    pub root_file: Option<String>,
+    pub owner_roots: Vec<String>,
+    pub revision: String,
+    pub model: Arc<Model>,
+    pub report: Arc<ExpandReport>,
+    pub raw: String,
+    pub sources: BTreeMap<String, String>,
+    pub line_indexes: BTreeMap<String, LineIndex>,
+    pub analyses: BTreeMap<String, SourceAnalysis>,
+    pub inputs: Value,
+    pub guards: Vec<InputGuard>,
+    pub coverage: Value,
+}
+
+impl SourceSnapshot {
+    pub fn range(&self, file: &str, span: Span) -> Option<Value> {
+        let text = self.text(Some(file))?;
+        text.get(span.start as usize..span.end as usize)?;
+        let index = self.line_indexes.get(file)?;
+        let start = index.position(text, span.start);
+        let end = index.position(text, span.end);
+        Some(
+            json!({"line":start.line+1,"column":start.character+1,"end_line":end.line+1,"end_column":end.character+1}),
+        )
+    }
+    pub fn text(&self, file: Option<&str>) -> Option<&str> {
+        self.sources
+            .get(file.unwrap_or(&self.root))
+            .map(String::as_str)
+    }
+
+    pub fn written_file(&self, file: Option<&str>) -> Option<String> {
+        if self.root_file.is_none() {
+            None
+        } else {
+            file.map(str::to_owned).or_else(|| self.root_file.clone())
+        }
+    }
+}
+
+pub fn resolve_source(
+    input: SourceInput,
+    expected_revision: Option<&str>,
+    control: &RequestControl,
+) -> Result<SourceSnapshot, SourceError> {
+    control.check()?;
+    let (mut workspace, root, owner_roots, kind, include_dirs, root_file) = match input {
+        SourceInput::Text { text } => {
+            check_files(
+                &BTreeMap::from([(TEXT_ROOT.into(), text.clone())]),
+                &control.limits,
+            )?;
+            let mut workspace = Workspace::overlay_documents_with_control(
+                &BTreeMap::from([(TEXT_ROOT.into(), text)]),
+                Some(Arc::clone(&control.cancelled)),
+            );
+            workspace.set_root_search_paths(TEXT_ROOT, Vec::new());
+            workspace.set_unnamed_root(TEXT_ROOT);
+            (
+                workspace,
+                TEXT_ROOT.into(),
+                vec![TEXT_ROOT.into()],
+                "text",
+                Vec::new(),
+                None,
+            )
+        }
+        SourceInput::Map {
+            root,
+            mut files,
+            root_text,
+            include_dirs,
+            owner_roots,
+        } => {
+            if files.is_empty() || !files.contains_key(&root) {
+                return Err(SourceError::invalid(
+                    "Map source requires a nonempty files map and an exact existing root key",
+                ));
+            }
+            validate_aliases(&files)?;
+            let owners = checked_owners(&root, owner_roots);
+            if owners.len() > control.limits.max_roots {
+                return Err(SourceError::failure(
+                    "ROOT_LIMIT",
+                    "The checked owner count exceeds the request root limit",
+                ));
+            }
+            if owners.iter().any(|owner| !files.contains_key(owner)) {
+                return Err(SourceError::invalid(
+                    "Every owner_roots entry must be an exact existing key in files",
+                ));
+            }
+            if let Some(text) = root_text {
+                files.insert(root.clone(), text);
+            }
+            check_files(&files, &control.limits)?;
+            validate_paths(&include_dirs)?;
+            let mut workspace = Workspace::overlay_documents_with_control(
+                &files,
+                Some(Arc::clone(&control.cancelled)),
+            );
+            let paths: Vec<_> = include_dirs
+                .iter()
+                .map(|dir| PathBuf::from(supplied_path_key(dir)))
+                .collect();
+            for owner in &owners {
+                workspace.set_root_search_paths(owner, paths.clone());
+            }
+            let root_file = Some(root.clone());
+            (workspace, root, owners, "map", include_dirs, root_file)
+        }
+        SourceInput::Disk {
+            root,
+            include_dirs,
+            owner_roots,
+        } => {
+            let supplied = checked_owners(&root, owner_roots);
+            if supplied.len() > control.limits.max_roots {
+                return Err(SourceError::failure(
+                    "ROOT_LIMIT",
+                    "The checked owner count exceeds the request root limit",
+                ));
+            }
+            if supplied
+                .iter()
+                .chain(&include_dirs)
+                .any(|path| !Path::new(path).is_absolute() || path.contains('\0'))
+            {
+                return Err(SourceError::invalid(
+                    "Disk root, owner_roots and include_dirs must be absolute server-host paths",
+                ));
+            }
+            let owners = checked_owners(
+                &normalize_uri(&root),
+                supplied
+                    .into_iter()
+                    .map(|owner| normalize_uri(&owner))
+                    .collect(),
+            );
+            let root = normalize_uri(&root);
+            let mut workspace =
+                Workspace::with_search_paths(include_dirs.iter().map(PathBuf::from).collect());
+            for owner in &owners {
+                workspace
+                    .set_root_search_paths(owner, include_dirs.iter().map(PathBuf::from).collect());
+            }
+            (
+                workspace,
+                root.clone(),
+                owners,
+                "disk",
+                include_dirs,
+                Some(root),
+            )
+        }
+    };
+    if owner_roots.len() > control.limits.max_roots {
+        return Err(SourceError::failure(
+            "ROOT_LIMIT",
+            "The checked owner count exceeds the request root limit",
+        ));
+    }
+    workspace.set_cancellation(Arc::clone(&control.cancelled));
+    workspace.set_source_limits(
+        control.limits.max_file_bytes,
+        control.limits.max_source_bytes,
+        control.limits.max_files,
+    );
+    let mut analyses = BTreeMap::new();
+    let mut guards = BTreeMap::new();
+    let mut sources = BTreeMap::new();
+    for owner in &owner_roots {
+        control.check()?;
+        if workspace.input_revision(owner).is_none() {
+            control.check()?;
+            return Err(acquisition_error(&workspace, owner));
+        }
+        let model = workspace.effective_model_snapshot(owner).ok_or_else(|| {
+            control
+                .check()
+                .err()
+                .unwrap_or_else(|| acquisition_error(&workspace, owner))
+        })?;
+        control.check()?;
+        let report = workspace.expand_report_snapshot(owner).ok_or_else(|| {
+            control
+                .check()
+                .err()
+                .unwrap_or_else(|| acquisition_error(&workspace, owner))
+        })?;
+        control.check()?;
+        if !workspace.input_snapshot_is_current(owner) {
+            return Err(SourceError::failure(
+                "INPUT_CHANGED",
+                "Source inputs changed while reading them; repeat the request",
+            ));
+        }
+        let records = workspace.include_records(owner).cloned();
+        let includes_complete = workspace.includes_complete(owner);
+        let causes = crate::engine::control::run(Some(Arc::clone(&control.cancelled)), || {
+            crate::engine::analysis::model_info::incomplete_reason_records(&model, records.as_ref())
+        })
+        .map_err(|_| SourceError::failure("CANCELLED", "The request was cancelled"))?;
+        let reasons: Vec<_> = causes
+        .into_iter()
+        .map(|(span, code, message)| {
+            let mut reason = json!({"code":code,"message":message});
+            // The first and last bytes must map continuously to one captured
+            // written source. A split or synthesized range gains no location.
+            if matches!(code, "INCOMPLETE_BLOCK" | "INCOMPLETE_STATEMENT") && let Some((file, written)) = workspace.map_effective_origin(owner, span) {
+                let continuous = span.is_empty() || workspace.map_effective_origin(owner, Span {start:span.end-1,end:span.end})
+                    .is_some_and(|(last_file,last)| last_file==file && last.start==written.start+span.end-span.start-1);
+                if continuous && let Some(raw)=workspace.source_for_normalized_key(&file) {
+                    let normalized=crate::engine::language::parser::normalize_newlines(raw);
+                    let index=LineIndex::new(&normalized);
+                    let start=index.position(&normalized,written.start);
+                    let end=index.position(&normalized,written.end);
+                    if normalized.get(written.start as usize..written.end as usize).is_some() {
+                        reason["source"]=json!({"file":if kind=="text" {Value::Null}else {json!(file)},
+                            "range":{"line":start.line+1,"column":start.character+1,"end_line":end.line+1,"end_column":end.character+1}});
+                    }
+                }
+            }
+            reason
+        })
+        .collect();
+        control.check()?;
+        let complete =
+            crate::engine::analysis::model_info::incomplete_model_status(&model, includes_complete)
+                .is_none()
+                && report.navigation_complete;
+        let work_limits = crate::engine::analysis::model_info::macro_work_limits(
+            &model,
+            (kind != "text").then_some(owner.as_str()),
+        );
+        let coverage = json!({"root":if kind=="text" { Value::Null } else { json!(owner) },"complete":complete,"includes_complete":includes_complete,"reasons":reasons,"work_limits":work_limits});
+        analyses.insert(
+            owner.clone(),
+            SourceAnalysis {
+                model,
+                report,
+                coverage,
+            },
+        );
+        for guard in workspace.input_guards(owner) {
+            guards.insert(guard.file.clone(), guard);
+        }
+        if guards.len() > control.limits.max_files
+            || guards
+                .values()
+                .filter(|guard| guard.exists && !guard.directory)
+                .try_fold(0usize, |used, guard| {
+                    used.checked_add(guard.length.unwrap_or(0) as usize)
+                })
+                .is_none_or(|bytes| bytes > control.limits.max_source_bytes)
+        {
+            return Err(SourceError::failure(
+                "SOURCE_LIMIT",
+                "Checked source bytes or lookup candidate count exceeds the request source limit",
+            ));
+        }
+        for key in workspace.snapshot_sources(owner).keys() {
+            if let Some(text) = workspace.source_for_normalized_key(key) {
+                sources.insert(key.clone(), text.to_owned());
+            }
+        }
+        control.complete_phase("Analyze source");
+    }
+    if let Some(message) = workspace.acquisition_limit() {
+        return Err(SourceError::failure("SOURCE_LIMIT", message));
+    }
+    if guards.len() > control.limits.max_files {
+        return Err(SourceError::failure(
+            "SOURCE_LIMIT",
+            "Checked source and lookup candidate count exceeds the request file limit",
+        ));
+    }
+    for owner in &owner_roots {
+        control.check()?;
+        if !workspace.input_snapshot_is_current(owner) {
+            return Err(SourceError::failure(
+                "INPUT_CHANGED",
+                "Source inputs changed while reading the checked owners; repeat the request",
+            ));
+        }
+    }
+    let guards: Vec<_> = guards.into_values().collect();
+    let identity = json!({"source_policy":kind,"root":root_file,"owner_roots":owner_roots,"include_dirs":include_dirs,"guards":guards});
+    let revision = sha256(serde_json::to_vec(&identity).expect("source identity is serializable"));
+    if expected_revision.is_some_and(|expected| expected != revision) {
+        return Err(SourceError::failure(
+            "INPUT_CHANGED",
+            "Source inputs no longer match expected_revision; start a new request",
+        ));
+    }
+    control.check()?;
+    let selected = &analyses[&root];
+    let model = selected.model.clone();
+    let report = selected.report.clone();
+    let coverage = selected.coverage.clone();
+    let raw = sources
+        .get(&root)
+        .cloned()
+        .ok_or_else(|| acquisition_error(&workspace, &root))?;
+    let mut inputs = json!({"source_policy":kind,"root":root_file,"synthetic_root":kind=="text","checked_owners":if kind=="text" { Vec::new() } else { owner_roots.clone() },"include_dirs":include_dirs,"revision":revision,"guards":guards});
+    if kind == "text"
+        && let Some(rows) = inputs["guards"].as_array_mut()
+    {
+        for row in rows {
+            row["file"] = Value::Null;
+        }
+    }
+    let line_indexes = sources
+        .iter()
+        .map(|(file, text)| (file.clone(), LineIndex::new(text)))
+        .collect();
+    control.check()?;
+    Ok(SourceSnapshot {
+        workspace,
+        root,
+        root_file,
+        owner_roots,
+        revision,
+        model,
+        report,
+        raw,
+        sources,
+        line_indexes,
+        analyses,
+        inputs,
+        guards,
+        coverage,
+    })
+}
+
+pub fn sha256(bytes: impl AsRef<[u8]>) -> String {
+    format!("{:x}", Sha256::digest(bytes.as_ref()))
+}
+
+fn checked_owners(root: &str, owners: Vec<String>) -> Vec<String> {
+    let mut out = vec![root.to_owned()];
+    for owner in owners {
+        if !out.contains(&owner) {
+            out.push(owner);
+        }
+    }
+    // The root stays first; additional owner order is not semantic.
+    out[1..].sort();
+    out
+}
+
+fn validate_paths(paths: &[String]) -> Result<(), SourceError> {
+    if paths
+        .iter()
+        .any(|path| path.contains('\0') || path.is_empty())
+    {
+        Err(SourceError::invalid(
+            "Source paths must be nonempty and contain no NUL",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_aliases(files: &BTreeMap<String, String>) -> Result<(), SourceError> {
+    validate_paths(&files.keys().cloned().collect::<Vec<_>>())?;
+    let mut identities = BTreeSet::new();
+    for key in files.keys() {
+        let lookup = supplied_path_key(key);
+        if lookup.is_empty() || !identities.insert(lookup) {
+            return Err(SourceError::invalid(
+                "Two supplied file keys resolve to the same lexical lookup key",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_files(files: &BTreeMap<String, String>, limits: &SourceLimits) -> Result<(), SourceError> {
+    let mut bytes = 0usize;
+    if files.len() > limits.max_files {
+        return Err(SourceError::failure(
+            "SOURCE_LIMIT",
+            "Supplied file count exceeds the request file limit",
+        ));
+    }
+    for text in files.values() {
+        if text.len() > limits.max_file_bytes
+            || text.len() > limits.max_source_bytes.saturating_sub(bytes)
+        {
+            return Err(SourceError::failure(
+                "SOURCE_LIMIT",
+                "Supplied source bytes exceed the request source limit",
+            ));
+        }
+        bytes += text.len();
+    }
+    Ok(())
+}
+
+fn acquisition_error(workspace: &Workspace, root: &str) -> SourceError {
+    if let Some(message) = workspace.acquisition_limit() {
+        SourceError::failure("SOURCE_LIMIT", message)
+    } else {
+        SourceError::failure(
+            "SOURCE_READ_FAILED",
+            format!("The selected model root could not be read: {root}"),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicU64;
+
+    const MODEL: &str = "var x; model; x=0; end;";
+    fn declared(model: &Model, name: &str) -> bool {
+        model
+            .intern
+            .lookup(name)
+            .and_then(|name| model.final_symbol_kind(name))
+            .is_some()
+    }
+    fn mapped(root: &str, files: &[(&str, &str)]) -> SourceInput {
+        SourceInput::Map {
+            root: root.into(),
+            files: files
+                .iter()
+                .map(|(key, text)| ((*key).into(), (*text).into()))
+                .collect(),
+            root_text: None,
+            include_dirs: Vec::new(),
+            owner_roots: Vec::new(),
+        }
+    }
+    fn error(input: SourceInput, control: &RequestControl) -> SourceError {
+        match resolve_source(input, None, control) {
+            Ok(_) => panic!("source unexpectedly accepted"),
+            Err(error) => error,
+        }
+    }
+
+    #[test]
+    fn unnamed_text_input_guards_expose_no_invented_file_identity() {
+        // Guards the internal parser root escaping through public input guards;
+        // content identity and expected-revision checks still use private facts.
+        let snapshot = resolve_source(
+            SourceInput::Text { text: MODEL.into() },
+            None,
+            &RequestControl::default(),
+        )
+        .unwrap();
+        assert_eq!(snapshot.inputs["root"], Value::Null);
+        assert_eq!(snapshot.inputs["checked_owners"], json!([]));
+        assert!(snapshot.inputs["guards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["file"].is_null()));
+        assert!(snapshot.guards.iter().any(|guard| guard.file == TEXT_ROOT));
+        let repeated = resolve_source(
+            SourceInput::Text { text: MODEL.into() },
+            Some(&snapshot.revision),
+            &RequestControl::default(),
+        )
+        .unwrap();
+        assert_eq!(snapshot.revision, repeated.revision);
+    }
+
+    #[test]
+    fn incomplete_accepted_commands_and_blocks_have_exact_causes() {
+        // Guards incomplete accepted statement records producing an empty
+        // structured reason list, and locations pointing at the include owner.
+        for (tail, code, name) in [
+            ("stoch_simul", "INCOMPLETE_STATEMENT", "stoch_simul"),
+            ("priors;", "INCOMPLETE_BLOCK", "priors"),
+        ] {
+            let text = format!("var y;model;y=1;end;\n{tail}");
+            let text_snapshot =
+                resolve_source(SourceInput::Text { text }, None, &RequestControl::default())
+                    .unwrap();
+            assert_eq!(text_snapshot.coverage["complete"], false);
+            let reason = text_snapshot.coverage["reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|reason| reason["code"] == code)
+                .expect("specific incomplete cause");
+            assert!(reason["message"].as_str().unwrap().contains(name));
+            assert_eq!(reason["source"]["file"], Value::Null);
+            assert_eq!(reason["source"]["range"]["line"], 2);
+            assert!(!crate::engine::diagnostics::analyze(&text_snapshot.model)
+                .iter()
+                .any(|row| row.code == "E001"));
+            let map_snapshot = resolve_source(
+                mapped(
+                    "pkg/root.mod",
+                    &[
+                        (
+                            "pkg/root.mod",
+                            "var y;model;y=1;end;\r\n@#include \"child.inc\"\r\n",
+                        ),
+                        ("pkg\\.\\child.inc", &format!("// source\r\n{tail}")),
+                    ],
+                ),
+                None,
+                &RequestControl::default(),
+            )
+            .unwrap();
+            let reason = map_snapshot.coverage["reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|reason| reason["code"] == code)
+                .unwrap();
+            assert_eq!(reason["source"]["file"], "pkg\\.\\child.inc");
+            assert_eq!(reason["source"]["range"]["line"], 2);
+        }
+        let broken = resolve_source(
+            SourceInput::Text {
+                text: "var y;model;\ny=1\nend;".into(),
+            },
+            None,
+            &RequestControl::default(),
+        )
+        .unwrap();
+        assert!(broken.coverage["reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason["code"] == "E001"));
+    }
+
+    #[test]
+    fn cancellation_during_ordinary_parsing_returns_no_snapshot_or_progress() {
+        // Guards the source resolver returning partially parsed facts after a
+        // cancellation that occurred inside ordinary equation parsing.
+        let control = RequestControl::default();
+        crate::engine::control::cancel_after(&control.cancelled, 1000);
+        let result = error(
+            SourceInput::Text {
+                text: format!("var y;model;\n{}end;", "y=1;\n".repeat(2000)),
+            },
+            &control,
+        );
+        assert_eq!(result.code, "CANCELLED");
+        assert_eq!(control.progress.completed.load(Ordering::SeqCst), 0);
+    }
+    struct DiskFixture(PathBuf);
+    impl DiskFixture {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(1);
+            let path = std::env::temp_dir().join(format!(
+                "dygnosis-source-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+        fn key(&self, name: &str) -> String {
+            self.0.join(name).to_string_lossy().into_owned()
+        }
+        fn write(&self, name: &str, text: &str) {
+            std::fs::write(self.0.join(name), text).unwrap();
+        }
+    }
+    impl Drop for DiskFixture {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    #[test]
+    fn map_includes_and_companions_never_consult_existing_disk_files() {
+        // Guards omitted disk include content and companion existence entering a map result.
+        let fixture = DiskFixture::new();
+        let root = fixture.key("root.mod");
+        let text = "@#include \"child.inc\"\nvar x; model; x=0; end;";
+        let before = resolve_source(
+            mapped(&root, &[(&root, text)]),
+            None,
+            &RequestControl::default(),
+        )
+        .unwrap();
+        fixture.write("child.inc", "var disk_only;");
+        fixture.write("root_steadystate.m", "function disk_only; end");
+        let mut after = resolve_source(
+            mapped(&root, &[(&root, text)]),
+            Some(&before.revision),
+            &RequestControl::default(),
+        )
+        .unwrap();
+        assert_eq!(after.revision, before.revision);
+        assert!(!declared(&after.model, "disk_only"));
+        assert_eq!(after.sources.len(), 1);
+        assert!(after
+            .workspace
+            .companion_records(&root)
+            .unwrap()
+            .iter()
+            .all(|record| record.path.is_none()));
+        assert!(!after.coverage["complete"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn lexical_lookup_preserves_exact_written_keys_and_search_order() {
+        // Guards host case folding, suffix fallback, ignored configured folders and rewritten source keys.
+        let root = "Models\\./Root.mod";
+        let child = "Models\\parts\\../parts/child.inc";
+        let mut input=mapped(root,&[(root,"@#include \"parts/../parts/child.inc\"\n@#include \"extra.inc\"\nmodel; x=0; end;"),(child,"var x;"),("Search\\./extra.inc","parameters beta;"),("Elsewhere/extra.inc","var wrong;")]);
+        if let SourceInput::Map { include_dirs, .. } = &mut input {
+            include_dirs.push("Search/".into());
+        }
+        let snapshot = resolve_source(input, None, &RequestControl::default()).unwrap();
+        assert_eq!(snapshot.root, root);
+        assert!(snapshot.sources.contains_key(child));
+        assert!(snapshot.sources.contains_key("Search\\./extra.inc"));
+        assert_eq!(
+            snapshot.raw,
+            "@#include \"parts/../parts/child.inc\"\n@#include \"extra.inc\"\nmodel; x=0; end;"
+        );
+        assert!(declared(&snapshot.model, "beta"));
+        assert!(!declared(&snapshot.model, "wrong"));
+        assert!(snapshot
+            .report
+            .model_map
+            .declarations
+            .iter()
+            .flat_map(|source| &source.segments)
+            .any(|segment| segment.file.as_deref() == Some(child)));
+        let suffix = resolve_source(
+            mapped(
+                "Models/Root.mod",
+                &[
+                    ("Models/Root.mod", "@#include \"child.inc\"\n"),
+                    ("Other/child.inc", "var x;"),
+                ],
+            ),
+            None,
+            &RequestControl::default(),
+        )
+        .unwrap();
+        assert!(!suffix.coverage["includes_complete"].as_bool().unwrap());
+        let case = resolve_source(
+            mapped(
+                "Models/Root.mod",
+                &[
+                    ("Models/Root.mod", "@#include \"child.inc\"\n"),
+                    ("Models/Child.inc", "var x;"),
+                ],
+            ),
+            None,
+            &RequestControl::default(),
+        )
+        .unwrap();
+        assert!(!case.coverage["includes_complete"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn absolute_supplied_root_keeps_its_root_directory_during_include_lookup() {
+        // Guards `/root.mod` looking up `child.inc` as a relative supplied key,
+        // or constructing a UNC-style `//child.inc` when its parent is `/`.
+        let snapshot = resolve_source(
+            mapped(
+                "/root.mod",
+                &[
+                    ("/root.mod", "@#include \"child.inc\"\nvar y;model;y=0;end;"),
+                    ("/child.inc", "parameters from_root;"),
+                    ("child.inc", "parameters relative_only;"),
+                ],
+            ),
+            None,
+            &RequestControl::default(),
+        )
+        .unwrap();
+        assert_eq!(snapshot.coverage["complete"], true);
+        assert!(declared(&snapshot.model, "from_root"));
+        assert!(!declared(&snapshot.model, "relative_only"));
+        assert!(snapshot.sources.contains_key("/child.inc"));
+    }
+
+    #[test]
+    fn companion_merge_preserves_supplied_case_and_exact_source_keys() {
+        // Guards host case folding or canonicalization collapsing distinct
+        // supplied companions or distinct unresolved names in one root.
+        let text=format!("{MODEL}\ndata(file='A.csv');\ndata(file='a.csv');\ndata(file='Missing.csv');\ndata(file='missing.csv');");
+        let mut snapshot = resolve_source(
+            mapped(
+                "models/root.mod",
+                &[
+                    ("models/root.mod", &text),
+                    ("models\\A.csv", "y\n1\n"),
+                    ("models/./a.csv", "y\n2\n"),
+                ],
+            ),
+            None,
+            &RequestControl::default(),
+        )
+        .unwrap();
+        let records = snapshot
+            .workspace
+            .companion_records(&snapshot.root)
+            .unwrap();
+        for (name, key) in [("A.csv", "models\\A.csv"), ("a.csv", "models/./a.csv")] {
+            let row = records
+                .iter()
+                .find(|row| row.name == name)
+                .expect("distinct supplied companion");
+            assert_eq!(row.path.as_ref().unwrap().to_str().unwrap(), key);
+        }
+        for name in ["Missing.csv", "missing.csv"] {
+            assert!(records
+                .iter()
+                .any(|row| row.name == name && row.path.is_none()));
+        }
+    }
+
+    #[test]
+    fn actual_macro_work_stop_has_a_typed_limit_but_unsupported_i211_does_not() {
+        // Guards a real nested-loop ceiling being reported only as generic
+        // incomplete analysis, and classifying every I211 as a budget stop.
+        let text="var y;\nmodel;\n@#for i in 1:1000\n@#for j in 1:1000\ny=0;\n@#endfor\n@#endfor\nend;\n";
+        let root = "Models\\.\\root.mod";
+        let stopped = resolve_source(
+            mapped(root, &[(root, text)]),
+            None,
+            &RequestControl::default(),
+        )
+        .unwrap();
+        assert_eq!(stopped.coverage["complete"], false);
+        let limit = stopped.coverage["work_limits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["limit"] == "iteration work")
+            .expect("actual work receipt");
+        assert_eq!(limit["code"], "MACRO_LIMIT");
+        assert_eq!(
+            limit["ceiling"],
+            crate::engine::language::macro_expr::MACRO_WORK_CAP
+        );
+        assert_eq!(limit["root"], root);
+        assert!(!limit["omitted"].as_str().unwrap().is_empty());
+        assert!(stopped
+            .model
+            .incomplete_reasons
+            .iter()
+            .any(|reason| reason.limit_name == Some("iteration work")));
+        let unsupported = resolve_source(
+            SourceInput::Text {
+                text: format!("@#include \"unavailable.inc\"\n{MODEL}"),
+            },
+            None,
+            &RequestControl::default(),
+        )
+        .unwrap();
+        assert!(crate::engine::diagnostics::analyze(&unsupported.model)
+            .iter()
+            .any(|reason| reason.code == "I211"));
+        assert!(unsupported
+            .model
+            .incomplete_reasons
+            .iter()
+            .all(|reason| reason.limit_name.is_none()));
+        assert_eq!(unsupported.coverage["work_limits"], json!([]));
+    }
+
+    #[test]
+    fn macro_precision_stop_does_not_invent_an_element_ceiling() {
+        // Guards a non-advancing floating-point range being mislabeled as the
+        // 10,000-element capacity stop, although it stops at its first value.
+        let snapshot = resolve_source(
+            SourceInput::Text {
+                text: format!("@#define values=10000000000000000:1:10000000000000002\n{MODEL}"),
+            },
+            None,
+            &RequestControl::default(),
+        )
+        .unwrap();
+        let limit = snapshot.coverage["work_limits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["limit"] == "range size")
+            .expect("actual precision stop");
+        assert!(limit["ceiling"].is_null());
+        assert!(limit["unit"].is_null());
+        assert_eq!(snapshot.coverage["complete"], false);
+    }
+
+    #[test]
+    fn collisions_missing_exact_roots_and_conflicting_source_arguments_are_input_errors() {
+        // Guards silent overwrite by separator/dot/dotdot aliases and synthetic missing extraction roots.
+        for alias in ["dir\\root.mod", "dir/./root.mod", "dir/child/../root.mod"] {
+            assert!(
+                error(
+                    mapped("dir/root.mod", &[("dir/root.mod", MODEL), (alias, MODEL)]),
+                    &RequestControl::default()
+                )
+                .invalid_arguments
+            );
+        }
+        assert!(
+            error(
+                mapped("root.mod", &[("./root.mod", MODEL)]),
+                &RequestControl::default()
+            )
+            .invalid_arguments
+        );
+        let args = SourceArgs {
+            source: Some(SourceInput::Text { text: MODEL.into() }),
+            file_content: Some(MODEL.into()),
+            ..Default::default()
+        };
+        assert!(args.input().unwrap_err().invalid_arguments);
+        let files = HashMap::from([("root.mod".into(), MODEL.into())]);
+        assert!(matches!(
+            resolve_legacy(None, Some("root.mod"), Some(&files)).unwrap(),
+            SourceInput::Map {
+                root_text: None,
+                ..
+            }
+        ));
+        assert!(matches!(
+            resolve_legacy(Some(MODEL), None, Some(&HashMap::new())).unwrap(),
+            SourceInput::Text { .. }
+        ));
+    }
+
+    #[test]
+    fn revision_checks_includes_settings_owners_missing_candidates_and_loader_sources() {
+        // Guards a stale proposal surviving changes in unchanged dependencies or lookup policy.
+        let root = "root.mod";
+        let base = mapped(
+            root,
+            &[
+                (root, "@#include \"child.inc\"\nmodel; x=0; end;"),
+                ("child.inc", "var x;"),
+            ],
+        );
+        let snapshot = resolve_source(base.clone(), None, &RequestControl::default()).unwrap();
+        assert_eq!(snapshot.revision.len(), 64);
+        let mut variants = Vec::new();
+        let mut changed = base.clone();
+        if let SourceInput::Map { files, .. } = &mut changed {
+            files.insert("child.inc".into(), "var x; parameters beta;".into());
+        }
+        variants.push(changed);
+        let mut settings = base.clone();
+        if let SourceInput::Map { include_dirs, .. } = &mut settings {
+            include_dirs.push("extra".into());
+        }
+        variants.push(settings);
+        let mut owners = base;
+        if let SourceInput::Map {
+            files, owner_roots, ..
+        } = &mut owners
+        {
+            files.insert("other.mod".into(), MODEL.into());
+            owner_roots.push("other.mod".into());
+        }
+        variants.push(owners);
+        for variant in variants {
+            assert_eq!(
+                resolve_source(
+                    variant,
+                    Some(&snapshot.revision),
+                    &RequestControl::default()
+                )
+                .err()
+                .unwrap()
+                .code,
+                "INPUT_CHANGED"
+            );
+        }
+        let missing = mapped(root, &[(root, "@#include \"missing.inc\"\n")]);
+        let snapshot = resolve_source(missing.clone(), None, &RequestControl::default()).unwrap();
+        let mut appeared = missing;
+        if let SourceInput::Map { files, .. } = &mut appeared {
+            files.insert("missing.inc".into(), MODEL.into());
+        }
+        assert_eq!(
+            resolve_source(
+                appeared,
+                Some(&snapshot.revision),
+                &RequestControl::default()
+            )
+            .err()
+            .unwrap()
+            .code,
+            "INPUT_CHANGED"
+        );
+        let mut loader=mapped(root,&[(root,"parameters beta; load_params_and_steady_state('values.inc'); var x; model; x=beta; end;"),("values.inc","beta = 1;")]);
+        let snapshot = resolve_source(loader.clone(), None, &RequestControl::default()).unwrap();
+        assert!(snapshot
+            .guards
+            .iter()
+            .any(|guard| guard.file == "values.inc"));
+        if let SourceInput::Map { files, .. } = &mut loader {
+            files.insert("values.inc".into(), "beta = 2;".into());
+        }
+        assert_eq!(
+            resolve_source(loader, Some(&snapshot.revision), &RequestControl::default())
+                .err()
+                .unwrap()
+                .code,
+            "INPUT_CHANGED"
+        );
+    }
+
+    #[test]
+    fn only_explicit_roots_are_checked_and_empty_root_overlay_is_kept() {
+        // Guards treating every .mod supplied key as a Rename owner and discarding an empty overlay.
+        let mut input = mapped(
+            "root.mod",
+            &[
+                ("root.mod", MODEL),
+                ("unrelated.mod", "@#include \"absent.inc\"\n"),
+            ],
+        );
+        let snapshot = resolve_source(input.clone(), None, &RequestControl::default()).unwrap();
+        assert_eq!(snapshot.owner_roots, vec!["root.mod"]);
+        assert_eq!(snapshot.analyses.len(), 1);
+        assert!(snapshot.coverage["complete"].as_bool().unwrap());
+        if let SourceInput::Map { root_text, .. } = &mut input {
+            *root_text = Some(String::new());
+        }
+        assert_eq!(
+            resolve_source(input, None, &RequestControl::default())
+                .unwrap()
+                .raw,
+            ""
+        );
+    }
+
+    #[test]
+    fn cached_ranges_use_scalar_columns_and_captured_original_source() {
+        // Guards supplementary Unicode/CRLF mapping and a range invented for uncaptured or split UTF-8 source.
+        let text = "// 😀\r\nvar x;\r\nmodel; x=0; end;";
+        let snapshot = resolve_source(
+            SourceInput::Text { text: text.into() },
+            None,
+            &RequestControl::default(),
+        )
+        .unwrap();
+        let x = text.find("x;").unwrap();
+        assert_eq!(
+            snapshot.range(&snapshot.root, Span::new(x, x + 1)).unwrap(),
+            json!({"line":2,"column":5,"end_line":2,"end_column":6})
+        );
+        let emoji = text.find('😀').unwrap();
+        assert!(snapshot
+            .range(&snapshot.root, Span::new(emoji + 1, emoji + 2))
+            .is_none());
+        assert!(snapshot.range("uncaptured.inc", Span::new(0, 0)).is_none());
+        assert_eq!(
+            snapshot.guards[0].text_sha256.as_deref(),
+            Some(sha256(text).as_str())
+        );
+    }
+
+    #[test]
+    fn saved_inputs_guard_unedited_sources_and_new_missing_candidates() {
+        // Guards disk dependency edits or newly created candidates leaving a returned revision valid.
+        let fixture = DiskFixture::new();
+        fixture.write("root.mod", "@#include \"child.inc\"\nmodel; x=0; end;");
+        fixture.write("child.inc", "var x;");
+        let input = SourceInput::Disk {
+            root: fixture.key("root.mod"),
+            include_dirs: Vec::new(),
+            owner_roots: Vec::new(),
+        };
+        let snapshot = resolve_source(input.clone(), None, &RequestControl::default()).unwrap();
+        fixture.write("child.inc", "var x; parameters beta;");
+        assert_eq!(
+            resolve_source(
+                input.clone(),
+                Some(&snapshot.revision),
+                &RequestControl::default()
+            )
+            .err()
+            .unwrap()
+            .code,
+            "INPUT_CHANGED"
+        );
+        let snapshot = resolve_source(input.clone(), None, &RequestControl::default()).unwrap();
+        fixture.write("root_steadystate.m", "function out=steadystate; out=0; end");
+        assert_eq!(
+            resolve_source(input, Some(&snapshot.revision), &RequestControl::default())
+                .err()
+                .unwrap()
+                .code,
+            "INPUT_CHANGED"
+        );
+    }
+
+    #[test]
+    fn ceilings_and_cancellation_stop_acquisition_before_analysis() {
+        // Guards unbounded supplied allocations, candidate capture, owner work and ignored cancellation.
+        let control = RequestControl {
+            limits: SourceLimits {
+                max_file_bytes: MODEL.len(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(resolve_source(SourceInput::Text { text: MODEL.into() }, None, &control).is_ok());
+        assert_eq!(
+            error(
+                SourceInput::Text {
+                    text: format!("{MODEL} ")
+                },
+                &control
+            )
+            .code,
+            "SOURCE_LIMIT"
+        );
+        let control = RequestControl {
+            limits: SourceLimits {
+                max_source_bytes: MODEL.len(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            error(
+                mapped("root.mod", &[("root.mod", MODEL), ("extra.inc", " ")]),
+                &control
+            )
+            .code,
+            "SOURCE_LIMIT"
+        );
+        let control = RequestControl {
+            limits: SourceLimits {
+                max_files: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(resolve_source(SourceInput::Text { text: MODEL.into() }, None, &control).is_ok());
+        assert_eq!(
+            error(
+                mapped("root.mod", &[("root.mod", MODEL), ("extra.inc", "")]),
+                &control
+            )
+            .code,
+            "SOURCE_LIMIT"
+        );
+        let control = RequestControl {
+            limits: SourceLimits {
+                max_roots: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut input = mapped("root.mod", &[("root.mod", MODEL), ("owner.mod", MODEL)]);
+        if let SourceInput::Map { owner_roots, .. } = &mut input {
+            owner_roots.push("owner.mod".into());
+        }
+        assert_eq!(error(input, &control).code, "ROOT_LIMIT");
+        control.cancelled.store(true, Ordering::Relaxed);
+        assert_eq!(
+            error(SourceInput::Text { text: MODEL.into() }, &control).code,
+            "CANCELLED"
+        );
+    }
+
+    #[test]
+    fn recorded_default_ceilings_accept_the_boundary_and_refuse_the_next_input() {
+        // Guards each advertised acquisition ceiling at its real value. Macro
+        // work limits can still make an accepted byte-bound input incomplete.
+        let control = RequestControl::default();
+        let maximum = " ".repeat(control.limits.max_file_bytes);
+        assert!(resolve_source(
+            SourceInput::Text {
+                text: maximum.clone()
+            },
+            None,
+            &control
+        )
+        .is_ok());
+        assert_eq!(
+            error(
+                SourceInput::Text {
+                    text: format!("{maximum} ")
+                },
+                &control
+            )
+            .code,
+            "SOURCE_LIMIT"
+        );
+        let mut files = BTreeMap::new();
+        let mut remaining = control.limits.max_source_bytes;
+        let mut index = 0;
+        while remaining > 0 {
+            let size = remaining.min(control.limits.max_file_bytes);
+            files.insert(format!("source{index}.mod"), " ".repeat(size));
+            remaining -= size;
+            index += 1;
+        }
+        let input = SourceInput::Map {
+            root: "source0.mod".into(),
+            files: files.clone(),
+            root_text: None,
+            include_dirs: Vec::new(),
+            owner_roots: Vec::new(),
+        };
+        assert!(resolve_source(input, None, &control).is_ok());
+        files
+            .get_mut(&format!("source{}.mod", index - 1))
+            .unwrap()
+            .push(' ');
+        assert_eq!(
+            error(
+                SourceInput::Map {
+                    root: "source0.mod".into(),
+                    files,
+                    root_text: None,
+                    include_dirs: Vec::new(),
+                    owner_roots: Vec::new()
+                },
+                &control
+            )
+            .code,
+            "SOURCE_LIMIT"
+        );
+        let mut files: BTreeMap<_, _> = (0..control.limits.max_files)
+            .map(|index| (format!("file{index}.mod"), String::new()))
+            .collect();
+        assert!(resolve_source(
+            SourceInput::Map {
+                root: "file0.mod".into(),
+                files: files.clone(),
+                root_text: None,
+                include_dirs: Vec::new(),
+                owner_roots: Vec::new()
+            },
+            None,
+            &control
+        )
+        .is_ok());
+        files.insert("one_extra.mod".into(), String::new());
+        assert_eq!(
+            error(
+                SourceInput::Map {
+                    root: "file0.mod".into(),
+                    files,
+                    root_text: None,
+                    include_dirs: Vec::new(),
+                    owner_roots: Vec::new()
+                },
+                &control
+            )
+            .code,
+            "SOURCE_LIMIT"
+        );
+        let files: BTreeMap<_, _> = (0..control.limits.max_roots + 1)
+            .map(|index| (format!("root{index}.mod"), String::new()))
+            .collect();
+        let owners: Vec<_> = (1..control.limits.max_roots)
+            .map(|index| format!("root{index}.mod"))
+            .collect();
+        assert!(resolve_source(
+            SourceInput::Map {
+                root: "root0.mod".into(),
+                files: files.clone(),
+                root_text: None,
+                include_dirs: Vec::new(),
+                owner_roots: owners.clone()
+            },
+            None,
+            &control
+        )
+        .is_ok());
+        let mut owners = owners;
+        owners.push(format!("root{}.mod", control.limits.max_roots));
+        assert_eq!(
+            error(
+                SourceInput::Map {
+                    root: "root0.mod".into(),
+                    files,
+                    root_text: None,
+                    include_dirs: Vec::new(),
+                    owner_roots: owners
+                },
+                &control
+            )
+            .code,
+            "ROOT_LIMIT"
+        );
+    }
+}

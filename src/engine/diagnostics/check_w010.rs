@@ -27,10 +27,16 @@ const RUN_COMMANDS: &[&str] = &[
 pub fn check_w010(model: &Model) -> Vec<Diagnostic> {
     let mut assigned: HashSet<Name> = model.param_assignments.iter().map(|a| a.name).collect();
     for eq in &model.steady_state_equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         assigned.extend(eq.steady_state_targets.iter().map(|target| target.name));
     }
     let mut diagnostics = Vec::new();
     for p in model.final_parameters() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if assigned.contains(&p.name) {
             continue;
         }
@@ -62,22 +68,37 @@ pub fn check_w011(model: &Model) -> Vec<Diagnostic> {
     let commands = run_command_positions(&model.source);
 
     for cmd in &commands {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let mut latest: HashMap<Name, usize> = HashMap::new();
         for (i, row) in subjects.iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if row.span.start < *cmd {
                 latest.insert(row.name, i);
             }
         }
         for i in latest.values() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             push_w011(&mut diagnostics, &mut reported, model, &subjects[*i]);
         }
     }
 
     let mut latest: HashMap<Name, usize> = HashMap::new();
     for (i, row) in subjects.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         latest.insert(row.name, i);
     }
     for i in latest.values() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         push_w011(&mut diagnostics, &mut reported, model, &subjects[*i]);
     }
     // HashMap order varies between checks. Macro copies can share a written
@@ -108,6 +129,9 @@ pub fn check_w012(model: &Model) -> Vec<Diagnostic> {
 
     let mut diagnostics = Vec::new();
     for a in &model.helper_assignments {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if declared.contains(&a.name) {
             continue;
         }
@@ -180,11 +204,17 @@ pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
     // `change_type(varexo)` leaves the written `var` declaration in place.
     // The unused check still applies to that final plain exogenous.
     for d in &model.endogenous {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if model.final_symbol_kind(d.name) == Some("varexo") {
             consider_unused_exogenous(model, d, &referenced, &mut reported, &mut diagnostics);
         }
     }
     for d in &model.retyped_trend_decls {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         consider_unused_exogenous(model, d, &referenced, &mut reported, &mut diagnostics);
     }
     diagnostics
@@ -259,6 +289,9 @@ pub fn check_w022(model: &Model) -> Vec<Diagnostic> {
 
     let mut diagnostics = Vec::new();
     for p in model.final_parameters() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if referenced.contains(&p.name) {
             continue;
         }
@@ -303,6 +336,9 @@ fn unevaluable_subjects(model: &Model, param_names: &HashSet<Name>) -> Vec<Calib
 
     let mut subjects = Vec::new();
     for (_, a) in indexed {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let value = a.expr.and_then(|id| eval_expr(model, id, &known));
         bind(&mut known, a.name, value);
         if param_names.contains(&a.name) {
@@ -317,14 +353,23 @@ fn unevaluable_subjects(model: &Model, param_names: &HashSet<Name>) -> Vec<Calib
     }
 
     for exo in &model.exogenous {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         known.insert(exo.name, 0.0);
     }
 
     for eq in &model.steady_state_equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(name) = ss_lhs_ident(model, eq) else {
             // A multiple-output RHS does not provide one scalar value per name.
             // Its outputs also replace any earlier scalar calibration knowledge.
             for target in &eq.steady_state_targets {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 known.remove(&target.name);
             }
             continue;
@@ -436,7 +481,13 @@ fn declared_names(model: &Model) -> HashSet<Name> {
 fn model_eq_refs(model: &Model) -> HashSet<Name> {
     let mut refs = HashSet::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for r in model.ident_refs(eq) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             refs.insert(r.name);
         }
     }
@@ -449,8 +500,17 @@ fn model_eq_refs(model: &Model) -> HashSet<Name> {
 fn model_and_het_eq_refs(model: &Model) -> HashSet<Name> {
     let mut refs = model_eq_refs(model);
     for block in &model.heterogeneous_models {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for eq in &block.equations {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             for r in model.ident_refs(eq) {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 refs.insert(r.name);
             }
         }
@@ -494,6 +554,9 @@ fn unused_decls<'a>(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for d in decls {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if referenced.contains(&d.name) {
             continue;
         }
@@ -572,6 +635,9 @@ fn eval_call(
 ) -> Option<f64> {
     let mut vals = Vec::with_capacity(args.len());
     for a in args {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         vals.push(eval_expr(model, *a, known)?);
     }
     let f = fname.to_ascii_lowercase();

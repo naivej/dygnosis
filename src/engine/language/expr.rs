@@ -116,6 +116,9 @@ impl ExprArena {
     }
 
     fn collect_idents(&self, id: ExprId, out: &mut Vec<IdentRef>) {
+        if crate::engine::control::cancelled() {
+            return;
+        }
         let expr = self.get(id);
         match &expr.kind {
             ExprKind::Ident {

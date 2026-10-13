@@ -133,6 +133,9 @@ fn unnamed_equations(model: &Model) -> Vec<Diagnostic> {
         .collect();
     let mut scopes: BTreeMap<usize, (Span, Vec<usize>)> = BTreeMap::new();
     for written in &model.written_equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if active.contains(&written.token_range.start) {
             scopes
                 .entry(written.statement_id)
@@ -158,6 +161,9 @@ fn missing_long_names(model: &Model) -> Vec<Diagnostic> {
         DeclKind::VarexoDet,
     );
     for decl in &model.exogenous {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if model
             .deterministic_exogenous
             .iter()
@@ -173,6 +179,9 @@ fn missing_long_names(model: &Model) -> Vec<Diagnostic> {
     let mut seen = Vec::new();
     let mut scopes: BTreeMap<Option<usize>, (Span, Vec<usize>)> = BTreeMap::new();
     for row in rows {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if seen.iter().any(|key| key == &row.key) {
             continue;
         }
@@ -218,6 +227,9 @@ pub(crate) fn group_summaries(
     let mut groups = HashMap::<(String, String, Span), usize>::new();
     let mut grouped: Vec<Diagnostic> = Vec::new();
     for mut diagnostic in std::mem::take(diagnostics) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let site = diagnostic
             .writing
             .as_ref()
@@ -274,6 +286,9 @@ fn equation_sites_full(model: &Model, counted_only: bool) -> Vec<&Equation> {
         .filter(|eq| equation_in_scope(eq, counted_only))
         .collect();
     for block in &model.heterogeneous_models {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         rows.extend(
             block
                 .equations
@@ -319,6 +334,9 @@ struct DeclRow {
 
 fn push_decls(out: &mut Vec<DeclRow>, decls: &[Decl], kind: DeclKind) {
     for decl in decls {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         out.push(decl_row(decl, kind));
     }
 }

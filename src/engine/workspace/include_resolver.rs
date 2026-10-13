@@ -12,6 +12,44 @@ pub fn normalize_separators(filename: &str) -> String {
     filename.replace('\\', "/")
 }
 
+/// Lookup identity for supplied paths. It never reads the host filesystem and
+/// keeps case, root prefixes and relative leading `..` segments.
+pub(crate) fn supplied_path_key(path: &str) -> String {
+    let path = normalize_separators(path);
+    let (scheme, path) = path
+        .find("://")
+        .map(|index| path.split_at(index + 3))
+        .unwrap_or(("", path.as_str()));
+    let prefix = if path.starts_with("//") {
+        "//"
+    } else if path.starts_with('/') {
+        "/"
+    } else {
+        ""
+    };
+    let drive = path.as_bytes().get(1) == Some(&b':');
+    let protected = if !scheme.is_empty() && !path.starts_with('/') {
+        1
+    } else if prefix == "//" {
+        2
+    } else {
+        usize::from(drive)
+    };
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." if parts.len() > protected && parts.last() != Some(&"..") => {
+                parts.pop();
+            }
+            ".." if prefix.is_empty() && !drive && scheme.is_empty() => parts.push(part),
+            ".." => {}
+            part => parts.push(part),
+        }
+    }
+    format!("{scheme}{prefix}{}", parts.join("/"))
+}
+
 /// Coerce a `file://` URI or plain path to a [`PathBuf`].
 pub fn uri_to_path(uri_or_path: &str) -> PathBuf {
     if let Some(after) = uri_or_path.strip_prefix("file://") {

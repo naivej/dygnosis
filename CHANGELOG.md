@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.11.23
+
+- MCP model tools accept explicit text, supplied-map or saved-disk sources.
+  Supplied maps resolve only supplied keys; selected owners and input revisions
+  are returned with each result.
+- Inspect a symbol by name, source target or binding identity. References use
+  accepted model bindings, and Rename returns a complete guarded proposal.
+- Model inspection, equation selection, source actions, formatting and
+  extraction return focused facts and complete edit proposals. MCP results use
+  a versioned structured envelope with causes, coverage, selection and limits;
+  legacy leading text items remain available by default.
+- Proposals do not write files. Verify their input guards before applying them.
+
 ## v0.11.22
 
 - Explain why MCP and LSP edit requests are refused, and report the cause of

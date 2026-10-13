@@ -68,6 +68,9 @@ impl ModelLocals {
     pub fn collect(model: &Model) -> Self {
         let mut facts = Self::default();
         for (declaration_index, row) in model.written_declarations.iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             if row.written_kind != "model_local_variable" {
                 continue;
             }
@@ -91,6 +94,9 @@ impl ModelLocals {
         }
         let mut definitions = HashMap::new();
         for (equation_index, row) in model.written_equations.iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             let eq = &row.equation;
             let Some(lhs) = eq
                 .lhs_expr
@@ -123,6 +129,9 @@ impl ModelLocals {
         let mut reads: Vec<_> = model.model_expression_uses.iter().collect();
         reads.sort_by_key(|read| read.parse_order);
         for (equation_index, row) in model.written_equations.iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             let eq = &row.equation;
             let roots = if eq.is_local {
                 vec![eq.rhs_expr]
@@ -187,6 +196,9 @@ impl ModelLocals {
         let mut names = HashSet::new();
         let mut bindings = Vec::new();
         for (index, decl) in self.declarations.iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             if decl.parse_order > parse_order || !names.insert(decl.name) {
                 continue;
             }
@@ -199,6 +211,9 @@ impl ModelLocals {
             });
         }
         for (index, definition) in self.definitions.iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             if definition.dimension != dimension
                 || definition.end_order > parse_order
                 || !names.insert(definition.name)

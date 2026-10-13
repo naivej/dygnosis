@@ -1,20 +1,23 @@
 //! Expand view plus origin map (`expand_report`).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::{atomic::AtomicBool, Arc};
 
 use crate::engine::analysis::equations::equations;
 use crate::engine::language::lexer::{tokenize, Token};
 use crate::engine::language::macro_expand::{
-    expand_macros_traced_with_lines_and_evaluations, FrameRec, MacroMessage, MacroReplay,
+    expand_macros_traced_with_lines_and_evaluations_budget, FrameRec, MacroMessage, MacroReplay,
     TokenTrace,
 };
-use crate::engine::language::parser::{join_lexemes_recorded, normalize_newlines, parse_expanded};
+use crate::engine::language::parser::{
+    join_lexemes_recorded, normalize_newlines, parse_expanded_controlled,
+};
 use crate::engine::language::span::Span;
 use crate::engine::workspace::model_map::{
     EquationOccurrence, SourceFrame, SourceOccurrence, WrittenModelMap, WrittenSegment,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ExpandReport {
     pub model_map: WrittenModelMap,
     /// False when macro syntax remains because this expander cannot safely evaluate it.
@@ -98,7 +101,7 @@ pub struct OriginFrame {
     pub value: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SpliceSegment {
     pub spliced: Span,
     pub file: Option<String>,
@@ -180,6 +183,27 @@ pub(crate) fn expand_report_from_spliced(
     map: &[SpliceSegment],
     written_navigation: Option<&NavigationSource>,
 ) -> ExpandReport {
+    expand_report_from_spliced_controlled(spliced, map, written_navigation, None)
+        .expect("uncontrolled expansion")
+}
+
+pub(crate) fn expand_report_from_spliced_controlled(
+    spliced: &str,
+    map: &[SpliceSegment],
+    written_navigation: Option<&NavigationSource>,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> Result<ExpandReport, crate::engine::control::Cancelled> {
+    crate::engine::control::run(cancellation.clone(), || {
+        expand_spliced(spliced, map, written_navigation, cancellation)
+    })
+}
+
+fn expand_spliced(
+    spliced: &str,
+    map: &[SpliceSegment],
+    written_navigation: Option<&NavigationSource>,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> ExpandReport {
     let source = normalize_newlines(spliced);
     let raw = tokenize(&source);
     let line_segments: Vec<(Span, u32)> = map
@@ -189,10 +213,24 @@ pub(crate) fn expand_report_from_spliced(
         .collect();
     let evaluations = splice_evaluations(map);
     let (tokens, traces, arena, incomplete, macro_navigation_complete, messages) =
-        expand_macros_traced_with_lines_and_evaluations(&source, raw, &line_segments, &evaluations);
+        expand_macros_traced_with_lines_and_evaluations_budget(
+            &source,
+            raw,
+            &line_segments,
+            &evaluations,
+            &mut crate::engine::language::macro_expr::MacroBudget::with_cancellation(
+                cancellation.clone(),
+            ),
+        );
+    if crate::engine::control::cancelled() {
+        return ExpandReport::default();
+    }
     let macro_messages = locate_macro_messages(map, messages);
     debug_assert_eq!(tokens.len(), traces.len());
-    let (model, ranges) = parse_expanded(&source, tokens.clone());
+    let (model, ranges) = parse_expanded_controlled(&source, tokens.clone(), cancellation.clone());
+    if crate::engine::control::cancelled() {
+        return ExpandReport::default();
+    }
     let map_complete = !incomplete && crate::engine::workspace::model_map::parser_complete(&model);
     let parsed_tokens = &model.expanded_tokens;
     let parsed_traces = project_token_traces(parsed_tokens, &ranges, &traces);
@@ -217,7 +255,12 @@ pub(crate) fn expand_report_from_spliced(
     // Compare with an independently proven active-include projection. Matching
     // lexemes alone is insufficient: kinds and order must agree too. It uses
     // the same expander and parser; each projection is parsed once.
-    let verified = if let Some(NavigationSource::Mapped { text, segments }) = written_navigation {
+    // Identical text and every source segment imply the same traced tokens and
+    // parser proof. A different projection retains its independent check.
+    let identical_navigation = matches!(written_navigation, Some(NavigationSource::Mapped {text,segments}) if text == &source && segments.as_slice() == map);
+    let verified = if identical_navigation {
+        None
+    } else if let Some(NavigationSource::Mapped { text, segments }) = written_navigation {
         let text = normalize_newlines(text);
         let navigation_lines: Vec<(Span, u32)> = segments
             .iter()
@@ -226,11 +269,14 @@ pub(crate) fn expand_report_from_spliced(
             .collect();
         let navigation_evaluations = splice_evaluations(segments);
         let (actual, actual_traces, actual_arena, incomplete, macro_navigation_complete, _) =
-            expand_macros_traced_with_lines_and_evaluations(
+            expand_macros_traced_with_lines_and_evaluations_budget(
                 &text,
                 tokenize(&text),
                 &navigation_lines,
                 &navigation_evaluations,
+                &mut crate::engine::language::macro_expr::MacroBudget::with_cancellation(
+                    cancellation.clone(),
+                ),
             );
         let matches = !incomplete
             && macro_navigation_complete
@@ -242,7 +288,11 @@ pub(crate) fn expand_report_from_spliced(
             // Raw terminators and Dynare strings can split or join ordinary
             // lexer tokens. Compare completed parser streams, then use the
             // independently parsed projection's exact written positions.
-            let (actual_model, actual_ranges) = parse_expanded(&text, actual);
+            let (actual_model, actual_ranges) =
+                parse_expanded_controlled(&text, actual, cancellation);
+            if crate::engine::control::cancelled() {
+                return ExpandReport::default();
+            }
             let parsed_matches = actual_model.expanded_tokens.len() == parsed_tokens.len()
                 && actual_model.expanded_tokens.iter().zip(parsed_tokens).all(
                     |(actual, legacy)| {
@@ -267,7 +317,9 @@ pub(crate) fn expand_report_from_spliced(
         None
     };
     let navigation_complete = map_complete
-        && if written_navigation.is_some() {
+        && if identical_navigation {
+            macro_navigation_complete
+        } else if written_navigation.is_some() {
             verified.is_some()
         } else {
             macro_navigation_complete

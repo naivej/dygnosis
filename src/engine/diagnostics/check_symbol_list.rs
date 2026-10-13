@@ -78,6 +78,9 @@ pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
         .map(|event| (event.name, event.kind))
         .collect();
     for (name, kind) in final_types {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if heterogeneous.contains(&name) {
             continue;
         }
@@ -103,6 +106,9 @@ pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
     let mut stopped: Option<u32> = None;
 
     for sym in &model.command_symbols {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if stopped == Some(sym.list_id) {
             continue;
         }
@@ -151,6 +157,9 @@ pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
 fn warn_stoch_duplicates(model: &Model, out: &mut Vec<Diagnostic>) {
     let mut seen = HashSet::new();
     for sym in &model.command_symbols {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if sym.command != "stoch_simul" || seen.insert((sym.list_id, sym.name)) {
             continue;
         }

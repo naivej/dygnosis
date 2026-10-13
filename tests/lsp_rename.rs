@@ -139,6 +139,105 @@ fn apply(text: &str, edits: &[TextEdit]) -> String {
     result
 }
 
+// Guards References including filename/option/native slots or ignoring its
+// declaration switch when the ordinary Rename binding is extracted.
+#[tokio::test]
+async fn ordinary_references_select_accepted_sites_and_semantic_tags() {
+    let fixture = Fixture::new();
+    let text = "var y;parameters order;order=0.9;model;[name='y',mcp='y > 0'] y=order;end;\nstoch_simul(order=1) y;\nload_params_and_steady_state(order);\nverbatim;\norder=2;y=3;\nend;\n// y order\n";
+    let root = fixture.write("references.mod", text);
+    let (service, _socket) = new_service();
+    open(service.inner(), &root, text, 1).await;
+    for (name, include_declaration, expected) in [
+        ("order;", true, vec!["order;", "order=0.9", "y=order"]),
+        ("order;", false, vec!["order=0.9", "y=order"]),
+        ("y;", false, vec!["y > 0", "y=order", " y;\\nload"]),
+    ] {
+        let locations = service
+            .inner()
+            .references(ReferenceParams {
+                text_document_position: position(&root, text, name),
+                context: ReferenceContext {
+                    include_declaration,
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let index = dygnosis::span::LineIndex::new(text);
+        let starts: Vec<_> = locations
+            .iter()
+            .map(|site| {
+                index.offset_utf16(
+                    text,
+                    dygnosis::span::Position {
+                        line: site.range.start.line,
+                        character: site.range.start.character,
+                    },
+                ) as usize
+            })
+            .collect();
+        let expected: Vec<_> = expected
+            .into_iter()
+            .map(|marker| {
+                let marker = marker.replace("\\n", "\n");
+                let offset = usize::from(marker.starts_with("y=order") && name == "order;") * 2
+                    + usize::from(marker.starts_with(" y;"));
+                text.find(&marker).unwrap() + offset
+            })
+            .collect();
+        assert_eq!(
+            starts, expected,
+            "name={name}, include_declaration={include_declaration}"
+        );
+    }
+}
+
+// Shared local includes can be renamed when every owner has the same verified
+// declaration, definition and aggregate scope. Edits retain document versions.
+#[tokio::test]
+async fn rename_shared_local_binding_updates_compatible_model_owners() {
+    let fixture = Fixture::new();
+    let declaration = fixture.write("decl.inc", "model_local_variable helper;\n");
+    let definition_text = "#helper=1;\n";
+    let definition = fixture.write("def.inc", definition_text);
+    let a_text = "var y;\n@#include \"decl.inc\"\nmodel;\n@#include \"def.inc\"\ny=helper;end;\n";
+    let b_text = a_text
+        .replace("var y", "var z")
+        .replace("y=helper", "z=helper");
+    let a = fixture.write("a.mod", a_text);
+    let b = fixture.write("b.mod", &b_text);
+    let (service, _socket) = new_service();
+    open(service.inner(), &a, a_text, 1).await;
+    open(service.inner(), &b, &b_text, 2).await;
+    open(service.inner(), &definition, definition_text, 3).await;
+    let changes = edits(
+        rename(
+            service.inner(),
+            &definition,
+            definition_text,
+            "helper",
+            "shared_helper",
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(changes[&a].0, Some(1));
+    assert_eq!(changes[&b].0, Some(2));
+    assert_eq!(changes[&definition].0, Some(3));
+    assert!(changes.contains_key(&declaration));
+    assert_eq!(
+        apply(a_text, &changes[&a].1),
+        a_text.replace("y=helper", "y=shared_helper")
+    );
+    assert_eq!(
+        apply(&b_text, &changes[&b].1),
+        b_text.replace("z=helper", "z=shared_helper")
+    );
+}
+
 // Guards Prepare succeeding while Rename drops a supported document entirely.
 #[tokio::test]
 async fn rename_supported_roots_and_untitled_use_one_decision() {

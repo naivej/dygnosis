@@ -26,6 +26,9 @@ fn check_duplicate_declarations(model: &Model) -> Vec<Diagnostic> {
     > = HashMap::new();
     let mut diagnostics = Vec::new();
     for (event_index, event) in model.symbol_type_events.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if event.changed {
             if let Some(previous) = seen.get_mut(&event.name) {
                 previous.0 = event.kind;
@@ -75,8 +78,14 @@ fn check_model_local_dups(model: &Model) -> Vec<Diagnostic> {
     // dimensions, is accepted.
     let mut diagnostics = Vec::new();
     for tree in crate::engine::diagnostics::check_e020::equation_trees(model) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let mut seen = HashMap::new();
         for eq in tree {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if !eq.model_local || !model.model_local_action_attempted(eq) {
                 continue;
             }

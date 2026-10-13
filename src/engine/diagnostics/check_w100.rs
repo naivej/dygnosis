@@ -283,6 +283,9 @@ fn trim_trailing_zeros(s: &mut String) {
         return;
     }
     while s.ends_with('0') {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         s.pop();
     }
     if s.ends_with('.') {

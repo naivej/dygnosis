@@ -2,7 +2,7 @@
 name = "dygnosis"
 description = "Dynare analysis core — LSP and MCP for .mod files"
 # Product version source. After editing, run: node scripts/version.cjs --sync
-version = "0.11.22"
+version = "0.11.23"
 edition = "2024"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/naivej/dygnosis"
@@ -22,7 +22,8 @@ rmcp = { version = "3.2.0", default-features = false, features = ["macros", "ser
 schemars = "1.2.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "net"] }
+sha2 = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "net", "time"] }
 tower-lsp = "0.20"
 tower = { version = "0.4", default-features = false }
 tracing = "0.1"

@@ -1,7 +1,14 @@
 //! Verified symbol references inside the two semantic equation-tag values.
 
-use super::*;
+use super::SemanticModel;
+use crate::engine::editing::refs::is_legal_ident;
 use crate::engine::language::lexer::Token;
+use crate::engine::language::{
+    lexer::{tokenize, TokenKind},
+    model::Model,
+    span::Span,
+};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 pub(super) struct Reference {
@@ -36,14 +43,16 @@ fn content(raw: &str) -> Option<&str> {
 /// Only copied bytes prove an editable reference. Other bytes in the same
 /// string may be generated, including an mcp tag's numeric bound.
 fn literal(
-    inner: &mut Inner,
-    root: &Url,
+    view: &SemanticModel,
     model: &Model,
     token: &Token,
     within: Span,
     name: &str,
     lexers: &mut HashMap<String, Vec<Token>>,
 ) -> Option<(String, Span)> {
+    if crate::engine::control::cancelled() {
+        return None;
+    }
     let raw = token.text(&model.source);
     if raw.get(within.start as usize..within.end as usize) != Some(name) {
         return None;
@@ -67,10 +76,9 @@ fn literal(
             .source
             .origins
             .partition_point(|origin| origin.emitted.end <= span.start);
-        for origin in emitted.source.origins[first..]
-            .iter()
-            .take_while(|origin| origin.emitted.start < span.end)
-        {
+        for origin in emitted.source.origins[first..].iter().take_while(|origin| {
+            !crate::engine::control::cancelled() && origin.emitted.start < span.end
+        }) {
             let start = span.start.max(origin.emitted.start);
             let end = span.end.min(origin.emitted.end);
             if !origin.copied || start != next || end <= start {
@@ -80,11 +88,7 @@ fn literal(
                 start: origin.written.start + start - origin.emitted.start,
                 end: origin.written.start + end - origin.emitted.start,
             };
-            parts.push(
-                inner
-                    .workspace
-                    .map_effective_origin(root.as_str(), written)?,
-            );
+            parts.push(view.written(written)?);
             next = end;
         }
         if next != span.end {
@@ -94,22 +98,22 @@ fn literal(
         if token.lexeme.is_some() {
             return None;
         }
-        parts.push(inner.workspace.map_effective_origin(
-            root.as_str(),
-            Span {
-                start: token.span.start + within.start,
-                end: token.span.start + within.end,
-            },
-        )?);
+        parts.push(view.written(Span {
+            start: token.span.start + within.start,
+            end: token.span.start + within.end,
+        })?);
     }
     let (file, mut span) = parts.first()?.clone();
     for (other_file, other_span) in parts.iter().skip(1) {
+        if crate::engine::control::cancelled() {
+            break;
+        }
         if other_file != &file || other_span.start != span.end {
             return None;
         }
         span.end = other_span.end;
     }
-    let source = inner.workspace.source_for_normalized_key(&file)?;
+    let source = view.sources.get(&file)?;
     if source.get(span.start as usize..span.end as usize) != Some(name) {
         return None;
     }
@@ -128,16 +132,25 @@ fn literal(
     Some((file, span))
 }
 
-pub(super) fn collect(inner: &mut Inner, root: &Url, model: &Model) -> Vec<Reference> {
+pub(super) fn collect(view: &SemanticModel, model: &Model) -> Vec<Reference> {
     let mut result = Vec::new();
     let mut lexers = HashMap::new();
     for row in &model.written_equations {
+        if crate::engine::control::cancelled() {
+            break;
+        }
         let tokens = &model.expanded_tokens;
         let mut order = row.token_range.start;
         let mut found = HashSet::new();
         while order < row.token_range.end && tokens[order].kind == TokenKind::LBrack {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             order += 1;
             while order < row.token_range.end && tokens[order].kind != TokenKind::RBrack {
+                if crate::engine::control::cancelled() {
+                    break;
+                }
                 if tokens[order].kind == TokenKind::Ident
                     && tokens
                         .get(order + 1)
@@ -163,15 +176,7 @@ pub(super) fn collect(inner: &mut Inner, root: &Url, model: &Model) -> Vec<Refer
                             order: Some(value_order),
                             declaration_order: row.token_range.end,
                             within_token,
-                            written: literal(
-                                inner,
-                                root,
-                                model,
-                                token,
-                                within_token,
-                                name,
-                                &mut lexers,
-                            ),
+                            written: literal(view, model, token, within_token, name, &mut lexers),
                         });
                         found.insert(key);
                     }
@@ -181,6 +186,9 @@ pub(super) fn collect(inner: &mut Inner, root: &Url, model: &Model) -> Vec<Refer
             order += 1;
         }
         for key in ["endogenous", "mcp"] {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             if !found.contains(key)
                 && let Some(value) = row.equation.tag_map.get(key)
                 && let Some((_, name)) = semantic_name(key, value)
@@ -202,8 +210,7 @@ pub(super) fn collect(inner: &mut Inner, root: &Url, model: &Model) -> Vec<Refer
 /// Every execution of a changed literal must still be the same semantic
 /// reference. A macro copy used as a display label is not an editable use.
 pub(super) fn compatible(
-    inner: &mut Inner,
-    root: &Url,
+    view: &SemanticModel,
     model: &Model,
     references: &[Reference],
     targets: &HashSet<(String, Span)>,
@@ -213,6 +220,7 @@ pub(super) fn compatible(
     for (order, token) in model
         .expanded_tokens
         .iter()
+        .take_while(|_| !crate::engine::control::cancelled())
         .enumerate()
         .filter(|(_, token)| token.kind == TokenKind::String)
     {
@@ -224,6 +232,7 @@ pub(super) fn compatible(
         // matches, including overlaps, without identifier-token boundaries.
         for (start, _) in value
             .char_indices()
+            .take_while(|_| !crate::engine::control::cancelled())
             .filter(|(start, _)| value[*start..].starts_with(name))
         {
             let span = Span::new(start, start + name.len());
@@ -231,7 +240,7 @@ pub(super) fn compatible(
                 start: span.start + 1,
                 end: span.end + 1,
             };
-            let Some(target) = literal(inner, root, model, token, within, name, &mut lexers) else {
+            let Some(target) = literal(view, model, token, within, name, &mut lexers) else {
                 continue;
             };
             if targets.contains(&target)
@@ -246,7 +255,7 @@ pub(super) fn compatible(
             }
         }
     }
-    true
+    !crate::engine::control::cancelled()
 }
 
 pub(super) fn rewrite(
@@ -257,6 +266,9 @@ pub(super) fn rewrite(
     replacement: &str,
 ) -> Option<()> {
     for reference in references.iter().filter(|reference| reference.name == name) {
+        if crate::engine::control::cancelled() {
+            break;
+        }
         reference.written.as_ref()?;
         let token = tokens.get_mut(reference.order?)?;
         let mut raw = token.text(&model.source).to_owned();
@@ -271,5 +283,5 @@ pub(super) fn rewrite(
         );
         token.lexeme = Some(raw);
     }
-    Some(())
+    (!crate::engine::control::cancelled()).then_some(())
 }

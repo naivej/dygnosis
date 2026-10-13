@@ -1,18 +1,13 @@
-//! Complete ordinary-symbol edits over current, compatible model owners.
+//! LSP source acquisition and versioned presentation of shared Rename decisions.
 
 use super::*;
+use crate::engine::analysis::symbols::{self, Selector, SemanticModel};
 
-pub(super) const SOURCE: &str =
-    "Rename source is unavailable. Open the model root and its required includes.";
-pub(super) const MAPPING: &str = "Rename cannot verify a literal written target for every occurrence. Resolve generated names or incomplete source locations.";
-pub(super) const INCOMPLETE: &str =
-    "Rename was withheld because required includes, parsing, or macro expansion are incomplete.";
-pub(super) const COLLISION: &str = "The new name is already declared in an affected model.";
-pub(super) const BINDING: &str =
-    "Rename cannot verify one compatible symbol binding across all affected model owners.";
+pub(super) const SOURCE: &str = symbols::SOURCE.message;
+pub(super) const MAPPING: &str = symbols::MAPPING.message;
 pub(super) const STALE: &str =
     "Model inputs changed during Rename. Refresh the model and try again.";
-pub(super) const IDENTIFIER: &str = "Rename requires a legal, non-reserved Dynare identifier.";
+pub(super) const IDENTIFIER: &str = symbols::IDENTIFIER.message;
 pub(super) const WRITABLE: &str = "A Rename target is unavailable or read-only. Make every affected source writable and try again.";
 
 pub(super) struct Decision {
@@ -21,482 +16,10 @@ pub(super) struct Decision {
     roots: Vec<Url>,
 }
 
-struct View {
-    root: Url,
-    revision: String,
-    declaration: (String, Span),
-    kind: &'static str,
-    targets: Vec<(String, Span)>,
-    model: Model,
-    tags: Vec<rename_tags::Reference>,
-}
-
-fn ordinary(kind: &str) -> bool {
-    matches!(kind, "var" | "varexo" | "varexo_det" | "parameters")
-}
-
-/// Parser-owned name slots. An equal spelling in a file/function/label slot
-/// is not evidence that the token refers to the selected ordinary symbol.
-fn binding_sites(model: &Model, name: &str) -> HashSet<Span> {
-    use crate::engine::language::model::{DottedHead, PathTarget, ShockKind};
-    let mut sites = HashSet::new();
-    let mut add = |symbol, span| {
-        if model.name(symbol) == name {
-            sites.insert(span);
-        }
-    };
-    for event in &model.symbol_type_events {
-        add(event.name, event.span);
-    }
-    for declaration in &model.predetermined {
-        add(declaration.name, declaration.span);
-    }
-    for write in &model.write_targets {
-        if model.name(write.name) == name {
-            for token in &model.expanded_tokens[write.token_range.clone()] {
-                if token.kind == TokenKind::Ident && token.text(&model.source) == name {
-                    add(write.name, token.span);
-                }
-            }
-        }
-    }
-    for usage in &model.model_expression_uses {
-        add(usage.name, usage.span);
-    }
-    for (symbol, span, _) in model
-        .outside_expression_uses
-        .iter()
-        .chain(&model.steady_state_rhs_uses)
-    {
-        add(*symbol, *span);
-    }
-    for row in &model.command_symbols {
-        add(row.name, row.span);
-    }
-    for row in model.varobs.iter().chain(&model.varexobs) {
-        add(row.name, row.span);
-    }
-    for row in &model.instrument_uses {
-        add(row.name, row.span);
-    }
-    for row in &model.irf_shocks_options {
-        for (symbol, span) in &row.names {
-            add(*symbol, *span);
-        }
-    }
-    for row in &model.change_type_statements {
-        for (symbol, span) in &row.names {
-            add(*symbol, *span);
-        }
-    }
-    for row in &model.var_removed {
-        add(row.name, row.name_span);
-    }
-    for row in model
-        .estimated_params
-        .iter()
-        .chain(&model.estimated_params_init)
-        .chain(&model.estimated_params_bounds)
-        .chain(&model.estimated_params_remove)
-    {
-        add(row.name, row.name_span);
-        if let (Some(symbol), Some(span)) = (row.corr_with, row.corr_with_span) {
-            add(symbol, span);
-        }
-    }
-    for (symbol, span) in &model.observation_trends {
-        add(*symbol, *span);
-    }
-    for row in &model.optim_weights {
-        add(row.first, row.first_span);
-        if let (Some(symbol), Some(span)) = (row.second, row.second_span) {
-            add(symbol, span);
-        }
-    }
-    for row in &model.init2shocks_blocks {
-        for target in &row.rows {
-            add(target.endo, target.endo_span);
-            add(target.exo, target.exo_span);
-        }
-    }
-    for row in &model.shock_groups {
-        for (symbol, span) in &row.members {
-            add(*symbol, *span);
-        }
-    }
-    for row in &model.generate_irfs {
-        for (symbol, span) in &row.exos {
-            add(*symbol, *span);
-        }
-    }
-    for row in &model.shock_blocks {
-        for target in &row.scheduled {
-            add(target.name, target.name_span);
-        }
-        for target in &row.stochastic {
-            let symbols = match &target.kind {
-                ShockKind::Var(symbol) | ShockKind::Stderr(symbol) => vec![*symbol],
-                ShockKind::Cov(symbols) | ShockKind::Skew(symbols) => symbols.clone(),
-                ShockKind::Corr { a, b } => vec![*a, *b],
-            };
-            if symbols.iter().any(|symbol| model.name(*symbol) == name) {
-                for token in model.expanded_tokens[target.parse_order..]
-                    .iter()
-                    .take_while(|token| !matches!(token.kind, TokenKind::Eq | TokenKind::Semi))
-                {
-                    if token.kind == TokenKind::Ident && token.text(&model.source) == name {
-                        add(
-                            symbols
-                                .iter()
-                                .copied()
-                                .find(|symbol| model.name(*symbol) == name)
-                                .unwrap(),
-                            token.span,
-                        );
-                    }
-                }
-            }
-        }
-    }
-    for row in model.shock_paths.iter().chain(&model.controlled_paths) {
-        for stanza in &row.stanzas {
-            match stanza.target {
-                PathTarget::Exogenous { name: symbol, span } => add(symbol, span),
-                PathTarget::Controlled {
-                    exogenize,
-                    exogenize_span,
-                    endogenize,
-                    endogenize_span,
-                } => {
-                    add(exogenize, exogenize_span);
-                    add(endogenize, endogenize_span);
-                }
-            }
-            for value in &stanza.values {
-                for reference in &value.path_refs {
-                    if reference
-                        .namespace
-                        .as_deref()
-                        .is_none_or(|namespace| namespace == "self")
-                    {
-                        add(reference.name, reference.ident_span);
-                    }
-                }
-            }
-        }
-    }
-    let token_spans: HashMap<_, _> = model
-        .expanded_tokens
-        .iter()
-        .map(|token| (token.span.start, token.span))
-        .collect();
-    for (symbol, start) in model
-        .homotopy_rows
-        .iter()
-        .map(|row| (row.name, row.span.start))
-        .chain(
-            model
-                .osr_params_bounds
-                .iter()
-                .map(|row| (row.name, row.span.start)),
-        )
-    {
-        if let Some(span) = token_spans.get(&start) {
-            add(symbol, *span);
-        }
-    }
-    let mut statement_at = vec![None; model.expanded_tokens.len()];
-    for (index, statement) in model.statements.iter().enumerate() {
-        for order in statement.token_range.clone() {
-            statement_at[order] = Some(index);
-        }
-    }
-    for row in &model.dotted_statements {
-        let target_start = token_spans.get(&row.span.start).copied();
-        // copy_source is the accepted source binding. Its first token follows
-        // the copy '=' in this parser execution, not in an arbitrary text scan.
-        let source_start = statement_at
-            .get(row.parse_order)
-            .copied()
-            .flatten()
-            .and_then(|index| model.statements.get(index))
-            .and_then(|statement| model.expanded_tokens.get(statement.token_range.clone()))
-            .and_then(|tokens| {
-                tokens
-                    .iter()
-                    .position(|token| token.kind == TokenKind::Eq)
-                    .and_then(|index| tokens.get(index + 1))
-            })
-            .map(|token| token.span);
-        for (head, start) in std::iter::once((&row.head, target_start))
-            .chain(row.copy_source.as_ref().map(|head| (head, source_start)))
-        {
-            match head {
-                DottedHead::Param { first, .. } => {
-                    if let Some(span) = start {
-                        add(*first, span);
-                    }
-                }
-                DottedHead::Std {
-                    first, first_span, ..
-                } => add(*first, *first_span),
-                DottedHead::Corr {
-                    first,
-                    first_span,
-                    second,
-                    second_span,
-                    ..
-                } => {
-                    add(*first, *first_span);
-                    add(*second, *second_span);
-                }
-                DottedHead::Vec { names } => {
-                    for (symbol, span) in names {
-                        add(*symbol, *span);
-                    }
-                }
-            }
-        }
-    }
-    sites
-}
-
-fn capture(
-    inner: &mut Inner,
-    root: Url,
-    name: &str,
-    replacement: &str,
-) -> std::result::Result<View, &'static str> {
-    let revision = inner.root_revision(&root).ok_or(MAPPING)?;
-    let model = inner
-        .workspace
-        .get_effective_model(root.as_str())
-        .ok_or(MAPPING)?
-        .clone();
-    let includes_complete = inner.workspace.includes_complete(root.as_str());
-    let report = inner
-        .workspace
-        .expand_report(root.as_str())
-        .ok_or(MAPPING)?;
-    if !includes_complete {
-        return Err("Rename was withheld because a required include is unresolved. Supply the include and try again.");
-    }
-    if !report.complete || !report.model_map.complete {
-        return Err(INCOMPLETE);
-    }
-    let tags = rename_tags::collect(inner, &root, &model);
-    let event = model
-        .symbol_type_events
-        .iter()
-        .enumerate()
-        .find(|(_, event)| model.name(event.name) == name);
-    let tag_declaration = tags.iter().find(|tag| tag.declaration && tag.name == name);
-    let event_order = |index| {
-        model
-            .type_event_occurrences
-            .iter()
-            .find(|(event, _)| *event == index)
-            .map(|(_, range)| range.end)
-    };
-    let declaration = match (event, tag_declaration) {
-        (Some((index, _)), Some(tag))
-            if tag.declaration_order < event_order(index).ok_or(MAPPING)? =>
-        {
-            tag.written.clone().ok_or(MAPPING)?
-        }
-        (Some((_, event)), _) => inner
-            .workspace
-            .map_effective_origin(root.as_str(), event.span)
-            .ok_or(MAPPING)?,
-        (None, Some(tag)) => tag.written.clone().ok_or(MAPPING)?,
-        (None, None) => return Err(BINDING),
-    };
-    let latest_tag = tags
-        .iter()
-        .filter(|tag| tag.declaration && tag.name == name)
-        .map(|tag| tag.declaration_order)
-        .max();
-    let latest_event = model
-        .symbol_type_events
-        .iter()
-        .enumerate()
-        .rev()
-        .find(|(_, event)| model.name(event.name) == name);
-    let kind = match latest_event {
-        Some((index, event))
-            if latest_tag.is_none_or(|order| event_order(index).is_some_and(|at| at > order)) =>
-        {
-            model.final_symbol_kind(event.name).ok_or(MAPPING)?
-        }
-        _ if latest_tag.is_some() => "var",
-        _ => return Err(BINDING),
-    };
-    // A retype through a model-local binding requires that binding's guards.
-    if !ordinary(kind) || event.is_some_and(|(_, event)| !ordinary(event.kind.as_str())) {
-        return Err(BINDING);
-    }
-    if name != replacement
-        && model
-            .symbol_type_events
-            .iter()
-            .any(|event| model.name(event.name) == replacement)
-        || name != replacement
-            && tags
-                .iter()
-                .any(|tag| tag.declaration && tag.name == replacement)
-    {
-        return Err(COLLISION);
-    }
-    let mut targets = Vec::new();
-    let mut target_set = HashSet::new();
-    let mut written_tokens: HashMap<String, HashSet<Span>> = HashMap::new();
-    let mut mappings = HashMap::new();
-    let binding_sites = binding_sites(&model, name);
-    let mut eligible = vec![false; model.expanded_tokens.len()];
-    for statement in &model.statements {
-        if statement.native {
-            continue;
-        }
-        let mut depth = 0usize;
-        for order in statement.token_range.clone() {
-            let token = model.expanded_tokens.get(order).ok_or(MAPPING)?;
-            eligible[order] = !(depth > 0
-                && model
-                    .expanded_tokens
-                    .get(order + 1)
-                    .is_some_and(|next| next.kind == TokenKind::Eq)
-                || order > 0 && model.expanded_tokens[order - 1].kind == TokenKind::Dot);
-            match token.kind {
-                TokenKind::LParen | TokenKind::LBrack => depth += 1,
-                TokenKind::RParen | TokenKind::RBrack => depth = depth.saturating_sub(1),
-                _ => {}
-            }
-        }
-    }
-    let mut renamed_tokens = model.expanded_tokens.clone();
-    for (order, token) in model.expanded_tokens.iter().enumerate() {
-        if token.kind != TokenKind::Ident || token.text(&model.source) != name {
-            continue;
-        }
-        // Native MATLAB text has no Dynare binding. It is not a rename target.
-        if !eligible[order] && !binding_sites.contains(&token.span) {
-            continue;
-        }
-        if !binding_sites.contains(&token.span) {
-            // The parser did not establish an ordinary binding at this slot.
-            // Withhold the operation instead of guessing or returning a
-            // partial set of known uses.
-            return Err(BINDING);
-        }
-        let target = mappings
-            .entry(token.span)
-            .or_insert_with(|| {
-                inner
-                    .workspace
-                    .map_effective_origin(root.as_str(), token.span)
-            })
-            .clone()
-            .ok_or(MAPPING)?;
-        let source = inner
-            .workspace
-            .source_for_normalized_key(&target.0)
-            .ok_or(MAPPING)?;
-        let literal_tokens = written_tokens.entry(target.0.clone()).or_insert_with(|| {
-            tokenize(source)
-                .into_iter()
-                .filter(|written| written.kind == TokenKind::Ident)
-                .map(|written| written.span)
-                .collect()
-        });
-        if source.get(target.1.start as usize..target.1.end as usize) != Some(name)
-            || !literal_tokens.contains(&target.1)
-        {
-            // An interpolation is not an editable literal identifier.
-            return Err(MAPPING);
-        }
-        if target_set.insert(target.clone()) {
-            targets.push(target);
-        }
-        renamed_tokens[order].lexeme = Some(replacement.to_string());
-    }
-    for tag in tags.iter().filter(|tag| tag.name == name) {
-        let target = tag.written.clone().ok_or(MAPPING)?;
-        if target_set.insert(target.clone()) {
-            targets.push(target);
-        }
-    }
-    rename_tags::rewrite(&model, &mut renamed_tokens, &tags, name, replacement).ok_or(MAPPING)?;
-    if !target_set.contains(&declaration) {
-        return Err(MAPPING);
-    }
-    // A literal macro site may execute as a different name or as native text
-    // in another copy. Changing it would change a binding outside this edit.
-    for (order, token) in model.expanded_tokens.iter().enumerate() {
-        let Some(target) = mappings
-            .entry(token.span)
-            .or_insert_with(|| {
-                inner
-                    .workspace
-                    .map_effective_origin(root.as_str(), token.span)
-            })
-            .as_ref()
-        else {
-            continue;
-        };
-        if target_set.contains(target)
-            && !tags
-                .iter()
-                .any(|tag| tag.order == Some(order) && tag.written.as_ref() == Some(target))
-            && (token.kind != TokenKind::Ident
-                || token.text(&model.source) != name
-                || renamed_tokens[order].text(&model.source) != replacement
-                || !binding_sites.contains(&token.span))
-        {
-            return Err(BINDING);
-        }
-    }
-    if name != replacement {
-        let (renamed, _) =
-            crate::engine::language::parser::parse_expanded(&model.source, renamed_tokens);
-        if !crate::engine::workspace::model_map::parser_complete(&renamed)
-            || model.statements.len() != renamed.statements.len()
-            || model
-                .statements
-                .iter()
-                .zip(&renamed.statements)
-                .any(|(before, after)| {
-                    before.kind != after.kind
-                        || before.native != after.native
-                        || before.token_range != after.token_range
-                })
-            || model.symbol_type_events.len() != renamed.symbol_type_events.len()
-            || model
-                .symbol_type_events
-                .iter()
-                .zip(&renamed.symbol_type_events)
-                .any(|(before, after)| {
-                    let expected = if model.name(before.name) == name {
-                        replacement
-                    } else {
-                        model.name(before.name)
-                    };
-                    renamed.name(after.name) != expected
-                        || before.kind != after.kind
-                        || before.changed != after.changed
-                })
-        {
-            return Err(BINDING);
-        }
-    }
-    Ok(View {
-        root,
-        revision,
-        declaration,
-        kind,
-        targets,
-        model,
-        tags,
-    })
+fn capture(inner: &mut Inner, root: &Url) -> std::result::Result<SemanticModel, &'static str> {
+    let revision = inner.root_revision(root).ok_or(SOURCE)?;
+    SemanticModel::capture(&mut inner.workspace, root.as_str(), revision)
+        .map_err(|reason| reason.message)
 }
 
 pub(super) fn decide(
@@ -517,86 +40,75 @@ pub(super) fn decide(
         return Err("Rename requires a file or untitled source with a known model owner.");
     }
     let file = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
-    let selected_tag = roots.iter().find_map(|root| {
-        let model = inner.workspace.get_effective_model(root.as_str())?.clone();
-        rename_tags::collect(inner, root, &model)
-            .into_iter()
-            .find_map(|tag| {
-                let (target, span) = tag.written?;
-                (target == file && span.start <= byte && byte <= span.end)
-                    .then_some((tag.name, span))
-            })
-    });
-    let (name, selected_span) = selected_tag
-        .or_else(|| ident_at(&text, byte))
+    let mut views = Vec::new();
+    for root in &roots {
+        views.push(capture(inner, root)?);
+    }
+    let binding = views[0]
+        .select(Selector::Target { file: &file, byte })
+        .map_err(|reason| reason.reason.message)?
         .ok_or("Place the cursor on a declared model name before requesting Rename.")?;
-    let replacement = new_name.unwrap_or(&name);
-    if new_name.is_some() && replacement == name {
+    let selected_span = views[0]
+        .references(&binding, true)
+        .into_iter()
+        .find_map(|site| {
+            site.written
+                .filter(|(target, span)| target == &file && span.start <= byte && byte < span.end)
+                .map(|(_, span)| span)
+        })
+        .ok_or(MAPPING)?;
+    let replacement = new_name.unwrap_or(&binding.name);
+    if new_name.is_some() && replacement == binding.name {
         return Err("The requested name is already the current name.");
     }
-    if !is_legal_ident(&name) || !is_legal_ident(replacement) {
-        return Err(IDENTIFIER);
-    }
-    let selected = (
-        crate::engine::workspace::include_resolver::normalize_uri(uri.as_str()),
-        selected_span,
-    );
-    let mut views = Vec::new();
-    for root in roots {
-        let view = capture(inner, root, &name, replacement)?;
-        if !view.targets.contains(&selected) {
-            return Err(BINDING);
+    // The first owner identifies the binding. Each known owner at the selected
+    // source must accept it before the shared operation can include that owner.
+    for view in views.iter().skip(1) {
+        let other = view
+            .select(Selector::Target { file: &file, byte })
+            .map_err(|reason| reason.reason.message)?
+            .ok_or(symbols::BINDING.message)?;
+        if binding.is_local() != other.is_local()
+            || other.name != binding.name
+            || other.kind != binding.kind
+            || other.declaration != binding.declaration
+            || other.definition != binding.definition
+            || other.dimension != binding.dimension
+        {
+            return Err(symbols::BINDING.message);
         }
-        views.push(view);
     }
-    // Close over every known owner of every edited source. Equal spelling in
-    // an unrelated root never adds that root to this closure.
-    let mut index = 0;
-    while index < views.len() {
-        let files: HashSet<_> = views[index]
-            .targets
-            .iter()
-            .map(|(file, _)| file.clone())
-            .collect();
-        for file in files {
-            let target_uri = naming_edit_url(inner, &views[index].root, &file).ok_or(MAPPING)?;
+    let proposal = loop {
+        let proposal =
+            symbols::rename(&views, 0, &binding, replacement).map_err(|reason| reason.message)?;
+        let mut additional = Vec::new();
+        for edit in &proposal.edits {
+            let target_uri = naming_edit_url(inner, &roots[0], &edit.file).ok_or(MAPPING)?;
             for owner in inner.known_owner_roots(&target_uri) {
-                if views.iter().any(|view| view.root == owner) {
-                    continue;
+                if !roots.contains(&owner) && !additional.contains(&owner) {
+                    additional.push(owner);
                 }
-                views.push(capture(inner, owner, &name, replacement)?);
             }
         }
-        index += 1;
-    }
-    let binding = (&views[0].declaration, views[0].kind);
-    if views
-        .iter()
-        .any(|view| (&view.declaration, view.kind) != binding)
-    {
-        return Err(BINDING);
-    }
-    let targets = views
-        .iter()
-        .flat_map(|view| view.targets.iter().cloned())
-        .collect();
-    for view in &views {
-        if !rename_tags::compatible(inner, &view.root, &view.model, &view.tags, &targets, &name) {
-            return Err(BINDING);
+        if additional.is_empty() {
+            break proposal;
         }
-    }
+        for owner in additional {
+            views.push(capture(inner, &owner)?);
+            roots.push(owner);
+        }
+    };
     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
     let mut sources = HashMap::new();
-    for view in &views {
-        for (file, span) in &view.targets {
-            if !sources.contains_key(file) {
-                let target_uri = naming_edit_url(inner, &view.root, file).ok_or(MAPPING)?;
-                if !matches!(target_uri.scheme(), "file" | "untitled") {
-                    return Err(WRITABLE);
-                }
-                if target_uri.scheme() == "file" {
-                    let path = target_uri.to_file_path().ok().ok_or(MAPPING)?;
-                    match std::fs::metadata(&path) {
+    for edit in &proposal.edits {
+        if !sources.contains_key(&edit.file) {
+            let target_uri = naming_edit_url(inner, &roots[0], &edit.file).ok_or(MAPPING)?;
+            if !matches!(target_uri.scheme(), "file" | "untitled") {
+                return Err(WRITABLE);
+            }
+            if target_uri.scheme() == "file" {
+                match target_uri.to_file_path() {
+                    Ok(path) => match std::fs::metadata(&path) {
                         Ok(metadata)
                             if !metadata.is_file() || metadata.permissions().readonly() =>
                         {
@@ -604,25 +116,34 @@ pub(super) fn decide(
                         }
                         Err(_) if inner.document(&target_uri).is_none() => return Err(SOURCE),
                         _ => {}
-                    }
+                    },
+                    Err(_) if inner.document(&target_uri).is_none() => return Err(MAPPING),
+                    _ => {}
                 }
-                let text = inner
-                    .workspace
-                    .source_for_normalized_key(file)
-                    .ok_or(MAPPING)?
-                    .to_owned();
-                sources.insert(file.clone(), (target_uri, LineIndex::new(&text), text));
             }
-            let (target_uri, index, source) = sources.get(file).ok_or(MAPPING)?;
-            let edit = TextEdit {
-                range: span_range(index, source, *span),
-                new_text: replacement.to_string(),
-            };
-            let edits = changes.entry(target_uri.clone()).or_default();
-            if !edits.contains(&edit) {
-                edits.push(edit);
-            }
+            let source = inner
+                .workspace
+                .source_for_normalized_key(&edit.file)
+                .ok_or(MAPPING)?
+                .to_owned();
+            sources.insert(
+                edit.file.clone(),
+                (target_uri, LineIndex::new(&source), source),
+            );
         }
+        let (target_uri, index, source) = sources.get(&edit.file).ok_or(MAPPING)?;
+        if source.get(edit.span.start as usize..edit.span.end as usize)
+            != Some(edit.expected.as_str())
+        {
+            return Err(STALE);
+        }
+        changes
+            .entry(target_uri.clone())
+            .or_default()
+            .push(TextEdit {
+                range: span_range(index, source, edit.span),
+                new_text: edit.replacement.clone(),
+            });
     }
     if changes.is_empty()
         || inner.document(uri).ok_or(MAPPING)?.version != version
@@ -634,23 +155,59 @@ pub(super) fn decide(
     {
         return Err(STALE);
     }
-    for view in &views {
-        if inner.root_revision(&view.root).as_ref() != Some(&view.revision)
-            || !inner
-                .workspace
-                .input_snapshot_is_current(view.root.as_str())
+    for (root, view) in roots.iter().zip(&views) {
+        if inner.root_revision(root).as_ref() != Some(&view.revision)
+            || !inner.workspace.input_snapshot_is_current(root.as_str())
         {
             return Err(STALE);
         }
     }
-    let edit = versioned_workspace_edit(inner, changes);
     Ok(Decision {
         range: span_range(&LineIndex::new(&text), &text, selected_span),
-        edit,
-        roots: views.into_iter().map(|view| view.root).collect(),
+        edit: versioned_workspace_edit(inner, changes),
+        roots,
     })
 }
 
+/// Ordinary references use accepted sites; callers convert the shared byte spans.
+pub(super) fn references(
+    inner: &mut Inner,
+    pos: &TextDocumentPositionParams,
+    include_declaration: bool,
+) -> Option<Vec<Location>> {
+    let text = inner.document(&pos.text_document.uri)?.text.clone();
+    let byte = LineIndex::new(&text).offset_utf16(&text, span_pos(pos.position));
+    let file =
+        crate::engine::workspace::include_resolver::normalize_uri(pos.text_document.uri.as_str());
+    let mut roots = inner.known_owner_roots(&pos.text_document.uri);
+    if roots.is_empty() {
+        roots.push(pos.text_document.uri.clone());
+    }
+    let mut locations = Vec::new();
+    for root in roots {
+        let view = capture(inner, &root).ok()?;
+        let binding = view.select(Selector::Target { file: &file, byte }).ok()??;
+        for site in view.references(&binding, include_declaration) {
+            let Some((file, span)) = site.written else {
+                continue;
+            };
+            let Some(uri) = naming_edit_url(inner, &root, &file) else {
+                continue;
+            };
+            let Some(source) = view.sources.get(&file) else {
+                continue;
+            };
+            if source.get(span.start as usize..span.end as usize).is_none() {
+                continue;
+            }
+            let location = Location::new(uri, span_range(&LineIndex::new(source), source, span));
+            if !locations.contains(&location) {
+                locations.push(location);
+            }
+        }
+    }
+    (!locations.is_empty()).then_some(locations)
+}
 /// Native Rename loads saved inputs before applying through workspace.applyEdit.
 /// A second capture after those loads proves the complete decision again.
 pub(super) fn capture_command(
@@ -668,19 +225,8 @@ pub(super) fn capture_command(
         return Err(IDENTIFIER);
     }
     let pos = &params.text_document_position;
-    let (edit, roots) = match locals::rename(inner, pos, Some(&params.new_name)) {
-        Some(edit) => {
-            let mut roots = inner.known_owner_roots(&pos.text_document.uri);
-            if roots.is_empty() {
-                roots.push(pos.text_document.uri.clone());
-            }
-            (edit?, roots)
-        }
-        None => {
-            let decision = decide(inner, pos, Some(&params.new_name))?;
-            (decision.edit, decision.roots)
-        }
-    };
+    let decision = decide(inner, pos, Some(&params.new_name))?;
+    let (edit, roots) = (decision.edit, decision.roots);
     let DocumentChanges::Edits(documents) = edit.document_changes.as_ref().ok_or(SOURCE)? else {
         return Err(MAPPING);
     };

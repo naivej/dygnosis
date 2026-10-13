@@ -48,6 +48,9 @@ pub fn check_mom(model: &Model) -> Vec<Diagnostic> {
     let mut units: Vec<Unit> = Vec::new();
     let mut seq = 0u32;
     for syn in &model.mom_syntax {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         push(
             &mut units,
             &mut seq,
@@ -104,6 +107,9 @@ fn err(span: Span, code: &str, message: impl Into<String>) -> Diagnostic {
 /// `(…)`, and a `mom_method` whose value is not one of the three bare methods.
 fn collect_mom_statements(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
     for stmt in &ctx.model.mom_statements {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if stmt.has_option_list && stmt.options.is_empty() {
             push(
                 units,
@@ -156,6 +162,9 @@ fn is_bare_method(text: &str) -> bool {
 /// row's own scope refuse, then the walk at the block's `end;`.
 fn collect_matched_moments(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
     for block in &ctx.model.matched_moments_blocks {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let rows: Vec<&MatchedMoment> = ctx
             .model
             .matched_moments
@@ -179,6 +188,9 @@ fn collect_matched_moments(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) 
             continue;
         }
         for row in &rows {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if row.expr.is_none() {
                 continue;
             }
@@ -196,6 +208,9 @@ fn collect_matched_moments(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) 
 
 fn collect_matched_irfs(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
     for block in &ctx.model.matched_irfs {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if block.rows.is_empty() && !ctx.syntax_in(block.span) {
             push(
                 units,
@@ -211,6 +226,9 @@ fn collect_matched_irfs(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
             continue;
         }
         for (index, row) in block.rows.iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let at = row.span.start;
             if let Some(diag) = irfs_row_names(ctx, row) {
                 push(units, seq, at, 0, diag);
@@ -230,6 +248,9 @@ fn collect_matched_irfs(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
 /// `matched_irfs_weights`: each row's names, then its tuple.
 fn collect_matched_irfs_weights(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
     for block in &ctx.model.matched_irfs_weights {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if block.rows.is_empty() && !ctx.syntax_in(block.span) {
             push(
                 units,
@@ -245,6 +266,9 @@ fn collect_matched_irfs_weights(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut 
             continue;
         }
         for (index, row) in block.rows.iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let at = row.span.start;
             if let Some(diag) = weights_row_names(ctx, row) {
                 push(units, seq, at, 0, diag);
@@ -260,6 +284,9 @@ fn collect_matched_irfs_weights(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut 
 /// `moment_calibration` and `irf_calibration`: each row's name slots.
 fn collect_calibration(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
     for block in &ctx.model.moment_calibration {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if block.rows.is_empty() && !ctx.syntax_in(block.span) {
             push(
                 units,
@@ -275,6 +302,9 @@ fn collect_calibration(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
             continue;
         }
         for row in &block.rows {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let hit = endo_slot(ctx, row.first, row.first_span, "moment_calibration")
                 .or_else(|| endo_slot(ctx, row.second, row.second_span, "moment_calibration"));
             if let Some(diag) = hit {
@@ -283,6 +313,9 @@ fn collect_calibration(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
         }
     }
     for block in &ctx.model.irf_calibration {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if block.rows.is_empty() && !ctx.syntax_in(block.span) {
             push(
                 units,
@@ -298,6 +331,9 @@ fn collect_calibration(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
             continue;
         }
         for row in &block.rows {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let hit = endo_slot(ctx, row.endogenous, row.endogenous_span, "irf_calibration")
                 .or_else(|| irf_calibration_shock(ctx, row));
             if let Some(diag) = hit {
@@ -367,6 +403,9 @@ fn irfs_row_counts(row: &MatchedIrfsRow) -> Option<Diagnostic> {
 /// `2000Q1:2000Q4` are dates the row cannot take.
 fn irfs_row_date(ctx: &Ctx<'_>, row: &MatchedIrfsRow) -> Option<Diagnostic> {
     for entry in &row.periods {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let text = ctx.source(*entry);
         let dated = match text.split_once(':') {
             Some((first, second)) => {
@@ -527,6 +566,9 @@ fn undeclared(ctx: &Ctx<'_>, name: Name, span: Span, block: &str) -> Diagnostic 
 /// row whose expression fails supplies the sentence.
 fn walk_block(ctx: &Ctx<'_>, rows: &[&MatchedMoment], end: u32) -> Option<Diagnostic> {
     for row in rows {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(expr) = row.expr else {
             continue;
         };
@@ -684,6 +726,9 @@ impl<'a> Ctx<'a> {
         // that closely enough to order two operands of one product.
         let mut idents: Vec<(u32, Name, i32)> = Vec::new();
         for (_, expr) in model.exprs.iter() {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             if let ExprKind::Ident {
                 name,
                 timing,
@@ -698,6 +743,9 @@ impl<'a> Ctx<'a> {
         let mut order: HashMap<(Name, i32), u32> = HashMap::new();
         let mut next = FIRST_FREE_INDEX;
         for (_, name, timing) in idents {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             order.entry((name, timing)).or_insert_with(|| {
                 let index = next;
                 next += 1;
@@ -767,6 +815,9 @@ impl<'a> Ctx<'a> {
     /// tree, so it goes to the walk on its type.
     fn row_scope_refusal(&self, row: &MatchedMoment) -> Option<(u32, Diagnostic)> {
         for usage in &self.model.model_expression_uses[row.expression_uses.clone()] {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let name = self.model.name(usage.name);
             let (span, code, message) =
                 match self.model.symbol_kind_in_context(usage.name, usage.context) {
@@ -1252,6 +1303,9 @@ fn outside_model_expression_with_locals(
     model_locals: &HashSet<Name>,
 ) -> Option<Diagnostic> {
     for ident in model.exprs.walk_idents(id) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let name = model.name(ident.name);
         let external = model.external_function_names.contains(&ident.name);
         if let Some(timing) = ident.timing_span {
@@ -1370,6 +1424,9 @@ fn has_lead(model: &Model, expr: ExprId) -> bool {
 fn check_statements(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
     let mut gmm = false;
     for stmt in &ctx.model.mom_statements {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let method = stmt
             .options
             .iter()
@@ -1387,6 +1444,9 @@ fn check_statements(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
             gmm = true;
         }
         for option in ["analytic_standard_errors", "analytic_jacobian"] {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if has_flag(stmt, option) && !gmm {
                 return vec![err(
                     flag_span(stmt, option),

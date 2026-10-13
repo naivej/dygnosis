@@ -69,6 +69,9 @@ fn check_w201(model: &Model) -> Vec<Diagnostic> {
 fn check_ss_target_types(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for eq in &model.steady_state_equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         // The official driver checks output types only after a parsed RHS.
         if !eq
             .rhs_expr
@@ -77,6 +80,9 @@ fn check_ss_target_types(model: &Model) -> Vec<Diagnostic> {
             continue;
         }
         for target in &eq.steady_state_targets {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if !target.action_attempted {
                 continue;
             }
@@ -114,8 +120,14 @@ fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     for eq in &model.steady_state_equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some(rhs) = eq.rhs_expr.filter(|_| !ramsey) {
             for r in model.exprs.walk_idents(rhs) {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 let needs_definition = match model.final_symbol_kind(r.name) {
                     Some("mod_file_local") => true,
                     Some("var") => !model.heterogeneous_in_context(r.name, model.symbol_context()),
@@ -144,6 +156,9 @@ fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
         }
 
         for target in &eq.steady_state_targets {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let lhs = target.name;
             if assigned_once.contains(&lhs) {
                 let reuses_self = eq.lhs_expr.is_some()
@@ -229,7 +244,13 @@ fn check_w200(model: &Model) -> Vec<Diagnostic> {
     // Official `isUnaryOpUsed` / `isBinaryOpUsed` walk the whole DataTree,
     // including `#` model-local RHS nodes.
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for id in [eq.lhs_expr, eq.rhs_expr].into_iter().flatten() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if let Some(span) = first_nonsmooth(model, id) {
                 return vec![Diagnostic::new(span, Severity::Warning, "W200", W200_MSG)];
             }
@@ -259,6 +280,9 @@ fn check_linear_ops(model: &Model) -> Vec<Diagnostic> {
     let mut seen: HashSet<(u32, String)> = HashSet::new();
     let mut diagnostics = Vec::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some((kind, operator, span)) = linear_hit(model, eq, &endo, &exo, &vars) {
             let line = index.position(&model.source, eq.span.start).line;
             if !seen.insert((line, operator.clone())) {
@@ -311,6 +335,9 @@ fn linear_hit(
     vars: &HashSet<Name>,
 ) -> Option<(LinearHit, String, Span)> {
     for id in [eq.lhs_expr, eq.rhs_expr].into_iter().flatten() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some((target, operator, span)) = first_nonsmooth_on_type(model, id, endo, exo) {
             let kind = if target == NonsmoothOn::Endo {
                 LinearHit::EndoNonsmooth
@@ -359,6 +386,9 @@ fn first_nonsmooth_on_type(
                 }
             }
             for a in args {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 if let Some(hit) = first_nonsmooth_on_type(model, *a, endo, exo) {
                     return Some(hit);
                 }
@@ -428,6 +458,9 @@ fn first_special_call(model: &Model, id: ExprId, vars: &HashSet<Name>) -> Option
                 return Some((c.to_ascii_lowercase(), expr.span));
             }
             for a in args {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 if let Some(hit) = first_special_call(model, *a, vars) {
                     return Some(hit);
                 }
@@ -463,6 +496,9 @@ fn first_operator(model: &Model, id: ExprId, vars: &HashSet<Name>) -> Option<(St
                 return Some((operator, expr.span));
             }
             for a in args {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 if let Some(hit) = first_operator(model, *a, vars) {
                     return Some(hit);
                 }
@@ -555,6 +591,9 @@ fn is_math_builtin(name: &str) -> bool {
 fn check_w150(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for &span in &model.simul_spans {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         diagnostics.push(deprecated(
             span,
             "'simul' is deprecated. Please use 'perfect_foresight_setup' and 'perfect_foresight_solver' instead.",
@@ -575,6 +614,9 @@ fn check_w150(model: &Model) -> Vec<Diagnostic> {
         .map(|d| model.name(d.name).to_string())
         .collect();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if eq.is_local
             && let Some(name) = ss_lhs_ident(model, eq)
         {
@@ -583,6 +625,9 @@ fn check_w150(model: &Model) -> Vec<Diagnostic> {
     }
 
     for (option, span) in &model.deprecated_option_spans {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let lex = model
             .source
             .get(span.start as usize..span.end as usize)

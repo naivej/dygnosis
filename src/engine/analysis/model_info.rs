@@ -144,6 +144,9 @@ pub fn model_info_json(model: &Model) -> Value {
     let mut forward_looking = Vec::new();
     let mut mixed = Vec::new();
     for name in &endogenous {
+        if crate::engine::control::cancelled() {
+            break;
+        }
         match timing.get(name).map(|t| t.class) {
             Some(TimingClass::Mixed) => mixed.push(name.clone()),
             Some(TimingClass::ForwardLooking) => forward_looking.push(name.clone()),
@@ -180,6 +183,9 @@ pub fn model_info_json(model: &Model) -> Value {
             let mut forward_looking = Vec::new();
             let mut mixed = Vec::new();
             for name in &names {
+                if crate::engine::control::cancelled() {
+                    break;
+                }
                 match heterogeneous_timing.get(name).map(|info| info.class) {
                     Some(TimingClass::Mixed) => mixed.push(name.clone()),
                     Some(TimingClass::ForwardLooking) => forward_looking.push(name.clone()),
@@ -332,7 +338,29 @@ pub(crate) fn model_incomplete_status() -> Value {
     json!({"status": "incomplete", "message": "Model expansion is incomplete"})
 }
 
-/// Optional `incomplete_reasons` entries share the diagnostic sentences.
+/// Applied work limits, from engine receipts rather than diagnostic prose.
+pub(crate) fn macro_work_limits(model: &Model, root: Option<&str>) -> Vec<Value> {
+    let mut seen = HashSet::new();
+    model
+        .incomplete_reasons
+        .iter()
+        .filter_map(|reason| {
+            let name = reason.limit_name?;
+            if name == "request cancelled" || !seen.insert(name) {
+                return None;
+            }
+            let ceiling = crate::engine::language::macro_expr::limit_ceiling(name);
+            Some(
+                json!({"code":"MACRO_LIMIT","limit":name,"ceiling":ceiling.map(|bound|bound.0),
+            "unit":ceiling.map(|bound|bound.1),"root":root,
+            "affected":"macro expansion and dependent model analysis",
+            "omitted":"authoritative model counts and complete navigation"}),
+            )
+        })
+        .collect()
+}
+
+/// Optional `incomplete_reasons` retain shared causes and diagnostic sentences.
 pub(crate) fn model_incomplete_status_with_reasons(reasons: &[Value]) -> Value {
     let mut status = model_incomplete_status();
     if !reasons.is_empty() {
@@ -350,7 +378,7 @@ fn e061_reasons(
         .collect()
 }
 
-/// Same reason selection as the incomplete diagnostic cascade, without locations.
+/// Diagnostic incomplete causes plus captured unfinished Dynare statements.
 pub fn incomplete_reason_records(
     model: &Model,
     includes: Option<&crate::engine::workspace::IncludeRecords>,
@@ -410,11 +438,36 @@ pub fn incomplete_reason_records(
             )];
         }
     }
-    crate::engine::diagnostics::check_parse::check_parse(model)
+    let mut reasons: Vec<_> = crate::engine::diagnostics::check_parse::check_parse(model)
         .into_iter()
         .filter(|diagnostic| diagnostic.code == "E001")
         .map(|diagnostic| (diagnostic.span, "E001", diagnostic.message))
-        .collect()
+        .collect();
+    // Presentation completeness also observes accepted but unfinished command
+    // and block records. These causes are not new language diagnostics.
+    reasons.extend(
+        model
+            .statements
+            .iter()
+            .filter(|row| !row.native && !row.complete)
+            .map(|row| {
+                let block = row.kind == crate::engine::language::model::StatementKind::Block;
+                (
+                    row.keyword_span,
+                    if block {
+                        "INCOMPLETE_BLOCK"
+                    } else {
+                        "INCOMPLETE_STATEMENT"
+                    },
+                    format!(
+                        "{} '{}' was not completely parsed.",
+                        if block { "Block" } else { "Statement" },
+                        row.name
+                    ),
+                )
+            }),
+    );
+    reasons
 }
 
 /// The same include/companion rows, with each transport retaining its path keys.

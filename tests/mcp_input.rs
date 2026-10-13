@@ -432,6 +432,13 @@ fn seven_tools_validate_nonempty_maps_on_the_wire() {
         single["files"] = json!({});
         single["active_file"] = json!("ignored.mod");
         let empty_map = wire.call(name, single);
+        if name == "dynare_related_files" {
+            assert_eq!(without_map["error"]["code"], -32602, "{without_map}");
+            assert_eq!(empty_map["error"]["code"], -32602, "{empty_map}");
+        } else {
+            assert!(without_map.get("error").is_none(), "{name}: {without_map}");
+            assert!(empty_map.get("error").is_none(), "{name}: {empty_map}");
+        }
         assert_eq!(without_map["result"], empty_map["result"], "{name}");
     }
 }

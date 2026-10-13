@@ -105,6 +105,9 @@ fn direct_constant_denominator(model: &Model) -> Option<Diagnostic> {
     }
     let mut lhs_counts = HashMap::<Name, usize>::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some(lhs) = eq.lhs_expr
             && let ExprKind::Ident {
                 name, timing: 0, ..
@@ -115,6 +118,9 @@ fn direct_constant_denominator(model: &Model) -> Option<Diagnostic> {
     }
     let mut constants = HashMap::<Name, f64>::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let (Some(lhs), Some(rhs)) = (eq.lhs_expr, eq.rhs_expr) else {
             continue;
         };
@@ -132,7 +138,13 @@ fn direct_constant_denominator(model: &Model) -> Option<Diagnostic> {
         }
     }
     for (index, eq) in model.equations.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for side in [eq.lhs_expr, eq.rhs_expr].into_iter().flatten() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if let Some(span) = direct_zero_denominator(model, side, &constants) {
                 return Some(Diagnostic::new(
                     span,
@@ -233,7 +245,13 @@ fn direct_partial_information_expectation(model: &Model) -> Option<Diagnostic> {
         return None;
     }
     for (equation_index, eq) in model.equations.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for root in [eq.lhs_expr, eq.rhs_expr].into_iter().flatten() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if let Some(span) = bad_expectation(model, root, equation_index) {
                 return Some(Diagnostic::new(
                     span,
@@ -331,11 +349,17 @@ fn plain_heterogeneous_count(model: &Model) -> Option<Diagnostic> {
     }
     let mut counts = HashMap::<Name, (usize, Span)>::new();
     for block in &model.heterogeneous_models {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let row = counts.entry(block.dimension).or_insert((0, block.span));
         row.0 += block.equations.len();
     }
     let mut seen = HashSet::new();
     for block in &model.heterogeneous_models {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let dimension = block.dimension;
         if !seen.insert(dimension) {
             continue;

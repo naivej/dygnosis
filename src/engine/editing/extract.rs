@@ -133,9 +133,50 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
             "the compilation unit could not be expanded",
         ));
     };
-    let model = &unit.model;
-    let hits = matching_places(model, &unit.report, request);
-    if let Some((kind, detail)) = unresolved_selection(model, unit.missing_include) {
+    extract_prepared(
+        request,
+        &unit.model,
+        &unit.report,
+        unit.missing_include,
+        None,
+    )
+}
+
+/// Additional selectors for callers that already captured the analyzed input.
+/// Counted indexes continue across blocks in one dimension; occurrence IDs are
+/// expanded parser token positions from the written model map.
+pub(crate) enum ExtractSelector {
+    Counted {
+        dimension: Option<String>,
+        index: usize,
+    },
+    Occurrence(usize),
+}
+
+/// Use the existing extraction closure without acquiring or parsing unchanged
+/// source again. The caller must supply one coherent model and source report.
+pub(crate) fn extract_prepared(
+    request: &ExtractRequest,
+    model: &Model,
+    report: &ExpandReport,
+    missing_include: bool,
+    selector: Option<ExtractSelector>,
+) -> Result<ExtractResult, ExtractError> {
+    if request.names.is_empty() && request.tags.is_empty() && selector.is_none() {
+        return Err(ExtractError::EmptySelector);
+    }
+    let mut hits = matching_places(model, report, request);
+    if let Some(selector) = selector {
+        hits.retain(|place| match &selector {
+            ExtractSelector::Occurrence(id) => eq_at(model, *place).parse_order == *id,
+            ExtractSelector::Counted { dimension, index } => {
+                !eq_at(model, *place).static_tag
+                    && scope_key(model, *place).map(|name| model.name(name)) == dimension.as_deref()
+                    && public_index(model, *place) == Some(*index)
+            }
+        });
+    }
+    if let Some((kind, detail)) = unresolved_selection(model, missing_include) {
         return Ok(unsupported(kind, detail));
     }
     if hits.is_empty() {
@@ -156,7 +197,7 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
         });
     }
 
-    let kept = kept_equations(model, &unit.report, &hits);
+    let kept = kept_equations(model, report, &hits);
     let kept_places: Vec<EqRef> = kept.iter().map(|row| row.place).collect();
     if let Some(detail) = required_partner_problem(model, &kept_places) {
         return Ok(unsupported(UnsupportedKind::CompilationUnit, detail));
@@ -166,7 +207,7 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
         Err(detail) => return Ok(unsupported(UnsupportedKind::CompilationUnit, detail)),
     };
     let closure = close(model, &kept_places, &constraints);
-    if let Some(reason) = refuse(model, &kept_places, &closure, unit.missing_include) {
+    if let Some(reason) = refuse(model, &kept_places, &closure, missing_include) {
         return Ok(unsupported(reason.0, reason.1));
     }
     let retained = retained_places(model, &kept_places, &closure);
@@ -184,7 +225,7 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
         .map(|row| {
             origin_row(
                 model,
-                &unit.report,
+                report,
                 row.place,
                 row.role,
                 request.active_file.as_deref(),
@@ -197,7 +238,7 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
         status: ExtractStatus::Ok,
         fragment: Some(render(
             model,
-            &unit.report,
+            report,
             &kept_places,
             &closure,
             occbin.as_ref(),

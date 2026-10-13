@@ -85,9 +85,15 @@ fn endogenous(
 pub fn check_d_shocks(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for (span, code, message) in &model.path_parse_errors {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         error(&mut out, *span, code, message);
     }
     for (name, span) in &model.option_twice {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let shock_option = model
             .shock_paths
             .iter()
@@ -132,14 +138,23 @@ pub fn check_d_shocks(model: &Model) -> Vec<Diagnostic> {
 
 fn check_stochastic_names(model: &Model, out: &mut Vec<Diagnostic>) {
     for block in &model.shock_blocks {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if block.kind == ShockBlockKind::Heterogeneous {
             for stmt in &block.stochastic {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 let names: Vec<Name> = match &stmt.kind {
                     ShockKind::Var(name) | ShockKind::Stderr(name) => vec![*name],
                     ShockKind::Cov(names) | ShockKind::Skew(names) => names.clone(),
                     ShockKind::Corr { a, b } => vec![*a, *b],
                 };
                 for name in names {
+                    if crate::engine::control::cancelled() {
+                        return Default::default();
+                    }
                     if !known(model, name, stmt.span, stmt.symbol_type_context) {
                         error(
                             out,
@@ -157,12 +172,18 @@ fn check_stochastic_names(model: &Model, out: &mut Vec<Diagnostic>) {
             continue;
         }
         for stmt in &block.stochastic {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let names: Vec<Name> = match &stmt.kind {
                 ShockKind::Var(name) | ShockKind::Stderr(name) => vec![*name],
                 ShockKind::Cov(names) | ShockKind::Skew(names) => names.clone(),
                 ShockKind::Corr { a, b } => vec![*a, *b],
             };
             for name in names {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 if !known(model, name, stmt.span, stmt.symbol_type_context) {
                     error(
                         out,
@@ -182,12 +203,18 @@ fn check_stochastic_names(model: &Model, out: &mut Vec<Diagnostic>) {
 pub(crate) fn completed_regular_parse_unknowns(model: &Model) -> Vec<(Diagnostic, usize)> {
     let mut out = Vec::new();
     for row in &model.shock_stmts {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let names: Vec<Name> = match &row.kind {
             ShockKind::Var(name) | ShockKind::Stderr(name) => vec![*name],
             ShockKind::Cov(names) | ShockKind::Skew(names) => names.clone(),
             ShockKind::Corr { a, b } => vec![*a, *b],
         };
         for name in names {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if !known(model, name, row.span, row.symbol_type_context) {
                 out.push((
                     Diagnostic::new(
@@ -207,7 +234,13 @@ pub(crate) fn completed_regular_parse_unknowns(model: &Model) -> Vec<(Diagnostic
 
 fn check_irf_shocks_options(model: &Model, out: &mut Vec<Diagnostic>) {
     for option in &model.irf_shocks_options {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for &(name, span) in &option.names {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if !known(model, name, span, option.symbol_type_context) {
                 error(
                     out,
@@ -246,6 +279,9 @@ fn check_range(out: &mut Vec<Diagnostic>, range: &PeriodRange) {
 
 fn check_scheduled(model: &Model, out: &mut Vec<Diagnostic>) {
     for block in &model.shock_blocks {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if block.kind == ShockBlockKind::Heterogeneous {
             continue;
         }
@@ -268,6 +304,9 @@ fn check_scheduled(model: &Model, out: &mut Vec<Diagnostic>) {
             );
         }
         for row in &block.scheduled {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let allow_det = block.kind != ShockBlockKind::Heteroskedastic
                 && row.operation == ShockOperation::Values;
             exogenous(
@@ -278,6 +317,9 @@ fn check_scheduled(model: &Model, out: &mut Vec<Diagnostic>) {
                 allow_det,
             );
             for range in &row.periods {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 check_range(out, range);
             }
             if block.kind == ShockBlockKind::Heteroskedastic {
@@ -360,6 +402,9 @@ fn check_scheduled(model: &Model, out: &mut Vec<Diagnostic>) {
                 && *n > 1
             {
                 for range in &row.periods {
+                    if crate::engine::control::cancelled() {
+                        return Default::default();
+                    }
                     if let PeriodPoint::Integer(first) = &range.first
                         && first < n
                     {
@@ -437,6 +482,9 @@ fn operation_word(operation: ShockOperation) -> &'static str {
 
 fn check_endval(model: &Model, out: &mut Vec<Diagnostic>) {
     for block in &model.endval_instructions {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let learnt = block.learnt_in.as_ref();
         if let Some(PeriodPoint::Integer(n)) = learnt
             && *n < 1
@@ -451,6 +499,9 @@ fn check_endval(model: &Model, out: &mut Vec<Diagnostic>) {
         let nondefault = matches!(learnt, Some(PeriodPoint::Date(_)))
             || matches!(learnt, Some(PeriodPoint::Integer(n)) if *n > 1);
         for entry in &block.entries {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if nondefault
                 && known(
                     model,
@@ -493,7 +544,13 @@ fn check_endval(model: &Model, out: &mut Vec<Diagnostic>) {
 fn check_databases(model: &Model, out: &mut Vec<Diagnostic>) {
     let mut seen = HashSet::new();
     for statement in &model.databases {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for &(name, span) in &statement.names {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if !seen.insert(name) {
                 error(
                     out,
@@ -508,15 +565,24 @@ fn check_databases(model: &Model, out: &mut Vec<Diagnostic>) {
 
 fn check_paths(model: &Model, out: &mut Vec<Diagnostic>) {
     for block in &model.shock_paths {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !block.completed {
             continue;
         }
         for stanza in &block.stanzas {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             check_path_self_variables(model, stanza, out);
         }
     }
     // The companion block has its separate value grammar and callback checks.
     for block in &model.controlled_paths {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some(PeriodPoint::Integer(n)) = block.options.learnt_in.as_ref()
             && *n < 1
         {
@@ -528,6 +594,9 @@ fn check_paths(model: &Model, out: &mut Vec<Diagnostic>) {
             );
         }
         for stanza in &block.stanzas {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             match &stanza.target {
                 PathTarget::Exogenous { name, span } => {
                     exogenous(
@@ -579,6 +648,9 @@ fn check_paths(model: &Model, out: &mut Vec<Diagnostic>) {
                 }
             }
             for range in &stanza.periods {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 check_range(out, range);
             }
         }
@@ -593,6 +665,9 @@ fn check_path_self_variables(model: &Model, stanza: &PathStanza, out: &mut Vec<D
         return;
     }
     for value in &stanza.values {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(facts) = value.expr.and_then(|id| model.path_value_facts.get(&id)) else {
             continue;
         };

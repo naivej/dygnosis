@@ -32,14 +32,16 @@ conditions, determinacy, correct economics or a successful experiment. Those nee
 | Check the current model | `dynare_diagnose`. Run it before a change (baseline) and after each edit to a declaration, an equation, or a command. |
 | Check several saved models or a folder | `dynare_workspace_diagnose`. Report each failed root separately. |
 | Symbols, timing classes, blocks, counts | `dynare_model_info`: `endogenous`, `predetermined`, `forward_looking`, `static`, `mixed`, counts, block flags. |
+| Inspect one symbol's meaning | `dynare_symbol_info`: select one binding by name, target or returned `binding_id`; ambiguous names return scoped candidates. |
+| Find accepted uses of a symbol | `dynare_find_references`: select a semantic binding; comments, unrelated strings, native MATLAB and inactive source are excluded. |
 | Inspect `#` helper expressions or explicit model-local metadata | `dynare_model_info`: `model_locals.declarations` and `model_locals.definitions`. |
 | Find an equation and its source location; check the equation count | `dynare_equations`: rows with tags, `idents` (written `timing`, `dynare_timing`, timing class), `origin`, and `count_gap`. |
 | See text produced by `@#include` and macros | `dynare_expand`: `effective_text`, `complete`, navigation back to the written source. |
 | Find includes and companion files (steady-state file, helper files) | `dynare_related_files`, then read those files. A listed companion is not proof that its MATLAB code is correct. |
 | Understand a diagnostic | `dynare_explain`; `dynare_list_diagnostic_codes` to find a code. |
 | Check the options of a command | `dynare_list_options`, then `references/dynare-manual.md` for meaning. An unknown command returns `known: false`. Do not invent options. |
-| Find and rename identifier spellings | `dynare_find_references`, then `dynare_rename`. These tools match spelling across the supplied text; inspect same-name locals in separate models before applying the result. Comments and strings stay unchanged. |
-| Apply a known fix, or format | `dynare_auto_fix`, `dynare_format` (`formatIndent`: `"tab"` or 1–8). |
+| Rename a model symbol | `dynare_rename`: select exactly one `old_name`, target or `binding_id`. Ambiguous bindings and incomplete or incompatible owners withhold the complete proposal. |
+| Apply a known fix, source action, or format | `dynare_auto_fix`, `dynare_code_actions`, `dynare_format` (`formatIndent`: `"tab"` or 1–8). Each returns proposed edits and never writes files. |
 | Review the structural effect of an edit | `dynare_compare_models` with supplied text and includes, or with explicit repository inputs. It is not a numerical equivalence test. |
 | Isolate a mechanism or make a small reproducer | `dynare_extract` by equation `names` or `tags` (all tags must match), optionally in one heterogeneity `dimension`. |
 
@@ -47,23 +49,17 @@ Call the tools that help the task. Do not call every tool on every task.
 
 ## Pass the model
 
-**One file.** Pass the complete text as `file_content`.
+Single-model tools accept one explicit `source` object:
 
-**A file with includes.** Pass `active_file` (the root) and a `files` map from file key to complete
-text. Include the text of each executed `@#include` target.
+- **Text:** `{"kind":"text","text":"..."}`. This is unnamed text; it cannot read includes or companions from disk.
+- **Map:** `{"kind":"map","root":"main.mod","files":{"main.mod":"...","parts.inc":"..."}}`. Supply the exact root and all required include text. `root_text` can overlay the existing root, including with an empty string. `include_dirs` adds virtual folders; `owner_roots` selects additional roots to check.
+- **Disk:** `{"kind":"disk","root":"C:/models/main.mod"}`. The MCP server reads saved host files. The root, `owner_roots` and `include_dirs` must be absolute host paths; editor buffers are not read.
 
-- The `active_file` value must match a key in `files` exactly (case and path form).
-- `file_content`, when you also pass it, replaces the root's entry for that request.
-- The map is text that you supply. It does not give the tool permission to read files on disk, and it
-  is not the editor's unsaved buffer. Read each file with your own file tools first.
-- Find the includes with `dynare_related_files`. An include with `resolved: false` is missing from your
-  map: read it and add it.
+The `source` object is exclusive with legacy `file_content`, `active_file` and `files`. Legacy single-file calls use `file_content`. Legacy map calls require `active_file` to match an exact existing key in nonempty `files`; an explicit `file_content` overlays that root even when empty. `dynare_related_files` needs map or disk identity.
 
-**Confirm that the root resolved.** If `active_file` is omitted or does not match a key in a nonempty
-`files` map, the tools return JSON-RPC invalid parameters (`-32602`) with
-`active_file is required with a nonempty files map` or `"<key>" is not in the file map`. After you
-build a map, check that `dynare_expand` returns `root_file` equal to your key, or that
-`dynare_model_info` returns your declarations.
+Map keys preserve their spelling. Include lookup normalizes slash direction and dot segments lexically, rejects colliding keys, and never reads an unsupplied host file or falls back to a matching filename. It searches the including file's folder, then explicit and executed macro include folders in engine order. Use an exact key or explicit search folder for non-sibling includes. The checked owner set is the selected root plus explicit `owner_roots`; unrelated `.mod` keys are not inferred as owners.
+
+Use `dynare_related_files` to inspect include and companion relationships for a named map or disk root. For an incomplete result, supply missing executed source before treating facts or edit proposals as complete.
 
 **Saved files on disk.** `dynare_workspace_diagnose` has two modes. Do not combine them.
 
@@ -102,18 +98,32 @@ objects. A required source outside that repository, a symlink, or a gitlink fail
 
 ## Read the result
 
+Every MCP result includes a canonical object with `schema_version: 2`.
+Structured clients read tool facts from `structuredContent.data`; `outcome`,
+`inputs`, `coverage`, `selection`, `proposal` and `limits` sit beside `data`.
+Text clients can parse the final JSON content item. Existing tools keep their
+default leading content items in order. `detail: "compact"` omits those legacy
+mirrors. Editions from 2025-06-18 advertise `outputSchema` and
+`structuredContent`; older editions receive the canonical JSON text only.
+
+`outcome.status` is `ok`, `changed`, `unchanged`, `partial` or `refused`.
+Read its causes and per-owner `coverage` before relying on facts. A page of
+complete analysis remains `ok`; `selection` describes the page independently.
+`changed` means an edit proposal changes text, not that a file was saved.
+
 **Completeness.** An unresolved include or an unsupported macro construct makes the result partial.
 
 | Tool | Sign of a partial result |
 |---|---|
-| `dynare_diagnose` | E061 (an `@#include` target could not be opened), I211 (macro expansion incomplete) |
-| `dynare_model_info` | `{"status": "incomplete", …}` |
-| `dynare_equations` | `{"status": "incomplete", …}`, `equations: []`, `count_gap: null` |
-| `dynare_expand` | `complete: false` |
-| `dynare_related_files` | a row with `resolved: false` |
-| `dynare_extract` | `status: "unsupported_context"`, `fragment: null` |
-| `dynare_compare_models` | `status: "incomplete"` or `status: "failed"` with no diff arrays or removed/added claims |
-| `dynare_workspace_diagnose` | a root with `status: "failed"` and a `failure` message |
+| `dynare_diagnose` | `outcome.status: "partial"`; diagnostic rows remain in `data`. |
+| `dynare_model_info` | `outcome.status: "partial"`; inspect its data and owner coverage for withheld facts. |
+| `dynare_equations` | `outcome.status: "partial"`; incomplete models withhold authoritative rows and count gaps. |
+| `dynare_expand` | `outcome.status: "partial"`; inspect `data.complete` and source coverage. |
+| `dynare_related_files` | `outcome.status: "partial"`; inspect relationship rows and coverage. |
+| `dynare_find_references`, `dynare_symbol_info` | `outcome.status: "partial"` when accepted occurrences lack verified written targets. |
+| `dynare_rename`, `dynare_code_actions`, `dynare_auto_fix`, `dynare_format` | Refused or partial outcomes explain why a complete proposal is unavailable. |
+| `dynare_compare_models` | Existing comparison status and source coverage; incomplete comparisons make no removed/added claims. |
+| `dynare_workspace_diagnose` | Per-root status distinguishes complete, partial, failed and unfinished work. |
 
 A partial result cannot support a claim that the model is clean. Fix the inputs, or report what was not
 covered.
@@ -161,6 +171,16 @@ to the file named in the row (`file`, `origin_uri`), or to the root when no file
 edit, query again; do not reuse old locations. Edit the written source at the returned location, not
 the expanded text.
 
+Input targets use `file`, `line` and `column`; a null or omitted file selects
+the root. Output ranges use `line`, `column`, `end_line` and `end_column`; the
+end is exclusive. Sections and filters use the runtime schema. Independent
+equation filters combine with AND, while extraction names combine with OR and
+tags combine with AND. Set `page_size` from 1 to 1000 for a bounded collection;
+continue with the returned token, the same query and its `expected_revision`.
+Do not page complete edit proposals. Source limits are 1,000,000 UTF-8 bytes
+per file, 8 MiB total source text, 256 files or lookup candidates and 64 checked
+roots. Macro expansion and serialized output each retain separate 8 MiB limits.
+
 Repository comparison adds `inputs` with `schema_version: 1`. Read each side's root, resolved commit,
 source policy, search paths, and completeness before making a change claim. Its navigation has
 `schema_version: 2`; each written target carries `input_id`, `file_key`, and the commit for a historical
@@ -169,21 +189,27 @@ navigation schema 1 and their original file keys.
 
 ## Apply edits
 
+`dynare_rename`, `dynare_code_actions`, `dynare_auto_fix` and `dynare_format`
+return proposals; they do not write files. Each proposal contains complete
+non-overlapping source edits, expected old text, the source revision and
+SHA-256 guards for all checked inputs, including unchanged dependencies and
+missing lookup candidates. Do not apply part of a proposal.
+
 The editing tools return proposed text. They do not save files.
 
 | Tool | Returns |
 |---|---|
-| `dynare_rename` | With a map: an object with only the changed files. Without a map: the new text. An illegal new name leaves the text unchanged. |
-| `dynare_auto_fix` | The text with the stored fixes applied. |
-| `dynare_format` | `status: "changed"` with `formatted_text`, or `status: "unchanged"` with `formatted_text: null`. |
+| `dynare_rename` | A semantic Rename proposal selected by one name, written target or binding identity. |
+| `dynare_code_actions` | Available source actions at a target; select one `action_id` and repeat with its `expected_revision` for its complete proposal. |
+| `dynare_auto_fix` | A proposed source revision with applied/skipped fixes and remaining diagnostics. |
+| `dynare_format` | A proposed whole-file or selected-line revision. |
 | `dynare_extract` | `fragment` with the declarations it needs, and `omitted_context` (for example `calibration`). `status: "empty"` when nothing matched. |
 
-1. Inspect the returned text.
-2. Apply only the intended change with your file tools. Keep unrelated edits by the user.
+For disk inputs, repeat the proposal request with its `expected_revision`. Verify every guard, apply the complete proposal with your file tools, refresh the inputs and run `dynare_diagnose` again. The revision check does not reserve files against later changes.
 3. Refresh the model inputs (the `files` map) and run `dynare_diagnose` again.
 
-An extracted fragment is not a runnable model. Before you present it as one, add what
-`omitted_context` names: parameter values, shocks, steady state, and the experiment.
+An extracted fragment is not a runnable model. Complete setup the result marks
+as omitted before presenting it as a runnable experiment.
 
 Extraction retains needed nested local definitions and explicit metadata from
 the selected model, including definitions in its earlier blocks. A definition

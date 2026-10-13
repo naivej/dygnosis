@@ -24,12 +24,18 @@ pub fn check_d_block(model: &Model) -> Vec<Diagnostic> {
     out.extend(check_ss_rhs_roles(model));
     let mut existing = HashMap::new();
     for row in &out {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         *existing
             .entry((row.span, row.code.clone(), row.message.clone()))
             .or_insert(0usize) += 1;
     }
     let mut captured = HashMap::new();
     for &(name, span, context) in &model.outside_expression_uses {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some(row) = outside_expression_role_refusal(model, name, span, context) {
             // Retain executed-copy counts where legacy role readers collapse
             // equal written spans. Other open/removed/heterogeneous readers
@@ -54,6 +60,9 @@ fn check_histval_lag_dup(model: &Model) -> Vec<Diagnostic> {
     let mut seen: HashMap<(Name, i32), Span> = HashMap::new();
     let mut out = Vec::new();
     for (index, entry) in model.histval.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if model.histval_block_starts.binary_search(&index).is_ok() {
             seen.clear();
         }
@@ -126,6 +135,9 @@ fn check_planner_lead_local(model: &Model) -> Vec<Diagnostic> {
 fn check_osr_bounds_type(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for bound in &model.osr_params_bounds {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if model.final_kind_or_written_if_excluded(bound.name) == Some("parameters") {
             continue;
         }
@@ -154,6 +166,9 @@ fn check_varexobs(model: &Model) -> Vec<Diagnostic> {
     }
     let exo: HashSet<Name> = model.exogenous.iter().map(|d| d.name).collect();
     for v in &model.varexobs {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if exo.contains(&v.name) {
             continue;
         }
@@ -194,6 +209,9 @@ fn check_option_twice(model: &Model) -> Vec<Diagnostic> {
 fn check_static_tag(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !eq.static_tag {
             continue;
         }
@@ -214,6 +232,9 @@ fn check_generate_irfs(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let mut seen: HashSet<Name> = HashSet::new();
     for (index, el) in model.generate_irfs.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if model
             .generate_irfs_block_starts
             .binary_search(&index)
@@ -233,6 +254,9 @@ fn check_generate_irfs(model: &Model) -> Vec<Diagnostic> {
         }
         let mut exo_seen: HashSet<Name> = HashSet::new();
         for (exo, span) in &el.exos {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if !exo_seen.insert(*exo) {
                 out.push(err(
                     *span,
@@ -281,6 +305,9 @@ fn check_outside_assignment_roles(model: &Model) -> Vec<Diagnostic> {
     {
         if let Some(id) = a.expr {
             for usage in model.exprs.walk_idents(id) {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 if let Some(diagnostic) = outside_expression_role_refusal(
                     model,
                     usage.name,
@@ -302,6 +329,9 @@ fn check_model_expression_roles(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     for usage in &model.model_expression_uses {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let name = model.name(usage.name);
         let kind = model.symbol_kind_in_context(usage.name, usage.context);
         let refusal = match kind {

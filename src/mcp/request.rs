@@ -1,0 +1,1640 @@
+//! MCP request contracts and adapters over one explicitly acquired source snapshot.
+
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
+
+use rmcp::model::{CallToolResult, ContentBlock};
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde_json::{json, Value};
+
+use super::result::{Detail, Pages, ResultOptions, ToolResult};
+use super::source::{RequestControl, SourceArgs, SourceSnapshot};
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct Target {
+    /// Exact source file key. Null or omitted selects the root; text sources have no file identity.
+    pub file: Option<String>,
+    /// One-based written line.
+    #[schemars(range(min = 1))]
+    pub line: u32,
+    /// One-based Unicode-scalar column. End positions are exclusive.
+    #[schemars(range(min = 1))]
+    pub column: u32,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct LineRange {
+    /// First selected line, one-based and inclusive.
+    #[schemars(range(min = 1))]
+    pub start_line: u32,
+    /// Last selected line, one-based and inclusive.
+    #[schemars(range(min = 1))]
+    pub end_line: u32,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct ExpandedRange {
+    #[schemars(range(min = 1))]
+    pub line: u32,
+    #[schemars(range(min = 1))]
+    pub column: u32,
+    #[schemars(range(min = 1))]
+    pub end_line: u32,
+    #[schemars(range(min = 1))]
+    pub end_column: u32,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct ScopedEquation {
+    /// Aggregate or dimension scope. Dimension scope requires dimension.
+    pub scope: String,
+    pub dimension: Option<String>,
+    /// Zero-based counted row in the selected scope, before Dynare transformations.
+    pub index: usize,
+}
+
+/// The schema projection and decoder use this single field inventory. Each
+/// tool accepts only its own projection; validation checks cross-field rules.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub(crate) struct Params {
+    #[serde(flatten)]
+    pub source_args: SourceArgs,
+    #[serde(flatten)]
+    pub output: ResultOptions,
+    /// Select one written symbol or source action location.
+    pub target: Option<Target>,
+    /// Symbol name. A unique binding is required; ambiguous names return scoped candidates.
+    pub symbol: Option<String>,
+    /// Snapshot-bound symbol identity returned by an earlier query.
+    pub binding_id: Option<String>,
+    /// Legacy Rename name selector. Use exactly one of old_name, target or binding_id.
+    pub old_name: Option<String>,
+    /// Legal, non-reserved replacement identifier. Rename returns a proposal and never writes files.
+    pub new_name: Option<String>,
+    /// Include declarations in References. Omitted values include them for legacy compatibility.
+    pub include_declaration: Option<bool>,
+    /// Return separate expanded occurrences beside deduplicated written locations.
+    pub occurrences: Option<bool>,
+    /// Exact equation display-name filter, or code/catalog text filter where documented.
+    pub name: Option<String>,
+    /// Zero-based aggregate counted equation index, before transformations.
+    pub index: Option<usize>,
+    /// Aggregate or dimension equation scope.
+    pub scope: Option<String>,
+    /// Exact heterogeneity dimension name.
+    pub dimension: Option<String>,
+    /// Required equation tag values. Independent filters combine with AND.
+    #[serde(default)]
+    pub tags: BTreeMap<String, String>,
+    /// Snapshot-bound expanded equation identity.
+    pub equation_id: Option<String>,
+    /// Select an unnamed equation by explicit scope and zero-based index.
+    pub equation: Option<ScopedEquation>,
+    /// Extraction name selectors combine with OR; names and tag filters combine with AND.
+    #[serde(default)]
+    pub names: Vec<String>,
+    /// Diagnostic or catalog code filter.
+    pub code: Option<String>,
+    /// Diagnostic severity filter: ERROR, WARNING, INFORMATION or HINT.
+    pub severity: Option<String>,
+    /// Exact written source-file filter, or selected source for Format.
+    pub file: Option<String>,
+    /// Diagnostic classification filter: shared, added or skipped.
+    pub kind: Option<String>,
+    /// Case-insensitive catalog text search.
+    pub search: Option<String>,
+    /// Dynare command name; omit to list known commands.
+    pub command: Option<String>,
+    /// Exact option name filter.
+    pub option: Option<String>,
+    /// Whole-line formatting or expanded-text selection, one-based and inclusive.
+    pub line_range: Option<LineRange>,
+    /// Half-open range in the full expanded text, with one-based Unicode-scalar coordinates.
+    pub expanded_range: Option<ExpandedRange>,
+    /// Formatting indentation: tab or a whole number from 1 to 8.
+    #[serde(rename = "formatIndent")]
+    pub format_indent: Option<Value>,
+    /// Snapshot-bound selected diagnostic identity.
+    pub diagnostic_id: Option<String>,
+    /// Snapshot-bound selected action identity. Its complete proposal is returned atomically.
+    pub action_id: Option<String>,
+    /// diagnostic_fix, equation_tags, long_names or shock_template.
+    pub action_kind: Option<String>,
+}
+
+impl std::ops::Deref for Params {
+    type Target = SourceArgs;
+    fn deref(&self) -> &SourceArgs {
+        &self.source_args
+    }
+}
+
+const SOURCE_FIELDS: &[&str] = &[
+    "source",
+    "file_content",
+    "active_file",
+    "files",
+    "expected_revision",
+];
+const OUTPUT_FIELDS: &[&str] = &["detail", "sections", "page_size", "continuation"];
+
+fn fields(tool: &str) -> Vec<&'static str> {
+    let mut fields = OUTPUT_FIELDS.to_vec();
+    if !matches!(
+        tool,
+        "dynare_explain" | "dynare_list_diagnostic_codes" | "dynare_list_options"
+    ) {
+        fields.extend_from_slice(SOURCE_FIELDS);
+    }
+    fields.extend_from_slice(match tool {
+        "dynare_diagnose" => &["code", "severity", "file"],
+        "dynare_model_info" | "dynare_related_files" => &[],
+        "dynare_find_references" => &[
+            "symbol",
+            "binding_id",
+            "target",
+            "include_declaration",
+            "occurrences",
+        ],
+        "dynare_symbol_info" => &["symbol", "binding_id", "target"],
+        "dynare_rename" => &["old_name", "binding_id", "target", "new_name"],
+        "dynare_equations" => &[
+            "name",
+            "index",
+            "scope",
+            "dimension",
+            "tags",
+            "symbol",
+            "binding_id",
+            "target",
+            "equation_id",
+            "equation",
+        ],
+        "dynare_expand" => &["line_range", "expanded_range", "equation_id"],
+        "dynare_format" => &["file", "line_range", "formatIndent"],
+        "dynare_extract" => &["names", "tags", "dimension", "equation_id", "equation"],
+        "dynare_auto_fix" => &["code", "diagnostic_id", "target"],
+        "dynare_code_actions" => &[
+            "target",
+            "action_kind",
+            "diagnostic_id",
+            "code",
+            "action_id",
+        ],
+        "dynare_explain" => &["code"],
+        "dynare_list_diagnostic_codes" => &["code", "kind", "severity", "search"],
+        "dynare_list_options" => &["command", "option", "search"],
+        _ => &[],
+    });
+    fields
+}
+
+pub(crate) fn input_schema(tool: &str) -> Arc<serde_json::Map<String, Value>> {
+    let mut schema = super::mcp_input_schema::<Params>().as_ref().clone();
+    let allowed = fields(tool);
+    schema
+        .get_mut("properties")
+        .and_then(Value::as_object_mut)
+        .expect("parameter properties")
+        .retain(|key, _| allowed.contains(&key.as_str()));
+    schema.insert("additionalProperties".into(), json!(false));
+    if allowed.contains(&"source") {
+        schema.insert("anyOf".into(), json!([
+            {"required":["source"],"properties":{"source":{"type":"object"}}},
+            {"required":["file_content"],"properties":{"file_content":{"type":"string"}}},
+            {"required":["files","active_file"],"properties":{"files":{"type":"object","minProperties":1},"active_file":{"type":"string","minLength":1}}}
+        ]));
+        schema.insert("not".into(), json!({"allOf":[{"required":["source"]},{"anyOf":SOURCE_FIELDS.iter().filter(|&&k| k != "source" && k != "expected_revision").map(|k| json!({"required":[k]})).collect::<Vec<_>>()}]}));
+    }
+    let required = match tool {
+        "dynare_rename" => vec!["new_name"],
+        "dynare_explain" => vec!["code"],
+        _ => Vec::new(),
+    };
+    if !required.is_empty() {
+        schema.insert("required".into(), json!(required));
+    }
+    if matches!(
+        tool,
+        "dynare_symbol_info" | "dynare_find_references" | "dynare_rename"
+    ) {
+        let name = if tool == "dynare_rename" {
+            "old_name"
+        } else {
+            "symbol"
+        };
+        let selectors = [name, "target", "binding_id"];
+        schema.insert("oneOf".into(),json!(selectors.iter().map(|selected|json!({
+            "required":[selected],"properties":{*selected:{"not":{"type":"null"}}},
+            "not":{"anyOf":selectors.iter().filter(|other|*other!=selected).map(|other|json!({"required":[other],"properties":{*other:{"not":{"type":"null"}}}})).collect::<Vec<_>>()}
+        })).collect::<Vec<_>>()));
+    }
+    prune_definitions(&mut schema);
+    Arc::new(schema)
+}
+
+/// Keep only definitions referenced by this tool's projected fields.
+pub(crate) fn prune_definitions(schema: &mut serde_json::Map<String, Value>) {
+    fn references(value: &Value, found: &mut std::collections::BTreeSet<String>) {
+        match value {
+            Value::Object(object) => {
+                if let Some(reference) = object
+                    .get("$ref")
+                    .and_then(Value::as_str)
+                    .and_then(|s| s.strip_prefix("#/definitions/"))
+                {
+                    found.insert(reference.to_owned());
+                }
+                for child in object.values() {
+                    references(child, found);
+                }
+            }
+            Value::Array(rows) => {
+                for row in rows {
+                    references(row, found);
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(Value::Object(definitions)) = schema.remove("definitions") else {
+        return;
+    };
+    let mut found = std::collections::BTreeSet::new();
+    references(&Value::Object(schema.clone()), &mut found);
+    loop {
+        let count = found.len();
+        for name in found.clone() {
+            if let Some(value) = definitions.get(&name) {
+                references(value, &mut found);
+            }
+        }
+        if found.len() == count {
+            break;
+        }
+    }
+    if !found.is_empty() {
+        schema.insert(
+            "definitions".into(),
+            Value::Object(
+                definitions
+                    .into_iter()
+                    .filter(|(name, _)| found.contains(name))
+                    .collect(),
+            ),
+        );
+    }
+}
+
+pub(crate) fn decode(tool: &str, value: &Value) -> Result<Params, rmcp::ErrorData> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| invalid("Tool arguments must be an object"))?;
+    let allowed = fields(tool);
+    if let Some(key) = object.keys().find(|key| !allowed.contains(&key.as_str())) {
+        return Err(invalid(format!(
+            "{tool} does not accept the argument {key}"
+        )));
+    }
+    if object.contains_key("source")
+        && ["file_content", "active_file", "files"]
+            .iter()
+            .any(|key| object.contains_key(*key))
+    {
+        return Err(invalid(
+            "source is mutually exclusive with file_content, active_file and files",
+        ));
+    }
+    let params: Params =
+        serde_json::from_value(value.clone()).map_err(|e| invalid(e.to_string()))?;
+    if params
+        .scope
+        .as_ref()
+        .is_some_and(|scope| !matches!(scope.as_str(), "aggregate" | "dimension"))
+        || params.equation.as_ref().is_some_and(|equation| {
+            !matches!(equation.scope.as_str(), "aggregate" | "dimension")
+                || (equation.scope == "dimension" && equation.dimension.is_none())
+        })
+    {
+        return Err(invalid(
+            "Equation scope must be aggregate or dimension; dimension scope requires dimension",
+        ));
+    }
+    if params
+        .output
+        .page_size
+        .is_some_and(|size| !(1..=1000).contains(&size))
+    {
+        return Err(invalid("page_size must be a whole number from 1 to 1000"));
+    }
+    if [
+        params.binding_id.is_some(),
+        params.equation_id.is_some(),
+        params.action_id.is_some(),
+        params.diagnostic_id.is_some(),
+        params.output.continuation.is_some() && allowed.contains(&"expected_revision"),
+    ]
+    .into_iter()
+    .any(|v| v)
+        && params.expected_revision.is_none()
+    {
+        return Err(invalid("Reusing an identity or continuation requires expected_revision from the original input"));
+    }
+    Ok(params)
+}
+
+fn invalid(message: impl Into<String>) -> rmcp::ErrorData {
+    rmcp::ErrorData::invalid_params(message.into(), None)
+}
+
+pub(crate) fn byte_position(text: &str, line: u32, column: u32) -> Result<u32, rmcp::ErrorData> {
+    if line == 0 || column == 0 {
+        return Err(invalid("Source lines and columns must start at one"));
+    }
+    let mut start = 0usize;
+    let mut lines = text.split('\n');
+    for _ in 1..line {
+        start += lines
+            .next()
+            .ok_or_else(|| invalid("Source line is outside the file"))?
+            .len()
+            + 1;
+    }
+    let text_line = lines
+        .next()
+        .ok_or_else(|| invalid("Source line is outside the file"))?
+        .trim_end_matches('\r');
+    let count = text_line.chars().count();
+    let offset = column as usize - 1;
+    if offset > count {
+        return Err(invalid("Source column is outside the line"));
+    }
+    let bytes = text_line
+        .char_indices()
+        .nth(offset)
+        .map_or(text_line.len(), |(at, _)| at);
+    Ok((start + bytes) as u32)
+}
+
+pub(crate) fn legacy_json(data: &Value) -> Vec<ContentBlock> {
+    vec![ContentBlock::text(data.to_string())]
+}
+
+// The request worker below uses the same source snapshot for its model query,
+// coverage and proposal guards. It never constructs an editor server.
+
+pub(crate) fn dispatch(
+    tool: &str,
+    arguments: Value,
+    control: RequestControl,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    let params = decode(tool, &arguments)?;
+    if matches!(
+        tool,
+        "dynare_explain" | "dynare_list_diagnostic_codes" | "dynare_list_options"
+    ) {
+        return catalog(tool, &arguments, &params);
+    }
+    let input = params.source_args.input().map_err(|e| invalid(e.message))?;
+    let mut snapshot = match super::source::resolve_source(
+        input,
+        params.expected_revision.as_deref(),
+        &control,
+    ) {
+        Ok(snapshot) => snapshot,
+        Err(error) if error.invalid_arguments => return Err(invalid(error.message)),
+        Err(error) => {
+            let mut result = ToolResult::refused(error.code, error.message);
+            if matches!(error.code, "SOURCE_LIMIT" | "ROOT_LIMIT") {
+                result.limits.push(json!({"code":error.code,"ceilings":control.limits,"affected_work":"source acquisition","omitted":"model analysis and edit proposals"}));
+            }
+            return Ok(result.wire(Vec::new(), params.output.detail));
+        }
+    };
+    control
+        .check()
+        .map_err(|e| rmcp::ErrorData::internal_error(e.message, None))?;
+    let mut result = match tool {
+        "dynare_find_references" | "dynare_symbol_info" | "dynare_rename" => {
+            symbols(tool, &params, &mut snapshot)?
+        }
+        "dynare_diagnose" => {
+            let diagnostics =
+                crate::engine::diagnostics::check_in_workspace_with_origins_controlled(
+                    &mut snapshot.workspace,
+                    &snapshot.root,
+                    &control.cancelled,
+                )
+                .map_err(|_| rmcp::ErrorData::internal_error("The request was cancelled", None))?;
+            let map: HashMap<_, _> = snapshot
+                .sources
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            let mut rows = serde_json::to_value(super::diagnostics_to_json_with_origins(
+                &snapshot.raw,
+                &diagnostics,
+                &map,
+            ))
+            .expect("diagnostics JSON");
+            if let Some(rows) = rows.as_array_mut() {
+                rows.retain(|row| {
+                    params.code.as_ref().is_none_or(|code| row["code"] == *code)
+                        && params
+                            .severity
+                            .as_ref()
+                            .is_none_or(|severity| row["severity"] == *severity)
+                        && params.file.as_ref().is_none_or(|file| {
+                            row["file"]
+                                .as_str()
+                                .unwrap_or(snapshot.root_file.as_deref().unwrap_or(""))
+                                == file
+                        })
+                });
+                for row in rows {
+                    row["diagnostic_id"] = json!(format!(
+                        "{}:diagnostic:{}",
+                        snapshot.revision,
+                        super::source::sha256(row.to_string())
+                    ));
+                }
+            }
+            ToolResult::new(rows)
+        }
+        "dynare_model_info" => ToolResult::new(model_info(&mut snapshot, &params)?),
+        "dynare_equations" => equation_query(&mut snapshot, &params)?,
+        "dynare_expand" => expand_query(&snapshot, &params)?,
+        "dynare_related_files" => {
+            if snapshot.root_file.is_none() {
+                return Err(invalid(
+                    "Related files requires map or disk source identity",
+                ));
+            }
+            let includes = snapshot
+                .workspace
+                .include_records(&snapshot.root)
+                .cloned()
+                .unwrap_or_default();
+            let companions = snapshot
+                .workspace
+                .companion_records(&snapshot.root)
+                .map(|rows| rows.to_vec())
+                .unwrap_or_default();
+            ToolResult::new(super::related_files_json(&includes, &companions, |path| {
+                snapshot
+                    .written_file(Some(&path.to_string_lossy()))
+                    .unwrap_or_default()
+            }))
+        }
+        "dynare_format" | "dynare_auto_fix" | "dynare_extract" | "dynare_code_actions" => {
+            super::edits::edit_request(tool, &params, &mut snapshot)?
+        }
+        _ => return Err(invalid(format!("Unknown tool: {tool}"))),
+    };
+    result.inputs = vec![snapshot.inputs.clone()];
+    result.coverage = Some(json!(snapshot
+        .analyses
+        .values()
+        .map(|analysis| analysis.coverage.clone())
+        .collect::<Vec<_>>()));
+    if snapshot
+        .analyses
+        .values()
+        .any(|analysis| analysis.coverage["complete"] != true)
+        && !matches!(result.outcome.status.as_str(), "refused" | "unchanged")
+    {
+        result.cause("partial","INCOMPLETE_INPUT","Only available source facts are returned. Includes, parsing or macro expansion prevent complete model coverage; see coverage reasons.");
+    }
+    project_and_page(tool, &arguments, &params, &snapshot.revision, &mut result)?;
+    if snapshot
+        .owner_roots
+        .iter()
+        .any(|root| !snapshot.workspace.input_snapshot_is_current(root))
+    {
+        return Ok(ToolResult::refused("INPUT_CHANGED","Source inputs changed before the result was returned. No stale facts or edits were returned.").wire(Vec::new(),params.output.detail));
+    }
+    let legacy = legacy_result(tool, &result, &snapshot, &params);
+    control.complete_phase("Return model result");
+    Ok(result.wire(legacy, params.output.detail))
+}
+
+fn unit(snapshot: &SourceSnapshot) -> super::McpUnit<'_> {
+    super::McpUnit {
+        model: std::borrow::Cow::Borrowed(&snapshot.model),
+        report: std::borrow::Cow::Borrowed(&snapshot.report),
+        raw: snapshot.raw.clone(),
+        files: snapshot.root_file.as_ref().map(|_| {
+            snapshot
+                .sources
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        }),
+        sources: snapshot
+            .sources
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        root_file: snapshot.root_file.clone(),
+        revision: snapshot.revision.clone(),
+        complete: snapshot.coverage["complete"] == true,
+        includes_complete: snapshot.coverage["includes_complete"] == true,
+        reasons: Some(snapshot.coverage["reasons"].clone()),
+    }
+}
+
+pub(crate) fn location(
+    snapshot: &SourceSnapshot,
+    file: &str,
+    span: crate::engine::language::span::Span,
+) -> Option<Value> {
+    let text = snapshot.text(Some(file))?;
+    text.get(span.start as usize..span.end as usize)?;
+    Some(json!({"file":snapshot.written_file(Some(file)),"range":snapshot.range(file,span)?}))
+}
+
+fn source_json(
+    snapshot: &SourceSnapshot,
+    source: &crate::engine::workspace::model_map::SourceOccurrence,
+) -> Value {
+    let segments: Vec<_> = source
+        .segments
+        .iter()
+        .filter_map(|segment| {
+            location(
+                snapshot,
+                segment.file.as_deref().unwrap_or(&snapshot.root),
+                segment.span,
+            )
+        })
+        .collect();
+    json!({"location":if segments.len()==1 {segments.first().cloned()} else {None},"segments":segments,
+        "origin_frames":source.origin_frames.iter().map(|frame|json!({"kind":frame.kind,"variable":frame.variable,"value":frame.value,
+            "segments":frame.segments.iter().filter_map(|segment|location(snapshot,segment.file.as_deref().unwrap_or(&snapshot.root),segment.span)).collect::<Vec<_>>() })).collect::<Vec<_>>()})
+}
+
+fn model_info(snapshot: &mut SourceSnapshot, params: &Params) -> Result<Value, rmcp::ErrorData> {
+    let valid = [
+        "summary",
+        "declarations",
+        "assignments",
+        "model_locals",
+        "statements",
+        "blocks",
+        "includes",
+        "scope",
+    ];
+    validate_sections(&params.output.sections, &valid)?;
+    let mut data = if snapshot.coverage["complete"] == true {
+        super::model_info_with_unit(&unit(snapshot))
+    } else {
+        json!({"status":"incomplete","incomplete_reasons":snapshot.coverage["reasons"]})
+    };
+    let want = |name: &str| params.output.sections.iter().any(|section| section == name);
+    if want("declarations") {
+        data["declarations"] = json!(snapshot
+            .model
+            .written_declarations
+            .iter()
+            .zip(&snapshot.report.model_map.declarations)
+            .map(|(written, source)| {
+                let declaration = &written.declaration;
+                let mut row = source_json(snapshot, source);
+                row["name"] = json!(snapshot.model.name(declaration.name));
+                row["written_kind"] = json!(written.written_kind);
+                row["final_kind"] = if snapshot.coverage["complete"] == true {
+                    json!(snapshot.model.final_symbol_kind(declaration.name))
+                } else {
+                    Value::Null
+                };
+                row["long_name"] = json!(declaration.long_name);
+                row["tex_name"] = json!(declaration.tex_name);
+                row["dimension"] = json!(declaration
+                    .heterogeneity
+                    .map(|(name, _)| snapshot.model.name(name)));
+                row
+            })
+            .collect::<Vec<_>>());
+    }
+    if want("assignments") {
+        let values = crate::engine::analysis::assignment_values::assignment_values(&snapshot.model);
+        data["assignments"] = json!(values.iter().filter_map(|proven| {
+            let statement = &snapshot.model.statements[proven.statement_id];
+            let assignment = match statement.assignment? {
+                crate::engine::language::model::AssignmentIndex::Parameter(index) => &snapshot.model.param_assignments[index],
+                crate::engine::language::model::AssignmentIndex::Helper(index) => &snapshot.model.helper_assignments[index],
+            };
+            let source = snapshot.report.model_map.statements.get(proven.statement_id);
+            Some(json!({"name":snapshot.model.name(assignment.name),"expression":assignment.expression,"value":proven.value,
+                "statement_id":proven.statement_id,"provenance":"value at this assignment's execution position",
+                "source":source.map(|source|source_json(snapshot,source))}))
+        }).collect::<Vec<_>>());
+    }
+    if want("statements") || want("blocks") {
+        for section in ["statements", "blocks"] {
+            if want(section) {
+                data[section] = json!(snapshot.model.statements.iter().zip(&snapshot.report.model_map.statements)
+                .filter(|(statement,_)|section=="statements"||statement.kind==crate::engine::language::model::StatementKind::Block)
+                .map(|(statement,source)|json!({"id":statement.id,"kind":statement.kind.as_str(),"name":statement.name,
+                    "complete":statement.complete,"native":statement.native,"dimension":statement.dimension,"source":source_json(snapshot,source)})).collect::<Vec<_>>());
+            }
+        }
+    }
+    if want("includes") {
+        let includes = snapshot
+            .workspace
+            .include_records(&snapshot.root)
+            .cloned()
+            .unwrap_or_default();
+        data["includes"] = super::related_files_json(&includes, &[], |path| {
+            snapshot
+                .written_file(Some(&path.to_string_lossy()))
+                .unwrap_or_default()
+        });
+    }
+    if want("scope") {
+        data["scope"] = json!({"root":snapshot.root_file,"checked_owners":snapshot.inputs["checked_owners"],"dimensions":snapshot.model.heterogeneity_dimensions.iter().map(|d|snapshot.model.name(d.name)).collect::<Vec<_>>()});
+    }
+    if !params.output.sections.is_empty() && !want("summary") {
+        data.as_object_mut()
+            .expect("model info object")
+            .retain(|key, _| {
+                params.output.sections.contains(key)
+                    || matches!(key.as_str(), "status" | "incomplete_reasons")
+            });
+    }
+    Ok(data)
+}
+
+fn validate_sections(sections: &[String], valid: &[&str]) -> Result<(), rmcp::ErrorData> {
+    if let Some(section) = sections
+        .iter()
+        .find(|section| !valid.contains(&section.as_str()))
+    {
+        return Err(invalid(format!(
+            "Unknown section {section}; available sections: {}",
+            valid.join(", ")
+        )));
+    }
+    Ok(())
+}
+
+fn line_bytes(text: &str, range: &LineRange) -> Result<(usize, usize), rmcp::ErrorData> {
+    if range.start_line == 0
+        || range.end_line < range.start_line
+        || range.end_line as usize > text.split('\n').count()
+    {
+        return Err(invalid(
+            "line_range must be ordered, one-based and inside the selected file",
+        ));
+    }
+    let starts: Vec<_> = std::iter::once(0)
+        .chain(text.match_indices('\n').map(|(at, _)| at + 1))
+        .collect();
+    let start = starts[range.start_line as usize - 1];
+    let end = starts
+        .get(range.end_line as usize)
+        .copied()
+        .unwrap_or(text.len());
+    Ok((start, end))
+}
+
+fn expand_query(snapshot: &SourceSnapshot, params: &Params) -> Result<ToolResult, rmcp::ErrorData> {
+    use crate::engine::language::span::Span;
+    if [
+        params.line_range.is_some(),
+        params.expanded_range.is_some(),
+        params.equation_id.is_some(),
+    ]
+    .into_iter()
+    .filter(|set| *set)
+    .count()
+        > 1
+    {
+        return Err(invalid(
+            "Choose one line_range, expanded_range or equation_id",
+        ));
+    }
+    let mut data = super::expand_with_unit(&unit(snapshot));
+    let full = &snapshot.report.effective_text;
+    let span = if let Some(range) = &params.line_range {
+        let (start, end) = line_bytes(full, range)?;
+        Some(Span::new(start, end))
+    } else if let Some(range) = &params.expanded_range {
+        let start = byte_position(full, range.line, range.column)?;
+        let end = byte_position(full, range.end_line, range.end_column)?;
+        if end < start {
+            return Err(invalid(
+                "expanded_range must have an exclusive end at or after its start",
+            ));
+        }
+        Some(Span { start, end })
+    } else if let Some(id) = &params.equation_id {
+        let selected = selected_equation(snapshot, id)?;
+        let fact = &snapshot.report.model_map.equations[selected];
+        let Some(navigation) = snapshot
+            .report
+            .navigation
+            .iter()
+            .find(|row| row.equation.id == fact.id)
+        else {
+            return Ok(ToolResult::refused(
+                "UNVERIFIED_EXPANDED_RANGE",
+                "The selected occurrence has no verified range in the available expanded text.",
+            ));
+        };
+        data["selected_occurrence"] =
+            json!({"equation_id":id,"source":source_json(snapshot,&fact.source)});
+        Some(navigation.effective_span)
+    } else {
+        None
+    };
+    let Some(span) = span else {
+        return Ok(ToolResult::new(data));
+    };
+    let selected = full
+        .get(span.start as usize..span.end as usize)
+        .ok_or_else(|| invalid("Expanded selection is outside the available text"))?;
+    data["effective_text"] = json!(selected);
+    data["selected_expanded_range"] = super::range_json(span, full);
+    let mut retained = Vec::new();
+    let mut omitted = 0;
+    let original = data["navigation"].as_array().cloned().unwrap_or_default();
+    for row in &snapshot.report.navigation {
+        let range = row.effective_span;
+        if range.end <= span.start || range.start >= span.end {
+            continue;
+        }
+        if range.start < span.start || range.end > span.end {
+            omitted += 1;
+            continue;
+        }
+        if let Some(mut value) = original
+            .iter()
+            .find(|value| value["id"] == format!("e{}", row.equation.id))
+            .cloned()
+        {
+            value["equation_id"] = json!(equation_id(snapshot, &row.equation));
+            value["effective_range"] = super::range_json(
+                Span {
+                    start: range.start - span.start,
+                    end: range.end - span.start,
+                },
+                selected,
+            );
+            retained.push(value);
+        }
+    }
+    data["navigation"] = json!(retained);
+    data["origins"] = json!(snapshot
+        .report
+        .origins
+        .iter()
+        .zip(data["origins"].as_array().into_iter().flatten())
+        .filter(|(origin, _)| {
+            snapshot.report.navigation.iter().any(|row| {
+                row.equation.dimension == origin.dimension
+                    && row.equation.number == Some(origin.scope_index + 1)
+                    && span.start <= row.effective_span.start
+                    && row.effective_span.end <= span.end
+            })
+        })
+        .map(|(_, value)| value.clone())
+        .collect::<Vec<_>>());
+    let mut result = ToolResult::new(data);
+    if omitted > 0 {
+        result.data["omitted_navigation_count"] = json!(omitted);
+        result.cause("partial","PARTIAL_ROW_ORIGINS",format!("The selected text is returned. Written navigation for {omitted} partly selected rows was withheld because a complete row range is required. Select their equation identity to inspect their verified origins."));
+    }
+    Ok(result)
+}
+
+pub(crate) fn selected_equation(
+    snapshot: &SourceSnapshot,
+    id: &str,
+) -> Result<usize, rmcp::ErrorData> {
+    snapshot
+        .report
+        .model_map
+        .equations
+        .iter()
+        .enumerate()
+        .find_map(|(index, row)| (equation_id(snapshot, row) == id).then_some(index))
+        .ok_or_else(|| invalid("equation_id does not belong to this input revision"))
+}
+
+pub(crate) fn equation_id(
+    snapshot: &SourceSnapshot,
+    row: &crate::engine::workspace::model_map::EquationOccurrence,
+) -> String {
+    format!(
+        "{}:equation:{}:{}:{}",
+        snapshot.revision,
+        row.dimension.as_deref().unwrap_or("aggregate"),
+        if row.local {
+            "local"
+        } else if row.static_only {
+            "static"
+        } else {
+            "counted"
+        },
+        row.id
+    )
+}
+
+fn equation_query(
+    snapshot: &mut SourceSnapshot,
+    params: &Params,
+) -> Result<ToolResult, rmcp::ErrorData> {
+    if params.index.is_some() && params.equation.is_some() {
+        return Err(invalid("Use index or equation, not both"));
+    }
+    if params
+        .scope
+        .as_deref()
+        .is_some_and(|scope| !matches!(scope, "aggregate" | "dimension"))
+    {
+        return Err(invalid("scope must be aggregate or dimension"));
+    }
+    if params.scope.as_deref() == Some("dimension") && params.dimension.is_none() {
+        return Err(invalid("Dimension scope requires dimension"));
+    }
+    let mut data = super::equations_with_unit(&unit(snapshot), None, None);
+    let selected_id = params
+        .equation_id
+        .as_ref()
+        .map(|id| selected_equation(snapshot, id))
+        .transpose()?;
+    let symbol = if params.symbol.is_some()
+        || params.target.is_some()
+        || params.binding_id.is_some()
+    {
+        let (model, selected) = semantic_selection(snapshot, params, false)?;
+        match selected {
+            Ok(Some(binding)) => Some((model, binding)),
+            Ok(None) => {
+                data["equations"] = json!([]);
+                data["heterogeneous_equations"] = json!([]);
+                return Ok(ToolResult::new(data));
+            }
+            Err(error) => {
+                let mut result = ToolResult::refused(error.reason.code, error.reason.message);
+                result.data = json!({"candidates":error.candidates.iter().map(|candidate|binding_json(snapshot,candidate)).collect::<Vec<_>>()});
+                return Ok(result);
+            }
+        }
+    } else {
+        None
+    };
+    let uses = if let Some((model, binding)) = &symbol {
+        model.references(binding, false)
+    } else {
+        Vec::new()
+    };
+    let attach = |rows: &mut Vec<Value>, dimension: Option<&str>| {
+        rows.retain_mut(|row| {
+            let index = row["index"].as_u64().unwrap_or(usize::MAX as u64) as usize;
+            let fact = snapshot
+                .report
+                .model_map
+                .equations
+                .iter()
+                .enumerate()
+                .find(|(_, fact)| {
+                    fact.active
+                        && !fact.local
+                        && !fact.static_only
+                        && fact.dimension.as_deref() == dimension
+                        && fact.number == Some(index + 1)
+                });
+            let Some((fact_index, fact)) = fact else {
+                return false;
+            };
+            if params
+                .name
+                .as_ref()
+                .is_some_and(|name| row["name"] != *name)
+                || params
+                    .index
+                    .is_some_and(|want| dimension.is_some() || want != index)
+                || params
+                    .dimension
+                    .as_deref()
+                    .is_some_and(|want| dimension != Some(want))
+                || params.scope.as_deref() == Some("aggregate") && dimension.is_some()
+                || params.scope.as_deref() == Some("dimension") && dimension.is_none()
+                || params.equation.as_ref().is_some_and(|want| {
+                    want.index != index
+                        || want.dimension.as_deref() != dimension
+                        || (want.scope == "aggregate") != dimension.is_none()
+                })
+                || selected_id.is_some_and(|want| want != fact_index)
+                || params
+                    .tags
+                    .iter()
+                    .any(|(tag, value)| row["tags"][tag] != *value)
+                || symbol.is_some()
+                    && !uses.iter().any(|use_| {
+                        snapshot.model.written_equations[fact_index]
+                            .equation
+                            .active_tokens
+                            .contains(&use_.order)
+                    })
+            {
+                return false;
+            }
+            row["equation_id"] = json!(equation_id(snapshot, fact));
+            row["scope"] = json!(if dimension.is_none() {
+                "aggregate"
+            } else {
+                "dimension"
+            });
+            row["dimension"] = json!(dimension);
+            row["index_base"] = json!(0);
+            true
+        });
+    };
+    if let Some(rows) = data["equations"].as_array_mut() {
+        attach(rows, None);
+    }
+    if let Some(blocks) = data
+        .get_mut("heterogeneous_equations")
+        .and_then(Value::as_array_mut)
+    {
+        for block in blocks.iter_mut() {
+            let dimension = block["dimension"].as_str().map(str::to_owned);
+            if let Some(rows) = block["equations"].as_array_mut() {
+                attach(rows, dimension.as_deref());
+            }
+        }
+        blocks.retain(|block| {
+            block["equations"]
+                .as_array()
+                .is_some_and(|rows| !rows.is_empty())
+        });
+    }
+    Ok(ToolResult::new(data))
+}
+
+type SemanticModel = crate::engine::analysis::symbols::SemanticModel;
+type Binding = crate::engine::analysis::symbols::Binding;
+
+fn semantic_selection(
+    snapshot: &mut SourceSnapshot,
+    params: &Params,
+    rename: bool,
+) -> Result<
+    (
+        SemanticModel,
+        Result<Option<Binding>, crate::engine::analysis::symbols::SelectionError>,
+    ),
+    rmcp::ErrorData,
+> {
+    use crate::engine::analysis::symbols::Selector;
+    let name = if rename {
+        params.old_name.as_deref()
+    } else {
+        params.symbol.as_deref()
+    };
+    if [
+        name.is_some(),
+        params.target.is_some(),
+        params.binding_id.is_some(),
+    ]
+    .into_iter()
+    .filter(|yes| *yes)
+    .count()
+        != 1
+    {
+        return Err(invalid(
+            "Select exactly one symbol name, target or binding_id",
+        ));
+    }
+    let model = SemanticModel::capture(
+        &mut snapshot.workspace,
+        &snapshot.root,
+        snapshot.revision.clone(),
+    )
+    .map_err(|reason| rmcp::ErrorData::internal_error(reason.message, None))?;
+    let selected = if let Some(name) = name {
+        model.select(Selector::Name(name))
+    } else if let Some(id) = &params.binding_id {
+        model.select(Selector::Id(id))
+    } else {
+        let target = params.target.as_ref().expect("validated target");
+        let file = target.file.as_deref().unwrap_or(&snapshot.root);
+        if !model.sources.contains_key(file) {
+            return Err(invalid("target.file must belong to the selected model"));
+        }
+        let text = snapshot
+            .text(Some(file))
+            .ok_or_else(|| invalid("target.file is unavailable"))?;
+        let byte = byte_position(text, target.line, target.column)?;
+        model.select(Selector::Target { file, byte })
+    };
+    Ok((model, selected))
+}
+
+fn binding_json(snapshot: &SourceSnapshot, binding: &Binding) -> Value {
+    json!({"binding_id":binding.id,"name":binding.name,"kind":binding.kind,
+        "scope":if binding.dimension.is_some() {"dimension"} else {"aggregate"},"dimension":binding.dimension,
+        "declaration":binding.declaration.as_ref().and_then(|(file,span)|location(snapshot,file,*span)),
+        "definition":binding.definition.as_ref().and_then(|(file,span)|location(snapshot,file,*span))})
+}
+
+fn symbols(
+    tool: &str,
+    params: &Params,
+    snapshot: &mut SourceSnapshot,
+) -> Result<ToolResult, rmcp::ErrorData> {
+    let rename = tool == "dynare_rename";
+    if rename
+        && params
+            .new_name
+            .as_deref()
+            .is_none_or(|name| !crate::engine::editing::refs::is_legal_ident(name))
+    {
+        return Err(invalid(
+            "new_name must be a legal, non-reserved Dynare identifier",
+        ));
+    }
+    let (model, selected) = semantic_selection(snapshot, params, rename)?;
+    let binding = match selected {
+        Ok(Some(binding)) => binding,
+        Ok(None) => {
+            let mut result = ToolResult::new(if rename {
+                json!({"text":snapshot.raw,"files":{}})
+            } else {
+                json!({"references":[],"occurrences":[],"symbol":null})
+            });
+            if rename {
+                result.cause(
+                    "unchanged",
+                    "NO_MATCH",
+                    "No matching symbol binding was found in the selected model.",
+                );
+            }
+            return Ok(result);
+        }
+        Err(error) => {
+            let mut result = ToolResult::refused(error.reason.code, error.reason.message);
+            result.data = json!({"candidates":error.candidates.iter().map(|candidate|binding_json(snapshot,candidate)).collect::<Vec<_>>()});
+            return Ok(result);
+        }
+    };
+    if tool == "dynare_symbol_info" {
+        let mut data = binding_json(snapshot, &binding);
+        let declaration = model
+            .model
+            .written_declarations
+            .iter()
+            .zip(&snapshot.report.model_map.declarations)
+            .find(|(decl, source)| {
+                model.model.name(decl.declaration.name) == binding.name
+                    && binding.declaration.as_ref().is_some_and(|(file, span)| {
+                        source.segments.iter().any(|segment| {
+                            segment.file.as_deref().unwrap_or(&snapshot.root) == file
+                                && segment.span.start <= span.start
+                                && span.end <= segment.span.end
+                        })
+                    })
+            })
+            .map(|(decl, _)| decl);
+        data["long_name"] =
+            json!(declaration.and_then(|decl| decl.declaration.long_name.as_deref()));
+        data["tex_name"] = json!(declaration.and_then(|decl| decl.declaration.tex_name.as_deref()));
+        data["written_kind"] = json!(declaration.map(|decl| decl.written_kind.as_str()));
+        data["timing"] = if binding.is_local() {
+            Value::Null
+        } else {
+            let timing = crate::engine::analysis::timing::classify_variable_timing(&model.model);
+            timing
+                .get(&binding.name)
+                .map(|fact| json!({"class":fact.class.label(),"offsets":fact.offsets}))
+                .unwrap_or(Value::Null)
+        };
+        // Assignment traces keep their execution positions. A trace value is
+        // not a claim that later native code retained that final value.
+        let values = crate::engine::analysis::assignment_values::assignment_values(&model.model);
+        data["assignment_values"] = json!(values.iter().filter_map(|value| {
+            let statement = &model.model.statements[value.statement_id];
+            let assignment = match statement.assignment? {
+                crate::engine::language::model::AssignmentIndex::Parameter(index) => &model.model.param_assignments[index],
+                crate::engine::language::model::AssignmentIndex::Helper(index) => &model.model.helper_assignments[index],
+            };
+            (model.model.name(assignment.name)==binding.name && !binding.is_local()).then(||json!({"value":value.value,
+                "statement_id":value.statement_id,"expression":assignment.expression,"provenance":"assignment execution position"}))
+        }).collect::<Vec<_>>());
+        if binding.is_local() {
+            data["expression"] = json!(model.local_expression(&binding));
+        }
+        return Ok(ToolResult::new(data));
+    }
+    if rename {
+        let replacement = params.new_name.as_deref().expect("validated replacement");
+        if replacement == binding.name {
+            let mut result = ToolResult::new(json!({"text":snapshot.raw,"files":{}}));
+            result.cause(
+                "unchanged",
+                "SAME_NAME",
+                "The requested name is already the current name.",
+            );
+            return Ok(result);
+        }
+        let mut owners = vec![model];
+        for owner in snapshot
+            .owner_roots
+            .iter()
+            .filter(|owner| *owner != &snapshot.root)
+        {
+            match SemanticModel::capture(&mut snapshot.workspace, owner, snapshot.revision.clone())
+            {
+                Ok(model) => owners.push(model),
+                Err(reason) => return Ok(ToolResult::refused(reason.code, reason.message)),
+            }
+        }
+        let proposal =
+            match crate::engine::analysis::symbols::rename(&owners, 0, &binding, replacement) {
+                Ok(proposal) => proposal,
+                Err(reason) => return Ok(ToolResult::refused(reason.code, reason.message)),
+            };
+        let affected = proposal.roots.clone();
+        let (data, proposal) = proposal_result(snapshot, &proposal.edits)?;
+        let mut result = ToolResult::new(data);
+        result.data["affected_owners"] = json!(affected);
+        result.outcome.status = "changed".into();
+        result.proposal = Some(proposal);
+        return Ok(result);
+    }
+    let occurrences = model.references(&binding, params.include_declaration.unwrap_or(true));
+    let mut locations = BTreeMap::<(String, u32, u32), Value>::new();
+    let mut expanded = Vec::new();
+    let mut omitted = 0;
+    let expanded_index = crate::engine::language::span::LineIndex::new(&model.model.source);
+    for occurrence in occurrences {
+        let written = occurrence
+            .written
+            .as_ref()
+            .and_then(|(file, span)| location(snapshot, file, *span));
+        if let (Some((file, span)), Some(mut row)) = (&occurrence.written, written.clone()) {
+            row["role"] = json!(occurrence.role);
+            row["dimension"] = json!(occurrence.dimension);
+            row["declaration"] = json!(occurrence.declaration);
+            locations
+                .entry((file.clone(), span.start, span.end))
+                .or_insert(row);
+        } else {
+            omitted += 1;
+        }
+        if params.occurrences.unwrap_or(false) {
+            expanded.push(json!({"occurrence_id":format!("{}:use:{}:{}",snapshot.revision,occurrence.order,occurrence.role),
+                "expanded_order":occurrence.order,"expanded_range":{
+                    "line":expanded_index.position(&model.model.source,occurrence.span.start).line+1,
+                    "column":expanded_index.position(&model.model.source,occurrence.span.start).character+1,
+                    "end_line":expanded_index.position(&model.model.source,occurrence.span.end).line+1,
+                    "end_column":expanded_index.position(&model.model.source,occurrence.span.end).character+1
+                },"role":occurrence.role,"dimension":occurrence.dimension,"written":written}));
+        }
+    }
+    let mut result = ToolResult::new(
+        json!({"binding":binding_json(snapshot,&binding),"references":locations.into_values().collect::<Vec<_>>() }),
+    );
+    if params.occurrences.unwrap_or(false) {
+        result.data["occurrences"] = json!(expanded);
+    }
+    if omitted > 0 {
+        result.cause("partial","UNVERIFIED_TARGET",format!("{omitted} accepted occurrences have no verified written location. Their source targets were omitted."));
+    }
+    Ok(result)
+}
+
+pub(crate) fn proposal_result(
+    snapshot: &SourceSnapshot,
+    edits: &[crate::engine::analysis::symbols::Edit],
+) -> Result<(Value, Value), rmcp::ErrorData> {
+    let mut grouped = BTreeMap::<String, Vec<&crate::engine::analysis::symbols::Edit>>::new();
+    for edit in edits {
+        grouped.entry(edit.file.clone()).or_default().push(edit);
+    }
+    let mut changed = BTreeMap::new();
+    let mut wire = Vec::new();
+    for (file, mut edits) in grouped {
+        edits.sort_by_key(|edit| (edit.span.start, edit.span.end));
+        if edits
+            .windows(2)
+            .any(|pair| pair[0].span.end > pair[1].span.start)
+        {
+            return Err(rmcp::ErrorData::internal_error(
+                "The proposed source edits overlap",
+                None,
+            ));
+        }
+        let original = snapshot.text(Some(&file)).ok_or_else(|| {
+            rmcp::ErrorData::internal_error("Proposed source is unavailable", None)
+        })?;
+        let mut text = original.to_owned();
+        for edit in edits.into_iter().rev() {
+            if original.get(edit.span.start as usize..edit.span.end as usize)
+                != Some(edit.expected.as_str())
+            {
+                return Err(rmcp::ErrorData::internal_error(
+                    "Proposed edit does not match captured source",
+                    None,
+                ));
+            }
+            text.replace_range(
+                edit.span.start as usize..edit.span.end as usize,
+                &edit.replacement,
+            );
+            let mut row = location(snapshot, &file, edit.span).expect("verified source edit");
+            row["expected_text"] = json!(edit.expected);
+            row["new_text"] = json!(edit.replacement);
+            wire.push(row);
+        }
+        changed.insert(snapshot.written_file(Some(&file)).unwrap_or_default(), text);
+    }
+    wire.reverse();
+    let data = if snapshot.root_file.is_none() {
+        json!({"text":changed.get("").unwrap_or(&snapshot.raw)})
+    } else {
+        json!({"files":changed})
+    };
+    let mut guards = serde_json::to_value(&snapshot.guards).expect("input guards");
+    if snapshot.root_file.is_none()
+        && let Some(rows) = guards.as_array_mut()
+    {
+        for row in rows {
+            row["file"] = Value::Null;
+        }
+    }
+    Ok((
+        data,
+        json!({"revision":snapshot.revision,"source_policy":snapshot.inputs["source_policy"],"checked_owners":snapshot.inputs["checked_owners"],
+        "include_dirs":snapshot.inputs["include_dirs"],"inputs":guards,"edits":wire}),
+    ))
+}
+
+fn catalog(
+    tool: &str,
+    arguments: &Value,
+    params: &Params,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    let mut result = match tool {
+        "dynare_explain" => {
+            let code = params
+                .code
+                .as_deref()
+                .ok_or_else(|| invalid("code is required"))?;
+            let mut result =
+                ToolResult::new(json!({"code":code,"explanation":super::dynare_explain(code)}));
+            if !crate::engine::diagnostics::explain::known_codes().contains(&code) {
+                result.cause("refused","UNKNOWN_CODE",format!("Diagnostic code {code} is not in the current catalog. Use dynare_list_diagnostic_codes to select a code."));
+            }
+            result
+        }
+        "dynare_list_diagnostic_codes" => {
+            let mut rows =
+                serde_json::to_value(super::dynare_list_diagnostic_codes()).expect("catalog JSON");
+            rows.as_array_mut().expect("code rows").retain(|row| {
+                params.code.as_ref().is_none_or(|code| row["code"] == *code)
+                    && params.kind.as_ref().is_none_or(|kind| row["kind"] == *kind)
+                    && params.severity.as_ref().is_none_or(|severity| {
+                        row["code"].as_str().is_some_and(|code| {
+                            code.starts_with(match severity.as_str() {
+                                "ERROR" => "E",
+                                "WARNING" => "W",
+                                "INFORMATION" => "I",
+                                "HINT" => "H",
+                                _ => "?",
+                            })
+                        })
+                    })
+                    && params.search.as_ref().is_none_or(|search| {
+                        row.to_string()
+                            .to_lowercase()
+                            .contains(&search.to_lowercase())
+                    })
+            });
+            ToolResult::new(rows)
+        }
+        _ => {
+            let mut data = super::dynare_list_options(params.command.as_deref());
+            if let Some(rows) = data.get_mut("options").and_then(Value::as_array_mut) {
+                rows.retain(|row| {
+                    params
+                        .option
+                        .as_ref()
+                        .is_none_or(|name| row["name"] == *name)
+                        && params.search.as_ref().is_none_or(|search| {
+                            row.to_string()
+                                .to_lowercase()
+                                .contains(&search.to_lowercase())
+                        })
+                });
+            }
+            if let Some(rows) = data.get_mut("commands").and_then(Value::as_array_mut) {
+                rows.retain(|row| {
+                    params.search.as_ref().is_none_or(|search| {
+                        row.as_str().is_some_and(|name| {
+                            name.to_lowercase().contains(&search.to_lowercase())
+                        })
+                    })
+                });
+            }
+            let mut result = ToolResult::new(data);
+            if result.data["known"] == false {
+                result.cause(
+                    "refused",
+                    "UNKNOWN_COMMAND",
+                    result.data["message"]
+                        .as_str()
+                        .unwrap_or("The command is not in the bundled catalog")
+                        .to_owned(),
+                );
+            }
+            result
+        }
+    };
+    project_and_page(
+        tool,
+        arguments,
+        params,
+        env!("CARGO_PKG_VERSION"),
+        &mut result,
+    )?;
+    let legacy = if tool == "dynare_explain" {
+        vec![ContentBlock::text(
+            result.data["explanation"].as_str().unwrap_or_default(),
+        )]
+    } else {
+        legacy_json(&result.data)
+    };
+    Ok(result.wire(legacy, params.output.detail))
+}
+
+fn project_and_page(
+    tool: &str,
+    arguments: &Value,
+    params: &Params,
+    revision: &str,
+    result: &mut ToolResult,
+) -> Result<(), rmcp::ErrorData> {
+    if result.proposal.is_some() {
+        return Ok(());
+    }
+    let mut pages = match Pages::new(tool, revision, arguments, &params.output) {
+        Ok(pages) => pages,
+        Err(message) if message.starts_with("INPUT_CHANGED") => {
+            *result = ToolResult::refused("INPUT_CHANGED", message);
+            return Ok(());
+        }
+        Err(message) => return Err(invalid(message)),
+    };
+    let complete = result.coverage.as_ref().is_none_or(|coverage| {
+        coverage
+            .as_array()
+            .is_none_or(|roots| roots.iter().all(|root| root["complete"] == true))
+    });
+    if let Some(rows) = result.data.as_array_mut() {
+        pages.collection_with_coverage("rows", rows, complete);
+    } else if let Some(object) = result.data.as_object_mut() {
+        for (name, rows) in object
+            .iter_mut()
+            .filter(|(name, _)| name.as_str() != "edits")
+        {
+            if let Some(rows) = rows.as_array_mut() {
+                if name == "heterogeneous_equations" {
+                    for block in rows.iter_mut() {
+                        let key = format!(
+                            "equations:{}",
+                            block["dimension"].as_str().unwrap_or_default()
+                        );
+                        if let Some(rows) = block["equations"].as_array_mut() {
+                            pages.collection_with_coverage(&key, rows, complete);
+                        }
+                    }
+                } else {
+                    pages.collection_with_coverage(name, rows, complete);
+                }
+            }
+        }
+    }
+    result.selection = pages.finish(&params.output);
+    if params.output.detail == Detail::Compact {
+        remove_prose(&mut result.data);
+    }
+    Ok(())
+}
+
+fn remove_prose(data: &mut Value) {
+    match data {
+        Value::Object(object) => {
+            object.remove("markdown");
+            object.remove("explain_markdown");
+            for value in object.values_mut() {
+                remove_prose(value);
+            }
+        }
+        Value::Array(rows) => {
+            for row in rows {
+                remove_prose(row);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn legacy_result(
+    tool: &str,
+    result: &ToolResult,
+    snapshot: &SourceSnapshot,
+    params: &Params,
+) -> Vec<ContentBlock> {
+    if tool == "dynare_format" {
+        let unsupported = result
+            .outcome
+            .reasons
+            .iter()
+            .find(|reason| reason.code == "FORMAT_UNSUPPORTED");
+        let status = unsupported.map_or_else(
+            || {
+                result.data["status"]
+                    .as_str()
+                    .unwrap_or(&result.outcome.status)
+            },
+            |_| "unsupported",
+        );
+        return legacy_json(
+            &json!({"status":status,"formatted_text":if status=="changed"{result.data["formatted_text"].clone()}else{Value::Null},
+            "reason":unsupported.map(|reason|reason.message.as_str())}),
+        );
+    }
+    if matches!(tool, "dynare_symbol_info" | "dynare_code_actions") {
+        return Vec::new();
+    }
+    if tool == "dynare_rename" && result.outcome.status != "refused" {
+        return if snapshot.root_file.is_none() {
+            vec![ContentBlock::text(
+                result.data["text"].as_str().unwrap_or(&snapshot.raw),
+            )]
+        } else {
+            legacy_json(&result.data["files"])
+        };
+    }
+    if tool == "dynare_find_references" && result.outcome.status != "refused" {
+        let rows=result.data["references"].as_array().cloned().unwrap_or_default().into_iter().map(|row| {
+            let range=&row["range"];let mut legacy=json!({"line":range["line"],"column":range["column"],"end_column":range["end_column"]});
+            if snapshot.root_file.is_some(){legacy["file"]=row["file"].clone();}legacy
+        }).collect::<Vec<_>>();
+        return legacy_json(&json!(rows));
+    }
+    if tool == "dynare_auto_fix" {
+        return vec![ContentBlock::text(result.data["text"].as_str().unwrap_or(&snapshot.raw)),ContentBlock::text(json!({"status":result.outcome.status,"message":result.outcome.reasons.first().map(|r|r.message.as_str()),"remaining_diagnostics":result.data["remaining_diagnostics"]}).to_string())];
+    }
+    let _ = params;
+    legacy_json(&result.data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn call(tool: &str, args: Value) -> Value {
+        dispatch(tool, args, RequestControl::default())
+            .unwrap()
+            .structured_content
+            .unwrap()
+    }
+    const MODEL: &str = "var y;\nmodel;\ny=1;\nend;\n";
+    #[test]
+    fn default_format_content_preserves_the_legacy_json_contract() {
+        // Guards unchanged text becoming an apparent formatted replacement,
+        // and unsupported formatting losing its existing status/reason fields.
+        for text in [MODEL, "   \n", "model;\ny=1;\n"] {
+            let expected = super::super::dynare_format(text, None).unwrap();
+            let wire = dispatch(
+                "dynare_format",
+                json!({"file_content":text}),
+                RequestControl::default(),
+            )
+            .unwrap();
+            let ContentBlock::Text(first) = &wire.content[0] else {
+                panic!("legacy JSON");
+            };
+            assert_eq!(
+                serde_json::from_str::<Value>(&first.text).unwrap(),
+                expected
+            );
+            assert!(wire.structured_content.unwrap()["outcome"].is_object());
+        }
+    }
+    #[test]
+    fn scalar_targets_reject_out_of_line_columns_and_keep_crlf_offsets() {
+        assert_eq!(byte_position("😀x\r\ny", 1, 2).unwrap(), 4);
+        assert_eq!(byte_position("😀x\r\ny", 2, 1).unwrap(), 7);
+        assert!(byte_position("😀x\r\ny", 1, 4).is_err());
+        assert!(byte_position("x", 0, 1).is_err());
+        assert!(byte_position("x", 2, 1).is_err());
+    }
+    #[test]
+    fn selected_expansion_navigation_refers_to_the_returned_fragment() {
+        let args = json!({"source":{"kind":"text","text":MODEL}});
+        let equations = call("dynare_equations", args.clone());
+        let id = &equations["data"]["equations"][0]["equation_id"];
+        assert!(id.is_string(), "{equations}");
+        let selected = call(
+            "dynare_expand",
+            json!({"source":args["source"],"equation_id":id,"expected_revision":equations["inputs"][0]["revision"]}),
+        );
+        assert_eq!(selected["outcome"]["status"], "ok");
+        let text = selected["data"]["effective_text"].as_str().unwrap();
+        for row in selected["data"]["navigation"].as_array().unwrap() {
+            let range = &row["effective_range"];
+            let start = byte_position(
+                text,
+                range["line"].as_u64().unwrap() as u32,
+                range["column"].as_u64().unwrap() as u32,
+            )
+            .unwrap();
+            let end = byte_position(
+                text,
+                range["end_line"].as_u64().unwrap() as u32,
+                range["end_column"].as_u64().unwrap() as u32,
+            )
+            .unwrap();
+            assert!(end > start);
+            assert!(text.get(start as usize..end as usize).is_some());
+        }
+        assert!(!selected["data"]["navigation"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+    #[test]
+    fn partial_expanded_row_withholds_its_written_jump_and_names_the_omission() {
+        let full = call(
+            "dynare_expand",
+            json!({"source":{"kind":"text","text":MODEL}}),
+        );
+        let range = &full["data"]["navigation"][0]["effective_range"];
+        let result = call(
+            "dynare_expand",
+            json!({"source":{"kind":"text","text":MODEL},"expanded_range":{
+            "line":range["line"],"column":range["column"].as_u64().unwrap()+1,
+            "end_line":range["end_line"],"end_column":range["end_column"]}}),
+        );
+        assert_eq!(result["outcome"]["status"], "partial");
+        assert_eq!(
+            result["outcome"]["reasons"][0]["code"],
+            "PARTIAL_ROW_ORIGINS"
+        );
+        assert!(result["data"]["navigation"].as_array().unwrap().is_empty());
+        assert!(result["data"]["origins"].as_array().unwrap().is_empty());
+    }
+    #[test]
+    fn source_limit_refusal_has_limit_metadata_and_no_proposal() {
+        let control = RequestControl {
+            limits: super::super::source::SourceLimits {
+                max_file_bytes: MODEL.len() - 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let wire = dispatch(
+            "dynare_rename",
+            json!({"source":{"kind":"text","text":MODEL},"old_name":"y","new_name":"z"}),
+            control,
+        )
+        .unwrap();
+        let result = wire.structured_content.unwrap();
+        assert_eq!(result["outcome"]["status"], "refused");
+        assert_eq!(result["limits"][0]["code"], "SOURCE_LIMIT");
+        assert!(result["proposal"].is_null());
+    }
+    #[test]
+    fn unknown_equation_scope_and_a_target_outside_the_selected_model_are_input_errors() {
+        assert!(dispatch(
+            "dynare_extract",
+            json!({"source":{"kind":"text","text":MODEL},"equation":{"scope":"guess","index":0}}),
+            RequestControl::default()
+        )
+        .is_err());
+        assert!(dispatch("dynare_symbol_info",json!({"source":{"kind":"map","root":"root.mod","files":{"root.mod":MODEL,"other.mod":MODEL}},"target":{"file":"other.mod","line":1,"column":5}}),RequestControl::default()).is_err());
+    }
+    #[test]
+    fn unknown_command_refuses_with_its_catalog_cause_and_command_search_filters_rows() {
+        let result = call(
+            "dynare_list_options",
+            json!({"command":"not_a_dynare_command"}),
+        );
+        assert_eq!(result["outcome"]["status"], "refused");
+        assert_eq!(result["outcome"]["reasons"][0]["code"], "UNKNOWN_COMMAND");
+        let result = call("dynare_list_options", json!({"search":"steady"}));
+        assert!(!result["data"]["commands"].as_array().unwrap().is_empty());
+        assert!(result["data"]["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row.as_str().unwrap().contains("steady")));
+    }
+}

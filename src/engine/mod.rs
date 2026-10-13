@@ -3,6 +3,7 @@
 pub(crate) mod analysis;
 pub mod catalog;
 pub mod comparison;
+pub(crate) mod control;
 pub mod diagnostics;
 pub(crate) mod editing;
 pub(crate) mod language;

@@ -24,6 +24,14 @@ pub(crate) struct NameTagEdit {
 pub(crate) struct NameTagPlan {
     pub title: String,
     pub edits: Vec<NameTagEdit>,
+    pub skipped: usize,
+    pub skipped_rows: Vec<SkippedMetadata>,
+}
+
+pub(crate) struct SkippedMetadata {
+    pub row_id: usize,
+    pub source: Option<(String, Span)>,
+    pub reason: &'static str,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,6 +56,34 @@ pub(crate) fn equation_name_plan(
         return None;
     }
     equation_name_plan_rows(ws, uri, rows)
+}
+
+/// A request-owned, freshly checked writing note. Its rows are supplied by the
+/// shared diagnostic producer; this path does not repeat unchanged analysis.
+pub(crate) fn equation_name_plan_captured(
+    ws: &mut Workspace,
+    root: &str,
+    context: &WritingContext,
+) -> Option<NameTagPlan> {
+    let WritingRows::Equations(rows) = &context.rows else {
+        return None;
+    };
+    captured_context_is_current(ws, root, context)
+        .then(|| equation_name_plan_rows(ws, root, rows))
+        .flatten()
+}
+
+fn captured_context_is_current(ws: &mut Workspace, root: &str, context: &WritingContext) -> bool {
+    let root_key = if ws.is_overlay_only() {
+        root.to_owned()
+    } else {
+        crate::engine::workspace::include_resolver::normalize_uri(root)
+    };
+    !context.statement_ids.is_empty()
+        && !context.rows.ids().is_empty()
+        && context.root == root_key
+        && ws.input_revision(root).as_deref() == Some(&context.input_revision)
+        && ws.input_snapshot_is_current(root)
 }
 
 fn equation_name_plan_rows(ws: &mut Workspace, uri: &str, rows: &[usize]) -> Option<NameTagPlan> {
@@ -83,21 +119,34 @@ fn plan_edits(
     }
     let mut sites = Vec::new();
     let mut skipped = 0usize;
+    let mut skipped_rows = Vec::new();
     for row in aggregate.iter().chain(&heterogeneous) {
         if !row.unnamed || !selected.contains(&row.id) {
             continue;
         }
         if !can_edit(row.origin, &shared) {
             skipped += 1;
+            skipped_rows.push(skipped_equation(
+                row,
+                "The equation has repeated or ambiguous written source.",
+            ));
             continue;
         }
         let file = row.origin.origin_uri.as_deref()?;
         let Some(source) = sources.get(file) else {
             skipped += 1;
+            skipped_rows.push(skipped_equation(
+                row,
+                "The equation's written source is unavailable.",
+            ));
             continue;
         };
         if tag_edit(source, row.origin.written_span, "eq1").is_none() {
             skipped += 1;
+            skipped_rows.push(skipped_equation(
+                row,
+                "The existing tag source has no safe empty name slot.",
+            ));
             continue;
         }
         sites.push((row, file, source));
@@ -123,13 +172,33 @@ fn plan_edits(
     } else {
         format!("Add equation tags ({skipped} skipped)")
     };
-    Some(NameTagPlan { title, edits })
+    Some(NameTagPlan {
+        title,
+        edits,
+        skipped,
+        skipped_rows,
+    })
 }
 
 struct Counted<'a> {
     id: usize,
     unnamed: bool,
     origin: &'a EquationOrigin,
+}
+
+fn skipped_equation(row: &Counted<'_>, reason: &'static str) -> SkippedMetadata {
+    SkippedMetadata {
+        row_id: row.id,
+        source: (!row.origin.ambiguous)
+            .then(|| {
+                row.origin
+                    .origin_uri
+                    .clone()
+                    .map(|file| (file, row.origin.written_span))
+            })
+            .flatten(),
+        reason,
+    }
 }
 
 fn counted_rows<'a>(
@@ -314,11 +383,29 @@ pub(crate) fn long_name_plan(
     {
         return None;
     }
+    long_name_plan_rows(ws, root, rows)
+}
+
+pub(crate) fn long_name_plan_captured(
+    ws: &mut Workspace,
+    root: &str,
+    context: &WritingContext,
+) -> Option<NameTagPlan> {
+    let WritingRows::Declarations(rows) = &context.rows else {
+        return None;
+    };
+    captured_context_is_current(ws, root, context)
+        .then(|| long_name_plan_rows(ws, root, rows))
+        .flatten()
+}
+
+fn long_name_plan_rows(ws: &mut Workspace, root: &str, rows: &[usize]) -> Option<NameTagPlan> {
     let model = ws.get_effective_model(root)?.clone();
     let report = ws.expand_report(root)?.clone();
     let selected: HashSet<_> = rows.iter().copied().collect();
     let mut edits = Vec::new();
     let mut skipped = 0;
+    let mut skipped_rows = Vec::new();
     for (written, occurrence) in model
         .written_declarations
         .iter()
@@ -329,24 +416,49 @@ pub(crate) fn long_name_plan(
         }
         let Some(anchor) = occurrence.anchor.as_ref() else {
             skipped += 1;
+            skipped_rows.push(SkippedMetadata {
+                row_id: written.declaration.parse_order,
+                source: None,
+                reason: "The declaration has no verified written name.",
+            });
             continue;
         };
         let Some(file) = anchor.file.as_deref() else {
             skipped += 1;
+            skipped_rows.push(SkippedMetadata {
+                row_id: written.declaration.parse_order,
+                source: None,
+                reason: "The declaration has no written source file.",
+            });
             continue;
         };
         let Some(source) = ws.get_source(file) else {
             skipped += 1;
+            skipped_rows.push(SkippedMetadata {
+                row_id: written.declaration.parse_order,
+                source: Some((file.into(), anchor.span)),
+                reason: "The declaration's written source is unavailable.",
+            });
             continue;
         };
         let name = model.name(written.declaration.name);
         // A declaration token produced by @{...} is not a literal name site.
         if source.get(anchor.span.start as usize..anchor.span.end as usize) != Some(name) {
             skipped += 1;
+            skipped_rows.push(SkippedMetadata {
+                row_id: written.declaration.parse_order,
+                source: Some((file.into(), anchor.span)),
+                reason: "The declaration name is generated by macro expansion.",
+            });
             continue;
         }
         let Some((span, new_text)) = declaration_edit(source, anchor.span, name) else {
             skipped += 1;
+            skipped_rows.push(SkippedMetadata {
+                row_id: written.declaration.parse_order,
+                source: Some((file.into(), anchor.span)),
+                reason: "The declaration already has a name or has no safe metadata slot.",
+            });
             continue;
         };
         let same = model
@@ -364,6 +476,11 @@ pub(crate) fn long_name_plan(
             });
         if !same {
             skipped += 1;
+            skipped_rows.push(SkippedMetadata {
+                row_id: written.declaration.parse_order,
+                source: Some((file.into(), anchor.span)),
+                reason: "Shared written bytes serve declarations with incompatible metadata.",
+            });
             continue;
         }
         let edit = NameTagEdit {
@@ -383,7 +500,12 @@ pub(crate) fn long_name_plan(
     } else {
         format!("Add long names ({skipped} skipped)")
     };
-    Some(NameTagPlan { title, edits })
+    Some(NameTagPlan {
+        title,
+        edits,
+        skipped,
+        skipped_rows,
+    })
 }
 
 fn span_key(origin: &EquationOrigin) -> (String, u32, u32) {

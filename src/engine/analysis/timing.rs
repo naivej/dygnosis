@@ -65,6 +65,9 @@ impl TimingAnalysis {
         };
         let mut aggregate_offsets = HashMap::new();
         for equation in &model.equations {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             analysis.record_aggregate(model, equation, &mut aggregate_offsets);
         }
         let declarations = model.final_decls(&["var"]);
@@ -78,9 +81,18 @@ impl TimingAnalysis {
             .collect();
         let mut heterogeneous_offsets: HashMap<Name, HashSet<i32>> = HashMap::new();
         for block in &model.heterogeneous_models {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             for equation in &block.equations {
+                if crate::engine::control::cancelled() {
+                    break;
+                }
                 if !equation.static_tag {
                     for reference in model.ident_refs(equation) {
+                        if crate::engine::control::cancelled() {
+                            break;
+                        }
                         if dimensions.get(&reference.name) == Some(&block.dimension) {
                             heterogeneous_offsets
                                 .entry(reference.name)
@@ -92,6 +104,9 @@ impl TimingAnalysis {
             }
         }
         for declaration in declarations {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             let name = model.name(declaration.name).to_string();
             if model.final_heterogeneity(declaration).is_none() {
                 let mut timing = classify_offsets(aggregate_offsets.get(&declaration.name));
@@ -134,6 +149,9 @@ impl TimingAnalysis {
             return;
         }
         for reference in model.ident_refs(equation) {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             let dynare_offset = self.aggregate_dynare_offset(reference.name, reference.timing);
             offsets
                 .entry(reference.name)
@@ -195,6 +213,9 @@ pub fn structure_summary(model: &Model) -> StructureSummary {
     let mut max_lead = 0;
     let mut max_lag = 0;
     for info in timing.values() {
+        if crate::engine::control::cancelled() {
+            break;
+        }
         match info.class {
             TimingClass::Static => static_vars += 1,
             TimingClass::Predetermined => predetermined += 1,
@@ -205,6 +226,9 @@ pub fn structure_summary(model: &Model) -> StructureSummary {
             }
         }
         for &o in &info.offsets {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             if o > max_lead {
                 max_lead = o;
             }

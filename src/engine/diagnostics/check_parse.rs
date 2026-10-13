@@ -142,24 +142,45 @@ fn reserved_symbol_use_diags(model: &Model) -> Vec<Diagnostic> {
 
     let mut slots: Vec<(Name, Span)> = Vec::new();
     for entry in model.initval.iter().chain(&model.endval) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         slots.push((entry.name, entry.span));
     }
     for entry in model.histval.iter().chain(&model.filter_initial_state) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         slots.push((entry.name, entry.span));
     }
     for block in &model.init2shocks_blocks {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for row in &block.rows {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             slots.push((row.endo, row.endo_span));
             slots.push((row.exo, row.exo_span));
         }
     }
     for row in &model.homotopy_rows {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         slots.push((row.name, row.span));
     }
     for group in &model.shock_groups {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         slots.extend(group.members.iter().copied());
     }
     for row in &model.optim_weights {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         slots.push((row.first, row.first_span));
         if let Some(second) = row.second
             && let Some(span) = row.second_span
@@ -169,9 +190,15 @@ fn reserved_symbol_use_diags(model: &Model) -> Vec<Diagnostic> {
     }
     slots.extend(model.observation_trends.iter().copied());
     for assignment in &model.epilogue {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         slots.push((assignment.name, assignment.span));
     }
     for (name, span) in slots {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if model.name(name) == RESERVED_SYMBOL {
             spans.push(span);
         }
@@ -228,6 +255,9 @@ fn skip_balanced(tokens: &[Token], mut i: usize, open: TokenKind, close: TokenKi
     let mut depth = 1;
     i += 1;
     while i < tokens.len() && depth > 0 {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if tokens[i].kind == open {
             depth += 1;
         } else if tokens[i].kind == close {
@@ -298,6 +328,9 @@ fn opener_at(
 fn at_statement_head(tokens: &[Token], i: usize) -> bool {
     let mut k = i;
     while k > 0 && tokens[k - 1].kind == TokenKind::MacroDir {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         k -= 1;
     }
     k == 0 || tokens.get(k - 1).is_some_and(|t| t.kind == TokenKind::Semi)
@@ -325,9 +358,15 @@ fn complete_block_ranges(tokens: &[Token], src: &str, declared: &[(String, u32)]
     let mut ranges = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some((_, span, semi_i)) = opener_at(tokens, src, i, declared) {
             let mut j = semi_i + 1;
             while j < tokens.len() {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 if is_end_semi(tokens, src, j) {
                     ranges.push(Span {
                         start: span.start,
@@ -361,6 +400,9 @@ fn last_eq_line(src: &str, index: &LineIndex, from: u32, to: u32) -> Option<u32>
     let mut last = None;
     let mut start = 0;
     for (rel, _) in body.match_indices(';') {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let stmt = body[start..rel].trim();
         start = rel + 1;
         if stmt.is_empty() || !stmt.chars().any(|c| c.is_ascii_alphabetic()) {
@@ -384,6 +426,9 @@ fn last_eq_line(src: &str, index: &LineIndex, from: u32, to: u32) -> Option<u32>
 fn mask_line_comments(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for line in s.split_inclusive('\n') {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let (content, had_nl) = match line.strip_suffix('\n') {
             Some(c) => (c, true),
             None => (line, false),
@@ -405,6 +450,9 @@ fn leading_ident(s: &str) -> Option<&str> {
     let s = s.trim_start();
     let mut end = 0;
     for (i, c) in s.char_indices() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if i == 0 {
             if !(c.is_ascii_alphabetic() || c == '_') {
                 return None;
@@ -427,6 +475,9 @@ fn format_recorded_issues(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
     let src = &model.source;
     let mut out = Vec::new();
     for issue in &model.parse_issues {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         match &issue.kind {
             ParseIssueKind::BisonSyntax(message) => {
                 out.push(e001(issue.span, message.clone(), None));
@@ -500,6 +551,9 @@ fn format_recorded_issues(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
                     let lines: Vec<&str> = src.split('\n').collect();
                     let mut fix_line = lines.len().saturating_sub(1) as u32;
                     while fix_line > 0 {
+                        if crate::engine::control::cancelled() {
+                            return Default::default();
+                        }
                         let t = lines[fix_line as usize].trim();
                         if t.is_empty() || t.starts_with("@#") {
                             fix_line -= 1;
@@ -715,11 +769,17 @@ fn last_ident_in(text: &str) -> Option<&str> {
     let bytes = text.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let c = bytes[i];
         if c.is_ascii_alphabetic() || c == b'_' {
             let start = i;
             i += 1;
             while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 i += 1;
             }
             last = Some(&text[start..i]);
@@ -745,6 +805,9 @@ fn decl_semi_diagnostic(
     let mut insert_line = next_line_1.saturating_sub(1);
     let mut last_var = String::new();
     while insert_line > 0 {
+        if crate::engine::control::cancelled() {
+            break;
+        }
         let idx = (insert_line - 1) as usize;
         if idx >= lines.len() {
             break;
@@ -804,6 +867,9 @@ fn decl_semi_diagnostic(
             let mut sc = start_char as usize;
             let bytes = fix_line_text.as_bytes();
             while sc > 0 && matches!(bytes.get(sc - 1), Some(b' ' | b'\t')) {
+                if crate::engine::control::cancelled() {
+                    break;
+                }
                 sc -= 1;
             }
             Some(TextEdit {
@@ -839,6 +905,9 @@ fn decl_semi_diagnostic(
 
 fn trailing_code_line(tokens: &[Token], src: &str, index: &LineIndex) -> Option<u32> {
     for tok in tokens {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if ident_in(tok, src, TERMINAL_COMMANDS) {
             return Some(index.position(src, tok.span.start).line);
         }
@@ -873,6 +942,9 @@ fn invalid_ident_diags(model: &Model, tokens: &[Token], index: &LineIndex) -> Ve
     blocks.extend(model.statement_spans());
     let mut i = 0;
     while i < tokens.len() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let tok = &tokens[i];
         if inside_span(tok.span.start, &blocks)
             || inside_span(tok.span.start, &inactive)
@@ -913,6 +985,9 @@ fn invalid_ident_diags(model: &Model, tokens: &[Token], index: &LineIndex) -> Ve
         let mut kept: Vec<usize> = Vec::new();
         let mut t = body_start_i;
         while t < k {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if tokens[t].kind == TokenKind::Latex
                 || tokens[t].kind == TokenKind::MacroDir
                 || inside_span(tokens[t].span.start, &inactive)
@@ -970,9 +1045,15 @@ fn excluded_character_spans(model: &Model) -> Vec<Span> {
             .map(|token| token.span),
     );
     for span in model.ms_unparsed_spans.iter().copied() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         spans.push(native_line_span(src, span));
     }
     for assignment in &model.helper_assignments {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !declared_statement_head(model, assignment.name, assignment.symbol_type_context) {
             spans.push(native_line_span(src, assignment.span));
         }
@@ -1017,6 +1098,9 @@ fn push_unrecognized_file_gaps(
     let verbatim = verbatim_body_spans(src, tokens);
     let mut prev = 0u32;
     for tok in tokens {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !span_contains(prev, &verbatim) {
             push_unrecognized_gap(src, prev, tok.span.start, excluded, out);
         }
@@ -1035,6 +1119,9 @@ fn verbatim_body_spans(src: &str, tokens: &[Token]) -> Vec<Span> {
     let mut ranges = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if tokens[i].kind == TokenKind::Ident
             && tokens[i].text(src).eq_ignore_ascii_case("verbatim")
             && tokens
@@ -1048,6 +1135,9 @@ fn verbatim_body_spans(src: &str, tokens: &[Token]) -> Vec<Span> {
             let start = tokens[i + 1].span.end;
             i += 2;
             while i < tokens.len() {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 if tokens[i].kind == TokenKind::Ident
                     && tokens[i].text(src).eq_ignore_ascii_case("end")
                     && tokens
@@ -1083,9 +1173,15 @@ fn push_unrecognized_gap(
         return;
     }
     while i < end {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let rest = &src[i..end];
         if rest.starts_with("//") || rest.starts_with('%') {
             while i < end && !src[i..].starts_with('\n') {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 i += src[i..].chars().next().map(char::len_utf8).unwrap_or(1);
             }
             continue;
@@ -1112,6 +1208,9 @@ fn push_unrecognized_gap(
         let run_start = i;
         i += len;
         while i < end {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let Some(c) = src[i..].chars().next() else {
                 break;
             };
@@ -1152,6 +1251,9 @@ fn flush_invalid_runs(
     }
     let mut run: Vec<usize> = vec![kept[0]];
     for &i in &kept[1..] {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let prev = &tokens[*run.last().unwrap()];
         let cur = &tokens[i];
         let between = &src[prev.span.end as usize..cur.span.start as usize];
@@ -1254,6 +1356,9 @@ fn reserved_ident_diags(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
         .chain(&model.predetermined)
         .collect();
     for decl in decls {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let name = model.name(decl.name);
         // A block opener whose lexer rule is `<INITIAL>` only is a legal
         // declaration name: a declaration list reads it as an identifier, and
@@ -1319,6 +1424,9 @@ fn execution_tokens<'a>(model: &'a Model, range: &std::ops::Range<usize>) -> Opt
 fn raw_directive_encloses(model: &Model, index: usize) -> bool {
     let mut depth = 0i32;
     for token in model.expanded_tokens.iter().take(index) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if token.kind != TokenKind::MacroDir {
             continue;
         }
@@ -1356,6 +1464,9 @@ fn skip_tag_tokens(toks: &[Token], mut i: usize) -> usize {
     }
     i += 1;
     while i < toks.len() && toks[i].kind != TokenKind::RBrack {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         i += 1;
     }
     if i < toks.len() {
@@ -1369,6 +1480,9 @@ fn standalone_eq_indices(toks: &[Token]) -> Vec<usize> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < toks.len() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if toks[i].kind == TokenKind::LBrack {
             i = skip_tag_tokens(toks, i);
             continue;
@@ -1521,6 +1635,9 @@ impl<'a> ExprWalk<'a> {
             return false;
         }
         while let Some((left_bp, right_bp)) = self.kind().and_then(infix_binding) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if left_bp < min_bp {
                 break;
             }
@@ -1556,6 +1673,9 @@ impl<'a> ExprWalk<'a> {
 
     fn parse_postfix(&mut self) -> bool {
         loop {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             match self.kind() {
                 Some(TokenKind::LParen) => {
                     if !self.parse_call_args() {
@@ -1598,6 +1718,9 @@ impl<'a> ExprWalk<'a> {
             return true;
         }
         loop {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if !self.parse_bp(0) {
                 return false;
             }
@@ -1623,6 +1746,9 @@ fn skip_leading_tags(tokens: &[Token]) -> usize {
     {
         let mut depth = 0i32;
         loop {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let Some(kind) = tokens.get(i).map(|token| token.kind) else {
                 return i;
             };
@@ -1695,6 +1821,9 @@ fn equation_separator_edit(
     let prefix = {
         let mut end = 0;
         for (n, c) in line.chars().enumerate() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if n as u32 >= split_pos.character {
                 break;
             }
@@ -1736,6 +1865,9 @@ fn merged_equation_diags(
     let src = &model.source;
     let mut out = Vec::new();
     for eq in crate::engine::diagnostics::check_e020::all_model_equations(model) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if eq.text.trim_start().starts_with('#') {
             continue;
         }
@@ -1758,6 +1890,9 @@ fn merged_equation_diags(
         let mut ident_i = None;
         let mut j = second;
         while j > 0 {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             j -= 1;
             if toks[j].kind == TokenKind::Ident {
                 ident_i = Some(j);
@@ -1833,6 +1968,9 @@ fn merged_assignment_diags(
         }
         let mut lhs_hits: Vec<usize> = Vec::new();
         for (i, tok) in toks.iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if tok.kind == TokenKind::Ident
                 && toks.get(i + 1).is_some_and(|n| n.kind == TokenKind::Eq)
             {
@@ -1850,6 +1988,9 @@ fn merged_assignment_diags(
         let mut fix_start = toks[second].span.start;
         if proved {
             while fix_start > span.start {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 let b = src.as_bytes()[(fix_start - 1) as usize];
                 if b == b' ' || b == b'\t' {
                     fix_start -= 1;
@@ -1907,6 +2048,9 @@ fn merged_assignment_diags(
         );
     }
     for a in &model.initval {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         consider(
             a.span,
             a.active_tokens.clone(),
@@ -1915,6 +2059,9 @@ fn merged_assignment_diags(
         );
     }
     for a in &model.endval {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         consider(
             a.span,
             a.active_tokens.clone(),
@@ -1923,6 +2070,9 @@ fn merged_assignment_diags(
         );
     }
     for eq in &model.steady_state_equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if eq.text.trim_start().starts_with('#') {
             continue;
         }
@@ -1939,6 +2089,9 @@ fn merged_assignment_diags(
 fn unbalanced_paren_diags(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for eq in crate::engine::diagnostics::check_e020::all_model_equations(model) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(toks) = execution_tokens(model, &eq.active_tokens) else {
             continue;
         };
@@ -1946,6 +2099,9 @@ fn unbalanced_paren_diags(model: &Model) -> Vec<Diagnostic> {
         let mut orphan = false;
         let mut i = 0;
         while i < toks.len() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if toks[i].kind == TokenKind::LBrack {
                 i = skip_tag_tokens(toks, i);
                 continue;

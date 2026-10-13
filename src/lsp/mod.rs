@@ -17,7 +17,6 @@ mod ordering;
 mod locals;
 
 mod rename;
-mod rename_tags;
 
 #[cfg(test)]
 mod ordering_tests;
@@ -925,71 +924,6 @@ impl Backend {
         )))
     }
 
-    fn ident_locations(&self, pos: &TextDocumentPositionParams) -> Option<Vec<Location>> {
-        let mut inner = self.lock_inner();
-        let doc = inner.document(&pos.text_document.uri)?;
-        let index = LineIndex::new(&doc.text);
-        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
-        let (word, _) = ident_at(&doc.text, byte)?;
-        let active_key = crate::engine::workspace::include_resolver::normalize_uri(
-            pos.text_document.uri.as_str(),
-        );
-        let mut roots = vec![pos.text_document.uri.clone()];
-        let open: Vec<Url> = inner.docs.keys().cloned().collect();
-        for uri in open {
-            if uri == pos.text_document.uri {
-                continue;
-            }
-            if inner
-                .workspace
-                .resolve_all_includes(uri.as_str())
-                .contains_key(&active_key)
-            {
-                roots.push(uri);
-            }
-        }
-        let mut scope = HashSet::new();
-        for root in roots {
-            scope.insert(crate::engine::workspace::include_resolver::normalize_uri(
-                root.as_str(),
-            ));
-            scope.extend(
-                inner
-                    .workspace
-                    .resolve_all_includes(root.as_str())
-                    .into_keys(),
-            );
-        }
-        let mut scope: Vec<String> = scope.into_iter().collect();
-        scope.sort();
-        let mut locs = Vec::new();
-        for file in scope {
-            let Some(text) = inner.workspace.get_source(&file) else {
-                continue;
-            };
-            let uri = inner
-                .docs
-                .keys()
-                .find(|uri| {
-                    crate::engine::workspace::include_resolver::normalize_uri(uri.as_str()) == file
-                })
-                .cloned()
-                .or_else(|| file_url_from_path_key(&file));
-            let Some(uri) = uri else { continue };
-            let index = LineIndex::new(text);
-            locs.extend(
-                occurrences(text, &word)
-                    .into_iter()
-                    .map(|span| Location::new(uri.clone(), span_range(&index, text, span))),
-            );
-        }
-        if locs.is_empty() {
-            None
-        } else {
-            Some(locs)
-        }
-    }
-
     fn ident_highlights(&self, pos: &TextDocumentPositionParams) -> Option<Vec<DocumentHighlight>> {
         let mut inner = self.lock_inner();
         if let Some(highlights) = locals::highlights(&mut inner, pos) {
@@ -1114,22 +1048,6 @@ impl Backend {
 
     fn prepare_rename_at(&self, pos: &TextDocumentPositionParams) -> Result<Range> {
         let mut inner = self.lock_inner();
-        if let Some(edit) = locals::rename(&mut inner, pos, None) {
-            edit.map_err(tower_lsp::jsonrpc::Error::invalid_params)?;
-            let text = &inner
-                .document(&pos.text_document.uri)
-                .ok_or_else(|| tower_lsp::jsonrpc::Error::invalid_params(rename::SOURCE))?
-                .text;
-            let index = LineIndex::new(text);
-            let byte = index.offset_utf16(text, span_pos(pos.position));
-            return ident_at(text, byte)
-                .map(|(_, span)| span_range(&index, text, span))
-                .ok_or_else(|| {
-                    tower_lsp::jsonrpc::Error::invalid_params(
-                        "Place the cursor on a declared model name.",
-                    )
-                });
-        }
         rename::decide(&mut inner, pos, None)
             .map(|decision| decision.range)
             .map_err(tower_lsp::jsonrpc::Error::invalid_params)
@@ -1142,9 +1060,6 @@ impl Backend {
             ));
         }
         let mut inner = self.lock_inner();
-        if let Some(edit) = locals::rename(&mut inner, pos, Some(new_name)) {
-            return edit.map_err(tower_lsp::jsonrpc::Error::invalid_params);
-        }
         rename::decide(&mut inner, pos, Some(new_name))
             .map(|decision| decision.edit)
             .map_err(tower_lsp::jsonrpc::Error::invalid_params)
@@ -2702,7 +2617,11 @@ impl LanguageServer for Backend {
                 return Ok(locations);
             }
         }
-        Ok(self.ident_locations(&params.text_document_position))
+        Ok(rename::references(
+            &mut self.lock_inner(),
+            &params.text_document_position,
+            params.context.include_declaration,
+        ))
     }
 
     async fn document_highlight(

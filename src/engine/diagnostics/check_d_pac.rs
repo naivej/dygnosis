@@ -77,6 +77,9 @@ fn required(command: &SemiStructuralCommand, name: &str) -> Diagnostic {
 pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for (name, span) in &model.option_twice {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if model
             .semi_structural_commands
             .iter()
@@ -91,6 +94,9 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
     }
     let mut model_names: HashSet<(SemiStructuralKind, Name)> = HashSet::new();
     for command in &model.semi_structural_commands {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         match command.kind {
             SemiStructuralKind::VarModel => {
                 if option(command, "model_name").is_none() {
@@ -101,6 +107,9 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
             }
             SemiStructuralKind::TrendComponentModel => {
                 for name in ["model_name", "eqtags", "targets"] {
+                    if crate::engine::control::cancelled() {
+                        return Default::default();
+                    }
                     if option(command, name).is_none() {
                         out.push(required(command, name));
                         break;
@@ -164,6 +173,9 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
                     ));
                 }
                 for name in ["model_name", "auxiliary_model_name", "horizon"] {
+                    if crate::engine::control::cancelled() {
+                        return Default::default();
+                    }
                     if option(command, name).is_none() {
                         out.push(required(command, name));
                         break;
@@ -216,7 +228,13 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
         }
     }
     for block in &model.deterministic_trends {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for row in &block.rows {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if let Some(refusal) = row.expression.expr.and_then(|id| {
                 crate::engine::diagnostics::check_mom::outside_model_expression(model, id)
             }) {
@@ -236,6 +254,9 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
         }
     }
     for operator in &model.named_model_operators {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let label = match operator.kind {
             NamedModelOperatorKind::VarExpectation => "var_expectation",
             NamedModelOperatorKind::PacExpectation => "pac_expectation",
@@ -282,6 +303,9 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
     let mut target_infos: BTreeMap<&str, Vec<&crate::engine::language::model::PacTargetInfoBlock>> =
         BTreeMap::new();
     for block in &model.pac_target_info {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         target_infos
             .entry(model.name(block.name))
             .or_default()
@@ -298,7 +322,13 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
     // PacModelTable::checkPass walks its sorted growth, auxname, then kind
     // maps. A refusal exits immediately, before target-info field checks.
     for field in ["growth", "auxname", "kind"] {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for (name, command) in &pac_commands {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let Some(row) = option(command, field) else {
                 continue;
             };
@@ -320,13 +350,22 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
         }
     }
     for (name, blocks) in target_infos {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let span = blocks[0].span;
         let mut target = false;
         let mut nonstationary_aux = false;
         let mut nonstationary_component = false;
         let mut components = Vec::new();
         for block in blocks {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             for row in &block.rows {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 match row {
                     PacTargetInfoRow::Target(_) => target = true,
                     PacTargetInfoRow::AuxnameTargetNonstationary { .. } => nonstationary_aux = true,
@@ -349,6 +388,9 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
             )];
         }
         for component in components {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let auxname = component
                 .rows
                 .iter()
@@ -412,7 +454,13 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
         )];
     }
     for block in &model.deterministic_trends {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for row in &block.rows {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if model.final_kind_or_written_if_excluded(row.name) != Some("var") {
                 out.push(warning(
                     row.name_span,
@@ -440,6 +488,9 @@ fn unused_implicit_exogenous(model: &Model) -> Vec<(Name, Span)> {
         .collect();
     declared.extend(model.mod_file_locals.iter().copied());
     for equation in model.equations.iter().filter(|equation| equation.is_local) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some(lhs) = equation.lhs_expr {
             declared.extend(model.exprs.walk_idents(lhs).map(|reference| reference.name));
         }
@@ -449,6 +500,9 @@ fn unused_implicit_exogenous(model: &Model) -> Vec<(Name, Span)> {
     let used_in_model = usage.model_names();
     let mut expressions = Vec::new();
     for command in &model.semi_structural_commands {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if command.kind == SemiStructuralKind::VarExpectationModel
             && let Some(expression) = expression_option(command, "expression")
         {
@@ -456,7 +510,13 @@ fn unused_implicit_exogenous(model: &Model) -> Vec<(Name, Span)> {
         }
     }
     for block in &model.pac_target_info {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for row in &block.rows {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             match row {
                 PacTargetInfoRow::Target(expression) => expressions.push(expression),
                 PacTargetInfoRow::Component(component) => {
@@ -469,8 +529,14 @@ fn unused_implicit_exogenous(model: &Model) -> Vec<(Name, Span)> {
     let mut seen = HashSet::new();
     let mut unused = Vec::new();
     for expression in expressions {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(id) = expression.expr else { continue };
         for reference in model.exprs.walk_idents(id) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if declared.contains(&reference.name)
                 || exempt.contains(&reference.name)
                 || !seen.insert(reference.name)
@@ -507,6 +573,9 @@ fn selected_equations<'a>(
     let mut out = Vec::new();
     if let Some(tags) = tags_option(command, "eqtags") {
         for (tag, span) in tags {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if let Some(equation) = tagged_equation(model, tag) {
                 out.push((equation, tag.clone(), *span));
             }
@@ -604,6 +673,9 @@ fn collect_refs(
         }
         ExprKind::Call { args, .. } => {
             for arg in args {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 collect_refs(model, *arg, offset, origin, visiting, out);
             }
         }
@@ -658,6 +730,9 @@ fn collect_operators(
                 });
             }
             for arg in args {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 collect_operators(model, *arg, origin, visiting, out);
             }
         }
@@ -705,17 +780,26 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
     // var(log). The selected tags are collected as a set there.
     let mut selected_tags = BTreeMap::<&str, Span>::new();
     for command in &model.semi_structural_commands {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if matches!(
             command.kind,
             SemiStructuralKind::VarModel | SemiStructuralKind::TrendComponentModel
         ) && let Some(tags) = tags_option(command, "eqtags")
         {
             for (tag, span) in tags {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 selected_tags.entry(tag.as_str()).or_insert(*span);
             }
         }
     }
     for (tag, span) in &selected_tags {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if tagged_equation(model, tag).is_none() {
             out.push(error(
                 *span,
@@ -728,11 +812,17 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
 
     let mut scanned = HashSet::new();
     for tag in selected_tags.keys() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some(equation) = tagged_equation(model, tag) {
             scanned.insert(equation.span.start);
         }
     }
     for equation in model.equations.iter().filter(|equation| !equation.is_local) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if equation_operators(model, equation)
             .iter()
             .any(|operator| operator.kind == NamedModelOperatorKind::PacExpectation)
@@ -776,11 +866,17 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
     }
 
     for command in &model.semi_structural_commands {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if command.kind != SemiStructuralKind::TrendComponentModel {
             continue;
         }
         if let Some(tags) = tags_option(command, "targets") {
             for (tag, span) in tags {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 if tagged_equation(model, tag).is_none() {
                     out.push(error(
                         *span,
@@ -794,6 +890,9 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
     }
 
     for command in &model.semi_structural_commands {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !matches!(
             command.kind,
             SemiStructuralKind::VarModel | SemiStructuralKind::TrendComponentModel
@@ -807,6 +906,9 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
     }
 
     for command in &model.semi_structural_commands {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if command.kind != SemiStructuralKind::VarExpectationModel {
             continue;
         }
@@ -844,7 +946,13 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
         }
     }
     for equation in model.equations.iter().filter(|equation| !equation.is_local) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for operator in equation_operators(model, equation) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if operator.kind == NamedModelOperatorKind::VarExpectation
                 && !expectation_models.contains(&operator.name)
             {
@@ -875,6 +983,9 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
     pac_commands.sort_by(|a, b| model.name(a.1).cmp(model.name(b.1)));
     let mut generated_vars = HashSet::new();
     for (command, name, name_span) in pac_commands {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some(growth) = expression_option(command, "growth")
             && let Some(span) = written_nonlinear_growth(model, growth)
         {
@@ -998,6 +1109,9 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
         .enumerate()
     {
         for operator in equation_operators(model, equation) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if operator.kind == NamedModelOperatorKind::PacExpectation
                 && !pac_models.contains(&operator.name)
             {
@@ -1020,6 +1134,9 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
         .enumerate()
     {
         for operator in equation_operators(model, equation) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if operator.kind == NamedModelOperatorKind::PacTargetNonstationary
                 && (!pac_models.contains(&operator.name)
                     || !model
@@ -1052,6 +1169,9 @@ fn equation_label(model: &Model, target_index: usize) -> String {
         .cloned()
         .collect();
     for (index, equation) in equations.into_iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some(explicit) = equation.tag_map.get("name").filter(|name| !name.is_empty()) {
             if index == target_index {
                 return explicit.clone();
@@ -1188,7 +1308,13 @@ fn pac_generated_name_clash(
     }
     let mut component_idx = 0;
     for block in target_infos {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for row in &block.rows {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if let PacTargetInfoRow::Component(component) = row {
                 component_idx += 1;
                 let name_component = format!("{pac}_component{component_idx}");
@@ -1319,6 +1445,9 @@ fn direct_target_equation_refusal(model: &Model, block: &PacTargetInfoBlock) -> 
     // that rewrite, even if the target RHS itself is plainly wrong. Require
     // a positive nonconstant proof for every competing direct assignment.
     for other in model.equations.iter().filter(|other| !other.is_local) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if std::ptr::eq(other, equation)
             || other
                 .lhs_expr
@@ -1336,6 +1465,9 @@ fn direct_target_equation_refusal(model: &Model, block: &PacTargetInfoBlock) -> 
     }
     let mut components = Vec::new();
     for row in &block.rows {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let PacTargetInfoRow::Component(component) = row else {
             continue;
         };
@@ -1344,6 +1476,9 @@ fn direct_target_equation_refusal(model: &Model, block: &PacTargetInfoBlock) -> 
             return None;
         }
         for field in &component.rows {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if let PacTargetComponentRow::Growth(growth) = field
                 && !direct_growth_is_safe(model, growth)
             {
@@ -1544,12 +1679,18 @@ fn direct_numeric_constant(model: &Model, id: ExprId) -> Option<f64> {
 fn stable_direct_terms(terms: Vec<(Name, Option<f64>)>) -> Option<Vec<Name>> {
     let mut names = Vec::new();
     for (name, _) in &terms {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !names.contains(name) {
             names.push(*name);
         }
     }
     let mut present = Vec::new();
     for name in names {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let coefficients: Vec<_> = terms
             .iter()
             .filter(|(term, _)| *term == name)
@@ -1637,6 +1778,9 @@ fn check_selected_shape(model: &Model, command: &SemiStructuralCommand) -> Optio
     };
     let rows = selected_equations(model, command);
     for (equation, tag, _) in &rows {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let lhs = equation.lhs_expr?;
         let lhs_refs = resolved_refs(model, lhs);
         let endos: HashSet<_> = lhs_refs
@@ -1684,10 +1828,16 @@ fn check_selected_shape(model: &Model, command: &SemiStructuralCommand) -> Optio
     // is filled. `structural` admits contemporaneous endogenous variables in a VAR.
     let structural = var && option(command, "structural").is_some();
     for (equation, tag, _) in &rows {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(rhs) = equation.rhs_expr else {
             continue;
         };
         for reference in resolved_refs(model, rhs) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if is_endogenous(model, reference.name) {
                 let text = if var {
                     if reference.timing > 0 {
@@ -1720,6 +1870,9 @@ fn check_selected_shape(model: &Model, command: &SemiStructuralCommand) -> Optio
     }
     let mut lhs = HashSet::new();
     for (equation, _, _) in &rows {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(id) = equation.lhs_expr else {
             continue;
         };
@@ -1778,6 +1931,9 @@ fn var_expectation_expression_reason(
     let mut terms = Vec::new();
     decompose_additive(model, id, &mut terms);
     for term in terms {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let mut factor = LinearFactor::default();
         match collect_linear_factors(model, term, false, &mut factor) {
             Ok(()) => {}

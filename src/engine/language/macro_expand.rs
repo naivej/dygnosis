@@ -39,6 +39,8 @@ pub struct IncompleteReason {
     pub span: Span,
     pub code: &'static str,
     pub message: String,
+    /// Receipt from an actual evaluator limit, independent of the I211 wording.
+    pub(crate) limit_name: Option<&'static str>,
 }
 
 #[derive(Clone, Debug)]
@@ -152,7 +154,12 @@ fn push_type_error(
     state.stopped = true;
 }
 
-fn push_i211(state: &mut ExpandState<'_, '_>, span: Span, message: String) {
+fn push_i211(
+    state: &mut ExpandState<'_, '_>,
+    span: Span,
+    message: String,
+    limit_name: Option<&'static str>,
+) {
     if !state
         .incomplete_reasons
         .iter()
@@ -162,6 +169,7 @@ fn push_i211(state: &mut ExpandState<'_, '_>, span: Span, message: String) {
             span,
             code: "I211",
             message,
+            limit_name,
         });
     }
     state.incomplete.get_or_insert(span);
@@ -184,13 +192,13 @@ fn note_eval_failure(
     match error {
         MacroEvalError::Limit(limit) => {
             state.limit.get_or_insert((span, limit));
-            push_i211(state, span, i211_limit_message(limit));
+            push_i211(state, span, i211_limit_message(limit), Some(limit));
         }
         MacroEvalError::PriorFailure => {
             state.incomplete.get_or_insert(span);
         }
         MacroEvalError::Unsupported => {
-            push_i211(state, span, i211_expression_message(expression));
+            push_i211(state, span, i211_expression_message(expression), None);
         }
         _ => {
             state.incomplete.get_or_insert(span);
@@ -799,6 +807,15 @@ impl MacroFileVisitor for MacroFiles<'_> {
 pub(crate) fn walk_macro_files(
     root: &str,
     source: &str,
+    load: impl FnMut(MacroFileEvent<'_>) -> Option<MacroFileLoad>,
+) -> MacroFileProof {
+    walk_macro_files_with_budget(root, source, MacroBudget::new(), load)
+}
+
+pub(crate) fn walk_macro_files_with_budget(
+    root: &str,
+    source: &str,
+    mut budget: MacroBudget,
     mut load: impl FnMut(MacroFileEvent<'_>) -> Option<MacroFileLoad>,
 ) -> MacroFileProof {
     let mut includes = MacroFiles {
@@ -815,7 +832,6 @@ pub(crate) fn walk_macro_files(
         message_bytes: 0,
         loop_occurrences: Vec::new(),
     };
-    let mut budget = MacroBudget::new();
     let run = macro_file_complete(source, &mut HashMap::new(), &mut includes, &mut budget);
     if let Some((span, name)) = run.limit {
         includes.limit.get_or_insert((root.to_string(), span, name));
@@ -928,11 +944,12 @@ pub(crate) fn expand_macros_with_status_lines_and_evaluations_budget(
     (out, errors, incomplete, reasons)
 }
 
-pub(crate) fn expand_macros_traced_with_lines_and_evaluations(
+pub(crate) fn expand_macros_traced_with_lines_and_evaluations_budget(
     src: &str,
     tokens: Vec<Token>,
     line_segments: &[(Span, u32)],
     evaluations: &[MacroReplay],
+    budget: &mut MacroBudget,
 ) -> (
     Vec<Token>,
     Vec<TokenTrace>,
@@ -942,7 +959,13 @@ pub(crate) fn expand_macros_traced_with_lines_and_evaluations(
     Vec<MacroMessage>,
 ) {
     let (out, traces, arena, errors, _, incomplete, _, _, messages) =
-        expand_macros_traced_full_and_evaluations(src, tokens, line_segments, evaluations);
+        expand_macros_traced_full_and_evaluations_budget(
+            src,
+            tokens,
+            line_segments,
+            evaluations,
+            budget,
+        );
     // Some existing macro checks record an error while still unrolling. Keep
     // legacy incomplete unchanged, but consume that same error proof for jumps.
     (
@@ -2570,7 +2593,12 @@ fn unroll_for(
         MacroVal::Array(items) if items.len() <= RANGE_CAP => items,
         other => {
             if oversized_collection(&other) {
-                push_i211(state, for_tok.span, i211_limit_message("range size"));
+                note_eval_failure(
+                    state,
+                    for_tok.span,
+                    MacroEvalError::Limit("range size"),
+                    &collection_expr,
+                );
             } else {
                 push_type_error(
                     state,
@@ -3716,7 +3744,7 @@ enum MacrovarLine {
     },
 }
 
-const MESSAGE_CAP: usize = 1_000_000;
+pub(crate) const MESSAGE_CAP: usize = 1_000_000;
 
 fn push_macro_message(
     state: &mut ExpandState<'_, '_>,

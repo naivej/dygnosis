@@ -42,6 +42,9 @@ pub fn check_estimated_params(model: &Model) -> Vec<Diagnostic> {
 fn check_remove_roles(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for entry in &model.estimated_params_remove {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let name = model.name(entry.name);
         if name == "dsge_prior_weight" {
             continue;
@@ -122,6 +125,9 @@ fn check_one_block(
     let mut seen_corr: HashMap<(Name, Name), (String, String, Span)> = HashMap::new();
 
     for (index, entry) in entries.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if block_starts.binary_search(&index).is_ok() {
             seen_param.clear();
             seen_stderr.clear();
@@ -225,6 +231,9 @@ fn check_one_block(
     }
 
     for (block_index, &start) in block_starts.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let end = block_starts
             .get(block_index + 1)
             .copied()
@@ -240,6 +249,9 @@ fn check_one_block(
             continue;
         }
         for entry in block_entries {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             for id in [
                 entry.init_expr,
                 entry.lower_expr,
@@ -251,6 +263,9 @@ fn check_one_block(
             .flatten()
             {
                 for r in model.exprs.walk_idents(id) {
+                    if crate::engine::control::cancelled() {
+                        return Default::default();
+                    }
                     if !declared_params.contains(&r.name) {
                         continue;
                     }

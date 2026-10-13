@@ -29,6 +29,8 @@ const RUST_TOOLS: &[&str] = &[
     "dynare_format",
     "dynare_extract",
     "dynare_workspace_diagnose",
+    "dynare_symbol_info",
+    "dynare_code_actions",
 ];
 
 const DROPPED_TOOLS: &[&str] = &[
@@ -503,17 +505,19 @@ fn rename_map(value: Value) -> HashMap<String, String> {
 fn registered_tools_include_format() {
     let names = registered_tool_names();
     assert_eq!(names, RUST_TOOLS);
-    assert_eq!(names.len(), 15);
+    assert_eq!(names.len(), RUST_TOOLS.len());
     assert_eq!(names[9], "dynare_equations");
     assert_eq!(names[10], "dynare_related_files");
     assert_eq!(names[11], "dynare_expand");
     assert_eq!(names[12], "dynare_format");
     assert_eq!(names[13], "dynare_extract");
     assert_eq!(names[14], "dynare_workspace_diagnose");
+    assert_eq!(names[15], "dynare_symbol_info");
+    assert_eq!(names[16], "dynare_code_actions");
 
     let list = tools_list_json();
     let tools = list["tools"].as_array().expect("tools array");
-    assert_eq!(tools.len(), 15);
+    assert_eq!(tools.len(), RUST_TOOLS.len());
     assert!(tools.iter().all(|tool| tool["description"]
         .as_str()
         .is_some_and(|text| !text.is_empty())));
@@ -552,8 +556,12 @@ fn registered_tools_include_format() {
             )
         })
         .collect::<HashMap<_, _>>();
-    assert!(descriptions["dynare_find_references"].contains("identifier spelling"));
-    assert!(descriptions["dynare_rename"].contains("identifier spelling"));
+    assert!(descriptions["dynare_find_references"].contains("semantic symbol binding"));
+    assert!(descriptions["dynare_rename"].contains("complete semantic Rename"));
+    assert!(descriptions["dynare_symbol_info"].contains("Inspect one semantic symbol"));
+    assert!(
+        descriptions["dynare_code_actions"].contains("Each action is a separate complete proposal")
+    );
 }
 
 #[test]
@@ -2660,17 +2668,37 @@ fn dynare_related_files_01_fixtures() {
         ),
     ];
     for (rel, kind, filename, resolved, basename) in cases {
-        let (key, text, files) = companion_fixture(rel);
+        let (key, text, mut files) = companion_fixture(rel);
+        // An existing disk sibling is outside this supplied map. Named data
+        // files stay unresolved; inferred helpers and conventions stay absent.
+        let unsupplied = dynare_related_files(&text, Some(&key), Some(&files));
+        if kind == "datafile" {
+            let row = related_row(&unsupplied, kind, filename);
+            assert_eq!(row["resolved"], false, "{rel}: {unsupplied}");
+            assert!(row.get("path").is_none());
+        } else {
+            assert!(
+                unsupplied
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|row| row["kind"] != kind || row["filename"] != filename),
+                "{rel}: {unsupplied}"
+            );
+        }
+        let companion_path = Path::new(&key).parent().unwrap().join(basename);
+        let companion_key = companion_path.to_str().unwrap().to_owned();
+        files.insert(
+            companion_key.clone(),
+            std::fs::read_to_string(&companion_path).unwrap(),
+        );
         let rows = dynare_related_files(&text, Some(&key), Some(&files));
         assert_related_shape(&rows, &files);
         let row = related_row(&rows, kind, filename);
         assert_eq!(row["resolved"], resolved, "{rel}");
         if resolved {
             let path = row["path"].as_str().expect("path");
-            assert!(
-                !files.contains_key(path),
-                "{rel}: sibling not in files map, path should be absolute, got {path}"
-            );
+            assert_eq!(path, companion_key, "{rel}: exact supplied companion key");
             assert!(
                 Path::new(path)
                     .file_name()
@@ -2713,7 +2741,15 @@ fn dynare_related_files_01_fixtures() {
         "missing ident helper must not be listed: {rows}"
     );
 
-    let (key, text, files) = companion_fixture("plus_pkg/plus_pkg.mod");
+    let (key, text, mut files) = companion_fixture("plus_pkg/plus_pkg.mod");
+    let generated = Path::new(&key)
+        .parent()
+        .unwrap()
+        .join("+plus_pkg/steadystate.m");
+    files.insert(
+        generated.to_str().unwrap().into(),
+        std::fs::read_to_string(&generated).unwrap(),
+    );
     let rows = dynare_related_files(&text, Some(&key), Some(&files));
     assert!(
         rows.as_array()

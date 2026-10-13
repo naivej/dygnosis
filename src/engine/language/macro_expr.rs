@@ -4,6 +4,10 @@
 //! Numbers are reals. Ranges materialize to arrays. `asin` is `atan`.
 
 use std::collections::HashMap;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use crate::engine::language::macro_expand::{MacroEvalError, MacroVal};
 
@@ -30,12 +34,31 @@ pub(crate) const MACRO_OUTPUT_CAP: usize = 8 * 1024 * 1024;
 /// Nested loop bodies and included files. Checked before the recursive call.
 pub(crate) const EXEC_DEPTH_CAP: usize = 64;
 
+/// Exact ceilings for receipts whose name denotes one bound. Some names also
+/// cover representation limits or several different bounds and have no single
+/// numeric ceiling.
+pub(crate) fn limit_ceiling(name: &str) -> Option<(usize, &'static str)> {
+    match name {
+        "iteration work" => Some((MACRO_WORK_CAP, "work units")),
+        "output size" => Some((MACRO_OUTPUT_CAP, "bytes")),
+        "execution depth" => Some((EXEC_DEPTH_CAP, "nesting depth")),
+        "string size" => Some((STRING_CAP, "bytes")),
+        "message size" => Some((crate::engine::language::macro_expand::MESSAGE_CAP, "bytes")),
+        // This name also covers a floating-point step that cannot advance.
+        // No element count was reached in that case.
+        "range size" => None,
+        "value depth" => Some((VALUE_DEPTH_CAP, "nesting depth")),
+        _ => None,
+    }
+}
+
 /// Shared per-root limit. Expression evaluation, loop iterations, include
 /// recursion, and emitted text spend the same counters.
 #[derive(Debug)]
 pub(crate) struct MacroBudget {
     work_left: usize,
     output_left: usize,
+    cancellation: Option<Arc<AtomicBool>>,
     /// Nested `@#for` bodies and `@#include` files on this root.
     pub(crate) exec_depth: usize,
 }
@@ -45,7 +68,15 @@ impl MacroBudget {
         Self {
             work_left: MACRO_WORK_CAP,
             output_left: MACRO_OUTPUT_CAP,
+            cancellation: crate::engine::control::current(),
             exec_depth: 0,
+        }
+    }
+
+    pub(crate) fn with_cancellation(cancellation: Option<Arc<AtomicBool>>) -> Self {
+        Self {
+            cancellation: cancellation.or_else(crate::engine::control::current),
+            ..Self::new()
         }
     }
 
@@ -54,8 +85,19 @@ impl MacroBudget {
         self.work_left
     }
 
+    pub(crate) fn cancellation(&self) -> Option<Arc<AtomicBool>> {
+        self.cancellation.clone()
+    }
+
     /// Count an operation. `amount` is the work about to be done.
     pub(crate) fn spend_work(&mut self, amount: usize) -> Result<(), MacroEvalError> {
+        if self
+            .cancellation
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        {
+            return Err(MacroEvalError::Limit("request cancelled"));
+        }
         if amount > self.work_left {
             return Err(MacroEvalError::Limit("iteration work"));
         }
@@ -77,6 +119,26 @@ impl MacroBudget {
             return Err(MacroEvalError::Limit("string size"));
         }
         self.spend_work(bytes.max(1))
+    }
+}
+
+#[cfg(test)]
+mod request_cancellation_tests {
+    use super::*;
+
+    #[test]
+    fn cancelled_macro_work_stops_at_the_next_budget_charge() {
+        // Guards cancellation being checked only around a long macro worker.
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut budget = MacroBudget::with_cancellation(Some(Arc::clone(&flag)));
+        budget.spend_work(1).unwrap();
+        let remaining = budget.remaining_work();
+        flag.store(true, Ordering::Relaxed);
+        assert!(matches!(
+            budget.spend_work(1),
+            Err(MacroEvalError::Limit("request cancelled"))
+        ));
+        assert_eq!(budget.remaining_work(), remaining);
     }
 }
 

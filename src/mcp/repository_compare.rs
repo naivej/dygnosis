@@ -1,7 +1,7 @@
 //! Read server-host Git objects and saved Working files for MCP comparison.
 //! Git bodies are acquired only when the shared snapshot engine requests them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -14,9 +14,10 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::engine::comparison::compare_snapshots::{
-    capture_git_snapshot, capture_working_snapshot, compare_captured_snapshots, tree_path,
-    CapturedSnapshot, GitSnapshotInput, ManifestEntry, SnapshotCapture, SnapshotCoordinates,
-    SnapshotFailure, SourceFact, MAX_SNAPSHOT_FILES, MAX_SNAPSHOT_SOURCE_BYTES,
+    capture_git_snapshot_controlled, capture_working_snapshot, compare_captured_snapshots,
+    tree_path, CapturedSnapshot, GitSnapshotInput, ManifestEntry, SnapshotCapture,
+    SnapshotCoordinates, SnapshotFailure, SourceFact, MAX_SNAPSHOT_FILES,
+    MAX_SNAPSHOT_SOURCE_BYTES,
 };
 use crate::engine::workspace::Workspace;
 
@@ -87,6 +88,9 @@ struct Acquisition<'a> {
     started: Instant,
     reads: usize,
     bytes: usize,
+    limits: super::source::SourceLimits,
+    cancellation: Option<Arc<AtomicBool>>,
+    checked_keys: BTreeSet<(String, String)>,
 }
 
 impl Acquisition<'_> {
@@ -297,7 +301,7 @@ impl Acquisition<'_> {
             let mut ready = None;
             for _ in 0..MAX_CAPTURE_ROUNDS {
                 self.check()?;
-                match capture_git_snapshot(&input) {
+                match capture_git_snapshot_controlled(&input, self.cancellation.clone()) {
                     SnapshotCapture::Ready(value) => {
                         ready = Some(*value);
                         break;
@@ -317,19 +321,23 @@ impl Acquisition<'_> {
                                 )
                             })?;
                             self.reads += 1;
-                            if self.reads > MAX_SOURCE_READS {
+                            if self.reads > MAX_SOURCE_READS.min(self.limits.max_files) {
                                 return Err(SnapshotFailure::new(
                                     "CAPTURE_LIMIT",
                                     "Repository source-read limit reached",
                                     Some(key),
                                 ));
                             }
-                            let fact = match self
-                                .git(&["cat-file", "blob", &entry.object_id], MAX_BLOB_BYTES)
-                            {
+                            let fact = match self.git(
+                                &["cat-file", "blob", &entry.object_id],
+                                MAX_BLOB_BYTES.min(self.limits.max_file_bytes),
+                            ) {
                                 Ok(bytes) => {
                                     self.bytes += bytes.len();
-                                    if self.bytes > MAX_SNAPSHOT_SOURCE_BYTES {
+                                    if self.bytes
+                                        > MAX_SNAPSHOT_SOURCE_BYTES
+                                            .min(self.limits.max_source_bytes)
+                                    {
                                         return Err(SnapshotFailure::new(
                                             "CAPTURE_LIMIT",
                                             "Repository source-byte limit reached",
@@ -389,7 +397,7 @@ impl Acquisition<'_> {
                     Some(root_file.to_owned()),
                 )
             })?;
-            if metadata.len() > MAX_BLOB_BYTES as u64 {
+            if metadata.len() > MAX_BLOB_BYTES.min(self.limits.max_file_bytes) as u64 {
                 return Err(SnapshotFailure::new(
                     "CAPTURE_LIMIT",
                     "Saved model root exceeds the source-byte limit",
@@ -405,12 +413,20 @@ impl Acquisition<'_> {
                     )
                 })?
                 .to_string();
-            let workspace = Workspace::with_search_paths(
+            let mut workspace = Workspace::with_search_paths(
                 search_paths
                     .iter()
                     .map(|path| self.repository.join(path))
                     .collect(),
             );
+            workspace.set_source_limits(
+                self.limits.max_file_bytes,
+                self.limits.max_source_bytes,
+                self.limits.max_files,
+            );
+            if let Some(cancellation) = &self.cancellation {
+                workspace.set_cancellation(Arc::clone(cancellation));
+            }
             match capture_working_snapshot(workspace, &root_uri, side, "saved_files") {
                 SnapshotCapture::Ready(value) => *value,
                 SnapshotCapture::Failure(failure) => return Err(failure),
@@ -425,6 +441,19 @@ impl Acquisition<'_> {
         };
         self.check()?;
         let mut captured = captured;
+        if matches!(selector, RepositorySelector::Working { .. }) {
+            self.bytes = self
+                .bytes
+                .saturating_add(captured.sources.values().map(String::len).sum::<usize>());
+            self.reads = self.reads.saturating_add(captured.sources.len());
+            if self.bytes > self.limits.max_source_bytes || self.reads > self.limits.max_files {
+                return Err(SnapshotFailure::new(
+                    "CAPTURE_LIMIT",
+                    "The two saved comparison inputs exceed the request source-byte or file limit",
+                    None,
+                ));
+            }
+        }
         captured.inputs["repository_uri"] = json!(repository_uri_for(&self.repository));
         captured.inputs["repository_path"] = json!(self.repository.to_string_lossy());
         captured.inputs["root_file"] = json!(root_file);
@@ -433,6 +462,36 @@ impl Acquisition<'_> {
             .iter()
             .map(|path| self.repository.join(path).to_string_lossy().into_owned())
             .collect::<Vec<_>>());
+        let guards = captured.input_guards();
+        self.checked_keys.extend(
+            guards
+                .iter()
+                .map(|guard| (side.to_owned(), guard.file.clone())),
+        );
+        self.checked_keys.extend(
+            captured
+                .sources
+                .keys()
+                .map(|file| (side.to_owned(), file.clone())),
+        );
+        if self.checked_keys.len() > self.limits.max_files {
+            return Err(SnapshotFailure::new("SOURCE_LIMIT", "The two comparison inputs exceed the request checked-file and lookup-candidate limit. No comparison facts were produced.", None));
+        }
+        let mut identity = captured.inputs.clone();
+        identity
+            .as_object_mut()
+            .expect("snapshot identity")
+            .remove("revision");
+        identity["guards"] = json!(guards);
+        identity["source_digests"] = json!(captured
+            .sources
+            .iter()
+            .map(|(file, text)| (file.clone(), super::source::sha256(text.as_bytes())))
+            .collect::<BTreeMap<_, _>>());
+        let revision =
+            super::source::sha256(serde_json::to_vec(&identity).expect("snapshot identity"));
+        captured.inputs["guards"] = json!(guards);
+        captured.rebind_revision(revision);
         Ok(captured)
     }
 }
@@ -564,9 +623,29 @@ fn decode_source(bytes: Vec<u8>) -> String {
     })
 }
 
+#[cfg(test)]
 pub(crate) fn compare_repository(
     params: RepositoryComparison,
     cancelled: &(dyn Fn() -> bool + Sync),
+) -> Value {
+    compare_repository_control(params, cancelled, None)
+}
+
+pub(crate) fn compare_repository_bounded(
+    params: RepositoryComparison,
+    control: &super::source::RequestControl,
+) -> Value {
+    compare_repository_control(
+        params,
+        &|| control.cancelled.load(Ordering::Relaxed),
+        Some(control),
+    )
+}
+
+fn compare_repository_control(
+    params: RepositoryComparison,
+    cancelled: &(dyn Fn() -> bool + Sync),
+    control: Option<&super::source::RequestControl>,
 ) -> Value {
     let identify = |side: &str, selector: &RepositorySelector| {
         let mut identity = json!({"input_id":side, "root_file":selector.root_file(),
@@ -589,7 +668,7 @@ pub(crate) fn compare_repository(
     };
     let mut inputs = json!({"schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION,
         "before":identify("before", &params.before), "after":identify("after", &params.after)});
-    let mut result = compare_repository_inner(params, cancelled, &mut inputs);
+    let mut result = compare_repository_inner(params, cancelled, &mut inputs, control);
     if result["state"] != "result" {
         if let Some(side) = result["side"].as_str() {
             inputs[side]["complete"] = json!(false);
@@ -603,6 +682,7 @@ fn compare_repository_inner(
     params: RepositoryComparison,
     cancelled: &(dyn Fn() -> bool + Sync),
     inputs: &mut Value,
+    control: Option<&super::source::RequestControl>,
 ) -> Value {
     let repository = match std::fs::canonicalize(&params.repository_path) {
         Ok(path) if path.is_dir() => path,
@@ -621,6 +701,16 @@ fn compare_repository_inner(
         started: Instant::now(),
         reads: 0,
         bytes: 0,
+        limits: control.map(|control| control.limits.clone()).unwrap_or(
+            super::source::SourceLimits {
+                max_file_bytes: MAX_BLOB_BYTES,
+                max_source_bytes: MAX_SNAPSHOT_SOURCE_BYTES,
+                max_files: MAX_SOURCE_READS,
+                max_roots: 2,
+            },
+        ),
+        cancellation: control.map(|control| Arc::clone(&control.cancelled)),
+        checked_keys: BTreeSet::new(),
     };
     let resolved_root = match acquisition.git(&["rev-parse", "--show-toplevel"], 32 * 1024) {
         Ok(bytes) => PathBuf::from(String::from_utf8_lossy(&bytes).trim()),
@@ -776,6 +866,68 @@ mod tests {
 
     const ROOT: &str = "var y;\nmodel;\n@#include \"equations.inc\"\nend;\n";
 
+    // Two sides must count their exact failed search candidates as well as
+    // loaded bodies. The same tree path belongs to each side's own namespace.
+    #[test]
+    fn historical_comparison_limits_combined_lookup_candidates() {
+        let repo = TestRepository::new();
+        repo.write("models/main.mod", ROOT);
+        repo.write("common/equations.inc", "y=1;\n");
+        let commit = repo.commit();
+        let params = || RepositoryComparison {
+            repository_path: repo.0.to_string_lossy().into_owned(),
+            before: git("models/main.mod", &commit),
+            after: git("models/main.mod", &commit),
+            search_paths: vec!["missing".into(), "common".into()],
+        };
+        let first =
+            compare_repository_bounded(params(), &super::super::source::RequestControl::default());
+        assert_eq!(first["state"], "result", "{first}");
+        let guards = first["inputs"]["before"]["guards"].as_array().unwrap();
+        assert!(guards
+            .iter()
+            .any(|guard| { guard["file"] == "models/equations.inc" && guard["exists"] == false }));
+        assert!(guards
+            .iter()
+            .any(|guard| { guard["file"] == "missing/equations.inc" && guard["exists"] == false }));
+        let mut control = super::super::source::RequestControl::default();
+        // Four source bodies still fit; the two guarded candidate sets do not.
+        control.limits.max_files = guards.len().max(4);
+        assert!(guards.len() * 2 > control.limits.max_files);
+        let limited = compare_repository_bounded(params(), &control);
+        assert_eq!(limited["state"], "failure", "{limited}");
+        assert_eq!(limited["code"], "SOURCE_LIMIT");
+        assert_eq!(limited["side"], "after");
+        assert!(limited.get("changed_equations").is_none());
+        assert!(limited.get("semantic").is_none());
+    }
+
+    // Historical capture refuses incomplete expansion before a snapshot exists,
+    // so the refusal itself must carry the real macro-budget receipt.
+    #[test]
+    fn historical_macro_work_stop_retains_side_coverage_receipt() {
+        let repo = TestRepository::new();
+        repo.write(
+            "main.mod",
+            "var y;\nmodel;\n@#for i in 1:1000\n@#for j in 1:1000\ny=0;\n@#endfor\n@#endfor\nend;\n",
+        );
+        let commit = repo.commit();
+        repo.write("main.mod", "var y;model;y=2;end;");
+        let result = repo.compare(git("main.mod", &commit), working("main.mod"), &[]);
+        assert_eq!(result["state"], "failure", "{result}");
+        assert_eq!(result["code"], "INCOMPLETE_INPUT");
+        let receipt = result["coverage"]["before"]["work_limits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|limit| limit["limit"] == "iteration work")
+            .unwrap();
+        assert_eq!(receipt["code"], "MACRO_LIMIT");
+        assert_eq!(receipt["ceiling"], 1_000_000);
+        assert_eq!(receipt["root"], "main.mod");
+        assert!(result.get("semantic").is_none());
+    }
+
     #[test]
     fn history_reads_each_commits_executed_include_and_mcp_source_identity() {
         let repo = TestRepository::new();
@@ -857,6 +1009,9 @@ mod tests {
             started: Instant::now(),
             reads: 0,
             bytes: 0,
+            limits: super::super::source::SourceLimits::default(),
+            cancellation: None,
+            checked_keys: BTreeSet::new(),
         };
         let selector = git("old.mod", "baseline");
         let pinned = acquisition.resolve(&selector).unwrap();
@@ -909,6 +1064,9 @@ mod tests {
             started: Instant::now(),
             reads: 0,
             bytes: 0,
+            limits: super::super::source::SourceLimits::default(),
+            cancellation: None,
+            checked_keys: BTreeSet::new(),
         };
         let before = acquisition
             .capture(&git("main.mod", &commit), Some(commit), "before", &[])

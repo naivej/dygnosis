@@ -60,11 +60,17 @@ pub fn check_w121(model: &Model) -> Vec<Diagnostic> {
     let mut seen: HashSet<(Name, u32)> = HashSet::new();
     let mut diagnostics = Vec::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if eq.is_local || eq.static_tag {
             continue;
         }
         let line = index.position(&model.source, eq.span.start).line;
         for r in model.ident_refs(eq) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if r.timing == 0 || !params.contains(&r.name) {
                 continue;
             }
@@ -100,13 +106,22 @@ pub fn check_w122(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut reported: HashSet<(Name, u32)> = HashSet::new();
     for cmd in &commands {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let mut latest: HashMap<Name, usize> = HashMap::new();
         for (i, row) in rows.iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if row.span.start < cmd.span.start {
                 latest.insert(row.name, i);
             }
         }
         for i in latest.values().copied() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let row = &rows[i];
             let name = model.name(row.name);
             if name == AUTO_PARAM || !used.contains(&row.name) {
@@ -187,10 +202,16 @@ fn run_commands(source: &str) -> Vec<CommandTok> {
 fn used_in_model(model: &Model) -> HashSet<Name> {
     let mut used = HashSet::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if eq.is_local {
             continue;
         }
         for r in model.ident_refs(eq) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             used.insert(r.name);
         }
     }
@@ -209,6 +230,9 @@ fn folded_param_assignments(model: &Model, param_names: &HashSet<Name>) -> Vec<F
 
     let mut rows = Vec::new();
     for (_, a) in indexed {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let value = a.expr.and_then(|id| eval_expr(model, id, &known));
         bind(&mut known, a.name, value);
         if param_names.contains(&a.name) {
@@ -324,6 +348,9 @@ fn eval_call(
 ) -> Option<f64> {
     let mut vals = Vec::with_capacity(args.len());
     for a in args {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         vals.push(eval_expr(model, *a, known)?);
     }
     let f = fname.to_ascii_lowercase();

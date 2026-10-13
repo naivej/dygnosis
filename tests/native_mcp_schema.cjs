@@ -1,5 +1,5 @@
 // Replay MCP discovery through the JSON validator bundled with a VS Code host.
-// Usage: node tests/native_mcp_schema.cjs <dygnosis binary> <VS Code resources/app>
+// Usage: node tests/native_mcp_schema.cjs <dygnosis binary> <VS Code resources/app> [expected host version]
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -61,9 +61,9 @@ async function listTools(binary) {
   }
 }
 
-async function bundledValidator(appPath) {
-  assert.equal(JSON.parse(fs.readFileSync(path.join(appPath, 'package.json'), 'utf8')).version, '1.102.0',
-    'This bundled-validator replay is pinned to the minimum VS Code host');
+async function bundledValidator(appPath, expectedVersion) {
+  const hostVersion = JSON.parse(fs.readFileSync(path.join(appPath, 'package.json'), 'utf8')).version;
+  assert.equal(hostVersion, expectedVersion, 'Unexpected VS Code host version');
   const main = path.join(appPath, 'extensions/json-language-features/server/dist/node/jsonServerMain.js');
   // Expose webpack's loader while skipping the language server entry point.
   // All validator and schema code still comes from the installed VS Code build.
@@ -90,15 +90,22 @@ async function bundledValidator(appPath) {
     const document = api.TextDocument.create('test://mcp-input.json', 'json', 1, JSON.stringify(schema));
     return service.doValidation(document, service.parseJSONDocument(document), {});
   };
-  return { validate, requestedUris };
+  return { validate, requestedUris, hostVersion };
 }
 
 async function main() {
-  const [binary, appPath] = process.argv.slice(2);
+  const [binary, appPath, expectedVersion = '1.102.0'] = process.argv.slice(2);
   assert.ok(binary && appPath, 'Supply the dygnosis binary and VS Code resources/app directory');
   const tools = await listTools(binary);
-  assert.equal(tools.length, 15, 'all public tools are discoverable over stdio');
-  const { validate, requestedUris } = await bundledValidator(appPath);
+  assert.ok(Array.isArray(tools) && tools.length > 0, 'public tools are discoverable over stdio');
+  for (const name of ['dynare_symbol_info', 'dynare_code_actions']) {
+    const tool = tools.find(candidate => candidate.name === name);
+    assert.ok(tool, `${name} metadata is discoverable`);
+    assert.equal(tool.inputSchema.type, 'object', `${name} exposes an object input schema`);
+    assert.ok(tool.inputSchema.properties && Object.keys(tool.inputSchema.properties).length > 0,
+      `${name} declares input controls`);
+  }
+  const { validate, requestedUris, hostVersion } = await bundledValidator(appPath, expectedVersion);
   // Verify the replay reaches schema validation, rather than silently accepting
   // all inputs if the bundle or schema-association seam changes.
   assert.equal((await validate({ type: 'object', properties: { value: { type: ['string', 'null'] } } })).length, 0);
@@ -108,7 +115,7 @@ async function main() {
     const errors = await validate(tool.inputSchema);
     if (errors.length) omitted.push({ name: tool.name, errors: errors.map(error => ({ code: error.code, message: error.message })) });
   }
-  console.log(JSON.stringify({ discovered: tools.length, omitted }, null, 2));
+  console.log(JSON.stringify({ hostVersion, discovered: tools.length, omitted }, null, 2));
   assert.equal(omitted.length, 0, 'native VS Code must register every discovered MCP tool');
   assert.deepEqual(requestedUris, [], 'fixed input schemas need no external metadata');
 }

@@ -29,7 +29,13 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
 pub fn check_mcp(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for block in &model.heterogeneous_models {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for eq in &block.equations {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if eq.complementarity.is_some() {
                 continue;
             }
@@ -60,6 +66,9 @@ pub fn check_second_dimension(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let mut first = true;
     for dim in &model.heterogeneity_dimensions {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !seen.insert(dim.name) {
             continue;
         }
@@ -94,6 +103,9 @@ pub fn check_square(model: &Model) -> Vec<Diagnostic> {
     let mut seen = HashSet::new();
     let mut endogenous: Vec<(String, Side)> = Vec::new();
     for decl in model.final_decls(&["var"]) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(dim) = model.final_heterogeneity(decl) else {
             continue;
         };
@@ -115,6 +127,9 @@ pub fn check_square(model: &Model) -> Vec<Diagnostic> {
     }
     let mut equations: Vec<(String, Side)> = Vec::new();
     for block in &model.heterogeneous_models {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let name = model.name(block.dimension).to_string();
         let n = block
             .equations
@@ -135,12 +150,18 @@ pub fn check_square(model: &Model) -> Vec<Diagnostic> {
     }
     let mut names: Vec<String> = endogenous.iter().map(|(name, _)| name.clone()).collect();
     for (name, _) in &equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !names.iter().any(|have| have == name) {
             names.push(name.clone());
         }
     }
     let mut out = Vec::new();
     for name in names {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let n_endo = endogenous
             .iter()
             .find(|(key, _)| key == &name)
@@ -190,6 +211,9 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
 fn unknown_and_repeated_dimensions(model: &Model, out: &mut Vec<Diagnostic>) {
     let mut seen = HashSet::new();
     for dim in &model.heterogeneity_dimensions {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !seen.insert(dim.name) {
             out.push(error(
                 dim.name_span,
@@ -225,6 +249,9 @@ fn unknown_and_repeated_dimensions(model: &Model, out: &mut Vec<Diagnostic>) {
         }
     }
     for block in &model.heterogeneous_models {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !known.contains(&block.dimension) {
             out.push(error(
                 block.dimension_span,
@@ -238,6 +265,9 @@ fn unknown_and_repeated_dimensions(model: &Model, out: &mut Vec<Diagnostic>) {
         }
     }
     for shock in &model.shock_blocks {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if shock.kind != ShockBlockKind::Heterogeneous {
             continue;
         }
@@ -261,12 +291,18 @@ fn unknown_and_repeated_dimensions(model: &Model, out: &mut Vec<Diagnostic>) {
 
 fn heterogeneous_shock_row_unknown(model: &Model, block: &ShockBlock) -> bool {
     for stmt in &block.stochastic {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let names: Vec<Name> = match &stmt.kind {
             ShockKind::Var(name) | ShockKind::Stderr(name) => vec![*name],
             ShockKind::Cov(names) | ShockKind::Skew(names) => names.clone(),
             ShockKind::Corr { a, b } => vec![*a, *b],
         };
         for name in names {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let declared = model
                 .endogenous
                 .iter()
@@ -296,6 +332,9 @@ fn forbidden_symbols(model: &Model, out: &mut Vec<Diagnostic>) {
         return;
     }
     for constraint in &model.occbin_constraints {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for piece in [
             constraint.bind.as_ref(),
             constraint.relax.as_ref(),
@@ -320,6 +359,9 @@ fn forbidden_symbols(model: &Model, out: &mut Vec<Diagnostic>) {
         }
     }
     for assignment in &model.epilogue {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some(expr) = assignment.expr
             && let Some((span, name)) = first_het_ident(model, expr)
         {
@@ -335,6 +377,9 @@ fn forbidden_symbols(model: &Model, out: &mut Vec<Diagnostic>) {
     }
     let outside = outside_exprs(model);
     for expr in outside {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some((span, name)) = first_het_ident(model, expr) {
             out.push(error(
                 span,
@@ -362,6 +407,9 @@ fn outside_exprs(model: &Model) -> Vec<ExprId> {
         }
     }
     for eq in &model.steady_state_equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         // Output names are checked by the steady-state target action, not by
         // the ordinary-expression heterogeneous-variable rule.
         if let Some(expr) = eq.rhs_expr {
@@ -373,7 +421,13 @@ fn outside_exprs(model: &Model) -> Vec<ExprId> {
 
 fn sum_operators(model: &Model, out: &mut Vec<Diagnostic>) {
     for block in &model.heterogeneous_models {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for eq in &block.equations {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if let Some(span) = first_sum_call(model, eq) {
                 out.push(error(
                     span,
@@ -385,6 +439,9 @@ fn sum_operators(model: &Model, out: &mut Vec<Diagnostic>) {
         }
     }
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some(diag) = aggregate_sum(model, eq) {
             out.push(diag);
             return;
@@ -425,6 +482,9 @@ fn walk_sum_span(model: &Model, id: ExprId, found: &mut Option<Span>) {
         }
         ExprKind::Call { args, .. } => {
             for arg in args {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 walk_sum_span(model, *arg, found);
             }
         }
@@ -495,6 +555,9 @@ fn walk_aggregate_sum(model: &Model, id: ExprId, found: &mut Option<Diagnostic>)
         }
         ExprKind::Call { args, .. } => {
             for arg in args {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 walk_aggregate_sum(model, *arg, found);
             }
         }
@@ -508,10 +571,16 @@ fn walk_aggregate_sum(model: &Model, id: ExprId, found: &mut Option<Diagnostic>)
 
 fn shock_types(model: &Model, out: &mut Vec<Diagnostic>) {
     for block in &model.shock_blocks {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if block.kind != ShockBlockKind::Heterogeneous {
             continue;
         }
         for stmt in &block.stochastic {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             match &stmt.kind {
                 ShockKind::Var(name) | ShockKind::Stderr(name)
                     if !is_het_exo_name(model, *name) =>
@@ -580,8 +649,14 @@ const COVAR_TAIL: &str =
 fn equation_timing(model: &Model, out: &mut Vec<Diagnostic>) {
     let lines = LineIndex::new(&model.source);
     for block in &model.heterogeneous_models {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let mut number = 0_u32;
         for eq in &block.equations {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if eq.is_local {
                 continue;
             }
@@ -611,6 +686,9 @@ fn equation_timing_error(
         collect_idents(model, expr, &mut idents);
     }
     for (name, timing, span) in &idents {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if het_exo_in(model, *name, dim) && *timing < 0 {
             return Some(error(
                 *span,
@@ -623,6 +701,9 @@ fn equation_timing_error(
         }
     }
     for (name, timing, span) in &idents {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if het_exo_in(model, *name, dim) && *timing > 0 {
             return Some(error(
                 *span,
@@ -636,6 +717,9 @@ fn equation_timing_error(
         }
     }
     for (name, timing, span) in &idents {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if het_endo_in(model, *name, dim) && *timing < -1 {
             return Some(error(
                 *span,
@@ -648,6 +732,9 @@ fn equation_timing_error(
         }
     }
     for (name, timing, span) in &idents {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if het_endo_in(model, *name, dim) && *timing > 1 {
             return Some(error(
                 *span,
@@ -715,6 +802,9 @@ fn first_unsupported(model: &Model) -> Option<(Span, String)> {
         ),
     ];
     for (span, message) in commands {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some(span) = *span {
             return Some((span, (*message).to_string()));
         }
@@ -800,6 +890,9 @@ fn keyword_span(source: &str, span: Span) -> Span {
     let mut end = start;
     let bytes = source.as_bytes();
     while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         end += 1;
     }
     Span {
@@ -856,6 +949,9 @@ fn collect_idents(model: &Model, id: ExprId, out: &mut Vec<(Name, i32, Span)>) {
         }
         ExprKind::Call { args, .. } => {
             for arg in args {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 collect_idents(model, *arg, out);
             }
         }
@@ -885,6 +981,9 @@ fn nonseparable(model: &Model, id: ExprId, dim: Name) -> Option<(Span, String)> 
         }
         ExprKind::Call { args, .. } => {
             for arg in args {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 if let Some(found) = nonseparable(model, *arg, dim) {
                     return Some(found);
                 }

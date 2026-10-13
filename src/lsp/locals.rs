@@ -8,8 +8,6 @@ struct LocalView {
     root: Url,
     model: Model,
     facts: ModelLocals,
-    revision: String,
-    complete: bool,
     standalone: bool,
 }
 
@@ -50,28 +48,18 @@ fn views(inner: &mut Inner, uri: &Url) -> Vec<LocalView> {
     roots
         .into_iter()
         .filter_map(|root| {
-            let revision = inner.root_revision(&root)?;
+            inner.root_revision(&root)?;
             let model = if standalone {
                 inner.workspace.get_model(root.as_str())?
             } else {
                 inner.workspace.get_effective_model(root.as_str())?
             }
             .clone();
-            let complete = if standalone {
-                crate::engine::workspace::model_map::parser_complete(&model)
-            } else {
-                let report = inner.workspace.expand_report(root.as_str())?;
-                report.complete
-                    && report.model_map.complete
-                    && inner.workspace.includes_complete(root.as_str())
-            };
             let facts = ModelLocals::collect(&model);
             Some(LocalView {
                 root,
                 model,
                 facts,
-                revision,
-                complete,
                 standalone,
             })
         })
@@ -385,151 +373,6 @@ pub(super) fn highlights(
         }
     }
     found.then_some((!result.is_empty()).then_some(result))
-}
-
-fn editable(inner: &mut Inner, view: &LocalView, span: Span, name: &str) -> Option<(Url, Range)> {
-    let (file, span) = written(inner, view, span)?;
-    let source = inner.workspace.get_source(&file)?;
-    if source.get(span.start as usize..span.end as usize) != Some(name)
-        || !tokenize(source)
-            .iter()
-            .any(|token| token.kind == TokenKind::Ident && token.span == span)
-    {
-        return None;
-    }
-    let range = span_range(&LineIndex::new(source), source, span);
-    Some((naming_edit_url(inner, &view.root, &file)?, range))
-}
-
-fn owns_execution(view: &LocalView, binding: Binding, order: usize) -> bool {
-    if binding
-        .declaration
-        .is_some_and(|id| view.facts.declarations[id].parse_order == order + 1)
-    {
-        return true;
-    }
-    if binding.definition.is_some_and(|id| {
-        let definition = &view.facts.definitions[id];
-        let equation = &view.model.written_equations[definition.equation_index].equation;
-        equation.active_tokens.contains(&order)
-            && view.model.expanded_tokens[order].span == definition.target_span
-    }) {
-        return true;
-    }
-    view.facts.uses.iter().any(|usage| {
-        usage.parse_order == order
-            && usage.name == binding.name
-            && usage.dimension == binding.dimension
-            && usage.definition == binding.definition
-            && usage.declaration == binding.declaration
-    })
-}
-
-pub(super) fn rename(
-    inner: &mut Inner,
-    pos: &TextDocumentPositionParams,
-    new_name: Option<&str>,
-) -> Option<std::result::Result<WorkspaceEdit, &'static str>> {
-    let text = inner.document(&pos.text_document.uri)?.text.clone();
-    let byte = LineIndex::new(&text).offset_utf16(&text, span_pos(pos.position));
-    let views = views(inner, &pos.text_document.uri);
-    let selections: Vec<_> = views
-        .iter()
-        .map(|view| selected(inner, view, &pos.text_document.uri, byte))
-        .collect();
-    if selections.iter().all(Vec::is_empty) {
-        return None;
-    }
-    if views.len() != 1 || selections[0].len() != 1 {
-        return Some(Err(rename::BINDING));
-    }
-    if !views[0].complete {
-        return Some(Err(rename::INCOMPLETE));
-    }
-    let view = &views[0];
-    let binding = selections[0][0];
-    let old_name = view.model.name(binding.name);
-    let new_name = new_name.unwrap_or(old_name);
-    if !crate::engine::analysis::model_locals::is_local_name(new_name) {
-        return Some(Err(rename::IDENTIFIER));
-    }
-    if new_name != old_name
-        && (view
-            .model
-            .symbol_type_events
-            .iter()
-            .any(|event| view.model.name(event.name) == new_name)
-            || view.facts.definitions.iter().any(|definition| {
-                view.model.name(definition.name) == new_name
-                    && definition.dimension == binding.dimension
-            }))
-    {
-        return Some(Err(rename::COLLISION));
-    }
-    if view
-        .facts
-        .declarations
-        .iter()
-        .filter(|decl| decl.name == binding.name)
-        .count()
-        > 1
-        || binding.declaration.is_some()
-            && view.facts.definitions.iter().any(|definition| {
-                definition.name == binding.name && definition.dimension != binding.dimension
-            })
-    {
-        return Some(Err(rename::BINDING));
-    }
-    let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
-    for (span, _) in sites(view, binding, true) {
-        let Some((uri, range)) = editable(inner, view, span, old_name) else {
-            return Some(Err(rename::MAPPING));
-        };
-        // One literal macro site can supply several different bindings. Every
-        // execution changed by this written edit must belong to this rename.
-        let Some(edit_byte) = inner
-            .workspace
-            .get_source(uri.as_str())
-            .map(|source| LineIndex::new(source).offset_utf16(source, span_pos(range.start)))
-        else {
-            return Some(Err(rename::SOURCE));
-        };
-        if selected(inner, view, &uri, edit_byte)
-            .iter()
-            .any(|other| *other != binding)
-        {
-            return Some(Err(rename::BINDING));
-        }
-        for (order, token) in view.model.expanded_tokens.iter().enumerate() {
-            if location(inner, view, token.span)
-                .is_some_and(|target| target.uri == uri && target.range == range)
-                && !owns_execution(view, binding, order)
-            {
-                return Some(Err(rename::BINDING));
-            }
-        }
-        let owners = inner.known_owner_roots(&uri);
-        if owners.iter().any(|owner| owner != &view.root) {
-            return Some(Err(rename::BINDING));
-        }
-        let edit = TextEdit {
-            range,
-            new_text: new_name.to_string(),
-        };
-        let edits = changes.entry(uri).or_default();
-        if !edits.contains(&edit) {
-            edits.push(edit);
-        }
-    }
-    if changes.is_empty()
-        || inner.root_revision(&view.root).as_ref() != Some(&view.revision)
-        || !inner
-            .workspace
-            .input_snapshot_is_current(view.root.as_str())
-    {
-        return Some(Err(rename::STALE));
-    }
-    Some(Ok(versioned_workspace_edit(inner, changes)))
 }
 
 /// Map the cursor to every parser execution at that written site.

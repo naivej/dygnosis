@@ -4,7 +4,7 @@ $electronRunAsNode = $env:ELECTRON_RUN_AS_NODE
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 $extensionRoot = Split-Path -Parent $PSScriptRoot
 $scope = $env:DYGNOSIS_HOST_SCOPE
-if ($scope -and $scope -notin @('all', 'semantic', 'folding', 'presentation', 'rename')) { throw 'DYGNOSIS_HOST_SCOPE must be all, semantic, folding, presentation, or rename.' }
+if ($scope -and $scope -notin @('all', 'mcp', 'semantic', 'folding', 'presentation', 'rename')) { throw 'DYGNOSIS_HOST_SCOPE must be all, mcp, semantic, folding, presentation, or rename.' }
 $testRoot = Join-Path $extensionRoot '.test-data'
 $runId = [Guid]::NewGuid().ToString()
 $hostRoot = Join-Path $testRoot $runId

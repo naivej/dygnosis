@@ -16,6 +16,9 @@ const STATEMENTS: &str = "model_remove/model_replace/exclude_eqs/include_eqs";
 pub fn check_d_surgery(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for surgery in &model.equation_surgery {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         // 7.1 refuses a repeated key while parsing the tag list, so the statement never
         // gets as far as matching equations.
         if !surgery.tag_twice.is_empty() {
@@ -64,6 +67,9 @@ pub fn check_w212(model: &Model) -> Vec<Diagnostic> {
 /// A key listed twice inside one bracketed set — **E256**'s official string.
 fn check_tag_twice(surgery: &EquationSurgery, out: &mut Vec<Diagnostic>) {
     for (key, span) in &surgery.tag_twice {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         push(
             out,
             *span,
@@ -101,6 +107,9 @@ fn check_not_found(surgery: &EquationSurgery, out: &mut Vec<Diagnostic>) {
 fn check_excluded_twice(surgery: &EquationSurgery, out: &mut Vec<Diagnostic>) {
     let mut seen: Vec<&str> = Vec::new();
     for row in &surgery.removed {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(name) = row.endogenous.as_deref() else {
             continue;
         };
@@ -123,6 +132,9 @@ fn check_excluded_twice(surgery: &EquationSurgery, out: &mut Vec<Diagnostic>) {
 /// its left side. `model_replace` does not gate on this; `model_remove` does.
 fn check_no_single_variable(surgery: &EquationSurgery, out: &mut Vec<Diagnostic>) {
     for row in &surgery.removed {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if row.endogenous.is_none() {
             push(
                 out,

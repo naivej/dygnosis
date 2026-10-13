@@ -16,7 +16,13 @@ pub(crate) fn exogenous_leads(model: &Model) -> Vec<Diagnostic> {
     }
     let mut out = Vec::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for ident in model.ident_refs(eq) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if ident.timing <= 0 || !ordinary_aggregate_varexo(model, ident.name) {
                 continue;
             }

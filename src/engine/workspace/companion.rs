@@ -9,7 +9,9 @@ use crate::engine::language::lexer::{tokenize, Token, TokenKind};
 use crate::engine::language::macro_expand::expand_macros;
 use crate::engine::language::model::Model;
 use crate::engine::language::span::Span;
-use crate::engine::workspace::include_resolver::{normalize_separators, path_key};
+use crate::engine::workspace::include_resolver::{
+    normalize_separators, path_key, supplied_path_key,
+};
 
 const RANK_OPTION: u8 = 3;
 const RANK_CONVENTION: u8 = 2;
@@ -17,6 +19,12 @@ const RANK_LEFTOVER: u8 = 1;
 
 const DATAFILE_SUFFIXES: &[&str] = &[".m", ".mat", ".csv", ".xls", ".xlsx"];
 const M_SUFFIXES: &[&str] = &[".m"];
+
+#[derive(Clone, Copy)]
+pub(crate) enum CompanionIdentity {
+    Supplied,
+    Host,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompanionKind {
@@ -122,6 +130,7 @@ pub(crate) fn harvest(
     source: &str,
     model: &Model,
     convention: &[(CompanionKind, String)],
+    identity: CompanionIdentity,
     mut resolve: impl FnMut(&str, &[&str]) -> Option<PathBuf>,
 ) -> Vec<CompanionRecord> {
     let raw = tokenize(source);
@@ -170,7 +179,7 @@ pub(crate) fn harvest(
         }
     }
 
-    merge(pending)
+    merge(pending, identity)
 }
 
 fn harvest_command_options(
@@ -577,10 +586,10 @@ fn strip_quotes(s: &str) -> &str {
     }
 }
 
-fn merge(pending: Vec<Pending>) -> Vec<CompanionRecord> {
+fn merge(pending: Vec<Pending>, identity: CompanionIdentity) -> Vec<CompanionRecord> {
     let mut map: HashMap<String, Pending> = HashMap::new();
     for p in pending {
-        let key = record_key(&p);
+        let key = record_key(&p, identity);
         match map.get(&key) {
             Some(old) if old.rank >= p.rank => {}
             _ => {
@@ -607,15 +616,26 @@ fn merge(pending: Vec<Pending>) -> Vec<CompanionRecord> {
     out
 }
 
-fn record_key(p: &Pending) -> String {
+fn record_key(p: &Pending, identity: CompanionIdentity) -> String {
     match &p.path {
-        Some(path) => format!("path:{}", path_key(path)),
+        Some(path) => format!(
+            "path:{}",
+            match identity {
+                CompanionIdentity::Supplied => supplied_path_key(&path.to_string_lossy()),
+                CompanionIdentity::Host => path_key(path),
+            }
+        ),
         None => {
-            let n = normalize_separators(&p.name);
-            let n = if cfg!(windows) {
-                n.to_ascii_lowercase()
-            } else {
-                n
+            let n = match identity {
+                CompanionIdentity::Supplied => supplied_path_key(&p.name),
+                CompanionIdentity::Host => {
+                    let n = normalize_separators(&p.name);
+                    if cfg!(windows) {
+                        n.to_ascii_lowercase()
+                    } else {
+                        n
+                    }
+                }
             };
             format!("unresolved:{n}")
         }

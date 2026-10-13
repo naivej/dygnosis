@@ -62,6 +62,9 @@ pub fn check_estimation(model: &Model) -> Vec<Diagnostic> {
         push(&mut out, span, "E226", E226_MSG);
     }
     for stmt in &model.estimation_statements {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if stmt.has_datafile {
             continue;
         }
@@ -117,6 +120,9 @@ pub fn check_estimation(model: &Model) -> Vec<Diagnostic> {
             .collect();
         let mut seen = HashSet::new();
         for r in model.exprs.walk_idents(expr) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if estimated.contains(&r.name) && seen.insert(r.name) {
                 let name = model.name(r.name);
                 out.push(Diagnostic::new(
@@ -157,10 +163,16 @@ fn dsge_prior_weight_span(model: &Model) -> Option<Span> {
 fn e226_span(model: &Model) -> Option<Span> {
     let stmts = &model.estimation_dsge_var_stmts;
     for (i, a) in stmts.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if a.estimated.is_none() {
             continue;
         }
         for (j, b) in stmts.iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if i != j && b.calibrated.is_some() {
                 return b.calibrated.or(a.estimated);
             }

@@ -78,6 +78,9 @@ pub fn check_clash(model: &Model) -> Vec<Diagnostic> {
         || model.pfee_solver_span.is_none();
     if learnt_gate {
         for block in &model.shock_blocks {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if !matches!(
                 block.kind,
                 ShockBlockKind::LearntIn | ShockBlockKind::Multiplicative
@@ -93,6 +96,9 @@ pub fn check_clash(model: &Model) -> Vec<Diagnostic> {
             );
         }
         for block in &model.endval_instructions {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if nondefault_learnt_in(block.learnt_in.as_ref()) {
                 push(
                     &mut out,
@@ -103,6 +109,9 @@ pub fn check_clash(model: &Model) -> Vec<Diagnostic> {
             }
         }
         for block in &model.controlled_paths {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if nondefault_learnt_in(block.options.learnt_in.as_ref()) {
                 push(
                     &mut out,
@@ -115,6 +124,9 @@ pub fn check_clash(model: &Model) -> Vec<Diagnostic> {
             }
         }
         for block in &model.shock_paths {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if nondefault_learnt_in(block.options.learnt_in.as_ref()) {
                 push(
                     &mut out,
@@ -230,6 +242,9 @@ fn check_default_eq_tag(model: &Model) -> Vec<Diagnostic> {
     let endo: HashSet<Name> = model.endogenous.iter().map(|d| d.name).collect();
     let mut used: HashSet<String> = HashSet::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if eq.is_local {
             continue;
         }
@@ -242,6 +257,9 @@ fn check_default_eq_tag(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let mut index = 0usize;
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if eq.is_local {
             continue;
         }

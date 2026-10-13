@@ -41,6 +41,7 @@ use crate::engine::language::parser::parse;
 use crate::engine::language::span::{LineIndex, Span};
 use crate::engine::workspace::Workspace;
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 pub use crate::engine::diagnostics::check_writing::{WritingContext, WritingRows};
@@ -171,6 +172,13 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     diagnostics
 }
 
+pub(crate) fn analyze_controlled(
+    model: &Model,
+    cancelled: &Arc<AtomicBool>,
+) -> Result<Vec<Diagnostic>, crate::engine::control::Cancelled> {
+    crate::engine::control::run(Some(Arc::clone(cancelled)), || analyze(model))
+}
+
 fn dedupe_macro_diagnostics(diagnostics: impl IntoIterator<Item = Diagnostic>) -> Vec<Diagnostic> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
@@ -220,9 +228,15 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
             )];
         }
     }
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     let macro_syntax = crate::engine::diagnostics::check_e060::check_e062(model);
     if !macro_syntax.is_empty() {
         return macro_syntax;
+    }
+    if crate::engine::control::cancelled() {
+        return Vec::new();
     }
     let parse_diags = crate::engine::diagnostics::check_parse::check_parse(model);
     if !parse_diags.is_empty() {
@@ -233,13 +247,22 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
         }
         return parse_diags;
     }
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     let pac_parse_diags = crate::engine::diagnostics::check_d_pac::check_parse(model);
     if !pac_parse_diags.is_empty() {
         return pac_parse_diags;
     }
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     let hank_parse_diags = crate::engine::diagnostics::check_d_hank::check_parse(model);
     if !hank_parse_diags.is_empty() {
         return hank_parse_diags;
+    }
+    if crate::engine::control::cancelled() {
+        return Vec::new();
     }
     let shape_diags = crate::engine::diagnostics::diag_shape::check_shape(model);
     let shape_syntax: Vec<Diagnostic> = shape_diags
@@ -249,6 +272,9 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
         .collect();
     if !shape_syntax.is_empty() {
         return shape_syntax;
+    }
+    if crate::engine::control::cancelled() {
+        return Vec::new();
     }
     let ms_diags = crate::engine::diagnostics::check_d_ms::check_d_ms(model);
     let recorded_syntax: Vec<Diagnostic> = ms_diags
@@ -281,6 +307,9 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     }) {
         return ms_diags;
     }
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     let shock_diags = crate::engine::diagnostics::check_d_shocks::check_d_shocks(model);
     let shock_parse_diags: Vec<Diagnostic> = shock_diags
         .iter()
@@ -298,13 +327,37 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
             model,
         ));
     }
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     let equation_parse = crate::engine::diagnostics::check_e020::check_e020(model);
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     let declaration_parse = crate::engine::diagnostics::check_e030::check_e030(model);
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     let occbin_diags = crate::engine::diagnostics::check_occbin::check_occbin(model);
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     let observed_diags = crate::engine::diagnostics::check_w090::check_w090(model);
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     let block_diags = crate::engine::diagnostics::check_d_block::check_d_block(model);
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     let steady_state_diags = crate::engine::diagnostics::check_w130::check_w130(model);
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     let open_diags = crate::engine::diagnostics::check_d_open::check_d_open(model);
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     let surgery_parse = crate::engine::diagnostics::check_d_surgery::check_d_surgery(model);
     // The equation/declaration/surgery families are parsed before checkPass.
     // Mixed families contribute only the named parse refusals below. In
@@ -360,7 +413,13 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
             )
         });
     let mut out = Vec::new();
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     out.extend(crate::engine::diagnostics::e010::check_e010(model));
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     out.extend(crate::engine::diagnostics::check_d_hank::check_square(
         model,
     ));
@@ -368,23 +427,50 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     out.extend(declaration_parse);
     out.extend(occbin_diags);
     out.extend(clashes.iter().cloned());
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     out.extend(crate::engine::diagnostics::check_estimation::check_estimation(model));
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     out.extend(crate::engine::diagnostics::check_context::check_context(
         model,
     ));
     out.extend(shape_diags);
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     out.extend(crate::engine::diagnostics::check_w010::check_w010_family(
         model,
     ));
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     out.extend(crate::engine::diagnostics::check_e060::check_e060_family_on_model(model));
     out.extend(observed_diags);
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     out.extend(crate::engine::diagnostics::check_estimated_params::check_estimated_params(model));
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     out.extend(crate::engine::diagnostics::check_w100::check_w100(model));
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     out.extend(crate::engine::diagnostics::check_w110::check_w110(model));
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     out.extend(crate::engine::diagnostics::check_w120::check_w120_family(
         model,
     ));
     out.extend(steady_state_diags);
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     out.extend(crate::engine::diagnostics::check_symbol_list::check_symbol_list(model));
     // Captured replacement uses also retain unknown names that a later
     // declaration hides from the equation pass. Keep its richer message when
@@ -437,9 +523,15 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     if !parse_refused {
         out.extend(crate::engine::diagnostics::check_d_pac::check_check(model));
     }
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     let hank_mcp = crate::engine::diagnostics::check_d_hank::check_mcp(model);
     let hank_parse_stopped = parse_refused || hank_mcp.iter().any(|diag| diag.code == "E479");
     out.extend(hank_mcp);
+    if crate::engine::control::cancelled() {
+        return Vec::new();
+    }
     out.extend(crate::engine::diagnostics::check_d_hank::check_second_dimension(model));
     if !hank_parse_stopped {
         out.extend(crate::engine::diagnostics::check_d_hank::check_check(model));
@@ -574,6 +666,38 @@ pub(crate) fn check_in_workspace_with_origins(ws: &mut Workspace, abs_path: &str
             diagnostics: analyze(&model),
             origins: Vec::new(),
         }
+    })
+}
+
+pub(crate) fn check_in_workspace_with_origins_controlled(
+    ws: &mut Workspace,
+    abs_path: &str,
+    cancelled: &Arc<AtomicBool>,
+) -> Result<DiagnosticSet, crate::engine::control::Cancelled> {
+    ws.set_cancellation(Arc::clone(cancelled));
+    crate::engine::control::run(Some(Arc::clone(cancelled)), || {
+        // No fallback parser should run after a stopped acquisition.
+        try_workspace_check(ws, abs_path).unwrap_or_else(|| {
+            if crate::engine::control::cancelled() {
+                return DiagnosticSet {
+                    root: root_key(ws, abs_path),
+                    diagnostics: Vec::new(),
+                    origins: Vec::new(),
+                };
+            }
+            let text = ws.get_source(abs_path).unwrap_or("").to_string();
+            let model = crate::engine::language::parser::parse_with_budget(
+                &text,
+                &mut crate::engine::language::macro_expr::MacroBudget::with_cancellation(Some(
+                    Arc::clone(cancelled),
+                )),
+            );
+            DiagnosticSet {
+                root: root_key(ws, abs_path),
+                diagnostics: analyze(&model),
+                origins: Vec::new(),
+            }
+        })
     })
 }
 
@@ -881,5 +1005,30 @@ fn root_key(ws: &Workspace, path: &str) -> String {
         path.to_string()
     } else {
         crate::engine::workspace::include_resolver::normalize_uri(path)
+    }
+}
+
+#[cfg(test)]
+mod request_cancellation_tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn cancellation_exits_a_name_family_and_restores_the_default_scope() {
+        // Guards checks existing only around analysis, and a cancelled request
+        // flag leaking into a later editor analysis on the same worker thread.
+        let text = format!("var y;model;\n{}end;", "y=unknown;\n".repeat(1000));
+        let model = parse(&text);
+        let flag = Arc::new(AtomicBool::new(false));
+        crate::engine::control::cancel_after(&flag, 100);
+        let result =
+            crate::engine::control::run(Some(flag.clone()), || check_e020::check_e020(&model));
+        assert_eq!(result, Err(crate::engine::control::Cancelled));
+        assert!(flag.load(Ordering::Relaxed));
+        assert_eq!(
+            analyze_controlled(&model, &flag),
+            Err(crate::engine::control::Cancelled)
+        );
+        assert!(analyze(&model).iter().any(|row| row.code == "E020"));
     }
 }

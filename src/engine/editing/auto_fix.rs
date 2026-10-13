@@ -4,8 +4,13 @@ use crate::engine::diagnostics::check_parse::check_parse;
 use crate::engine::diagnostics::{analyze, Diagnostic, TextEdit};
 use crate::engine::language::lexer::{tokenize, TokenKind};
 use crate::engine::language::parser::parse;
+use std::sync::{atomic::AtomicBool, Arc};
 
 const PASS2_CODES: &[&str] = &["E020", "E030", "W013", "W054", "W055", "W056", "W057"];
+
+pub(crate) fn eligible_code(code: &str) -> bool {
+    code == "E001" || PASS2_CODES.contains(&code)
+}
 
 /// Apply `edits` to `text`. Columns are Unicode scalars (`chars().count()`).
 ///
@@ -22,6 +27,9 @@ pub fn apply_fix(text: &str, edits: &[TextEdit]) -> String {
 
     let mut applied: Vec<&TextEdit> = Vec::new();
     for edit in sorted {
+        if crate::engine::control::cancelled() {
+            return text.to_owned();
+        }
         if applied.iter().any(|prior| ranges_overlap(edit, prior)) {
             continue;
         }
@@ -60,27 +68,78 @@ pub fn auto_fix(text: &str) -> String {
 }
 
 pub(crate) fn auto_fix_outcome(text: &str) -> Result<String, &'static str> {
+    auto_fix_worker(text, None).map_err(|failure| match failure {
+        AutoFixFailure::Refused(message) => message,
+        AutoFixFailure::Cancelled => "The request was cancelled",
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AutoFixFailure {
+    Cancelled,
+    Refused(&'static str),
+}
+
+pub(crate) fn auto_fix_outcome_controlled(
+    text: &str,
+    cancelled: &Arc<AtomicBool>,
+) -> Result<String, AutoFixFailure> {
+    crate::engine::control::run(Some(Arc::clone(cancelled)), || {
+        auto_fix_worker(text, Some(cancelled))
+    })
+    .map_err(|_| AutoFixFailure::Cancelled)?
+}
+
+fn auto_fix_worker(
+    text: &str,
+    cancelled: Option<&Arc<AtomicBool>>,
+) -> Result<String, AutoFixFailure> {
     if refuse_macro_rewrite(text) {
-        return Err("Automatic fixes were withheld because macro definitions or loops with identifier interpolation can change the written edit targets.");
+        return Err(AutoFixFailure::Refused("Automatic fixes were withheld because macro definitions or loops with identifier interpolation can change the written edit targets."));
     }
+    let parsed = |text: &str| match cancelled {
+        Some(flag) => crate::engine::language::parser::parse_with_budget(
+            text,
+            &mut crate::engine::language::macro_expr::MacroBudget::with_cancellation(Some(
+                Arc::clone(flag),
+            )),
+        ),
+        None => parse(text),
+    };
     let mut text = text.to_string();
     for _ in 0..3 {
-        let diags = check_parse(&parse(&text));
-        let fixes = repairing_fixes(&text, &diags, true);
+        if crate::engine::control::cancelled() {
+            return Err(AutoFixFailure::Cancelled);
+        }
+        let diags = check_parse(&parsed(&text));
+        let fixes = repairing_fixes(&text, &diags, true, cancelled);
         if fixes.is_empty() {
             break;
         }
         text = apply_fix(&text, &fixes);
     }
-    let diags = analyze(&parse(&text));
-    let fixes = repairing_fixes(&text, &diags, false);
+    if crate::engine::control::cancelled() {
+        return Err(AutoFixFailure::Cancelled);
+    }
+    let model = parsed(&text);
+    let diags = match cancelled {
+        Some(flag) => crate::engine::diagnostics::analyze_controlled(&model, flag)
+            .map_err(|_| AutoFixFailure::Cancelled)?,
+        None => analyze(&model),
+    };
+    let fixes = repairing_fixes(&text, &diags, false, cancelled);
     if !fixes.is_empty() {
         text = apply_fix(&text, &fixes);
     }
     Ok(text)
 }
 
-fn repairing_fixes(text: &str, diags: &[Diagnostic], parse_pass: bool) -> Vec<TextEdit> {
+fn repairing_fixes(
+    text: &str,
+    diags: &[Diagnostic],
+    parse_pass: bool,
+    cancelled: Option<&Arc<AtomicBool>>,
+) -> Vec<TextEdit> {
     diags
         .iter()
         .filter(|diagnostic| {
@@ -91,7 +150,8 @@ fn repairing_fixes(text: &str, diags: &[Diagnostic], parse_pass: bool) -> Vec<Te
             }
         })
         .filter(|diagnostic| diagnostic.fix.is_some())
-        .filter(|diagnostic| edit_repairs_owner(text, diags, diagnostic, parse_pass))
+        .take_while(|_| !crate::engine::control::cancelled())
+        .filter(|diagnostic| edit_repairs_owner(text, diags, diagnostic, parse_pass, cancelled))
         .filter_map(|diagnostic| diagnostic.fix.clone())
         .collect()
 }
@@ -108,7 +168,11 @@ fn edit_repairs_owner(
     before_diags: &[Diagnostic],
     owner: &Diagnostic,
     parse_pass: bool,
+    cancelled: Option<&Arc<AtomicBool>>,
 ) -> bool {
+    if crate::engine::control::cancelled() {
+        return false;
+    }
     let Some(fix) = owner.fix.clone() else {
         return false;
     };
@@ -117,19 +181,31 @@ fn edit_repairs_owner(
         return false;
     }
     let candidate = apply_fix(text, &[fix]);
+    let model = match cancelled {
+        Some(flag) => crate::engine::language::parser::parse_with_budget(
+            &candidate,
+            &mut crate::engine::language::macro_expr::MacroBudget::with_cancellation(Some(
+                Arc::clone(flag),
+            )),
+        ),
+        None => parse(&candidate),
+    };
     let after = if parse_pass {
-        check_parse(&parse(&candidate))
+        check_parse(&model)
     } else {
-        analyze(&parse(&candidate))
+        analyze(&model)
     };
     owner_count(&after, owner) < before
 }
 
-fn refuse_macro_rewrite(text: &str) -> bool {
+pub(crate) fn refuse_macro_rewrite(text: &str) -> bool {
     let tokens = tokenize(text);
     let mut has_define_or_for = false;
     let mut has_interp = false;
     for tok in &tokens {
+        if crate::engine::control::cancelled() {
+            return false;
+        }
         match tok.kind {
             TokenKind::MacroDir
                 if matches!(dir_kind(tok.text(text)).as_deref(), Some("define" | "for")) =>
@@ -201,5 +277,32 @@ fn skip_chars(s: &str, n: usize) -> &str {
     match s.char_indices().nth(n) {
         Some((i, _)) => &s[i..],
         None => "",
+    }
+}
+
+#[cfg(test)]
+mod request_cancellation_tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn cancellation_stops_stored_fix_repair_verification() {
+        // Guards bulk Auto Fix continuing with all proposed-input reparses after
+        // cancellation. The stop is armed after diagnostics and fixes exist.
+        let text = "var y;model;\ny=1\nend;";
+        let diagnostics = check_parse(&parse(text));
+        assert!(diagnostics.iter().any(|row| row.fix.is_some()));
+        let flag = Arc::new(AtomicBool::new(false));
+        crate::engine::control::cancel_after(&flag, 4);
+        let outcome = crate::engine::control::run(Some(flag.clone()), || {
+            repairing_fixes(text, &diagnostics, true, Some(&flag))
+        });
+        assert_eq!(outcome, Err(crate::engine::control::Cancelled));
+        assert!(flag.load(Ordering::Relaxed));
+        assert_eq!(
+            auto_fix_outcome_controlled(text, &flag),
+            Err(AutoFixFailure::Cancelled)
+        );
+        assert_eq!(auto_fix_outcome(text).unwrap(), "var y;model;\ny=1;\nend;");
     }
 }

@@ -44,6 +44,9 @@ pub fn check_d_open(model: &Model) -> Vec<Diagnostic> {
 fn check_ms_symbols(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for block in &model.conditional_forecast_paths {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some((span, name, undeclared)) =
             crate::engine::diagnostics::check_d_ms::cfp_first_bad_row(model, &block.rows)
         else {
@@ -62,6 +65,9 @@ fn check_ms_symbols(model: &Model) -> Vec<Diagnostic> {
         break;
     }
     for block in &model.svar_identifications {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some((span, name)) =
             crate::engine::diagnostics::check_d_ms::identification_undeclared_name(model, block)
         {
@@ -74,6 +80,9 @@ fn check_ms_symbols(model: &Model) -> Vec<Diagnostic> {
         }
     }
     for row in prior_std_corr_rows(model) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         match row.verdict {
             PriorHeadVerdict::Undeclared => {
                 out.push(err(
@@ -172,13 +181,22 @@ fn declared_before(model: &Model, name: Name, pos: u32) -> bool {
 fn model_context_expr_ids(model: &Model) -> Vec<ExprId> {
     let mut out = Vec::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         out.extend(eq.lhs_expr);
         out.extend(eq.rhs_expr);
     }
     for var in &model.nonstationary_vars {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         out.extend(var.deflator);
     }
     for row in &model.ramsey_constraints {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         out.extend(row.expr);
     }
     out
@@ -196,15 +214,27 @@ fn statement_expr_ids(model: &Model) -> Vec<ExprId> {
     }
     out.extend(model.planner_objective_expr);
     for a in model.initval.iter().chain(&model.endval) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         out.extend(a.expr);
     }
     for entry in model.histval.iter().chain(&model.filter_initial_state) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         out.extend(entry.expr);
     }
     for stmt in &model.shock_stmts {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         out.extend(stmt.rhs_expr);
     }
     for row in &model.optim_weights {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         out.extend(row.expr);
     }
     out
@@ -221,7 +251,13 @@ fn ident_uses(model: &Model, ids: &[ExprId]) -> Vec<(Name, Span)> {
     let mut seen: HashSet<u32> = HashSet::new();
     let mut out = Vec::new();
     for id in ids {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for r in model.exprs.walk_idents(*id) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if seen.insert(r.span.start) {
                 out.push((r.name, r.span));
             }
@@ -233,6 +269,9 @@ fn ident_uses(model: &Model, ids: &[ExprId]) -> Vec<(Name, Span)> {
 fn check_epilogue(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for (name, span) in &model.epilogue_undeclared_calls {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         out.push(err(
             *span,
             "E288",
@@ -255,6 +294,9 @@ fn check_epilogue(model: &Model) -> Vec<Diagnostic> {
 
     let mut seen: HashSet<Name> = HashSet::new();
     for assignment in &model.epilogue {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !seen.insert(assignment.name) {
             out.push(err(
                 assignment.span,
@@ -268,6 +310,9 @@ fn check_epilogue(model: &Model) -> Vec<Diagnostic> {
     }
 
     for assignment in &model.epilogue {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(id) = assignment.expr else {
             continue;
         };
@@ -276,6 +321,9 @@ fn check_epilogue(model: &Model) -> Vec<Diagnostic> {
 
     let mut decl_start: HashMap<Name, u32> = HashMap::new();
     for assignment in &model.epilogue {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         decl_start
             .entry(assignment.name)
             .and_modify(|start| *start = (*start).min(assignment.span.start))
@@ -285,6 +333,9 @@ fn check_epilogue(model: &Model) -> Vec<Diagnostic> {
         return out;
     }
     for (name, span) in ident_uses(model, &outside_expr_ids(model)) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if model
             .model_expression_uses
             .iter()
@@ -315,6 +366,9 @@ fn check_epilogue(model: &Model) -> Vec<Diagnostic> {
 fn check_epilogue_expr(model: &Model, id: ExprId) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for r in model.exprs.walk_idents(id) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let name = model.name(r.name);
         if model
             .epilogue
@@ -406,6 +460,9 @@ fn walk_nodes<'a>(
         }
         ExprKind::Call { args, .. } => {
             for arg in args {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 walk_nodes(model, *arg, f);
             }
         }
@@ -424,6 +481,9 @@ pub(crate) fn check_ramsey_statements(model: &Model) -> Vec<Diagnostic> {
     let mut saw_model = false;
     let mut saw_policy = false;
     for stmt in &model.policy_command_statements {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         match stmt.command {
             PolicyCommand::RamseyModel => {
                 if saw_policy {
@@ -461,6 +521,9 @@ pub(crate) fn check_ramsey_statements(model: &Model) -> Vec<Diagnostic> {
         }
     }
     for stmt in &model.policy_command_statements {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(option_span) = stmt.planner_discount else {
             continue;
         };
@@ -513,6 +576,9 @@ fn check_includepath_dirs(ws: &mut Workspace, model: &Model, abs_path: &str) -> 
     }
     let executed = crate::engine::language::macro_expand::executed_includepaths(&model.source);
     for (span, literal) in executed {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some((_owner, _)) = ws.map_effective_origin(abs_path, span) else {
             continue;
         };
@@ -566,6 +632,9 @@ fn check_load_params(ws: &Workspace, model: &Model, abs_path: &str) -> Vec<Diagn
     let mut out = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     for name in load_file_names(&text) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !seen.insert(name.clone()) {
             continue;
         }
@@ -649,6 +718,9 @@ fn check_trend_vars(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let mut seen: HashSet<(Name, bool)> = HashSet::new();
     for trend in &model.trend_vars {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if seen.insert((trend.name, trend.log_trend)) {
             continue;
         }
@@ -664,6 +736,9 @@ fn check_trend_vars(model: &Model) -> Vec<Diagnostic> {
     out.extend(check_nonstationary_vars(model));
 
     for &(name, span) in &model.trend_outside_uses {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         out.push(err(
             span,
             "E310",
@@ -681,6 +756,9 @@ fn check_nonstationary_vars(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let mut nonstationary: HashSet<Name> = HashSet::new();
     for var in &model.nonstationary_vars {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !nonstationary.insert(var.name) {
             out.push(err(
                 var.span,
@@ -694,6 +772,9 @@ fn check_nonstationary_vars(model: &Model) -> Vec<Diagnostic> {
     }
     let mut seen: HashSet<ExprId> = HashSet::new();
     for var in &model.nonstationary_vars {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(deflator) = var.deflator else {
             continue;
         };
@@ -719,6 +800,9 @@ fn check_filter_initial_state(model: &Model) -> Vec<Diagnostic> {
     let mut seen: HashSet<(Name, i32)> = HashSet::new();
     let mut out = Vec::new();
     for (index, entry) in model.filter_initial_state.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if model
             .filter_initial_state_block_starts
             .binary_search(&index)
@@ -790,7 +874,13 @@ fn check_filter_initial_state(model: &Model) -> Vec<Diagnostic> {
 fn min_model_lag(model: &Model, name: Name) -> i32 {
     let mut min_lag = 0;
     for id in model_context_expr_ids(model) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for r in model.exprs.walk_idents(id) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if r.name == name {
                 min_lag = min_lag.min(r.timing);
             }
@@ -804,6 +894,9 @@ fn check_optim_weights(model: &Model) -> Vec<Diagnostic> {
     let mut pairs: HashSet<(Name, Name)> = HashSet::new();
     let mut out = Vec::new();
     for (index, row) in model.optim_weights.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if model
             .optim_weights_block_starts
             .binary_search(&index)
@@ -951,6 +1044,9 @@ fn check_ramsey_constraints(model: &Model) -> Vec<Diagnostic> {
     let mut seen: HashSet<Name> = HashSet::new();
     let mut out = Vec::new();
     for row in &model.ramsey_constraints {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(id) = row.expr else {
             continue;
         };
@@ -1032,6 +1128,9 @@ fn check_external_functions(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let mut table: HashMap<Name, EffectiveOptions> = HashMap::new();
     for stmt in &model.external_functions {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some((own, _)) = stmt.name else {
             out.push(err(
                 stmt.span,
@@ -1112,8 +1211,14 @@ fn check_pair_lists(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
 
     for block in &model.init2shocks_blocks {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let mut seen: HashSet<Name> = HashSet::new();
         for row in &block.rows {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if model
                 .symbol_kind_in_context(row.endo, row.symbol_type_context)
                 .is_none()
@@ -1176,6 +1281,9 @@ fn check_pair_lists(model: &Model) -> Vec<Diagnostic> {
     }
 
     for row in &model.homotopy_rows {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if model
             .symbol_kind_in_context(row.name, row.symbol_type_context)
             .is_none()
@@ -1209,7 +1317,13 @@ fn check_pair_lists(model: &Model) -> Vec<Diagnostic> {
     }
 
     for group in &model.shock_groups {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for (name, span) in &group.members {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if model
                 .symbol_kind_in_context(*name, group.symbol_type_context)
                 .is_none()
@@ -1263,8 +1377,14 @@ fn check_shock_group_labels(model: &Model) -> Vec<Diagnostic> {
     let mut bounds = model.shock_group_block_starts.clone();
     bounds.push(rows.len());
     for window in bounds.windows(2) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let (start, end) = (window[0], window[1]);
         for (i, group) in rows[start..end].iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let rest = &rows[start + i + 1..end];
             if !rest.iter().any(|later| later.label == group.label) {
                 continue;

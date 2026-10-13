@@ -30,6 +30,9 @@ fn check_w060(model: &Model) -> Vec<Diagnostic> {
     let mut next_block = 0;
     let mut out = Vec::new();
     for request in &model.stoch_simul_requests {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let estimated: HashSet<Name> = model
             .estimated_params
             .iter()
@@ -41,6 +44,9 @@ fn check_w060(model: &Model) -> Vec<Diagnostic> {
             .map(|row| row.name)
             .collect();
         while let Some(block) = model.shock_blocks.get(next_block) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if block.span.start >= request.span.start {
                 break;
             }
@@ -58,6 +64,9 @@ fn check_w060(model: &Model) -> Vec<Diagnostic> {
                 specified.clear();
             }
             for stmt in &block.stochastic {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 if let ShockKind::Var(name) | ShockKind::Stderr(name) = &stmt.kind
                     && exo.contains(name)
                 {
@@ -76,6 +85,9 @@ fn check_w060(model: &Model) -> Vec<Diagnostic> {
         if let Some(selected) = &request.irf_shocks {
             let mut seen = HashSet::new();
             for &(name, span) in selected {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 if !exo.contains(&name)
                     || specified.contains(&name)
                     || estimated.contains(&name)
@@ -129,6 +141,9 @@ fn check_shock_stmts(model: &Model, mut parse_orders: Option<&mut Vec<usize>>) -
     let mut seen: HashMap<SeenKey, Span> = HashMap::new();
     let mut diagnostics = Vec::new();
     for block in &model.shock_blocks {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if ordinary_shock_handler(block) && block.kind != ShockBlockKind::Regular {
             // learnt_in=1 has only scheduled rows, but its pinned handler
             // delegates to end_shocks and clears the retained skew map.
@@ -142,6 +157,9 @@ fn check_shock_stmts(model: &Model, mut parse_orders: Option<&mut Vec<usize>>) -
             continue;
         }
         for stmt in &block.stochastic {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let before = diagnostics.len();
             let span = nonempty(stmt.span);
             match &stmt.kind {
@@ -319,6 +337,9 @@ fn check_shock_types(model: &Model) -> Vec<Diagnostic> {
     let mut pending_skew = Vec::new();
     let mut consumed_skew = Vec::new();
     for block in &model.shock_blocks {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if ordinary_shock_handler(block) {
             consumed_skew.append(&mut pending_skew);
             continue;
@@ -336,6 +357,9 @@ fn check_shock_types(model: &Model) -> Vec<Diagnostic> {
     // their Check-stage type check. Keep the written row as the error's span.
     let mut out = Vec::new();
     for stmt in model.shock_stmts.iter().chain(consumed_skew) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let span = nonempty(stmt.span);
         let is_exo = |name: &Name| {
             if model.trend_vars.iter().any(|trend| trend.name == *name) {
@@ -441,10 +465,16 @@ fn check_e212(model: &Model) -> Vec<Diagnostic> {
     }
     let mut hits: Vec<Name> = Vec::new();
     for stmt in &model.shock_stmts {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(id) = stmt.rhs_expr else {
             continue;
         };
         for r in model.exprs.walk_idents(id) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if estimated.contains(&r.name)
                 && model
                     .final_symbol_kind(r.name)
@@ -569,6 +599,9 @@ fn trim_trailing_zeros(s: &mut String) {
         return;
     }
     while s.ends_with('0') {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         s.pop();
     }
     if s.ends_with('.') {

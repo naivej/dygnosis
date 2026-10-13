@@ -13,14 +13,14 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 static INPUT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 use self::companion::{CompanionKind, CompanionRecord};
 use crate::engine::language::expand::{
-    expand_report_from_spliced, ExpandReport, NavigationSource, SpliceSegment,
+    expand_report_from_spliced_controlled, ExpandReport, NavigationSource, SpliceSegment,
 };
 use crate::engine::language::macro_expand::{IncompleteReason, MacroEvalError};
 use crate::engine::language::macro_expr::MacroBudget;
@@ -80,7 +80,7 @@ pub struct IncludeRecords {
 
 struct Doc {
     source: String,
-    model: Model,
+    model: Arc<Model>,
     overlay: bool,
     input_generation: u64,
 }
@@ -190,6 +190,19 @@ struct InputFile {
     overlay_generation: Option<u64>,
 }
 
+/// Checked source and lookup fact. Missing candidates and directories have no
+/// text digest; regular source files have a digest of their original UTF-8 text.
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct InputGuard {
+    pub file: String,
+    pub exists: bool,
+    pub directory: bool,
+    pub identity: Option<String>,
+    pub text_sha256: Option<String>,
+    pub byte_sha256: Option<String>,
+    pub length: Option<u64>,
+}
+
 /// Compact provenance retained by project reports after parsed caches expire.
 pub(crate) type InputStamps = BTreeMap<String, u64>;
 
@@ -200,17 +213,22 @@ pub struct Workspace {
     search_paths: Vec<PathBuf>,
     root_search_paths: HashMap<String, Vec<PathBuf>>,
     virtual_roots: HashSet<String>,
+    unnamed_roots: HashSet<String>,
     // Retain input provenance when model/source caches are cleared.
     dependency_candidates: HashMap<String, HashSet<String>>,
     input_snapshots: HashMap<String, BTreeMap<String, InputFile>>,
     include_owners: HashMap<String, HashSet<String>>,
-    effective: HashMap<String, Model>,
+    effective: HashMap<String, Arc<Model>>,
     spliced: HashMap<String, Arc<SplicedSource>>,
-    expand: HashMap<String, ExpandReport>,
+    expand: HashMap<String, Arc<ExpandReport>>,
     records: HashMap<String, IncludeRecords>,
     companions: HashMap<String, Vec<CompanionRecord>>,
     /// When set, document text and `@#include` targets come only from overlays.
     overlay_only: bool,
+    /// Request cancellation; absent for existing editor and comparison calls.
+    cancellation: Option<Arc<AtomicBool>>,
+    source_limits: Option<(usize, usize, usize)>,
+    acquisition_limit: Option<&'static str>,
     pub(crate) snapshot_lookup:
         Option<crate::engine::comparison::compare_snapshots::SnapshotLookup>,
 }
@@ -218,16 +236,30 @@ pub struct Workspace {
 impl Workspace {
     /// Isolated editor snapshot that preserves this root's include settings.
     pub(crate) fn snapshot_with_root_settings(&self, uri: &str) -> Self {
-        self.snapshot_for_root(uri, self.root_paths(&normalize_uri(uri)).to_vec())
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
+        self.snapshot_for_root(uri, self.root_paths(&key).to_vec())
     }
 
     /// Owned editor snapshot. Parsed overlays and joined source are immutable
     /// and shared; disk IO and root analysis happen on the receiving worker.
     pub(crate) fn snapshot_for_root(&self, uri: &str, search_paths: Vec<PathBuf>) -> Self {
-        let key = normalize_uri(uri);
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
         let reuse_joined = self.root_paths(&key) == search_paths.as_slice();
         let candidates = self.input_snapshots.get(&key);
         let mut snapshot = Self::with_search_paths(search_paths);
+        snapshot.overlay_only = self.overlay_only;
+        snapshot.virtual_roots = self.virtual_roots.clone();
+        snapshot.unnamed_roots = self.unnamed_roots.clone();
+        snapshot.cancellation = self.cancellation.clone();
+        snapshot.source_limits = self.source_limits;
         snapshot.docs = self
             .docs
             .iter()
@@ -257,6 +289,12 @@ impl Workspace {
         // registered; restore the immutable joined source after that operation.
         if let Some(source) = self.spliced.get(&key).filter(|_| reuse_joined) {
             snapshot.spliced.insert(key.clone(), Arc::clone(source));
+            if let Some(model) = self.effective.get(&key) {
+                snapshot.effective.insert(key.clone(), model.clone());
+            }
+            if let Some(report) = self.expand.get(&key) {
+                snapshot.expand.insert(key.clone(), report.clone());
+            }
             if let Some(records) = self.records.get(&key) {
                 snapshot.records.insert(key, records.clone());
             }
@@ -291,16 +329,68 @@ impl Workspace {
         Self::default()
     }
 
+    pub(crate) fn set_cancellation(&mut self, cancellation: Arc<AtomicBool>) {
+        self.cancellation = Some(cancellation);
+    }
+
+    pub(crate) fn cancellation(&self) -> Option<Arc<AtomicBool>> {
+        self.cancellation.clone()
+    }
+
+    pub(crate) fn check_cancelled(&self) -> Result<(), crate::engine::control::Cancelled> {
+        if self.cancelled() {
+            Err(crate::engine::control::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Unnamed supplied text has no identity for file-location checks.
+    pub(crate) fn set_unnamed_root(&mut self, root: &str) {
+        self.unnamed_roots.insert(root.to_owned());
+    }
+
+    /// Bounds apply before root reads, include reads and candidate capture.
+    pub(crate) fn set_source_limits(
+        &mut self,
+        file_bytes: usize,
+        total_bytes: usize,
+        files: usize,
+    ) {
+        self.source_limits = Some((file_bytes, total_bytes, files));
+    }
+
+    pub(crate) fn acquisition_limit(&self) -> Option<&'static str> {
+        self.acquisition_limit
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancellation
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+    }
+
     /// Overlay workspace. Include lookup does not read file bodies from disk.
     ///
     /// Keys are stored as given. This path does not canonicalize, lowercase,
-    /// or collapse `..`.
+    /// or change the supplied key. Lookup resolves slash, `.` and `..` aliases.
     pub(crate) fn overlay_documents(files: &BTreeMap<String, String>) -> Self {
+        Self::overlay_documents_with_control(files, None)
+    }
+
+    pub(crate) fn overlay_documents_with_control(
+        files: &BTreeMap<String, String>,
+        cancellation: Option<Arc<AtomicBool>>,
+    ) -> Self {
         let mut ws = Self {
             overlay_only: true,
+            cancellation,
             ..Self::default()
         };
         for (name, content) in files {
+            if ws.cancelled() {
+                break;
+            }
             ws.insert_overlay(name, content.clone());
         }
         ws
@@ -394,12 +484,15 @@ impl Workspace {
     /// Store one overlay under `key` exactly. No disk and no path folding.
     fn insert_overlay(&mut self, key: &str, source: String) {
         let input_generation = self.overlay_generation(key, &source);
-        let model = parse(&source);
+        let model = crate::engine::language::parser::parse_with_budget(
+            &source,
+            &mut MacroBudget::with_cancellation(self.cancellation.clone()),
+        );
         self.docs.insert(
             key.to_string(),
             Arc::new(Doc {
                 source,
-                model,
+                model: Arc::new(model),
                 overlay: true,
                 input_generation,
             }),
@@ -420,7 +513,11 @@ impl Workspace {
 
     /// In-memory overlay. Beats disk for this key.
     pub fn update_document(&mut self, uri: &str, source: impl Into<String>) {
-        let key = normalize_uri(uri);
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
         let source = source.into();
         let input_generation = self.overlay_generation(&key, &source);
         let model = parse(&source);
@@ -428,7 +525,7 @@ impl Workspace {
             key.clone(),
             Arc::new(Doc {
                 source,
-                model,
+                model: Arc::new(model),
                 overlay: true,
                 input_generation,
             }),
@@ -446,7 +543,11 @@ impl Workspace {
     /// Clears every cached effective model, include-record map, and companion
     /// cache: other roots may have spliced this file.
     pub fn remove_document(&mut self, uri: &str) {
-        let key = normalize_uri(uri);
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
         self.docs.remove(&key);
         self.effective.clear();
         self.spliced.clear();
@@ -459,18 +560,53 @@ impl Workspace {
     pub fn load_from_disk(&mut self, path: &Path) -> Option<&Model> {
         let key = path_key(path);
         if self.docs.get(&key).is_some_and(|d| d.overlay) {
-            return self.docs.get(&key).map(|d| &d.model);
+            return self.docs.get(&key).map(|d| d.model.as_ref());
         }
         if self.overlay_only {
             return None;
         }
-        let source = read_text(path)?;
-        let model = parse(&source);
+        let source = if let Some((file_limit, total_limit, file_count)) = self.source_limits {
+            let metadata = std::fs::metadata(path).ok()?;
+            let used: usize = self.docs.values().map(|doc| doc.source.len()).sum();
+            if metadata.len() > file_limit as u64
+                || metadata.len() > total_limit.saturating_sub(used) as u64
+                || self.docs.len() >= file_count
+            {
+                self.acquisition_limit =
+                    Some("Source acquisition limit reached before reading a model file");
+                return None;
+            }
+            let file = std::fs::File::open(path).ok()?;
+            let mut bytes = Vec::new();
+            file.take(file_limit as u64 + 1)
+                .read_to_end(&mut bytes)
+                .ok()?;
+            if bytes.len() > file_limit {
+                self.acquisition_limit = Some("Source file byte limit reached");
+                return None;
+            }
+            let source = String::from_utf8(bytes)
+                .unwrap_or_else(|error| error.into_bytes().into_iter().map(char::from).collect());
+            if source.len() > file_limit || source.len() > total_limit.saturating_sub(used) {
+                self.acquisition_limit = Some("Decoded source byte limit reached");
+                return None;
+            }
+            source
+        } else {
+            read_text(path)?
+        };
+        if self.cancelled() {
+            return None;
+        }
+        let model = crate::engine::language::parser::parse_with_budget(
+            &source,
+            &mut MacroBudget::with_cancellation(self.cancellation.clone()),
+        );
         self.docs.insert(
             key.clone(),
             Arc::new(Doc {
                 source,
-                model,
+                model: Arc::new(model),
                 overlay: false,
                 input_generation: 0,
             }),
@@ -481,7 +617,7 @@ impl Workspace {
         self.expand.clear();
         self.records.clear();
         self.companions.clear();
-        self.docs.get(&key).map(|d| &d.model)
+        self.docs.get(&key).map(|d| d.model.as_ref())
     }
 
     pub fn add_search_path(&mut self, path: PathBuf) {
@@ -512,7 +648,11 @@ impl Workspace {
 
     /// Set one root's paths without changing any other root or the CLI/MCP defaults.
     pub fn set_root_search_paths(&mut self, uri: &str, paths: Vec<PathBuf>) {
-        let key = normalize_uri(uri);
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
         if is_virtual_uri(uri) {
             self.virtual_roots.insert(key.clone());
         }
@@ -588,6 +728,17 @@ impl Workspace {
             .entry(key.clone())
             .or_default()
             .extend(resolved_keys);
+        if self.overlay_only && !self.virtual_roots.contains(&key) {
+            let loader_names: Vec<_> = self
+                .get_effective_model(uri)
+                .into_iter()
+                .flat_map(|model| model.load_params_file.iter().map(|(name, _)| name.clone()))
+                .collect();
+            for name in loader_names {
+                // Parameter loaders use only the root's sibling directory.
+                self.record_candidates(&key, &key, &name, &[]);
+            }
+        }
         if !self.overlay_only && !self.virtual_roots.contains(&key) {
             // These checks read directory existence and a loader file outside
             // include/companion resolution. They are revision inputs too.
@@ -621,6 +772,34 @@ impl Workspace {
             .cloned()
             .unwrap_or_default();
         files.insert(key.clone());
+        if let Some((file_limit, total_limit, file_count)) = self.source_limits {
+            if files.len() > file_count {
+                self.acquisition_limit = Some("Source lookup candidate count limit reached");
+                return None;
+            }
+            let mut bytes = 0usize;
+            for path in &files {
+                if self.cancelled() {
+                    return None;
+                }
+                let length = if let Some(doc) = self.docs.get(path) {
+                    doc.source.len() as u64
+                } else if self.overlay_only {
+                    0
+                } else {
+                    std::fs::metadata(path)
+                        .ok()
+                        .filter(|metadata| metadata.is_file())
+                        .map_or(0, |metadata| metadata.len())
+                };
+                if length > file_limit as u64 || length > total_limit.saturating_sub(bytes) as u64 {
+                    self.acquisition_limit =
+                        Some("Source byte limit reached before capturing input guards");
+                    return None;
+                }
+                bytes += length as usize;
+            }
+        }
         let snapshot: BTreeMap<_, _> = files
             .into_iter()
             .map(|path| {
@@ -646,6 +825,40 @@ impl Workspace {
         }
         self.input_snapshots.insert(key, snapshot);
         Some(format!("{:016x}", hash.finish()))
+    }
+
+    /// Guards use the exact candidates already selected by the engine. Hosts
+    /// must not repeat the include lookup algorithm to build a revision.
+    pub(crate) fn input_guards(&self, uri: &str) -> Vec<InputGuard> {
+        use sha2::{Digest, Sha256};
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
+        self.input_snapshots
+            .get(&key)
+            .into_iter()
+            .flat_map(|files| files.iter())
+            .map(|(file, state)| {
+                let text = state.bytes.as_ref().map(|bytes| {
+                    String::from_utf8(bytes.clone())
+                        .unwrap_or_else(|_| bytes.iter().map(|byte| char::from(*byte)).collect())
+                });
+                InputGuard {
+                    file: file.clone(),
+                    exists: state.exists,
+                    directory: state.directory,
+                    identity: state.identity.clone(),
+                    text_sha256: text.map(|text| format!("{:x}", Sha256::digest(text.as_bytes()))),
+                    byte_sha256: state
+                        .bytes
+                        .as_ref()
+                        .map(|bytes| format!("{:x}", Sha256::digest(bytes))),
+                    length: state.length,
+                }
+            })
+            .collect()
     }
 
     /// Exact native candidates in the last input revision, including misses.
@@ -708,6 +921,23 @@ impl Workspace {
                     .then_some(doc.input_generation),
             }
         } else {
+            if self.overlay_only {
+                let prefix = format!("{}/", overlay_key(key).trim_end_matches('/'));
+                let directory = self
+                    .docs
+                    .keys()
+                    .any(|file| overlay_key(file).starts_with(&prefix));
+                return InputFile {
+                    overlay: false,
+                    bytes: None,
+                    exists: directory,
+                    directory,
+                    identity: None,
+                    length: None,
+                    modified: None,
+                    overlay_generation: None,
+                };
+            }
             let metadata = (!self.overlay_only && !is_virtual_uri(key))
                 .then(|| std::fs::metadata(key).ok())
                 .flatten();
@@ -768,7 +998,11 @@ impl Workspace {
     /// Known compilation-unit owners from resolved include edges. Retained
     /// across cache invalidation so an editor edit does not lose root context.
     pub fn owner_roots(&self, uri: &str) -> Vec<String> {
-        let key = normalize_uri(uri);
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
         let mut roots: Vec<_> = self
             .include_owners
             .iter()
@@ -789,6 +1023,18 @@ impl Workspace {
         if self.virtual_roots.contains(root) {
             return;
         }
+        if self.overlay_only {
+            let candidates = self.overlay_candidates(including_key, filename, paths);
+            let candidates: Vec<_> = candidates
+                .into_iter()
+                .map(|candidate| self.overlay_match_key(&candidate).unwrap_or(candidate))
+                .collect();
+            self.dependency_candidates
+                .entry(root.to_owned())
+                .or_default()
+                .extend(candidates);
+            return;
+        }
         let name = PathBuf::from(normalize_separators(filename));
         let mut candidates = Vec::new();
         if name.is_absolute() {
@@ -806,7 +1052,12 @@ impl Workspace {
     }
 
     pub fn get_model(&self, uri: &str) -> Option<&Model> {
-        self.docs.get(&normalize_uri(uri)).map(|d| &d.model)
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
+        self.docs.get(&key).map(|d| d.model.as_ref())
     }
 
     pub fn get_source(&self, uri: &str) -> Option<&str> {
@@ -879,7 +1130,31 @@ impl Workspace {
                     .or_else(|| records.cycles.first().map(|item| item.span))?;
                 Some(span)
             });
-            let mut model = {
+            let same_root = self.docs.get(&key).filter(|doc| {
+                let [segment] = spliced.segments.as_slice() else {
+                    return false;
+                };
+                spliced.gaps.is_empty()
+                    && doc.model.source == spliced.text
+                    && segment.file.as_deref() == Some(key.as_str())
+                    && segment.spliced == Span::new(0, spliced.text.len())
+                    && segment.origin == segment.spliced
+                    && segment.line == 1
+                    && segment.evaluation.is_none()
+            });
+            if fatal.is_none()
+                && spliced.limit.is_none()
+                && spliced.refusal.is_none()
+                && let Some(doc) = same_root
+            {
+                self.effective.insert(key.clone(), Arc::clone(&doc.model));
+                return self.effective.get(&key).map(Arc::as_ref);
+            }
+            // A one-segment unchanged root already has the same parser input,
+            // original lines and macro evaluation context. Reuse its facts.
+            let mut model = if let Some(doc) = same_root {
+                doc.model.as_ref().clone()
+            } else {
                 let lines: Vec<_> = spliced
                     .segments
                     .iter()
@@ -887,10 +1162,11 @@ impl Workspace {
                     .collect();
                 let evaluations =
                     crate::engine::language::expand::splice_evaluations(&spliced.segments);
-                crate::engine::language::parser::parse_with_lines_and_evaluations(
+                crate::engine::language::parser::parse_with_lines_and_evaluations_budget(
                     &spliced.text,
                     &lines,
                     &evaluations,
+                    &mut MacroBudget::with_cancellation(self.cancellation.clone()),
                 )
             };
             if let Some(span) = fatal {
@@ -934,9 +1210,19 @@ impl Workspace {
                 model.macro_incomplete_span.get_or_insert(span);
                 model.incomplete_reasons.clear();
             }
-            self.effective.insert(key.clone(), model);
+            self.effective.insert(key.clone(), Arc::new(model));
         }
-        self.effective.get(&key)
+        self.effective.get(&key).map(Arc::as_ref)
+    }
+
+    pub(crate) fn effective_model_snapshot(&mut self, root: &str) -> Option<Arc<Model>> {
+        self.get_effective_model(root)?;
+        let key = if self.overlay_only {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
+        self.effective.get(&key).cloned()
     }
 
     /// Map one span in the include-spliced model back to the active root file.
@@ -993,11 +1279,13 @@ impl Workspace {
                 .get(&key)
                 .map(|records| !records.unresolved.is_empty() || !records.cycles.is_empty())
                 .unwrap_or(false);
-            let mut report = expand_report_from_spliced(
+            let mut report = expand_report_from_spliced_controlled(
                 &spliced.text,
                 &spliced.segments,
                 Some(&spliced.navigation),
-            );
+                self.cancellation.clone(),
+            )
+            .ok()?;
             if spliced.limit.is_some() || spliced.refusal.is_some() {
                 report.complete = false;
                 report.navigation_complete = false;
@@ -1019,9 +1307,19 @@ impl Workspace {
                 report.navigation.clear();
                 report.origins.clear();
             }
-            self.expand.insert(key.clone(), report);
+            self.expand.insert(key.clone(), Arc::new(report));
         }
-        self.expand.get(&key)
+        self.expand.get(&key).map(Arc::as_ref)
+    }
+
+    pub(crate) fn expand_report_snapshot(&mut self, root: &str) -> Option<Arc<ExpandReport>> {
+        self.expand_report(root)?;
+        let key = if self.overlay_only {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
+        self.expand.get(&key).cloned()
     }
 
     /// Independently verified written portions of any include-spliced span.
@@ -1086,6 +1384,9 @@ impl Workspace {
     /// Companion records for the root `.mod` (convention + named mentions).
     pub fn companion_records(&mut self, uri: &str) -> Option<&[CompanionRecord]> {
         let key = self.ensure_loaded(uri)?;
+        if self.unnamed_roots.contains(&key) {
+            return Some(&[]);
+        }
         if !self.companions.contains_key(&key) {
             let records = self.build_companions(&key);
             self.companions.insert(key.clone(), records);
@@ -1114,7 +1415,7 @@ impl Workspace {
 
     fn model_for_key(&mut self, key: &str) -> Option<&Model> {
         if self.docs.contains_key(key) {
-            return self.docs.get(key).map(|d| &d.model);
+            return self.docs.get(key).map(|d| d.model.as_ref());
         }
         if self.overlay_only {
             return None;
@@ -1123,7 +1424,7 @@ impl Workspace {
         if path.exists() {
             self.load_from_disk(&path)?;
         }
-        self.docs.get(key).map(|d| &d.model)
+        self.docs.get(key).map(|d| d.model.as_ref())
     }
 
     fn source_for_key(
@@ -1131,6 +1432,35 @@ impl Workspace {
         key: &str,
         budget: &mut MacroBudget,
     ) -> Result<Option<String>, MacroEvalError> {
+        if self.cancelled() {
+            return Err(MacroEvalError::Limit("request cancelled"));
+        }
+        if let Some((file_limit, total_limit, file_count)) = self.source_limits {
+            let length = self
+                .docs
+                .get(key)
+                .map(|doc| doc.source.len() as u64)
+                .or_else(|| {
+                    (!self.overlay_only)
+                        .then(|| std::fs::metadata(key).ok().map(|metadata| metadata.len()))
+                        .flatten()
+                })
+                .unwrap_or(0);
+            let used: usize = self
+                .docs
+                .iter()
+                .filter(|(file, _)| file.as_str() != key)
+                .map(|(_, doc)| doc.source.len())
+                .sum();
+            if length > file_limit as u64
+                || length > total_limit.saturating_sub(used) as u64
+                || (!self.docs.contains_key(key) && self.docs.len() >= file_count)
+            {
+                self.acquisition_limit =
+                    Some("Source acquisition limit reached before reading an include");
+                return Err(MacroEvalError::Limit("source acquisition"));
+            }
+        }
         if let Some(doc) = self.docs.get(key) {
             budget.spend_work(doc.source.len().max(1))?;
             return Ok(Some(doc.source.clone()));
@@ -1152,7 +1482,7 @@ impl Workspace {
             key.to_string(),
             Arc::new(Doc {
                 source,
-                model,
+                model: Arc::new(model),
                 overlay: false,
                 input_generation: 0,
             }),
@@ -1191,8 +1521,10 @@ impl Workspace {
             return None;
         }
         if self.overlay_only {
+            let paths = self.configured_search(root_key, active_search);
+            self.record_candidates(root_key, including_key, filename, &paths);
             return self
-                .overlay_include_key(including_key, filename, active_search)
+                .overlay_include_key(including_key, filename, &paths)
                 .map(PathBuf::from);
         }
         let paths = self.configured_search(root_key, active_search);
@@ -1262,16 +1594,15 @@ impl Workspace {
         matched
     }
 
-    /// Match an `@#include` filename to an overlay key. No disk and no `..` fold.
-    fn overlay_include_key(
+    fn overlay_candidates(
         &self,
         including_key: &str,
         filename: &str,
         active_search: &[PathBuf],
-    ) -> Option<String> {
+    ) -> Vec<String> {
         let name = overlay_key(filename);
         if name.is_empty() {
-            return None;
+            return Vec::new();
         }
         let mut candidates = Vec::new();
         if overlay_absolute(&name) {
@@ -1287,11 +1618,18 @@ impl Workspace {
                     candidates.push(candidate);
                 }
             }
-            if !candidates.contains(&name) {
-                candidates.push(name);
-            }
         }
         candidates
+    }
+
+    /// Match the explicit sibling/search-folder candidates to exact supplied keys.
+    fn overlay_include_key(
+        &self,
+        including_key: &str,
+        filename: &str,
+        search: &[PathBuf],
+    ) -> Option<String> {
+        self.overlay_candidates(including_key, filename, search)
             .into_iter()
             .find_map(|candidate| self.overlay_match_key(&candidate))
     }
@@ -1307,16 +1645,18 @@ impl Workspace {
         }
         let joined = self.spliced_source(root_key);
         if self.overlay_only {
-            let paths = &joined.include_search;
-            if let Some(key) = self.overlay_include_key(root_key, name, paths) {
+            let paths = self.configured_search(root_key, &joined.include_search);
+            self.record_candidates(root_key, root_key, name, &paths);
+            if let Some(key) = self.overlay_include_key(root_key, name, &paths) {
                 return Some(PathBuf::from(key));
             }
             if Path::new(name).extension().is_some() {
                 return None;
             }
             for suffix in extra_suffixes {
+                self.record_candidates(root_key, root_key, &format!("{name}{suffix}"), &paths);
                 if let Some(key) =
-                    self.overlay_include_key(root_key, &format!("{name}{suffix}"), paths)
+                    self.overlay_include_key(root_key, &format!("{name}{suffix}"), &paths)
                 {
                     return Some(PathBuf::from(key));
                 }
@@ -1367,7 +1707,7 @@ impl Workspace {
         let cut = self.records.get(root_key).and_then(fatal_include_cut);
         let (source, model) = if let Some(cut) = cut {
             let text = root[..(cut as usize).min(root.len())].to_string();
-            let model = parse(&text);
+            let model = Arc::new(parse(&text));
             (text, model)
         } else {
             let Some(doc) = self.docs.get(root_key) else {
@@ -1390,7 +1730,12 @@ impl Workspace {
             ),
             (CompanionKind::RunScript, format!("run_{stem}.m")),
         ];
-        companion::harvest(&source, &model, &convention, |name, extra| {
+        let identity = if self.overlay_only {
+            companion::CompanionIdentity::Supplied
+        } else {
+            companion::CompanionIdentity::Host
+        };
+        companion::harvest(&source, &model, &convention, identity, |name, extra| {
             self.resolve_companion_from_root(root_key, name, extra)
         })
     }
@@ -1404,8 +1749,11 @@ impl Workspace {
         let mut seen_sites = HashSet::new();
         let mut seen_cycles = HashSet::new();
         let source = self.docs.get(root_key).expect("loaded root").source.clone();
-        let mut proof =
-            crate::engine::language::macro_expand::walk_macro_files(root_key, &source, |event| {
+        let mut proof = crate::engine::language::macro_expand::walk_macro_files_with_budget(
+            root_key,
+            &source,
+            MacroBudget::with_cancellation(self.cancellation.clone()),
+            |event| {
                 if !event.certain {
                     if matches!(
                         event.directive,
@@ -1441,13 +1789,17 @@ impl Workspace {
                     } else {
                         resolve_includepath(root_key, path)
                     };
-                    if !path.is_empty() && !self.overlay_only {
+                    if !path.is_empty() {
                         // The directory check reads existence/type even when it
                         // refuses. Creating that directory must invalidate E304.
                         self.dependency_candidates
                             .entry(root_key.to_string())
                             .or_default()
-                            .insert(path_key(&added));
+                            .insert(if self.overlay_only {
+                                overlay_path_key(&added)
+                            } else {
+                                path_key(&added)
+                            });
                     }
                     let valid = if self.overlay_only {
                         !path.is_empty() && self.overlay_directory_exists(root_key, path)
@@ -1573,7 +1925,8 @@ impl Workspace {
                         source,
                     },
                 )
-            });
+            },
+        );
         targets.loop_occurrences = std::mem::take(&mut proof.loop_occurrences);
         let included = records
             .resolved
@@ -1637,6 +1990,7 @@ impl Workspace {
             span,
             code: "I211",
             message: format!("Macro expansion stopped at the {limit} limit; some model checks were withheld."),
+            limit_name: Some(limit),
         });
         let targets_complete = targets
             .sites
@@ -2547,9 +2901,9 @@ fn push_root_piece(
     Ok(())
 }
 
-/// Overlay key: `\` becomes `/`, trailing slashes drop. No disk and no `..` fold.
+/// Lexical lookup identity; the stored supplied key remains unchanged.
 fn overlay_key(key: &str) -> String {
-    key.replace('\\', "/").trim_end_matches('/').to_string()
+    include_resolver::supplied_path_key(key)
 }
 
 fn overlay_path_key(path: &Path) -> String {
@@ -2568,14 +2922,15 @@ fn overlay_parent(key: &str) -> Option<String> {
     let normalized = overlay_key(key);
     normalized
         .rfind('/')
-        .map(|idx| normalized[..idx].to_string())
+        .map(|idx| normalized[..idx.max(1)].to_string())
 }
 
 fn overlay_join(parent: &str, name: &str) -> String {
     if parent.is_empty() {
         name.to_string()
     } else {
-        format!("{parent}/{name}")
+        let separator = if parent.ends_with('/') { "" } else { "/" };
+        overlay_key(&format!("{parent}{separator}{name}"))
     }
 }
 
@@ -2588,21 +2943,7 @@ fn overlay_includepath_key(key: &str, raw: &str) -> String {
     } else {
         path
     };
-    // Directory lookup may collapse `.` without changing supplied map keys or
-    // folding `..`, which remains a distinct map path.
-    let mut lookup = joined;
-    while lookup.starts_with("./") {
-        lookup.drain(..2);
-    }
-    while lookup.contains("/./") {
-        lookup = lookup.replace("/./", "/");
-    }
-    if lookup == "." {
-        lookup.clear();
-    } else if lookup.ends_with("/.") {
-        lookup.truncate(lookup.len() - 2);
-    }
-    lookup
+    overlay_key(&joined)
 }
 
 pub fn resolve_includepath(key: &str, raw: &str) -> PathBuf {

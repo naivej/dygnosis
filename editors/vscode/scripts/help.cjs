@@ -47,6 +47,18 @@ async function engineFingerprint() {
   return hash.digest('hex');
 }
 
+function resultData(result) {
+  if (result?.structuredContent?.schema_version === 2) return result.structuredContent.data;
+  for (const item of [...(result?.content ?? [])].reverse()) {
+    if (typeof item.text !== 'string') continue;
+    try {
+      const value = JSON.parse(item.text);
+      if (value?.schema_version === 2) return value.data;
+    } catch { /* Leading legacy text items are not necessarily JSON. */ }
+  }
+  throw new Error('MCP tool result has no canonical schema_version 2 object');
+}
+
 async function generate(executable) {
   const session = rpc(executable, ['mcp'], false);
   try {
@@ -60,13 +72,13 @@ async function generate(executable) {
     async function call(name, args = {}) {
       const result = await session.request('tools/call', { name, arguments: args });
       assert.ok(!result.isError, `${name} failed`);
-      return result.content.filter(item => item.type === 'text').map(item => item.text).join('\n');
+      return result;
     }
-    const codes = JSON.parse(await call('dynare_list_diagnostic_codes'));
-    for (const code of codes) code.markdown = await call('dynare_explain', { code: code.code });
-    const commands = JSON.parse(await call('dynare_list_options')).commands;
+    const codes = resultData(await call('dynare_list_diagnostic_codes'));
+    for (const code of codes) code.markdown = resultData(await call('dynare_explain', { code: code.code })).explanation;
+    const commands = resultData(await call('dynare_list_options')).commands;
     const options = [];
-    for (const command of commands) options.push(JSON.parse(await call('dynare_list_options', { command })));
+    for (const command of commands) options.push(resultData(await call('dynare_list_options', { command })));
     await fs.writeFile(path.join(source, 'reference.json'), JSON.stringify({ version: init.serverInfo.version, fingerprint: await engineFingerprint(), tools, codes, options }, null, 2) + '\n');
   } finally { session.close(); }
 }
@@ -119,4 +131,4 @@ if (require.main === module) (async () => {
   if (process.argv[2] === '--generate') await generate(path.resolve(process.argv[3] ?? path.join(extensionRoot, 'bin', process.platform === 'win32' ? 'dygnosis.exe' : 'dygnosis')));
   await build();
 })().catch(error => { console.error(error); process.exitCode = 1; });
-module.exports = { build, generate, engineFingerprint, copyHelpAssets };
+module.exports = { build, generate, engineFingerprint, copyHelpAssets, resultData };

@@ -2,6 +2,7 @@
 
 use std::collections::{hash_map::Entry, BTreeMap, HashMap, HashSet};
 use std::ops::Range;
+use std::sync::{atomic::AtomicBool, Arc};
 
 use crate::engine::language::constructor::{
     ConstructorContext, ConstructorTree, DataTreeScope, NodeId,
@@ -68,7 +69,7 @@ pub(crate) fn parse_with_budget(
     parse_with_lines_and_evaluations_budget(text, &[], &[], budget)
 }
 
-fn parse_with_lines_and_evaluations_budget(
+pub(crate) fn parse_with_lines_and_evaluations_budget(
     text: &str,
     line_segments: &[(crate::engine::language::span::Span, u32)],
     evaluations: &[crate::engine::language::macro_expand::MacroReplay],
@@ -86,6 +87,7 @@ fn parse_with_lines_and_evaluations_budget(
                 span,
                 code: "I211",
                 message: crate::engine::language::macro_expand::i211_limit_message(limit),
+                limit_name: Some(limit),
             }],
             ..Model::default()
         };
@@ -104,7 +106,7 @@ fn parse_with_lines_and_evaluations_budget(
             evaluations,
             budget,
         );
-    let (mut model, _ranges) = parse_expanded(&source, tokens);
+    let (mut model, _ranges) = parse_expanded_controlled(&source, tokens, budget.cancellation());
     model.includes = includes;
     model.includepaths = includepaths;
     model.macro_directives = macro_directives;
@@ -124,7 +126,17 @@ pub(crate) struct EquationTokenRanges {
 }
 
 pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationTokenRanges) {
+    parse_expanded_controlled(src, tokens, None)
+}
+
+pub(crate) fn parse_expanded_controlled(
+    src: &str,
+    tokens: Vec<Token>,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> (Model, EquationTokenRanges) {
+    let cancellation = cancellation.or_else(crate::engine::control::current);
     let mut p = Parser {
+        cancellation,
         src,
         token_origins: (0..tokens.len()).map(|i| i..i + 1).collect(),
         tokens,
@@ -163,15 +175,21 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
         implicit_function_names: Vec::new(),
     };
     p.parse_file();
-    p.record_double_quoted_strings();
+    if !p.cancelled() {
+        p.record_double_quoted_strings();
+    }
     p.model
         .exogenous
         .extend(p.model.deterministic_exogenous.iter().cloned());
     p.model
         .exogenous
         .sort_by_key(|d| (d.span.start, d.span.end));
-    p.record_keyword_typos();
-    p.record_missing_assign_semis();
+    if !p.cancelled() {
+        p.record_keyword_typos();
+    }
+    if !p.cancelled() {
+        p.record_missing_assign_semis();
+    }
     let Parser {
         intern,
         mut model,
@@ -971,6 +989,7 @@ fn is_ident_only(s: &str) -> bool {
 }
 
 struct Parser<'a> {
+    cancellation: Option<Arc<AtomicBool>>,
     src: &'a str,
     tokens: Vec<Token>,
     token_origins: Vec<Range<usize>>,
@@ -1030,6 +1049,9 @@ struct Parser<'a> {
 }
 
 impl Parser<'_> {
+    fn cancelled(&self) -> bool {
+        crate::engine::control::flag_cancelled(self.cancellation.as_deref())
+    }
     fn record_symbol_declaration(
         &mut self,
         name: Name,
@@ -1102,6 +1124,9 @@ impl Parser<'_> {
 
     fn parse_file(&mut self) {
         loop {
+            if self.cancelled() {
+                break;
+            }
             if self.skip_initial_native_region(true) {
                 continue;
             }
@@ -10577,6 +10602,9 @@ impl Parser<'_> {
     fn record_double_quoted_strings(&mut self) {
         let mut issues = Vec::new();
         for (i, tok) in self.tokens.iter().enumerate() {
+            if self.cancelled() {
+                return;
+            }
             if tok.kind != TokenKind::String || !self.lexeme(tok).starts_with('"') {
                 continue;
             }
@@ -10738,6 +10766,9 @@ impl Parser<'_> {
         }
         let blocks = complete_block_ranges(&self.tokens, self.src);
         for (i, tok) in self.tokens.iter().enumerate() {
+            if self.cancelled() {
+                return;
+            }
             if self.in_native_line_assignment(i) || self.in_verbatim_range(i) {
                 continue;
             }
@@ -10785,6 +10816,9 @@ impl Parser<'_> {
         let inactive = crate::engine::language::macro_expand::inactive_macro_spans(src);
         let lines: Vec<&str> = src.split('\n').collect();
         for (i, line) in lines.iter().enumerate() {
+            if self.cancelled() {
+                return;
+            }
             let i = i as u32;
             if trailing.is_some_and(|t| i > t) {
                 break;
@@ -13164,6 +13198,9 @@ impl Parser<'_> {
     }
 
     fn at(&self, kind: TokenKind) -> bool {
+        if self.cancelled() {
+            return kind == TokenKind::Eof;
+        }
         self.tokens.get(self.i).is_some_and(|t| t.kind == kind)
     }
 
@@ -13217,6 +13254,10 @@ impl Parser<'_> {
     }
 
     fn bump(&mut self) -> Token {
+        if self.cancelled() {
+            self.i = self.tokens.len().saturating_sub(1);
+            return self.tokens[self.i].clone();
+        }
         let tok = self.tokens[self.i].clone();
         if tok.kind != TokenKind::Eof {
             self.i += 1;
@@ -13341,6 +13382,46 @@ impl Parser<'_> {
             ExprKind::Ident { name, .. } => self.intern.get(*name).to_string(),
             _ => String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod ordinary_request_cancellation_tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn cancellation_exits_an_ordinary_model_body_after_work_starts() {
+        // Guards a stop being observed only before macro expansion or after all
+        // ordinary equations have already been parsed.
+        let text = format!("var y;model;\n{}end;", "y=1;\n".repeat(2000));
+        let flag = Arc::new(AtomicBool::new(false));
+        crate::engine::control::cancel_after(&flag, 1000);
+        let (stopped, _) = parse_expanded_controlled(&text, tokenize(&text), Some(flag.clone()));
+        assert!(flag.load(Ordering::Relaxed));
+        assert!(
+            !stopped.equations.is_empty(),
+            "ordinary parsing must have started"
+        );
+        assert!(stopped.equations.len() < 2000);
+        assert_eq!(parse(&text).equations.len(), 2000);
+    }
+
+    #[test]
+    fn default_candidate_reparse_inherits_the_active_request_flag() {
+        // Guards shared Rename's default expanded-token reparse continuing
+        // after its owning MCP worker has been cancelled.
+        let text = format!("var y;model;\n{}end;", "y=1;\n".repeat(2000));
+        let flag = Arc::new(AtomicBool::new(false));
+        crate::engine::control::cancel_after(&flag, 1000);
+        let result = crate::engine::control::run(Some(flag.clone()), || {
+            let (stopped, _) = parse_expanded(&text, tokenize(&text));
+            assert!(!stopped.equations.is_empty());
+            assert!(stopped.equations.len() < 2000);
+        });
+        assert_eq!(result, Err(crate::engine::control::Cancelled));
+        assert!(flag.load(Ordering::Relaxed));
+        assert_eq!(parse(&text).equations.len(), 2000);
     }
 }
 

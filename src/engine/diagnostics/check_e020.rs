@@ -39,6 +39,9 @@ pub(crate) fn equation_trees(model: &Model) -> Vec<Vec<&Equation>> {
     let mut trees = vec![agg];
     let mut dimensions = HashMap::new();
     for block in &model.heterogeneous_models {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let next = trees.len();
         let index = *dimensions.entry(block.dimension).or_insert_with(|| {
             trees.push(Vec::new());
@@ -47,6 +50,9 @@ pub(crate) fn equation_trees(model: &Model) -> Vec<Vec<&Equation>> {
         trees[index].extend(&block.equations);
     }
     for tree in trees.iter_mut().skip(1) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         tree.sort_by_key(|eq| eq.parse_order);
     }
     trees
@@ -62,7 +68,13 @@ fn local_names(model: &Model, eqs: &[&Equation]) -> HashSet<Name> {
 fn earliest_local_defs(model: &Model, trees: &[Vec<&Equation>]) -> HashMap<Name, usize> {
     let mut earliest = HashMap::new();
     for tree in trees {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for eq in tree {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let Some((name, _)) = model_local_name(model, eq) else {
                 continue;
             };
@@ -83,6 +95,9 @@ fn check_e023(model: &Model) -> Vec<Diagnostic> {
     let mut seen = HashSet::new();
     let mut diagnostics = Vec::new();
     for decl in &model.predetermined {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         // ParsingDriver accepts only ordinary endogenous names at this command.
         // Later declarations and type changes cannot validate an earlier mark.
         if model.symbol_kind_in_context(decl.name, decl.symbol_type_context) == Some("var")
@@ -116,6 +131,9 @@ fn check_e024(model: &Model) -> Vec<Diagnostic> {
     let mut seen = HashSet::new();
     let mut diagnostics = Vec::new();
     for usage in &model.model_expression_uses {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if usage.timing == 0
             || model.symbol_kind_in_context(usage.name, usage.context) != Some("varexo_det")
             || !seen.insert((usage.name, usage.span))
@@ -150,6 +168,9 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     for eq in &eqs {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some((name, span)) = model_local_name(model, eq) else {
             continue;
         };
@@ -181,12 +202,21 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
     let trees = equation_trees(model);
     let earliest = earliest_local_defs(model, &trees);
     for tree in &trees {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let first_definition = local_def_starts(model, tree);
         let mut visible_locals = HashSet::new();
         let mut seen_early = HashSet::new();
         for eq in tree {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let local = model_local_name(model, eq).map(|(n, _)| n);
             for r in expression_reads(model, eq) {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 if local == Some(r.name) {
                     continue;
                 }
@@ -236,6 +266,9 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
     }
 
     for eq in &model.steady_state_equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some((name, span)) = model_local_name(model, eq) else {
             continue;
         };
@@ -297,6 +330,9 @@ fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
     let mut pounds: Vec<HashSet<Name>> =
         trees.iter().map(|tree| local_names(model, tree)).collect();
     for eq in removed_equations() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some((name, _)) = model_local_name(model, eq) {
             pounds[0].insert(name);
         }
@@ -344,6 +380,9 @@ fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
     let mut seen = HashSet::new();
     let mut diagnostics = Vec::new();
     for (eq, removed) in eqs {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         // Unknown model names are reported when this reader completes. An
         // eager constructor refusal prevents that flush, including earlier rows
         // in this same execution; another completed reader keeps its own names.
@@ -356,6 +395,9 @@ fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
         }
         let visible = visible_names(model, eq);
         for r in expression_reads(model, eq) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let ref_name = model.name(r.name);
             if is_skipped_ref(ref_name) {
                 continue;
@@ -536,6 +578,9 @@ fn visible_names(model: &Model, eq: &Equation) -> HashSet<Name> {
     };
     let mut visible = HashSet::new();
     for decl in visibility_decls(model) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if nested_ok(decl) || decl.parse_order <= eq.parse_order {
             visible.insert(decl.name);
         }
@@ -615,6 +660,9 @@ fn local_hides_unknown(
 fn equation_tree_index(model: &Model, eq: &Equation) -> usize {
     let mut dimensions = HashMap::new();
     for block in &model.heterogeneous_models {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let next = dimensions.len() + 1;
         let index = *dimensions.entry(block.dimension).or_insert(next);
         if block.equations.iter().any(|other| std::ptr::eq(other, eq)) {
@@ -627,6 +675,9 @@ fn equation_tree_index(model: &Model, eq: &Equation) -> usize {
 fn local_def_starts(model: &Model, eqs: &[&Equation]) -> HashMap<Name, usize> {
     let mut first = HashMap::new();
     for eq in eqs {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some((name, _)) = model_local_name(model, eq) else {
             continue;
         };
@@ -653,6 +704,9 @@ fn find_similar_names(name: &str, declared: &HashSet<String>) -> Vec<String> {
     declared_sorted.sort();
     let mut candidates: Vec<(usize, String)> = Vec::new();
     for d in declared_sorted {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let d_lower = d.to_lowercase();
         if d_lower == name_lower {
             continue;

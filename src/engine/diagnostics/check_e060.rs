@@ -64,6 +64,9 @@ pub fn check_e061(records: &IncludeRecords) -> Vec<Diagnostic> {
                 if !u.searched.is_empty() {
                     msg.push(':');
                     for dir in &u.searched {
+                        if crate::engine::control::cancelled() {
+                            break;
+                        }
                         msg.push_str("\n   * ");
                         msg.push_str(dir);
                     }
@@ -92,6 +95,9 @@ pub fn check_e062(model: &Model) -> Vec<Diagnostic> {
     let mut had_mismatch = false;
 
     for directive in &model.macro_directives {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let kind = directive.kind.as_str();
         if CONDITIONAL_OPENERS.contains(&kind) || kind == "for" {
             stack.push(directive);
@@ -181,6 +187,9 @@ pub fn check_e062(model: &Model) -> Vec<Diagnostic> {
     }
 
     for opener in stack {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let expected = closer_for(&opener.kind);
         diagnostics.push(Diagnostic::new(
             opener.span,
@@ -211,6 +220,9 @@ pub fn check_e064(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut stack = IfStack::default();
     for directive in &model.macro_directives {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let emitting = stack.emitting();
         if directive.kind == "error" && emitting {
             let raw = directive.argument.as_deref().unwrap_or("");
@@ -239,6 +251,9 @@ pub fn check_e065(model: &Model) -> Vec<Diagnostic> {
     }
     let mut diagnostics = Vec::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let mut operands = Vec::new();
         if let Some(id) = eq.lhs_expr {
             collect_steady_state_operands(&model.exprs, id, &mut operands);
@@ -247,6 +262,9 @@ pub fn check_e065(model: &Model) -> Vec<Diagnostic> {
             collect_steady_state_operands(&model.exprs, id, &mut operands);
         }
         for arg in operands {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let mut names: Vec<String> = model
                 .exprs
                 .walk_idents(arg)
@@ -277,6 +295,9 @@ pub fn check_w061(ws: &mut Workspace, uri: &str) -> Vec<Diagnostic> {
     let docs = ws.document_uris();
     let mut parents = Vec::new();
     for parent in &docs {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if parent == &key {
             continue;
         }
@@ -289,6 +310,9 @@ pub fn check_w061(ws: &mut Workspace, uri: &str) -> Vec<Diagnostic> {
     }
     let mut outermost = Vec::new();
     for parent in &parents {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let nested_in_other = parents
             .iter()
             .any(|other| other != parent && ws.resolve_all_includes(other).contains_key(parent));
@@ -367,6 +391,9 @@ pub fn check_e381(model: &Model) -> Vec<Diagnostic> {
     let external: HashSet<Name> = model.external_function_names.iter().copied().collect();
     let mut diagnostics = Vec::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let mut operands = Vec::new();
         if let Some(id) = eq.lhs_expr {
             collect_steady_state_operands(&model.exprs, id, &mut operands);
@@ -376,6 +403,9 @@ pub fn check_e381(model: &Model) -> Vec<Diagnostic> {
         }
         let mut hit = false;
         for arg in operands {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             walk_call_callees(model, arg, &mut |callee| {
                 if external.contains(&callee) {
                     hit = true;
@@ -405,6 +435,9 @@ fn walk_call_callees(model: &Model, id: ExprId, f: &mut impl FnMut(Name)) {
         ExprKind::Call { callee, args } => {
             f(*callee);
             for arg in args {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 walk_call_callees(model, *arg, f);
             }
         }
@@ -496,6 +529,9 @@ fn leading_ident(s: &str) -> Option<&str> {
     }
     let mut end = first.len_utf8();
     for (i, c) in chars {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if c.is_ascii_alphanumeric() || c == '_' {
             end = i + c.len_utf8();
         } else {
@@ -617,6 +653,9 @@ pub(crate) fn collect_steady_state_operands(
         }
         ExprKind::Call { args, .. } => {
             for arg in args {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 collect_steady_state_operands(arena, *arg, out);
             }
         }

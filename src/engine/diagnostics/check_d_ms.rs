@@ -62,6 +62,9 @@ pub fn check_d_ms(model: &Model) -> Vec<Diagnostic> {
 pub(crate) fn check_parse_before(model: &Model, syntax: &[Diagnostic]) -> Vec<Diagnostic> {
     let mut boundary = usize::MAX;
     for diagnostic in syntax {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(order) = model
             .parse_issue_orders
             .iter()
@@ -83,9 +86,15 @@ pub(crate) fn check_parse_before(model: &Model, syntax: &[Diagnostic]) -> Vec<Di
 fn shape_refuses(model: &Model) -> Vec<&ShapeRefuse> {
     let mut rows: Vec<&ShapeRefuse> = model.shape_refuses.iter().collect();
     for block in &model.svar_identifications {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         rows.extend(block.shape_refuses.iter());
     }
     for block in &model.conditional_forecast_paths {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         rows.extend(block.shape_refuses.iter());
     }
     rows.sort_by_key(|refuse| (refuse.span.start, refuse.span.end));
@@ -179,6 +188,9 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>, before: Option<us
     let mut units: Vec<(usize, Unit)> = Vec::new();
     let spans = statement_spans(model);
     for refuse in shape_refuses(model) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let at = containing_statement_start(&spans, refuse);
         units.push((at as usize, Unit::Shape(refuse)));
     }
@@ -199,6 +211,9 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>, before: Option<us
     // A top-level `symbol = …;` reaches the grammar only when the head is declared,
     // and the pin refuses it while parsing when the symbol is not a parameter.
     for assignment in &model.helper_assignments {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !assignment.native
             && model
                 .symbol_kind_in_context(assignment.name, assignment.symbol_type_context)
@@ -214,6 +229,9 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>, before: Option<us
         }
     }
     for stmt in &model.ms_statements {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if stmt.command.eq_ignore_ascii_case("markov_switching") {
             units.push((stmt.span.start as usize, Unit::Markov(stmt)));
         } else if stmt.command.eq_ignore_ascii_case("svar") {
@@ -221,6 +239,9 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>, before: Option<us
         }
     }
     for block in &model.svar_identifications {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some((span, code, message, order)) = identification_body_refusal(model, block) {
             units.push((
                 span.start as usize,
@@ -232,6 +253,9 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>, before: Option<us
         }
     }
     for block in &model.conditional_forecast_paths {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some((diagnostic, order)) = conditional_forecast_path_refusal(model, block) {
             units.push((
                 diagnostic.span.start as usize,
@@ -240,9 +264,15 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>, before: Option<us
         }
     }
     for stmt in &model.dotted_statements {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         units.push((stmt.span.start as usize, Unit::Prior(stmt)));
     }
     for row in &model.var_removed {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         units.push((row.statement.start as usize, Unit::VarRemove(row)));
     }
     // These captures can compete across backward written macro spans.
@@ -329,6 +359,9 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>, before: Option<us
 
     let mut subsample_ranges: HashMap<(Name, Option<Name>), HashSet<Name>> = HashMap::new();
     for (_, unit) in units {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let fired = match unit {
             Unit::Shape(refuse) => {
                 push(out, refuse.span, "E001", shape_refuse_message(refuse));
@@ -447,6 +480,9 @@ fn check_subsample_parse(
         } => {
             let mut names = HashSet::new();
             for row in rows {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 if !names.insert(row.name) {
                     push(
                         out,
@@ -461,6 +497,9 @@ fn check_subsample_parse(
                 }
             }
             for (name, name_span) in subsample_names(head) {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 if model
                     .symbol_kind_in_context(name, *symbol_type_context)
                     .is_none()
@@ -639,6 +678,9 @@ fn check_dotted_copy_source(
         _ => Vec::new(),
     };
     for (name, span) in names {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let refusal = match std_corr_verdict_at(model, name, stmt.symbol_type_context) {
             PriorHeadVerdict::Undeclared => {
                 Some(("E058", format!("Unknown symbol: {}.", model.name(name))))
@@ -691,6 +733,9 @@ fn check_dotted_head_and_subsample(
     }
     if let DottedHead::Vec { names } = &stmt.head {
         for (name, span) in names {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if !model.parameter_in_context(*name, stmt.symbol_type_context) {
                 push(
                     out,
@@ -779,6 +824,9 @@ fn check_dotted_head_and_subsample(
 
 fn check_subsample_writer(model: &Model, out: &mut Vec<Diagnostic>) {
     for stmt in &model.subsamples {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let head = match stmt {
             SubsampleInstruction::Declare { head, .. } => head,
             SubsampleInstruction::Copy { target, .. } => target,
@@ -818,9 +866,15 @@ enum CheckUnit<'a> {
 fn check_check_phase(model: &Model, out: &mut Vec<Diagnostic>) {
     let mut units: Vec<(u32, CheckUnit)> = Vec::new();
     for stmt in &model.data_statements {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         units.push((stmt.span.start, CheckUnit::Data(stmt)));
     }
     for stmt in &model.ms_statements {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let unit = if stmt.command.eq_ignore_ascii_case("ms_estimation") {
             CheckUnit::MsEstimation(stmt)
         } else if stmt.command.eq_ignore_ascii_case("conditional_forecast") {
@@ -833,15 +887,24 @@ fn check_check_phase(model: &Model, out: &mut Vec<Diagnostic>) {
         units.push((stmt.span.start, unit));
     }
     for block in &model.svar_identifications {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         units.push((block.span.start, CheckUnit::Identification(block)));
     }
     for stmt in &model.dotted_statements {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         units.push((stmt.span.start, CheckUnit::Prior(stmt)));
     }
     units.sort_by_key(|(at, _)| *at);
     let mut chains: i32 = 0;
     let mut second_identification = false;
     for (at, unit) in units {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         // The pinned parser stops inside the statement before its check pass runs, so a
         // shape refuse written anywhere in this statement beats every sentence the
         // statement would print here.
@@ -1074,6 +1137,9 @@ fn conditional_forecast_path_refusal(
     let endogenous = endogenous_names(model);
     let mut seen: HashMap<Name, Span> = HashMap::new();
     for row in &block.rows {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(order) = row.parse_order else {
             continue;
         };
@@ -1154,6 +1220,9 @@ pub(crate) fn cfp_first_bad_row(
     let declared = declared_names(model);
     let endogenous = endogenous_names(model);
     for row in block {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !declared.contains(&row.name) {
             return Some((row.span, row.name, true));
         }
@@ -1184,6 +1253,9 @@ fn check_markov_switching_parse(
         return true;
     }
     for name in ["chain", "number_of_regimes", "duration"] {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !has(stmt, name) {
             push(
                 out,
@@ -1229,6 +1301,9 @@ fn check_markov_switching_parse(
     let rows = matrix_rows(&restrictions.value_text).unwrap_or_default();
     let mut map: Vec<(i64, i64, f64)> = Vec::new();
     for row in &rows {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if row.len() != 3 {
             push(
                 out,
@@ -1351,6 +1426,9 @@ fn check_ms_parameters(model: &Model, stmt: &MsStatement, out: &mut Vec<Diagnost
         return false;
     };
     for (name, _span) in &parameters.names {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let kind = model.symbol_kind_in_context(*name, stmt.symbol_type_context);
         if kind.is_none() {
             return false;
@@ -1381,6 +1459,9 @@ fn regime_sum_refusal(
     regimes: usize,
 ) -> Option<(&'static str, &'static str)> {
     for regime in 1..=regimes as i64 {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let row: Vec<f64> = map
             .iter()
             .filter(|(from, _, _)| *from == regime)
@@ -1482,6 +1563,9 @@ pub(crate) fn identification_undeclared_name(
 ) -> Option<(Span, String)> {
     let declared = declared_names(model);
     for (span, name) in identification_names(model, block) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let known = model
             .intern
             .lookup(&name)
@@ -1498,16 +1582,28 @@ pub(crate) fn identification_undeclared_name(
 fn identification_names(model: &Model, block: &SvarIdentification) -> Vec<(Span, String)> {
     let mut out = Vec::new();
     for element in &block.elements {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         match element {
             SvarIdentificationElement::ExclusionLag { equations, .. } => {
                 for row in equations {
+                    if crate::engine::control::cancelled() {
+                        return Default::default();
+                    }
                     for (name, span) in &row.names {
+                        if crate::engine::control::cancelled() {
+                            return Default::default();
+                        }
                         out.push((*span, model.name(*name).to_string()));
                     }
                 }
             }
             SvarIdentificationElement::Restriction { span, .. } => {
                 for (name, _lag, term) in restriction_terms(model, *span) {
+                    if crate::engine::control::cancelled() {
+                        return Default::default();
+                    }
                     out.push((term, name));
                 }
             }
@@ -1535,6 +1631,9 @@ fn identification_body_refusal(
     let declared = declared_names(model);
     let mut lags: Vec<i32> = Vec::new();
     for (element, order) in block.elements.iter().zip(&block.element_parse_orders) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         match element {
             SvarIdentificationElement::ExclusionLag { lag, equations, .. } => {
                 if let Some(refusal) = equation_rows_refusal(model, equations, &declared) {
@@ -1582,6 +1681,9 @@ fn equation_rows_refusal(
 ) -> Option<(Span, &'static str, String, usize)> {
     let mut numbers: Vec<i64> = Vec::new();
     for row in equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(order) = row.parse_order else {
             continue;
         };
@@ -1609,6 +1711,9 @@ fn equation_rows_refusal(
         }
         let mut names: Vec<Name> = Vec::new();
         for (name, name_span) in &row.names {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if !declared.contains(name) {
                 return Some((
                     *name_span,
@@ -1675,6 +1780,9 @@ fn qi_ri_refusal(model: &Model, element_span: Span) -> Option<(Span, &'static st
     }
     let starts_with_qi = first.1 == 0;
     for (name, lag, span) in &terms {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !is_declared(name) {
             return None;
         }
@@ -1698,6 +1806,9 @@ fn sign_span(model: &Model, span: Span) -> Span {
     let mut start = span.start as usize;
     let mut i = start;
     while i > 0 && bytes.get(i - 1).is_some_and(|b| b.is_ascii_whitespace()) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         i -= 1;
     }
     if i > 0 && matches!(bytes.get(i - 1), Some(b'+') | Some(b'-')) {
@@ -1722,6 +1833,9 @@ fn restriction_terms(model: &Model, element_span: Span) -> Vec<(String, i64, Spa
     let mut out = Vec::new();
     let mut i = 0;
     while i < text.len() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !at_ident(&text[i..], "coeff") {
             i += 1;
             continue;
@@ -1750,6 +1864,9 @@ fn read_coeff_term(text: &str, from: usize) -> Option<(String, i64, usize)> {
     let bytes = text.as_bytes();
     let mut i = from + "coeff".len();
     while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         i += 1;
     }
     if bytes.get(i) != Some(&b'(') {
@@ -1757,10 +1874,16 @@ fn read_coeff_term(text: &str, from: usize) -> Option<(String, i64, usize)> {
     }
     i += 1;
     while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         i += 1;
     }
     let name_start = i;
     while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         i += 1;
     }
     let name = text.get(name_start..i)?.to_string();
@@ -1768,6 +1891,9 @@ fn read_coeff_term(text: &str, from: usize) -> Option<(String, i64, usize)> {
         return None;
     }
     while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         i += 1;
     }
     if bytes.get(i) != Some(&b',') {
@@ -1775,10 +1901,16 @@ fn read_coeff_term(text: &str, from: usize) -> Option<(String, i64, usize)> {
     }
     i += 1;
     while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         i += 1;
     }
     let lag_start = i;
     while i < bytes.len() && bytes[i].is_ascii_digit() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         i += 1;
     }
     if lag_start == i {
@@ -1786,6 +1918,9 @@ fn read_coeff_term(text: &str, from: usize) -> Option<(String, i64, usize)> {
     }
     let lag: i64 = text.get(lag_start..i)?.parse().ok()?;
     while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         i += 1;
     }
     if bytes.get(i) != Some(&b')') {
@@ -1881,6 +2016,9 @@ fn check_svar(src: &str, stmt: &MsStatement, out: &mut Vec<Diagnostic>) -> bool 
         return false;
     }
     for value in &values {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(number) = plain_int(value) else {
             return false;
         };
@@ -2014,6 +2152,9 @@ fn check_top_assignment(
 ) -> bool {
     if let Some(id) = assignment.expr {
         for usage in model.exprs.walk_idents(id) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if let Some(diagnostic) =
                 crate::engine::diagnostics::check_d_block::outside_expression_role_refusal(
                     model,
@@ -2233,6 +2374,9 @@ fn bracketed_entries(text: &str) -> Option<Vec<String>> {
     let inner = trimmed.strip_prefix('[')?.strip_suffix(']')?;
     let mut out = Vec::new();
     for piece in inner.split([',', ' ', '\t']) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if piece.is_empty() {
             continue;
         }
@@ -2250,6 +2394,9 @@ fn matrix_rows(text: &str) -> Option<Vec<Vec<String>>> {
     let mut depth = 0i32;
     let mut current: Option<String> = None;
     for ch in inner.chars() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         match ch {
             '[' => {
                 depth += 1;

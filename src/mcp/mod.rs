@@ -3,15 +3,25 @@
 //! Tests call these functions directly. Stdio is a thin wrap around the same
 //! handlers.
 
+mod edits;
+mod multi_request;
 pub(crate) mod repository_compare;
+mod request;
+mod result;
+pub(crate) mod source;
 pub(crate) mod workspace_diagnose;
 
-use std::collections::{HashMap, HashSet};
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::Path;
 
+#[cfg(test)]
 use rmcp::handler::server::wrapper::Parameters;
+#[cfg(test)]
 use rmcp::model::{CallToolResult, ContentBlock};
-use rmcp::{tool, tool_handler, tool_router, ServerHandler, ServiceExt};
+#[cfg(test)]
+use rmcp::{tool, tool_router};
+use rmcp::{tool_handler, ServerHandler, ServiceExt};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -27,22 +37,24 @@ use crate::engine::catalog::list_options;
 use crate::engine::comparison::{compare_models_with_sources, CompareSource};
 use crate::engine::diagnostics::explain;
 use crate::engine::diagnostics::{analyze, Diagnostic, Severity};
-use crate::engine::editing::auto_fix::{auto_fix, auto_fix_outcome};
+use crate::engine::editing::auto_fix::auto_fix;
+#[cfg(test)]
+use crate::engine::editing::auto_fix::auto_fix_outcome;
 use crate::engine::editing::extract::{
     extract, EquationDomain, EquationRole, ExtractError, ExtractRequest, ExtractResult,
     ExtractStatus,
 };
 use crate::engine::editing::format::{format_outcome, parse_format_indent, FormatOutcome};
-use crate::engine::editing::refs::{is_legal_ident, occurrences, rename_in_text};
+use crate::engine::editing::refs::is_legal_ident;
 use crate::engine::language::expand::{expand_report, EquationOrigin, ExpandReport, OriginFrame};
 use crate::engine::language::model::Model;
 use crate::engine::language::parser::{normalize_newlines, parse};
 use crate::engine::language::span::{LineIndex, Span};
-use crate::engine::workspace::include_resolver::{normalize_uri, path_key};
+use crate::engine::workspace::include_resolver::normalize_uri;
 use crate::engine::workspace::Workspace;
-use crate::mcp::repository_compare::{
-    compare_repository, RepositoryComparison, RepositorySelector,
-};
+use crate::mcp::repository_compare::RepositorySelector;
+#[cfg(test)]
+use crate::mcp::repository_compare::{compare_repository, RepositoryComparison};
 use crate::mcp::workspace_diagnose::{
     diagnose_map, diagnose_paths, RootStatus, WorkspaceDiagnoseError, WorkspaceDiagnoseReport,
     WorkspaceDiagnostic, WorkspaceRootReport,
@@ -68,6 +80,8 @@ const TOOL_NAMES: &[&str] = &[
     "dynare_format",
     "dynare_extract",
     "dynare_workspace_diagnose",
+    "dynare_symbol_info",
+    "dynare_code_actions",
 ];
 
 /// One diagnostic as MCP JSON: 1-based line/column, severity `ERROR`/`WARNING`/`INFORMATION`/`HINT`.
@@ -120,7 +134,7 @@ pub fn registered_tool_names() -> Vec<&'static str> {
 
 /// JSON for tools/list assertions (names + descriptions). No live client.
 pub fn tools_list_json() -> Value {
-    let tools = DygnosisMcp::tool_router().list_all();
+    let tools = advertised_tools(true);
     json!({"tools": TOOL_NAMES.iter().map(|name| {
         let tool = tools.iter().find(|tool| tool.name == *name).expect("registered tool");
         json!({"name": tool.name, "description": tool.description})
@@ -141,6 +155,15 @@ fn overlay_files(
     let mut workspace_files = files.clone();
     workspace_files.insert(active_file.to_string(), file_content.to_string());
     workspace_files
+}
+
+fn supplied_workspace(files: &HashMap<String, String>) -> Workspace {
+    Workspace::overlay_documents(
+        &files
+            .iter()
+            .map(|(key, text)| (key.clone(), text.clone()))
+            .collect(),
+    )
 }
 
 /// `analyze` / `check_in_workspace` only. Product MCP does not spawn Dynare.
@@ -169,10 +192,7 @@ fn diagnose_in_workspace(active_file: &str, files: &HashMap<String, String>) -> 
     let Some(text) = files.get(active_file) else {
         return Vec::new();
     };
-    let mut ws = Workspace::new();
-    for (name, content) in files {
-        ws.update_document(name, content);
-    }
+    let mut ws = supplied_workspace(files);
     let own = crate::engine::diagnostics::check_in_workspace_with_origins(&mut ws, active_file);
     diagnostics_to_json_with_origins(text, &own, files)
 }
@@ -195,8 +215,12 @@ pub fn dynare_model_info(
         status["incomplete_reasons"] = unit.incomplete_reasons();
         return status;
     }
+    model_info_with_unit(&unit)
+}
+
+fn model_info_with_unit(unit: &McpUnit) -> Value {
     let mut info = model_info_json(&unit.model);
-    attach_model_local_origins(&mut info, &unit);
+    attach_model_local_origins(&mut info, unit);
     info
 }
 
@@ -294,6 +318,10 @@ pub fn dynare_equations(
     index: Option<usize>,
 ) -> Value {
     let unit = mcp_unit(file_content, active_file, files);
+    equations_with_unit(&unit, name, index)
+}
+
+fn equations_with_unit(unit: &McpUnit, name: Option<&str>, index: Option<usize>) -> Value {
     if let Some(mut status) = incomplete_model_status(&unit.model, unit.includes_complete) {
         status["incomplete_reasons"] = unit.incomplete_reasons();
         status["equations"] = json!([]);
@@ -314,7 +342,7 @@ pub fn dynare_equations(
         (None, None) => {
             out["equations"] = Value::Array(
                 rows.iter()
-                    .map(|row| equation_row_json(row, origin_for(&unit, row.index), &unit, false))
+                    .map(|row| equation_row_json(row, origin_for(unit, row.index), unit, false))
                     .collect(),
             );
         }
@@ -328,9 +356,7 @@ pub fn dynare_equations(
             } else {
                 out["equations"] = Value::Array(
                     hits.into_iter()
-                        .map(|row| {
-                            equation_row_json(row, origin_for(&unit, row.index), &unit, true)
-                        })
+                        .map(|row| equation_row_json(row, origin_for(unit, row.index), unit, true))
                         .collect(),
                 );
             }
@@ -341,8 +367,8 @@ pub fn dynare_equations(
             } else {
                 out["equations"] = json!([equation_row_json(
                     &rows[i],
-                    origin_for(&unit, rows[i].index),
-                    &unit,
+                    origin_for(unit, rows[i].index),
+                    unit,
                     true
                 )]);
             }
@@ -368,7 +394,7 @@ pub fn dynare_equations(
                                 .heterogeneous_origins
                                 .get(block.block_index)
                                 .and_then(|origins| origins.get(local_index));
-                            equation_row_json(row, origin, &unit, name.is_some())
+                            equation_row_json(row, origin, unit, name.is_some())
                         })
                         .collect();
                     if name.is_some() && selected.is_empty() {
@@ -397,6 +423,10 @@ pub fn dynare_expand(
     files: Option<&HashMap<String, String>>,
 ) -> Value {
     let unit = mcp_unit(file_content, active_file, files);
+    expand_with_unit(&unit)
+}
+
+fn expand_with_unit(unit: &McpUnit) -> Value {
     let has_heterogeneous = !unit.report.heterogeneous_origins.is_empty();
     let origins: Vec<Value> = unit
         .report
@@ -414,7 +444,7 @@ pub fn dynare_expand(
                     v["scope"] = json!("aggregate");
                 }
             }
-            attach_origin(&mut v, origin, &unit);
+            attach_origin(&mut v, origin, unit);
             v
         })
         .collect();
@@ -426,7 +456,7 @@ pub fn dynare_expand(
         "root_file": unit.root_file,
         "revision": unit.revision,
         "complete": unit.complete,
-        "macro_messages": macro_messages_json(&unit.report.macro_messages, &unit),
+        "macro_messages": macro_messages_json(&unit.report.macro_messages, unit),
     });
     result["navigation"] = if unit.complete {
         crate::engine::preview::preview_navigation::navigation_json(
@@ -548,9 +578,9 @@ fn equation_row_json(
     v
 }
 
-struct McpUnit {
-    model: Model,
-    report: ExpandReport,
+struct McpUnit<'a> {
+    model: Cow<'a, Model>,
+    report: Cow<'a, ExpandReport>,
     raw: String,
     files: Option<HashMap<String, String>>,
     sources: HashMap<String, String>,
@@ -565,7 +595,7 @@ fn mcp_unit(
     file_content: &str,
     active_file: Option<&str>,
     files: Option<&HashMap<String, String>>,
-) -> McpUnit {
+) -> McpUnit<'static> {
     let Some(files) = nonempty_map(files) else {
         return McpUnit::free(file_content);
     };
@@ -575,7 +605,7 @@ fn mcp_unit(
     McpUnit::mapped(file_content, active, files)
 }
 
-impl McpUnit {
+impl McpUnit<'_> {
     fn incomplete_reasons(&self) -> Value {
         if let Some(reasons) = &self.reasons {
             return reasons.clone();
@@ -621,8 +651,8 @@ impl McpUnit {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         file_content.hash(&mut hash);
         Self {
-            model: parse(file_content),
-            report,
+            model: Cow::Owned(parse(file_content)),
+            report: Cow::Owned(report),
             raw: normalize_newlines(file_content),
             files: None,
             sources: HashMap::new(),
@@ -636,10 +666,7 @@ impl McpUnit {
 
     fn mapped(file_content: &str, active: &str, files: &HashMap<String, String>) -> Self {
         let workspace_files = overlay_files(file_content, active, files);
-        let mut ws = Workspace::new();
-        for (name, content) in &workspace_files {
-            ws.update_document(name, content);
-        }
+        let mut ws = supplied_workspace(&workspace_files);
         let revision = ws.input_revision(active).unwrap_or_default();
         let model = ws
             .get_effective_model(active)
@@ -675,8 +702,8 @@ impl McpUnit {
             }
         }
         Self {
-            model,
-            report,
+            model: Cow::Owned(model),
+            report: Cow::Owned(report),
             raw: normalize_newlines(file_content),
             files: Some(workspace_files),
             sources,
@@ -695,14 +722,13 @@ impl McpUnit {
                 if let Some(src) = self.sources.get(uri) {
                     return Some(src.as_str());
                 }
-                let key = path_key(Path::new(uri));
-                if let Some(src) = self.sources.get(&key) {
-                    return Some(src.as_str());
-                }
                 let files = self.files.as_ref()?;
                 files
                     .iter()
-                    .find(|(name, _)| normalize_uri(name) == key)
+                    .find(|(name, _)| {
+                        crate::engine::workspace::include_resolver::supplied_path_key(name)
+                            == crate::engine::workspace::include_resolver::supplied_path_key(uri)
+                    })
                     .map(|(_, content)| content.as_str())
             }
         }
@@ -715,7 +741,7 @@ impl McpUnit {
     }
 }
 
-fn origin_for(unit: &McpUnit, index: usize) -> Option<&EquationOrigin> {
+fn origin_for<'a>(unit: &'a McpUnit<'_>, index: usize) -> Option<&'a EquationOrigin> {
     unit.report
         .aggregate_origins
         .get(index)
@@ -1056,7 +1082,7 @@ pub fn dynare_list_options(command: Option<&str>) -> Value {
     serde_json::to_value(list_options(command)).expect("list_options is serializable")
 }
 
-/// Whole-word Ident occurrences.
+/// Accepted uses of one unique symbol binding, in the legacy coordinate shape.
 ///
 /// No map: `[{ line, column, end_column }]`. With a nonempty map: objects also
 /// have `file` (caller key). Missing `active_file` or empty symbol → `[]`.
@@ -1066,73 +1092,17 @@ pub fn dynare_find_references(
     active_file: Option<&str>,
     files: Option<&HashMap<String, String>>,
 ) -> Value {
-    let Some(files) = nonempty_map(files) else {
-        return serde_json::to_value(find_references_in_text(file_content, symbol))
-            .expect("find_references json");
-    };
-    let Some(active) = active_file.filter(|a| files.contains_key(*a)) else {
+    if symbol.is_empty()
+        || nonempty_map(files)
+            .is_some_and(|files| active_file.is_none_or(|active| !files.contains_key(active)))
+    {
         return json!([]);
-    };
-    let workspace_files = overlay_files(file_content, active, files);
-    serde_json::to_value(find_references_in_workspace(
-        active,
-        symbol,
-        &workspace_files,
-    ))
-    .expect("find_references json")
+    }
+    let arguments = json!({"file_content":file_content,"symbol":symbol,"active_file":active_file,"files":files});
+    legacy_library_query("dynare_find_references", arguments, json!([]))
 }
 
-fn find_references_in_text(file_content: &str, symbol: &str) -> Vec<McpReference> {
-    if symbol.is_empty() {
-        return Vec::new();
-    }
-    let index = LineIndex::new(file_content);
-    occurrences(file_content, symbol)
-        .into_iter()
-        .map(|span| {
-            let start = index.position(file_content, span.start);
-            let end = index.position(file_content, span.end);
-            McpReference {
-                line: start.line + 1,
-                column: start.character + 1,
-                end_column: end.character + 1,
-            }
-        })
-        .collect()
-}
-
-fn find_references_in_workspace(
-    active_file: &str,
-    symbol: &str,
-    files: &HashMap<String, String>,
-) -> Vec<McpWorkspaceReference> {
-    if symbol.is_empty() || !files.contains_key(active_file) {
-        return Vec::new();
-    }
-    let mut ws = Workspace::new();
-    for (name, content) in files {
-        ws.update_document(name, content);
-    }
-    let scope = workspace_scope_files(active_file, files, &mut ws);
-    let mut results = Vec::new();
-    for (fname, content) in &scope {
-        let text = ws.get_source(fname).unwrap_or(content.as_str());
-        let index = LineIndex::new(text);
-        for span in occurrences(text, symbol) {
-            let start = index.position(text, span.start);
-            let end = index.position(text, span.end);
-            results.push(McpWorkspaceReference {
-                file: fname.clone(),
-                line: start.line + 1,
-                column: start.character + 1,
-                end_column: end.character + 1,
-            });
-        }
-    }
-    results
-}
-
-/// Rename Ident occurrences.
+/// Rename one unique binding with the shared safety decision; never spelling replacement.
 ///
 /// No map: JSON string (illegal / reserved / no hits → original). With a
 /// nonempty map: object of changed files only, or `{}`.
@@ -1143,52 +1113,37 @@ pub fn dynare_rename(
     active_file: Option<&str>,
     files: Option<&HashMap<String, String>>,
 ) -> Value {
-    let Some(files) = nonempty_map(files) else {
-        return Value::String(rename_in_single(file_content, old_name, new_name));
+    let unchanged = if nonempty_map(files).is_some() {
+        json!({})
+    } else {
+        json!(file_content)
     };
-    let Some(active) = active_file.filter(|a| files.contains_key(*a)) else {
-        return json!({});
-    };
-    let workspace_files = overlay_files(file_content, active, files);
-    serde_json::to_value(rename_in_workspace(
-        active,
-        old_name,
-        new_name,
-        &workspace_files,
-    ))
-    .expect("rename json")
+    if !is_legal_ident(new_name)
+        || old_name.is_empty()
+        || nonempty_map(files)
+            .is_some_and(|files| active_file.is_none_or(|active| !files.contains_key(active)))
+    {
+        return unchanged;
+    }
+    let arguments = json!({"file_content":file_content,"old_name":old_name,"new_name":new_name,"active_file":active_file,"files":files});
+    legacy_library_query("dynare_rename", arguments, unchanged)
 }
 
-fn rename_in_single(file_content: &str, old_name: &str, new_name: &str) -> String {
-    if !is_legal_ident(old_name) || !is_legal_ident(new_name) {
-        return file_content.to_string();
-    }
-    rename_in_text(file_content, old_name, new_name)
-}
-
-fn rename_in_workspace(
-    active_file: &str,
-    old_name: &str,
-    new_name: &str,
-    files: &HashMap<String, String>,
-) -> HashMap<String, String> {
-    if !is_legal_ident(old_name) || !is_legal_ident(new_name) || !files.contains_key(active_file) {
-        return HashMap::new();
-    }
-    let mut ws = Workspace::new();
-    for (name, content) in files {
-        ws.update_document(name, content);
-    }
-    let scope = workspace_scope_files(active_file, files, &mut ws);
-    let mut out = HashMap::new();
-    for (fname, content) in &scope {
-        let text = ws.get_source(fname).unwrap_or(content.as_str());
-        let rewritten = rename_in_text(text, old_name, new_name);
-        if rewritten != text {
-            out.insert(fname.clone(), rewritten);
+fn legacy_library_query(tool: &str, arguments: Value, fallback: Value) -> Value {
+    match request::dispatch(tool, arguments, source::RequestControl::default()) {
+        Ok(result) => {
+            if result.is_error == Some(true) {
+                return result.structured_content.expect("canonical refusal");
+            }
+            result
+                .content
+                .first()
+                .and_then(|block| block.as_text())
+                .map(|text| serde_json::from_str(&text.text).unwrap_or_else(|_| json!(text.text)))
+                .unwrap_or(fallback)
         }
+        Err(error) => json!({"status":"refused","message":error.message}),
     }
-    out
 }
 
 /// Thin wrap of library `auto_fix`.
@@ -1220,10 +1175,7 @@ pub fn dynare_related_files(
 }
 
 fn related_files_in_workspace(active_file: &str, files: &HashMap<String, String>) -> Value {
-    let mut ws = Workspace::new();
-    for (name, content) in files {
-        ws.update_document(name, content);
-    }
+    let mut ws = supplied_workspace(files);
     let includes = ws.include_records(active_file).cloned().unwrap_or_default();
     let companions = ws
         .companion_records(active_file)
@@ -1236,10 +1188,11 @@ fn related_files_in_workspace(active_file: &str, files: &HashMap<String, String>
 }
 
 fn related_file_path(resolved: &Path, files: &HashMap<String, String>) -> String {
-    let key = path_key(resolved);
+    let key =
+        crate::engine::workspace::include_resolver::supplied_path_key(&resolved.to_string_lossy());
     files
         .keys()
-        .find(|orig| normalize_uri(orig) == key)
+        .find(|orig| crate::engine::workspace::include_resolver::supplied_path_key(orig) == key)
         .cloned()
         .unwrap_or_else(|| resolved.to_string_lossy().into_owned())
 }
@@ -1257,104 +1210,6 @@ pub async fn run_stdio() {
     if let Err(err) = service.waiting().await {
         tracing::error!("MCP stdio stopped: {err}");
         std::process::exit(1);
-    }
-}
-
-/// Active + transitive includes + supplied parents that reach active.
-fn workspace_scope_files(
-    active_file: &str,
-    files: &HashMap<String, String>,
-    ws: &mut Workspace,
-) -> HashMap<String, String> {
-    let active_key = normalize_uri(active_file);
-    let mut supplied_by_key: HashMap<String, String> = HashMap::new();
-    for fname in files.keys() {
-        supplied_by_key.insert(normalize_uri(fname), fname.clone());
-    }
-
-    let mut scope: HashMap<String, String> = HashMap::new();
-    let mut seen: HashSet<String> = HashSet::new();
-
-    let add_named = |fname: &str,
-                     content: &str,
-                     seen: &mut HashSet<String>,
-                     scope: &mut HashMap<String, String>| {
-        let key = normalize_uri(fname);
-        if !seen.insert(key) {
-            return;
-        }
-        scope.insert(fname.to_string(), content.to_string());
-    };
-
-    if let Some(content) = files.get(active_file) {
-        add_named(active_file, content, &mut seen, &mut scope);
-    }
-
-    let active_include_keys: Vec<String> = ws
-        .resolve_all_includes(active_file)
-        .keys()
-        .cloned()
-        .collect();
-    for path_key in active_include_keys {
-        add_path_key(
-            &path_key,
-            files,
-            &supplied_by_key,
-            ws,
-            &mut seen,
-            &mut scope,
-        );
-    }
-
-    let other_files: Vec<(String, String)> = files
-        .iter()
-        .filter(|(fname, _)| normalize_uri(fname) != active_key)
-        .map(|(fname, content)| (fname.clone(), content.clone()))
-        .collect();
-    for (fname, content) in other_files {
-        let included = ws.resolve_all_includes(&fname);
-        if !included.contains_key(&active_key) {
-            continue;
-        }
-        add_named(&fname, &content, &mut seen, &mut scope);
-        let include_keys: Vec<String> = included.keys().cloned().collect();
-        for path_key in include_keys {
-            add_path_key(
-                &path_key,
-                files,
-                &supplied_by_key,
-                ws,
-                &mut seen,
-                &mut scope,
-            );
-        }
-    }
-
-    scope
-}
-
-fn add_path_key(
-    path_key: &str,
-    files: &HashMap<String, String>,
-    supplied_by_key: &HashMap<String, String>,
-    ws: &mut Workspace,
-    seen: &mut HashSet<String>,
-    scope: &mut HashMap<String, String>,
-) {
-    if let Some(orig) = supplied_by_key.get(path_key)
-        && let Some(content) = files.get(orig)
-    {
-        let key = normalize_uri(orig);
-        if seen.insert(key) {
-            scope.insert(orig.clone(), content.clone());
-        }
-        return;
-    }
-    if let Some(src) = ws.get_source(path_key) {
-        let key = normalize_uri(path_key);
-        if seen.insert(key) {
-            scope.insert(path_key.to_string(), src.to_string());
-        }
     }
 }
 
@@ -1815,20 +1670,24 @@ fn workspace_diag_json(diag: &WorkspaceDiagnostic) -> Value {
     row
 }
 
+#[cfg(test)]
 fn tool_json(value: Value) -> CallToolResult {
     CallToolResult::structured(value)
 }
 
+#[cfg(test)]
 fn tool_text(text: String) -> CallToolResult {
     CallToolResult::success(vec![ContentBlock::text(text)])
 }
 
 /// Keep the original payload first; clients must also read the coverage notice.
+#[cfg(test)]
 fn tool_notice(mut result: CallToolResult, notice: Value) -> CallToolResult {
     result.content.push(ContentBlock::text(notice.to_string()));
     result
 }
 
+#[cfg(test)]
 fn tool_coverage(result: CallToolResult, src: &MappedSource<'_>) -> CallToolResult {
     let unit = mcp_unit(src.content, src.active, src.files);
     if unit.complete {
@@ -1843,6 +1702,7 @@ fn tool_coverage(result: CallToolResult, src: &MappedSource<'_>) -> CallToolResu
 
 /// Map args for diagnose / model_info: optional `file_content` overlay.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[cfg(test)]
 struct IncludeMapParams {
     /// Full root text. Supply this when files is absent or empty. With a nonempty map, it replaces the active_file entry for this request.
     #[serde(default)]
@@ -1859,12 +1719,14 @@ struct IncludeMapParams {
 struct DygnosisMcp;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[cfg(test)]
 struct FileContentParams {
     /// Complete .mod text to process. The tool returns text; it does not write a file.
     file_content: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[cfg(test)]
 struct FormatParams {
     /// Complete .mod text. Formatting does not write to disk.
     file_content: String,
@@ -1874,6 +1736,7 @@ struct FormatParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[cfg(test)]
 struct ExtractParams {
     /// Complete root .mod text. With a nonempty files map, it overlays the active_file entry. Without a map, only this supplied text is used.
     file_content: String,
@@ -1895,6 +1758,7 @@ struct ExtractParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[cfg(test)]
 struct WorkspaceDiagnoseParams {
     /// Nonempty supplied file-key to text map. Combine with nonempty roots; do not combine with paths.
     #[serde(default)]
@@ -2040,6 +1904,7 @@ impl CompareModelsParams {
         Ok(())
     }
 
+    #[cfg(test)]
     fn compare(self, cancelled: &(dyn Fn() -> bool + Sync)) -> Value {
         if let Some(repository_path) = self.repository_path {
             compare_repository(
@@ -2069,6 +1934,7 @@ impl CompareModelsParams {
     }
 }
 
+#[cfg(test)]
 fn compare_models_input_schema() -> std::sync::Arc<serde_json::Map<String, Value>> {
     let mut schema = mcp_input_schema::<CompareModelsParams>().as_ref().clone();
     let absent = |keys: &[&str]| json!({"not": {"anyOf": keys.iter().map(|key| json!({"required": [key]})).collect::<Vec<_>>()}});
@@ -2084,12 +1950,14 @@ fn compare_models_input_schema() -> std::sync::Arc<serde_json::Map<String, Value
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[cfg(test)]
 struct ExplainParams {
     /// Diagnostic code, such as E020 or W013. Use dynare_list_diagnostic_codes to find documented codes and their classification.
     code: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[cfg(test)]
 struct ListOptionsParams {
     /// Dynare command name. Omit it to list known commands; an unknown name returns known=false rather than inventing options.
     #[serde(default)]
@@ -2097,6 +1965,7 @@ struct ListOptionsParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[cfg(test)]
 struct EquationsParams {
     /// Complete root .mod text. With a nonempty files map, it overlays the active_file entry. Without a map, only this supplied text is used.
     #[serde(default)]
@@ -2116,6 +1985,7 @@ struct EquationsParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[cfg(test)]
 struct FindReferencesParams {
     /// Complete root .mod text. With a nonempty files map, it overlays the active_file entry. Without a map, only this supplied text is used.
     #[serde(default)]
@@ -2131,6 +2001,7 @@ struct FindReferencesParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[cfg(test)]
 struct RenameParams {
     /// Complete root .mod text. With a nonempty files map, it overlays the active_file entry. Without a map, only this supplied text is used.
     #[serde(default)]
@@ -2148,6 +2019,7 @@ struct RenameParams {
 }
 
 /// Source text plus map args after overlay.
+#[cfg(test)]
 struct MappedSource<'a> {
     content: &'a str,
     active: Option<&'a str>,
@@ -2156,6 +2028,7 @@ struct MappedSource<'a> {
 
 /// `None` means missing `file_content` on the single-file path. A nonempty
 /// map requires an exact root key and never falls back to single-file input.
+#[cfg(test)]
 fn resolve_mapped<'a>(
     file_content: Option<&'a str>,
     active_file: Option<&'a str>,
@@ -2222,6 +2095,7 @@ fn mcp_input_schema<T: JsonSchema>() -> std::sync::Arc<rmcp::model::JsonObject> 
     std::sync::Arc::new(object)
 }
 
+#[cfg(test)]
 #[tool_router]
 impl DygnosisMcp {
     #[tool(
@@ -2542,7 +2416,139 @@ impl DygnosisMcp {
 }
 
 #[tool_handler(name = "dygnosis")]
-impl ServerHandler for DygnosisMcp {}
+impl ServerHandler for DygnosisMcp {
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        struct StopWorker(Arc<AtomicBool>);
+        impl Drop for StopWorker {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let _stop = StopWorker(Arc::clone(&cancelled));
+        let structured = context
+            .protocol_version()
+            .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2025_06_18);
+        let name = request.name.to_string();
+        if !TOOL_NAMES.contains(&name.as_str()) {
+            return Err(rmcp::ErrorData::invalid_params(
+                format!("Unknown tool: {name}"),
+                None,
+            ));
+        }
+        let arguments = Value::Object(request.arguments.unwrap_or_default());
+        let control = source::RequestControl {
+            cancelled: Arc::clone(&cancelled),
+            ..Default::default()
+        };
+        let progress = Arc::clone(&control.progress);
+        let progress_token = context.meta.get_progress_token();
+        let mut worker = tokio::task::spawn_blocking(move || {
+            crate::engine::control::run(Some(Arc::clone(&control.cancelled)), || {
+                if matches!(
+                    name.as_str(),
+                    "dynare_compare_models" | "dynare_workspace_diagnose"
+                ) {
+                    multi_request::dispatch(&name, arguments, control)
+                } else {
+                    request::dispatch(&name, arguments, control)
+                }
+            })
+            .map_err(|_| rmcp::ErrorData::internal_error("Request cancelled", None))?
+        });
+        let mut tick = tokio::time::interval(std::time::Duration::from_millis(500));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut sent = None;
+        let result=loop {
+            tokio::select! {
+                result=&mut worker=>break result,
+                _=context.ct.cancelled()=>{
+                    cancelled.store(true,Ordering::Relaxed);
+                    let _=worker.await;
+                    return Err(rmcp::ErrorData::internal_error("Request cancelled",None));
+                }
+                _=tick.tick(),if progress_token.is_some()=>{
+                    let (count,phase)={let phase=progress.phase.lock().unwrap_or_else(|error|error.into_inner());
+                        (progress.completed.load(Ordering::SeqCst),*phase)};
+                    if sent.is_none_or(|sent|count>sent) && !context.ct.is_cancelled()
+                        && let Some(token)=&progress_token {
+                            let _=context.peer.notify_progress(rmcp::model::ProgressNotificationParam::new(token.clone(),count as f64).with_message(phase)).await;
+                            sent=Some(count);
+                        }
+                }
+            }
+        }.map_err(|error|rmcp::ErrorData::internal_error(format!("Model request worker failed: {error}"),None))?;
+        let mut result = result?;
+        if !structured {
+            result.structured_content = None;
+        }
+        Ok(result.into())
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
+        let structured = context
+            .protocol_version()
+            .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2025_06_18);
+        Ok(rmcp::model::ListToolsResult::with_all_items(
+            advertised_tools(structured),
+        ))
+    }
+
+    fn get_tool(&self, name: &str) -> Option<rmcp::model::Tool> {
+        advertised_tools(true)
+            .into_iter()
+            .find(|tool| tool.name == name)
+    }
+}
+
+fn advertised_tools(structured: bool) -> Vec<rmcp::model::Tool> {
+    use rmcp::model::{Tool, ToolAnnotations};
+    TOOL_NAMES.iter().map(|&name| {
+        let description=match name {
+            "dynare_diagnose"=>"Check the selected model and return diagnostics with one-based Unicode-scalar ranges. Filter by code, severity or written file. Model errors are diagnostic data. Missing includes or incomplete parsing/expansion produce partial coverage.",
+            "dynare_model_info"=>"Inspect model names, counts, timing and local definitions. Select summary, declarations, assignments, model_locals, statements, blocks, includes or scope sections. Assignment values are proven at their execution positions; unknown values stay null. Counts describe written equations before Dynare transformations.",
+            "dynare_equations"=>"Inspect aggregate and dimension equations, tags, identifiers, timing and verified source locations. Combine name, aggregate index, scope/dimension, tags and resolved-symbol filters with AND. index starts at zero; equation_id identifies this expanded row and input revision. Written timing and convention-converted dynare_timing remain distinct. Incomplete models withhold authoritative rows/count gaps.",
+            "dynare_find_references"=>"Find accepted uses of one semantic symbol binding. Select exactly one symbol name, written target or returned binding_id. Ambiguous names return scoped candidates. Return deduplicated written locations, roles and optionally separate expanded occurrences. Comments, unrelated strings and native MATLAB lookalikes are excluded; supported literal tag references and built-in calls are classified.",
+            "dynare_symbol_info"=>"Inspect one semantic symbol's declaration/definition, scope, type, labels, timing, verified written targets and assignment values with execution provenance. Select exactly one symbol name, target or binding_id; ambiguous selections return candidates. Model-local expressions have no computed value.",
+            "dynare_rename"=>"Propose a complete semantic Rename without writing files. Select exactly one old_name, target or binding_id. Collisions, incomplete inputs, generated names and incompatible checked owners refuse the whole proposal. Literal endogenous/mcp tag names retain surrounding quotes and text. Default leading content is rewritten text or a changed-file map; the canonical object includes complete edits and guards. changed means proposed text changed.",
+            "dynare_auto_fix"=>"Propose proven stored diagnostic fixes, optionally selected by code, diagnostic_id or written target. Each fix must repair its owning diagnostic. The result states applied and skipped work and diagnostics remaining in proposed source. No files are written. Default leading items retain resulting text and outcome details.",
+            "dynare_code_actions"=>"List available diagnostic fixes, equation tags, long names and commented shock templates at a written target. Each action is a separate complete proposal. Select action_id with expected_revision to return that action's top-level proposal; alternatives are not combined. No files are written.",
+            "dynare_expand"=>"Inspect include/macro-expanded text, verified written origins, macro frames/messages and navigation. Select inclusive one-based line_range, exclusive-end expanded_range or equation_id for focused text/origins. Navigation ranges refer to the returned fragment. Rows cut by a range omit their origins and explain that omission. Partial expansion retains its causes and withholds authoritative counts or source jumps.",
+            "dynare_related_files"=>"Discover includes and companions of the selected map or saved disk root. Supplied maps consult only supplied keys. Returns resolved/missing source relationships and model coverage. Unnamed text has no file identity for discovery.",
+            "dynare_format"=>"Propose whitespace formatting for the root or selected source file. line_range selects whole lines, one-based and inclusive; reversed/out-of-file ranges are input errors. Preserves native MATLAB, verbatim layout and source outside the selected lines. formatIndent is tab or one to eight spaces. No file is written.",
+            "dynare_extract"=>"Extract a model fragment selected by equation names/tags, equation_id or explicit scoped index, including unnamed equations. Names combine with OR; tags combine with AND. Keeps required declarations, locals, static partners and OccBin context in execution order. Omitted setup remains explicit; no runnable model or numerical result is guessed.",
+            "dynare_explain"=>"Read the canonical Markdown explanation for a diagnostic code. An unknown code is refused with its cause and known-code guidance.",
+            "dynare_list_diagnostic_codes"=>"List the diagnostic catalog, with code, kind, severity or text filters. shared, added and skipped classify relation to official Dynare; this inventory is not the diagnostics fired on a model.",
+            "dynare_list_options"=>"Read the pinned Dynare command/option catalog. Omit command to list commands; select option or search text to focus a known command. Unknown commands return their cause and suggestions.",
+            "dynare_compare_models"=>"Compare Before to After retained model facts and captured Source. Supplied inputs cannot read disk. Repository mode uses absolute repository_path on this server host and explicit Git or Working selectors; Git resolves local immutable commits with no fetch, and Working reads saved server-host files. INPUT_CHANGED refuses stale input. Preserve matching/count rules, side coverage and source navigation; select families/kinds and bounded detail without inferring algebraic equivalence or numerical results.",
+            "dynare_workspace_diagnose"=>"Check supplied-map roots or saved server-host paths, with explicit include settings, root/path exclusions and diagnostic filters. Each root retains complete, partial, failed or unfinished status. Work/output limits explain completed and omitted work; one failed root does not drop the others.",
+            _=>unreachable!(),
+        };
+        let schema=if matches!(name,"dynare_compare_models"|"dynare_workspace_diagnose") {multi_request::input_schema(name)} else {request::input_schema(name)};
+        let mut tool=Tool::new(name,format!("{description} Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. {}",match name {
+            "dynare_model_info"=>"Single-model tools accept source text/map/disk or legacy supplied inputs. Maps use exact keys and no disk fallback. Coordinates are one-based Unicode scalars, with exclusive ends. Limits: 1,000,000 bytes per file, 8 MiB source/expansion/output, 256 files or lookup candidates per request, 64 owners, 1,000,000 macro work units, 1–1000 rows per page. No numerical execution.",
+            "dynare_rename"|"dynare_auto_fix"|"dynare_format"|"dynare_code_actions"=>"Proposals contain complete original-source edits, expected text and SHA-256 guards for all checked inputs and missing candidates. Recheck saved disk inputs with expected_revision and verify all guards before external application. Proposals do not reserve files. Identities require their original expected_revision.",
+            "dynare_explain"|"dynare_list_options"|"dynare_list_diagnostic_codes"=>"Catalog queries need no model source.",
+            "dynare_compare_models"|"dynare_workspace_diagnose"=>"Use this tool's source selectors and expected revisions. Continuations require unchanged inputs and filters.",
+            _=>"Use explicit source text/map/disk or legacy supplied inputs. Reused identities and continuations require their original expected_revision; changed inputs return INPUT_CHANGED."
+        }),schema)
+            .with_annotations(ToolAnnotations::new().read_only(true).destructive(false).idempotent(true).open_world(false));
+        if structured {tool.output_schema=Some(result::output_schema());}
+        tool
+    }).collect()
+}
 
 #[cfg(test)]
 mod tests {
@@ -2828,7 +2834,7 @@ end;
 
     #[test]
     fn rmcp_stdio_registers_rust_tools() {
-        let listed = DygnosisMcp::tool_router().list_all();
+        let listed = advertised_tools(true);
         let mut got: Vec<String> = listed.iter().map(|t| t.name.to_string()).collect();
         got.sort_unstable();
         let mut want: Vec<String> = registered_tool_names()

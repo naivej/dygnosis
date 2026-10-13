@@ -80,6 +80,9 @@ pub fn equations(model: &Model) -> Vec<EquationRow> {
     let locals = crate::engine::analysis::model_locals::ModelLocals::collect(model);
     let mut rows = Vec::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            break;
+        }
         if !is_counted(eq) {
             continue;
         }
@@ -100,6 +103,9 @@ pub(crate) fn heterogeneous_equations(model: &Model) -> Vec<HeterogeneousEquatio
             let index = next_index.entry(block.dimension).or_insert(0usize);
             let mut rows = Vec::new();
             for eq in &block.equations {
+                if crate::engine::control::cancelled() {
+                    break;
+                }
                 if is_counted(eq) {
                     rows.push(equation_row(
                         model,
@@ -217,6 +223,9 @@ pub fn explain_equation(row: &EquationRow) -> String {
         row.index
     );
     for id in &row.idents {
+        if crate::engine::control::cancelled() {
+            break;
+        }
         out.push_str(&format!(
             "- `{}`: {}, written offset {}, Dynare offset {}",
             id.name,
@@ -242,6 +251,9 @@ fn collapsed_equation_count(model: &Model) -> usize {
     let mut n = 0;
     let mut seen = HashSet::new();
     for row in equations(model) {
+        if crate::engine::control::cancelled() {
+            break;
+        }
         let occbin = !row.name.is_empty()
             && (row.tags.contains_key("bind") || row.tags.contains_key("relax"));
         if occbin {
@@ -293,6 +305,9 @@ fn equation_refs(model: &Model) -> HashSet<crate::engine::language::intern::Name
             .flat_map(|block| block.equations.iter()),
     ) {
         for r in model.ident_refs(eq) {
+            if crate::engine::control::cancelled() {
+                break;
+            }
             referenced.insert(r.name);
         }
     }

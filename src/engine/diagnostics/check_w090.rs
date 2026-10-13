@@ -30,6 +30,9 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut seen: HashMap<Name, Span> = HashMap::new();
     for v in &model.varobs {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let name = model.name(v.name);
         if let Some(&first) = seen.get(&v.name) {
             diagnostics.push(
@@ -101,6 +104,9 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
     let mut obs_seen = HashSet::new();
     let mut n_obs = 0usize;
     for v in &model.varobs {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !obs_seen.insert(v.name) {
             continue;
         }
@@ -111,11 +117,17 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
     if n_obs > 0 {
         let mut measurement_errors: HashSet<Name> = HashSet::new();
         for e in &model.estimated_params {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if e.kind == EstimatedParamKind::Stderr && endogenous.contains(&e.name) {
                 measurement_errors.insert(e.name);
             }
         }
         for s in &model.shocks_vars {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if endogenous.contains(s) {
                 measurement_errors.insert(*s);
             }
@@ -134,6 +146,9 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
     }
 
     for entry in &model.estimated_params {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let span = span_or_fallback(Some(entry.span));
         let name = model.name(entry.name);
         match entry.kind {
@@ -191,6 +206,9 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
                     diagnostics.push(Diagnostic::new(span, Severity::Error, "E093", format!("{name} and {} must either be both endogenous variables or both exogenous", model.name(other))));
                 } else {
                     for symbol in [Some(entry.name), entry.corr_with].into_iter().flatten() {
+                        if crate::engine::control::cancelled() {
+                            return Default::default();
+                        }
                         if !matches!(
                             model.symbol_kind_in_context(symbol, entry.symbol_type_context),
                             Some("var" | "varexo")
@@ -250,6 +268,9 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
 
     let varobs_set: HashSet<Name> = model.varobs.iter().map(|v| v.name).collect();
     for (name, span) in &model.observation_trends {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !varobs_set.contains(name) {
             diagnostics.push(Diagnostic::new(
                 nonempty_or(*span, model.varobs_span),
@@ -326,6 +347,9 @@ fn trim_trailing_zeros(s: &mut String) {
         return;
     }
     while s.ends_with('0') {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         s.pop();
     }
     if s.ends_with('.') {

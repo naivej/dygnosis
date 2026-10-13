@@ -38,6 +38,9 @@ fn check_e050(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
     let mut seen: HashMap<(String, Vec<String>), (&Equation, Span, u32)> = HashMap::new();
     let mut diagnostics = Vec::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if eq.text.trim().starts_with('#') {
             continue;
         }
@@ -82,13 +85,22 @@ fn normalize_eq_text(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
     while i < chars.len() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if OP_CHARS.contains(&chars[i]) {
             while out.ends_with(' ') {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 out.pop();
             }
             out.push(chars[i]);
             i += 1;
             while i < chars.len() && chars[i].is_whitespace() {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 i += 1;
             }
             continue;
@@ -112,6 +124,9 @@ fn check_e051(model: &Model) -> Vec<Diagnostic> {
     }
     let mut diagnostics = Vec::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let text = eq.text.trim();
         if text.starts_with('#') {
             continue;
@@ -205,6 +220,9 @@ fn check_e052(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
     let mut seen: HashMap<Name, Vec<(f64, u32, String)>> = HashMap::new();
     let mut diagnostics = Vec::new();
     for a in &model.param_assignments {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let name = model.name(a.name).to_string();
         let value = fold_numeric(&a.expression, &known);
         if let Some(v) = value {
@@ -271,6 +289,9 @@ impl FoldParser<'_> {
     fn fold_bp(&mut self, min_bp: u8) -> Option<f64> {
         let mut lhs = self.fold_prefix()?;
         while let Some((l_bp, r_bp, op)) = self.infix() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if l_bp < min_bp {
                 break;
             }
@@ -351,6 +372,9 @@ fn check_e053(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
             .position(&model.source, span.end.saturating_sub(1).max(span.start))
             .line;
         for line in start..=end {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             block_lines.insert(line);
         }
     }
@@ -376,6 +400,9 @@ fn check_e053(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
     let mut line: Option<u32> = None;
     let mut line_toks: Vec<Token> = Vec::new();
     for tok in tokenize(&model.source) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if tok.kind == TokenKind::Eof {
             break;
         }
@@ -620,6 +647,9 @@ fn model_local_gate_empty(model: &Model) -> bool {
 
     let mut first_definition: HashMap<Name, u32> = HashMap::new();
     for eq in &eqs {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(name) = model_local_name(model, eq) else {
             continue;
         };
@@ -635,8 +665,14 @@ fn model_local_gate_empty(model: &Model) -> bool {
     let mut visible_locals = HashSet::new();
     let mut seen_early = HashSet::new();
     for eq in &eqs {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let local = model_local_name(model, eq);
         for r in model.ident_refs(eq) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if local == Some(r.name) {
                 continue;
             }
@@ -661,6 +697,9 @@ fn model_local_gate_empty(model: &Model) -> bool {
     }
 
     for eq in &model.steady_state_equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let Some(name) = model_local_name(model, eq) else {
             continue;
         };
@@ -689,7 +728,13 @@ fn model_local_name(model: &Model, eq: &Equation) -> Option<Name> {
 fn check_prior_head_not_endo_or_exo(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for stmt in &model.dotted_statements {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for head in crate::engine::diagnostics::check_d_ms::prior_std_corr_head_names(model, stmt) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if head.verdict != crate::engine::diagnostics::check_d_ms::PriorHeadVerdict::NotEndogenousOrExogenous {
                 continue;
             }
@@ -735,6 +780,9 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
         ("endval", model.endval.as_slice()),
     ] {
         for entry in entries {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             let name = model.name(entry.name);
             let kind = initialization_kind(model, entry.name, entry.symbol_type_context);
             if kind
@@ -771,6 +819,9 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
         }
     }
     for entry in &model.histval {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let name = model.name(entry.name);
         let kind = initialization_kind(model, entry.name, entry.symbol_type_context);
         if kind.is_some_and(|kind| !matches!(kind, "var" | "varexo" | "varexo_det" | "excluded")) {
@@ -823,6 +874,9 @@ fn check_w051(model: &Model) -> Vec<Diagnostic> {
         .collect();
     let mut diagnostics = Vec::new();
     for entry in &model.initval {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if exo.contains(&entry.name) {
             let name = model.name(entry.name);
             diagnostics.push(Diagnostic {

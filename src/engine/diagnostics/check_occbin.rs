@@ -220,6 +220,9 @@ fn check_blocks(model: &Model, out: &mut Vec<Diagnostic>) {
 fn check_constraint_rows(model: &Model, out: &mut Vec<Diagnostic>) {
     let mentioned = mentioned_constraints(model);
     for c in &model.occbin_constraints {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !is_occbin_ident(&c.name) {
             out.push(error(
                 c.name_span,
@@ -282,6 +285,9 @@ fn check_constraint_rows(model: &Model, out: &mut Vec<Diagnostic>) {
         }
         let locals = model_locals(model);
         for expr in occbin_exprs(c) {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if let Some(id) = expr.expr {
                 walk_occbin_expr_inner(model, id, &locals, out);
             }
@@ -290,6 +296,9 @@ fn check_constraint_rows(model: &Model, out: &mut Vec<Diagnostic>) {
     if !model.occbin_constraints_blocks.is_empty() {
         let tokens = tokenize(&model.source);
         for &block in &model.occbin_constraints_blocks {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             check_duplicate_clauses(model, &tokens, block, out);
         }
     }
@@ -335,6 +344,9 @@ fn occbin_exprs(c: &OccbinConstraint) -> impl Iterator<Item = &OccbinExpr> {
 fn mentioned_constraints(model: &Model) -> HashSet<String> {
     let mut out = HashSet::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if eq.is_local {
             continue;
         }
@@ -369,6 +381,9 @@ fn check_duplicate_clauses(
         .collect();
     let mut i = 0;
     while i < in_block.len() && in_block[i].kind != TokenKind::Semi {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         i += 1;
     }
     if i < in_block.len() {
@@ -376,6 +391,9 @@ fn check_duplicate_clauses(
     }
     let mut seen: HashSet<String> = HashSet::new();
     while i < in_block.len() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         let tok = in_block[i];
         if tok.kind == TokenKind::Eof {
             break;
@@ -400,6 +418,9 @@ fn check_duplicate_clauses(
                 ));
             }
             while i < in_block.len() && in_block[i].kind != TokenKind::Semi {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 i += 1;
             }
             if i < in_block.len() {
@@ -422,6 +443,9 @@ fn clause_keyword(word: &str) -> Option<&'static str> {
 fn model_locals(model: &Model) -> HashSet<Name> {
     let mut out = HashSet::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !eq.is_local {
             continue;
         }
@@ -536,6 +560,9 @@ fn walk_occbin_expr_inner(
                 out.push(error(expr.span, "E182", *msg));
             }
             for arg in args {
+                if crate::engine::control::cancelled() {
+                    return Default::default();
+                }
                 walk_occbin_expr_inner(model, *arg, locals, out);
             }
         }
@@ -554,6 +581,9 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
     let mut trackers: BTreeMap<String, OccbinRegimeTracker> = BTreeMap::new();
     let mut first_span: BTreeMap<String, Span> = BTreeMap::new();
     for eq in &model.equations {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if eq.is_local {
             continue;
         }
@@ -586,6 +616,9 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
             }
         }
         for (key, span) in &eq.tag_twice {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             out.push(error(
                 *span,
                 "E256",
@@ -664,7 +697,13 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
     // a wrong form there like anywhere else. The `mcp` reading of those bodies is
     // the heterogeneous owner's (02), so only the form check walks them here.
     for block in &model.heterogeneous_models {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         for eq in &block.equations {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if let Some(comp) = eq.complementarity.as_ref()
                 && comp.matched.is_none()
             {
@@ -697,6 +736,9 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
         return;
     }
     for (eq_name, tracker) in &trackers {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if let Some(missing) = tracker.first_missing() {
             let span = first_span[eq_name];
             let rendering = render_bind_relax(&missing.0, &missing.1);
@@ -716,6 +758,9 @@ fn check_tag_pieces(model: &Model, eq: &Equation, key: &str, out: &mut Vec<Diagn
         return;
     };
     for piece in split_names(value) {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
         if !is_occbin_ident(piece) {
             out.push(error(
                 eq.span,
@@ -791,6 +836,9 @@ impl OccbinRegimeTracker {
         constraints_union.sort_unstable();
         constraints_union.dedup();
         for c in &constraints_union {
+            if crate::engine::control::cancelled() {
+                return Ok(());
+            }
             if !self.constraints.iter().any(|x| x == c) {
                 self.constraints.push((*c).to_string());
                 let regimes_copy: Vec<_> = self
@@ -800,6 +848,9 @@ impl OccbinRegimeTracker {
                     .collect();
                 self.regimes_present.clear();
                 for (r, site) in regimes_copy {
+                    if crate::engine::control::cancelled() {
+                        return Ok(());
+                    }
                     let mut r0 = r.clone();
                     let mut r1 = r;
                     r0.push(false);
@@ -811,6 +862,9 @@ impl OccbinRegimeTracker {
         }
         let mut new_regime_template = vec![false; self.constraints.len()];
         for c in constraints_bind {
+            if crate::engine::control::cancelled() {
+                return Ok(());
+            }
             if let Some(i) = self.constraints.iter().position(|x| x == c) {
                 new_regime_template[i] = true;
             }
@@ -827,14 +881,23 @@ impl OccbinRegimeTracker {
             .filter(|c| !union_owned.iter().any(|u| u == c))
             .collect();
         for c in not_mentioned {
+            if crate::engine::control::cancelled() {
+                return Ok(());
+            }
             let i = self.constraints.iter().position(|x| x == &c).unwrap();
             let copy: Vec<Vec<bool>> = new_regimes.iter().cloned().collect();
             for mut r2 in copy {
+                if crate::engine::control::cancelled() {
+                    return Ok(());
+                }
                 r2[i] = true;
                 new_regimes.insert(r2);
             }
         }
         for r in new_regimes {
+            if crate::engine::control::cancelled() {
+                return Ok(());
+            }
             if let Some(earlier) = self.regimes_present.get(&r) {
                 let (bind, relax) = self.convert_bit_vector(&r);
                 return Err(RegimeError::AlreadyPresent {
@@ -852,6 +915,9 @@ impl OccbinRegimeTracker {
         let mut bind = Vec::new();
         let mut relax = Vec::new();
         for (i, c) in self.constraints.iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if r.get(i).copied().unwrap_or(false) {
                 bind.push(c.clone());
             } else {
@@ -867,11 +933,17 @@ impl OccbinRegimeTracker {
         }
         let mut r = vec![false; self.constraints.len()];
         loop {
+            if crate::engine::control::cancelled() {
+                return Default::default();
+            }
             if !self.regimes_present.contains_key(&r) {
                 return Some(self.convert_bit_vector(&r));
             }
             if let Some(idx) = r.iter().position(|b| !b) {
                 for b in r.iter_mut().take(idx) {
+                    if crate::engine::control::cancelled() {
+                        return Default::default();
+                    }
                     *b = false;
                 }
                 r[idx] = true;

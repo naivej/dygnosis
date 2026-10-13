@@ -79,6 +79,8 @@ pub struct SnapshotFailure {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_key: Option<String>,
+    #[serde(skip)]
+    work_limits: Vec<Value>,
 }
 
 impl SnapshotFailure {
@@ -87,6 +89,7 @@ impl SnapshotFailure {
             code: code.to_owned(),
             message: message.into(),
             file_key,
+            work_limits: Vec::new(),
         }
     }
 
@@ -94,6 +97,9 @@ impl SnapshotFailure {
         let mut value = serde_json::to_value(self).expect("snapshot failure");
         value["state"] = json!("failure");
         value["side"] = json!(side);
+        if !self.work_limits.is_empty() {
+            value["coverage"] = json!({side:{"complete":false,"work_limits":self.work_limits}});
+        }
         value
     }
 }
@@ -106,6 +112,8 @@ pub(crate) struct SnapshotLookup {
     pub manifest: BTreeMap<String, ManifestEntry>,
     pub facts: BTreeMap<String, SourceFact>,
     pub requested: BTreeSet<String>,
+    pub checked: BTreeSet<String>,
+    pub checked_directories: BTreeSet<String>,
     pub failure: Option<SnapshotFailure>,
 }
 
@@ -143,6 +151,7 @@ impl SnapshotLookup {
     }
 
     pub fn contains(&mut self, key: &str) -> bool {
+        self.checked.insert(key.to_owned());
         if let Some(entry) = self.manifest.get(key) {
             if !matches!(entry.mode.as_str(), "100644" | "100755") {
                 self.refuse(
@@ -191,7 +200,8 @@ impl SnapshotLookup {
         }
     }
 
-    pub fn directory_exists(&self, directory: &str) -> bool {
+    pub fn directory_exists(&mut self, directory: &str) -> bool {
+        self.checked_directories.insert(directory.to_owned());
         let prefix = if directory.is_empty() {
             String::new()
         } else {
@@ -251,7 +261,77 @@ pub struct CapturedSnapshot {
     historical: bool,
 }
 
+impl CapturedSnapshot {
+    /// A transport can bind its content-based input identity before navigation
+    /// is produced. Existing editor captures retain their native revision.
+    pub(crate) fn rebind_revision(&mut self, revision: String) {
+        self.inputs["revision"] = json!(revision);
+        self.revision = revision;
+    }
+
+    pub(crate) fn input_guards(&self) -> Vec<crate::engine::workspace::InputGuard> {
+        if let Some(lookup) = &self.workspace.snapshot_lookup {
+            use sha2::{Digest, Sha256};
+            let keys: BTreeSet<_> = lookup
+                .checked
+                .iter()
+                .chain(lookup.checked_directories.iter())
+                .chain(self.sources.keys())
+                .cloned()
+                .collect();
+            return keys
+                .into_iter()
+                .map(|file| {
+                    let entry = lookup.manifest.get(&file);
+                    let directory = lookup.checked_directories.contains(&file)
+                        && lookup
+                            .manifest
+                            .keys()
+                            .any(|key| file.is_empty() || key.starts_with(&format!("{file}/")));
+                    let text = match lookup.facts.get(&file) {
+                        Some(SourceFact::Text { text }) => Some(text),
+                        _ => None,
+                    };
+                    let digest = text.map(|text| format!("{:x}", Sha256::digest(text.as_bytes())));
+                    crate::engine::workspace::InputGuard {
+                        file,
+                        exists: entry.is_some() || directory,
+                        directory,
+                        identity: entry.map(|entry| entry.object_id.clone()),
+                        text_sha256: digest.clone(),
+                        byte_sha256: digest,
+                        length: text.map(|text| text.len() as u64),
+                    }
+                })
+                .collect();
+        }
+        self.workspace.input_guards(&self.root)
+    }
+}
+
 pub fn capture_git_snapshot(input: &GitSnapshotInput) -> SnapshotCapture {
+    capture_git_snapshot_controlled(input, None)
+}
+
+pub(crate) fn capture_git_snapshot_controlled(
+    input: &GitSnapshotInput,
+    cancellation: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> SnapshotCapture {
+    let stopped = || {
+        cancellation
+            .as_ref()
+            .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed))
+    };
+    let cancelled = || {
+        SnapshotCapture::Failure(SnapshotFailure::new(
+            "CANCELLED",
+            "Historical model capture was cancelled",
+            None,
+        ))
+    };
+    if stopped() {
+        return cancelled();
+    }
     let invalid = |message| {
         SnapshotCapture::Failure(SnapshotFailure::new("INVALID_ARGUMENTS", message, None))
     };
@@ -333,7 +413,14 @@ pub fn capture_git_snapshot(input: &GitSnapshotInput) -> SnapshotCapture {
         _ => {}
     }
     let mut workspace = Workspace::snapshot_documents(input);
-    let Some(model) = workspace.get_effective_model(&input.root_file).cloned() else {
+    if let Some(flag) = &cancellation {
+        workspace.set_cancellation(std::sync::Arc::clone(flag));
+    }
+    let model = workspace.get_effective_model(&input.root_file).cloned();
+    if stopped() {
+        return cancelled();
+    }
+    let Some(model) = model else {
         return invalid("Snapshot root could not be read");
     };
     let lookup = workspace
@@ -440,7 +527,7 @@ fn incomplete(workspace: &mut Workspace, root: &str, model: &Model) -> Option<Sn
     let includes = workspace.include_records(root).cloned();
     let reasons =
         crate::engine::analysis::model_info::incomplete_reason_records(model, includes.as_ref());
-    Some(SnapshotFailure::new(
+    let mut failure = SnapshotFailure::new(
         "INCOMPLETE_INPUT",
         match &miss {
             Some(miss) => format!("Active include {} is absent or unreadable", miss.filename),
@@ -458,7 +545,9 @@ fn incomplete(workspace: &mut Workspace, root: &str, model: &Model) -> Option<Sn
             }
         },
         miss.map(|miss| miss.filename),
-    ))
+    );
+    failure.work_limits = crate::engine::analysis::model_info::macro_work_limits(model, Some(root));
+    Some(failure)
 }
 
 fn input_changed() -> SnapshotFailure {
