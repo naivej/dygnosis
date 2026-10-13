@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { record } from "../client/protocol";
 
 export interface WorkingSelector { kind: "working"; root_uri: string }
@@ -40,7 +39,6 @@ export function resourceName(resource: ComparisonResource): string {
   const version = (input: ModelSelector): string => input.kind === "git" ? input.commit.slice(0, 7) : "Working";
   return `${base} · ${version(resource.before)} → ${version(resource.after)}.dygnosis-changes`;
 }
-export function selectorId(input: ModelSelector): string { return createHash("sha256").update(JSON.stringify(input)).digest("hex"); }
 export function inputLabel(input: ModelSelector): string {
   if (input.kind === "working") return `${decodeURIComponent(new URL(input.root_uri).pathname)} · Working`;
   const commit = input.commit.slice(0, 7), ref = input.requested_ref.replace(/^[0-9a-f]{40,64}(?=$|[~^])/, value => value.slice(0, 7));

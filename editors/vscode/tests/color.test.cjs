@@ -82,11 +82,35 @@ Module._load = function(id, ...args) {
   };
   return originalLoad.call(this, id, ...args);
 };
-const { dimensionOverrides, registerColors, tintCategoryDefaults, tintPreferences, tintRanges } = require(compiledModule("color"));
+const { dimensionOverrides, registerColors, tintPreferences, tintRanges } = require(compiledModule("color"));
 Module._load = originalLoad;
 const manifest = require("../package.json").contributes;
 const colorContributions = { ...manifest, configuration: manifest.configuration.find(group => group.title === "Dygnosis: Appearance") };
 
+// This fixture guards native settings against the engine's category/default contract.
+const tintCategoryDefaults = [
+  ["model.aggregate", "model"], ["model.heterogeneous", "model"],
+  ["model_replace", "subtle"], ["steady_state_model", "subtle"], ["initval", "subtle"],
+  ["endval.standard", "subtle"], ["endval.learnt_in", "subtle"], ["histval", "subtle"],
+  ["filter_initial_state", "subtle"], ["shocks.standard", "subtle"],
+  ["shocks.surprise", "subtle"], ["shocks.learnt_in", "subtle"],
+  ["shocks.heterogeneous", "subtle"], ["mshocks.standard", "subtle"],
+  ["mshocks.learnt_in", "subtle"], ["heteroskedastic_shocks", "subtle"],
+  ["shock_paths.standard", "subtle"], ["shock_paths.learnt_in", "subtle"],
+  ["perfect_foresight_controlled_paths.standard", "subtle"],
+  ["perfect_foresight_controlled_paths.learnt_in", "subtle"],
+  ["conditional_forecast_paths", "subtle"], ["estimated_params", "subtle"],
+  ["estimated_params_init", "subtle"], ["estimated_params_bounds", "subtle"],
+  ["estimated_params_remove", "subtle"], ["observation_trends", "subtle"],
+  ["deterministic_trends", "subtle"], ["matched_moments", "subtle"],
+  ["matched_irfs", "subtle"], ["matched_irfs_weights", "subtle"],
+  ["generate_irfs", "subtle"], ["irf_calibration", "subtle"],
+  ["moment_calibration", "subtle"], ["optim_weights", "subtle"],
+  ["osr_params_bounds", "subtle"], ["ramsey_constraints", "subtle"],
+  ["homotopy_setup", "subtle"], ["occbin_constraints", "subtle"],
+  ["svar_identification", "subtle"], ["shock_groups", "subtle"], ["init2shocks", "subtle"],
+  ["pac_target_info", "subtle"], ["epilogue", "subtle"], ["verbatim", "subtle"], ["priors", "subtle"],
+];
 const registry = tintCategoryDefaults.map(([category, fallback]) => ({ category, default: fallback }));
 function location(value = "file:///project/main.mod", start = 2, end = 5, character = 0, lastCharacter = 4) {
   return { uri: value, range: { start: { line: start, character }, end: { line: end, character: lastCharacter } } };

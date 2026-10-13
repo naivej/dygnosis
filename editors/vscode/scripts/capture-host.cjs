@@ -1,8 +1,13 @@
+// Capture Help images from the extension development host in a throwaway workspace.
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const vscode = require("vscode");
+
+function isChangesTab(tab) {
+  return tab.input instanceof vscode.TabInputCustom && tab.input.viewType === "dygnosis.changes";
+}
 
 async function waitFor(predicate, description, attempts = 150) {
   for (let i = 0; i < attempts; ++i) {
@@ -227,11 +232,11 @@ exports.run = async function run() {
     } finally {
       vscode.window.showOpenDialog = originalPicker;
     }
-    await waitFor(async () => vscode.window.tabGroups.all.flatMap(group => group.tabs).some(tab => typeof tab.label === "string" && tab.label.includes("Diff")), "structural diff view", 200);
+    await waitFor(() => vscode.window.tabGroups.all.flatMap(group => group.tabs).some(isChangesTab), "Changes view", 200);
     await settle(800);
     for (const group of vscode.window.tabGroups.all) {
       for (const tab of group.tabs) {
-        if (typeof tab.label === "string" && !tab.label.includes("Diff")) await vscode.window.tabGroups.close(tab);
+        if (!isChangesTab(tab)) await vscode.window.tabGroups.close(tab);
       }
     }
     await runCommand("workbench.action.closeSidebar");

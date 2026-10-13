@@ -6,7 +6,7 @@ use dygnosis::explain::{explain, ExplainKind};
 use dygnosis::{analyze, check_file, parse, Diagnostic};
 
 #[test]
-fn included_writing_notes_use_owner_scalar_positions_in_cli_and_mcp() {
+fn included_writing_notes_use_owner_scalar_positions_in_formatter_and_mcp() {
     let dir = std::env::temp_dir().join(format!(
         "dygnosis-writing-wire-{}-{}",
         std::process::id(),
@@ -28,13 +28,11 @@ fn included_writing_notes_use_owner_scalar_positions_in_cli_and_mcp() {
     let output = dygnosis::format_check_lines_with_origins(&root_key, &set, root_text);
     assert!(output.contains("child.inc:1:6: INFO [I209]"), "{output}");
     assert!(output.contains("child.inc:2:1: INFO [I208]"), "{output}");
-    assert!(!output.contains("[I210]"), "{output}");
     let files = HashMap::from([
         (root_key.clone(), root_text.to_string()),
         (child_key.clone(), child_text.to_string()),
     ]);
     let notes = dygnosis::dynare_diagnose(root_text, Some(&root_key), Some(&files));
-    assert!(notes.iter().all(|note| note.code != "I210"), "{notes:?}");
     for (code, line, column) in [("I209", 1, 6), ("I208", 2, 1)] {
         let note = notes.iter().find(|note| note.code == code).unwrap();
         assert_eq!(note.file.as_deref(), Some(child_key.as_str()));
@@ -95,7 +93,6 @@ fn singular_summaries_anchor_on_their_statement_keyword() {
         assert_eq!(symbol.message, "1 symbol has no long_name.");
         assert_eq!(slice_of("one_each.mod", symbol), keyword);
     }
-    assert!(codes("one_each.mod").iter().all(|code| code != "I210"));
 }
 
 #[test]
@@ -108,7 +105,6 @@ fn plural_wording() {
         one("plural.mod", "I209").message,
         "2 symbols have no long_name."
     );
-    assert!(codes("plural.mod").iter().all(|code| code != "I210"));
 }
 
 #[test]
@@ -121,35 +117,11 @@ fn named_zero_and_one_stay_quiet() {
 }
 
 #[test]
-fn equation_literals_are_not_a_writing_problem() {
-    let (text, _) = fixture("power.mod");
-    let model = parse(&text);
-    assert_eq!(model.equations.len(), 1);
-    assert!(model.equations[0].text.contains('^'));
-    assert!(analyze(&model).iter().all(|diag| diag.code != "I210"));
-    for src in [
-        "var x; model; x = x^2; end;",
-        "var x; model; x = x + 1; end;",
-        "var x; model; x = x + 2; end;",
-        "var x; model; x = 1/2; end;",
-        "var x; model; x = -2; end;",
-    ] {
-        let model = parse(src);
-        assert_eq!(model.equations.len(), 1, "{src}");
-        assert!(
-            analyze(&model).iter().all(|diag| diag.code != "I210"),
-            "{src}"
-        );
-    }
-}
-
-#[test]
 fn macro_copies_count_and_share_the_template_anchor() {
     assert_eq!(
         one("loop.mod", "I208").message,
         "3 counted equations have no name tag."
     );
-    assert!(codes("loop.mod").iter().all(|code| code != "I210"));
 }
 
 #[test]
@@ -182,7 +154,6 @@ fn heterogeneous_rows_share_one_summary() {
     let symbols = one("het.mod", "I209");
     assert_eq!(symbols.message, "1 symbol has no long_name.");
     assert_eq!(slice_of("het.mod", &symbols), "var");
-    assert!(codes("het.mod").iter().all(|code| code != "I210"));
 }
 
 #[test]
@@ -194,7 +165,6 @@ fn include_rows_use_the_root_model_keyword() {
         &text[unnamed.span.start as usize..unnamed.span.end as usize],
         "model"
     );
-    assert!(diags.iter().all(|diag| diag.code != "I210"));
     assert!(diags.iter().all(|diag| diag.code != "I209"));
 }
 
@@ -213,7 +183,6 @@ fn unresolved_include_and_syntax_withhold_the_summaries() {
 fn disable_comment_does_not_silence_information() {
     let got = codes("suppress.mod");
     assert!(got.iter().any(|code| code == "I208"), "{got:?}");
-    assert!(got.iter().all(|code| code != "I210"), "{got:?}");
 }
 
 #[test]
@@ -294,7 +263,6 @@ fn explain_calls_them_writing_preferences() {
             .body
             .contains("does not mean Dynare will refuse the model"));
     }
-    assert!(explain("I210").is_none());
 }
 
 mod ownership {

@@ -180,23 +180,14 @@ fn fixed_significant(digits: &[char], exp: i32) -> String {
     text
 }
 
-/// Compatibility printer. A limit panics; call [`render_macro_val_budget`]
-/// with the root budget when the caller can propagate `MacroEvalError`.
-#[allow(dead_code)]
+/// Test printer with a fresh budget. Production uses the root budget.
+#[cfg(test)]
 pub(crate) fn interpolate(value: &MacroVal) -> String {
     render_fresh(value, RenderStyle::Interpolate)
 }
 
-/// `echomacrovars` printing. `matlab` selects the `(save)` quoting.
-/// A limit panics; call [`render_macro_val_budget`] to propagate it.
-#[allow(dead_code)]
-pub(crate) fn print_value(value: &MacroVal, matlab: bool) -> String {
-    render_fresh(value, RenderStyle::Print { matlab })
-}
-
-/// Printed length of [`print_value`]. Does not allocate the composite string
-/// and does not spend.
-#[allow(dead_code)]
+/// Test preflight for printed length. Does not allocate or spend.
+#[cfg(test)]
 pub(crate) fn plan_macro_render(value: &MacroVal, matlab: bool) -> Result<usize, MacroEvalError> {
     measure_val(value)?;
     Ok(render_len(value, RenderStyle::Print { matlab }))
@@ -226,6 +217,7 @@ enum RenderStyle {
     Print { matlab: bool },
 }
 
+#[cfg(test)]
 fn render_fresh(value: &MacroVal, style: RenderStyle) -> String {
     match render_charged(value, style, &mut MacroBudget::new(), false) {
         Ok(text) => text,
@@ -590,10 +582,8 @@ fn seal_value(value: MacroVal) -> Result<MacroVal, MacroEvalError> {
     Ok(value)
 }
 
-/// Compatibility wrapper. Expansion passes one root budget to
-/// [`eval_macro_expr_budget`]. This entry remains for a caller that has not
-/// moved yet.
-#[allow(dead_code)]
+/// Test evaluator with a fresh budget. Expansion uses the root budget.
+#[cfg(test)]
 pub(crate) fn eval_macro_expr(
     source: &str,
     defines: &mut HashMap<String, MacroVal>,
@@ -624,7 +614,7 @@ pub(crate) fn eval_macro_expr_interpolation_budget(
     eval_expr(&expr, defines, None, 0, 0, budget)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn check_macro_syntax(source: &str) -> Result<(), MacroEvalError> {
     check_macro_syntax_budget(source, &mut MacroBudget::new())
 }
@@ -730,8 +720,8 @@ pub(crate) fn check_macro_definition_budget(
     Ok(())
 }
 
-/// Print a function body the way `Environment::print` prints an expression.
-#[allow(dead_code)]
+/// Test printer for the `Environment::print` expression form.
+#[cfg(test)]
 pub(crate) fn print_expression(source: &str) -> Result<String, MacroEvalError> {
     print_expression_budget(source, &mut MacroBudget::new())
 }

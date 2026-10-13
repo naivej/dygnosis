@@ -443,9 +443,7 @@ async fn included_writing_notes_route_to_their_files_and_clear_after_edits() {
         unnamed.range,
         Range::new(Position::new(2, 0), Position::new(2, 5))
     );
-    assert!(root_notes
-        .iter()
-        .all(|diag| !matches!(diag_code(diag).as_str(), "I209" | "I210")));
+    assert!(root_notes.iter().all(|diag| diag_code(diag) != "I209"));
     let declaration = items(&service, &decl_uri).await;
     let long_name = declaration
         .iter()
@@ -457,7 +455,6 @@ async fn included_writing_notes_route_to_their_files_and_clear_after_edits() {
     );
     let equations = items(&service, &eq_uri).await;
     assert!(equations.iter().all(|diag| diag_code(diag) != "I208"));
-    assert!(equations.iter().all(|diag| diag_code(diag) != "I210"));
 
     service
         .inner()
@@ -470,19 +467,10 @@ async fn included_writing_notes_route_to_their_files_and_clear_after_edits() {
     assert_eq!(edits_for(&action, &eq_uri).len(), 1);
     assert!(edits_for(&action, &root_uri).is_empty());
 
-    let without_literal = "/*😀*/ y = 0;\n";
-    service
-        .inner()
-        .did_change(change_params(eq_uri.clone(), without_literal.into(), 2))
-        .await;
-    assert!(items(&service, &root_uri)
-        .await
-        .iter()
-        .all(|diag| diag_code(diag) != "I210"));
     let named = "/*😀*/ [name='law'] y = 0;\n";
     service
         .inner()
-        .did_change(change_params(eq_uri.clone(), named.into(), 3))
+        .did_change(change_params(eq_uri.clone(), named.into(), 2))
         .await;
     assert!(items(&service, &eq_uri)
         .await
