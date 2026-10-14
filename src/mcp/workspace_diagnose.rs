@@ -12,7 +12,7 @@ use crate::engine::diagnostics::{
     check_in_workspace_with_origins, Diagnostic, DiagnosticSet, Severity,
 };
 use crate::engine::language::span::LineIndex;
-use crate::engine::workspace::check_walk::{absolute_path, collect_mod_files, starts_with_plus};
+use crate::engine::workspace::check_walk::{absolute_path, collect_model_files, starts_with_plus};
 use crate::engine::workspace::include_resolver::{normalize_uri, path_key};
 use crate::engine::workspace::Workspace;
 use crate::mcp::McpDiagnostic;
@@ -84,7 +84,7 @@ pub(crate) fn diagnose_map(
 
 /// Diagnose files and directories on disk.
 ///
-/// Directories recurse into `*.mod` and skip directories whose names start
+/// Directories recurse into `.mod` and `.dyn` and skip directories whose names start
 /// with `+`. The same absolute path is diagnosed once. A missing or unreadable
 /// path is a failed root. An empty result is [`WorkspaceDiagnoseError::NoFiles`].
 pub(crate) fn diagnose_paths(
@@ -218,7 +218,7 @@ fn expand_one(path: &str, seen: &mut BTreeSet<String>, out: &mut Vec<PathHit>) {
         if starts_with_plus(&abs) {
             return;
         }
-        match collect_mod_files(&abs) {
+        match collect_model_files(&abs) {
             Ok(files) => {
                 for file in files {
                     expand_one(&file, seen, out);

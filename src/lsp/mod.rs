@@ -4163,10 +4163,7 @@ fn equation_at<'a>(
 }
 
 fn is_model_root(uri: &Url) -> bool {
-    Path::new(uri.path())
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("mod") || ext.eq_ignore_ascii_case("dyn"))
+    crate::engine::workspace::check_walk::is_model_path(Path::new(uri.path()))
 }
 
 enum ModelInfoChanged {}

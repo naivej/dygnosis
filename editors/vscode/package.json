@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.24",
+  "version": "0.11.25",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -214,6 +214,12 @@
         "icon": "$(settings-gear)"
       },
       {
+        "command": "dygnosis.ignoreProjectFolder",
+        "title": "Ignore this folder",
+        "category": "Dygnosis",
+        "icon": "$(exclude)"
+      },
+      {
         "command": "dygnosis.openChanges",
         "title": "Show mod changes",
         "category": "Dygnosis",
@@ -282,6 +288,10 @@
       ],
       "commandPalette": [
         {
+          "command": "dygnosis.ignoreProjectFolder",
+          "when": "false"
+        },
+        {
           "command": "dygnosis.renameSymbol",
           "when": "dygnosis.analysisDocument"
         },
@@ -338,8 +348,8 @@
       ],
       "view/item/context": [
         {
-          "command": "dygnosis.configureProjectExclusions",
-          "when": "view == dygnosis.project && viewItem == dygnosis.projectFolder",
+          "command": "dygnosis.ignoreProjectFolder",
+          "when": "view == dygnosis.project && (viewItem == dygnosis.projectFolder || viewItem == dygnosis.projectDirectory)",
           "group": "inline"
         }
       ],
@@ -1324,7 +1334,7 @@
             "type": "boolean",
             "default": true,
             "scope": "window",
-            "description": "Check unopened saved .mod models in workspace folders. Turning this off cancels background work and clears its project reports."
+            "description": "Check unopened saved .mod and .dyn models in workspace folders. Turning this off cancels background work and clears its project reports."
           },
           "dynare.projectExcludePaths": {
             "type": "array",
@@ -1333,7 +1343,7 @@
             },
             "default": [],
             "scope": "resource",
-            "description": "Paths and patterns excluded from background root discovery in this folder. Open files and dependencies remain checked. Use *, ?, **, or a directory ending with /."
+            "description": "Paths and patterns excluded from background root checking in this folder. Exclusions do not hide .inc file entries. Open files and dependencies remain checked. Use *, ?, **, or a directory ending with /."
           }
         }
       }
@@ -1462,7 +1472,7 @@
     "viewsWelcome": [
       {
         "view": "dygnosis.project",
-        "contents": "Open a folder to check saved .mod models.\n[Open Dygnosis Help](command:dygnosis.openHelp)"
+        "contents": "Open a folder to check saved .mod and .dyn models and browse saved .inc files.\n[Open Dygnosis Help](command:dygnosis.openHelp)"
       }
     ],
     "walkthroughs": [

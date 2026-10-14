@@ -14,6 +14,7 @@ use super::{
     file_url_from_path_key, is_model_root, prepare_root_report, Backend, Inner, RootReport,
 };
 use crate::engine::diagnostics::check_in_workspace_with_origins;
+use crate::engine::workspace::check_walk::{collect_project_files, is_include_path};
 use crate::engine::workspace::include_resolver::{normalize_uri, path_key};
 use crate::engine::workspace::InputStamps;
 use crate::lsp::settings::SettingsStore;
@@ -26,6 +27,7 @@ const RETAINED_REQUEST_ROOTS: usize = 8;
 #[derive(Default)]
 pub(super) struct ProjectState {
     roots: BTreeMap<Url, RootEntry>,
+    include_files: BTreeSet<Url>,
     pub notifications: bool,
     pub worker_running: bool,
     pub(super) initialized: bool,
@@ -103,6 +105,17 @@ impl RootEntry {
 }
 
 impl ProjectState {
+    fn update_include_files(
+        &mut self,
+        found: BTreeSet<Url>,
+        folders: &[Url],
+        failed_folders: &[Url],
+    ) {
+        self.include_files
+            .retain(|uri| failed_owner(uri, folders, failed_folders));
+        self.include_files.extend(found);
+    }
+
     pub fn is_selected(&self, root: &Url) -> bool {
         if let Some(entry) = self.roots.get(root) {
             return entry.selected;
@@ -163,7 +176,7 @@ impl ProjectState {
             && counts["checking"] == 0;
         json!({"schema_version": SCHEMA_VERSION, "pass_revision": self.pass_revision, "enabled": enabled, "discovery": if enabled { self.discovery } else { "disabled" },
             "cancelled": self.cancelled, "complete": complete, "coverage_complete": complete && self.discovery_failures.is_empty() && counts["failed"] == 0 && counts["incomplete"] == 0,
-            "counts": counts, "roots": roots, "discovery_failures": self.discovery_failures,
+            "counts": counts, "roots": roots, "include_files": self.include_files, "discovery_failures": self.discovery_failures,
             "metrics": {"discovery_ms": self.discovery_ms, "analysis_ms": self.analysis_ms, "completed_jobs": self.completed_jobs, "reused_jobs": self.reused_jobs, "elapsed_ms": self.started.map(|at| at.elapsed().as_secs_f64() * 1000.0)}})
     }
 
@@ -247,6 +260,7 @@ impl Inner {
         }
         if !settings.project_diagnostics {
             self.project.roots.clear();
+            self.project.include_files.clear();
         }
         self.reports
             .retain(|root, _| self.docs.contains_key(root) || self.project.is_selected(root));
@@ -308,15 +322,15 @@ impl Inner {
                 self.reports.remove(&root);
             }
         }
-        if Path::new(changed.path())
-            .extension()
-            .is_some_and(|ext| ext == "mod")
+        if is_model_root(changed)
             && (deleted
                 || !self
                     .project
                     .roots
                     .values()
                     .any(|entry| entry.identity == key))
+            || is_include_path(Path::new(changed.path()))
+                && (deleted || !self.project.include_files.contains(changed))
         {
             self.project.discovery_requested = true;
             self.project.discovery = "pending";
@@ -590,6 +604,11 @@ async fn run_worker(
         match work {
             Work::Discover { epoch, settings } => {
                 let started = Instant::now();
+                let folder_uris: Vec<_> = settings
+                    .folders
+                    .iter()
+                    .map(|folder| folder.uri.clone())
+                    .collect();
                 let result = tokio::task::spawn_blocking(move || discover(&settings)).await;
                 let _output = output_gate.lock().await;
                 let publications = {
@@ -604,7 +623,7 @@ async fn run_worker(
                     inner.project.discovery_ms = started.elapsed().as_secs_f64() * 1000.0;
                     inner.project.discovery = "complete";
                     match result {
-                        Ok((found, failures)) => {
+                        Ok(discovered) => {
                             // Resolve each open document once. A stored root
                             // identity that is not in this walk is resolved
                             // once, so a changed canonical target still binds
@@ -618,9 +637,9 @@ async fn run_worker(
                             let roots = bind_discovered_roots(
                                 &inner.project.roots,
                                 &open_identities,
-                                found,
+                                discovered.roots,
                             );
-                            inner.project.discovery_failures = failures;
+                            inner.project.discovery_failures = discovered.failures;
                             // A failed folder walk cannot prove prior roots gone.
                             // Keep them pending/incomplete rather than clear coverage.
                             let failed_folders: Vec<_> = inner
@@ -631,9 +650,20 @@ async fn run_worker(
                                     item["folder_uri"].as_str().and_then(|s| Url::parse(s).ok())
                                 })
                                 .collect();
+                            let current_folders: Vec<_> = inner
+                                .settings
+                                .folders
+                                .iter()
+                                .map(|folder| folder.uri.clone())
+                                .collect();
+                            inner.project.update_include_files(
+                                discovered.includes,
+                                &current_folders,
+                                &failed_folders,
+                            );
                             inner.project.roots.retain(|root, _| {
                                 roots.contains_key(root)
-                                    || failed_folders.iter().any(|folder| in_folder(root, folder))
+                                    || failed_owner(root, &current_folders, &failed_folders)
                             });
                             for (root, (key, selected)) in roots {
                                 let entry = inner
@@ -657,9 +687,9 @@ async fn run_worker(
                             }
                         }
                         Err(error) => {
-                            inner.project.discovery_failures = vec![
-                                json!({"failure": format!("Discovery worker failed: {error}")}),
-                            ]
+                            inner.project.discovery_failures = folder_uris.into_iter().map(|uri|
+                                json!({"folder_uri": uri, "failure": format!("Cannot list project models and include files: discovery worker failed: {error}")})
+                            ).collect();
                         }
                     }
                     let docs: HashSet<_> = inner.docs.keys().cloned().collect();
@@ -915,31 +945,44 @@ fn fresh_canonical(uri: &Url, fresh_keys: &HashSet<String>) -> Option<String> {
     fresh_keys.contains(&key).then_some(key)
 }
 
-fn discover(settings: &SettingsStore) -> (Vec<(Url, String, bool)>, Vec<Value>) {
-    let mut roots = Vec::new();
+#[derive(Default)]
+struct Discovery {
+    roots: Vec<(Url, String, bool)>,
+    includes: BTreeSet<Url>,
+    failures: Vec<Value>,
+}
+
+fn discover(settings: &SettingsStore) -> Discovery {
+    let mut found = Discovery::default();
     let mut seen = HashSet::new();
-    let mut failures = Vec::new();
     for folder in &settings.folders {
         let Ok(path) = folder.uri.to_file_path() else {
             continue;
         };
-        match crate::engine::workspace::check_walk::collect_mod_files(&path) {
+        match collect_project_files(&path) {
             Ok(paths) => {
-                for path in paths {
+                for path in paths.models {
                     if let Ok(uri) = Url::from_file_path(path) {
                         let key = normalize_uri(uri.as_str());
                         if seen.insert(key.clone()) {
-                            roots.push((uri.clone(), key, selection(settings, &uri) == Some(true)));
+                            found.roots.push((uri.clone(), key, selection(settings, &uri) == Some(true)));
                         }
                     }
                 }
+                for path in paths.includes {
+                    if let Ok(uri) = Url::from_file_path(path)
+                        && seen.insert(normalize_uri(uri.as_str()))
+                    {
+                        found.includes.insert(uri);
+                    }
+                }
             }
-            Err(error) => failures.push(
-                json!({"folder_uri": folder.uri, "failure": format!("Cannot discover root models: {error}")}),
+            Err(error) => found.failures.push(
+                json!({"folder_uri": folder.uri, "failure": format!("Cannot list project models and include files: {error}")}),
             ),
         }
     }
-    (roots, failures)
+    found
 }
 
 fn in_folder(root: &Url, folder: &Url) -> bool {
@@ -947,6 +990,14 @@ fn in_folder(root: &Url, folder: &Url) -> bool {
         .ok()
         .zip(folder.to_file_path().ok())
         .is_some_and(|(root, folder)| Path::new(&path_key(&root)).starts_with(path_key(&folder)))
+}
+
+fn failed_owner(uri: &Url, folders: &[Url], failed_folders: &[Url]) -> bool {
+    folders
+        .iter()
+        .filter(|folder| in_folder(uri, folder))
+        .max_by_key(|folder| folder.path().len())
+        .is_some_and(|owner| failed_folders.contains(owner))
 }
 
 fn selection(settings: &SettingsStore, root: &Url) -> Option<bool> {
@@ -1058,6 +1109,30 @@ async fn send_status(client: &Client, state: &Mutex<Inner>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn successful_nested_discovery_removes_deleted_includes_despite_parent_failure() {
+        let folder = Url::from_file_path(std::env::temp_dir().join("project-parent")).unwrap();
+        let nested =
+            Url::from_file_path(std::env::temp_dir().join("project-parent/models")).unwrap();
+        let old = Url::from_file_path(std::env::temp_dir().join("project-parent/models/old.inc"))
+            .unwrap();
+        let retained =
+            Url::from_file_path(std::env::temp_dir().join("project-parent/sibling/kept.inc"))
+                .unwrap();
+        let current =
+            Url::from_file_path(std::env::temp_dir().join("project-parent/models/current.inc"))
+                .unwrap();
+        let mut state = ProjectState::default();
+        state.include_files.extend([old.clone(), retained.clone()]);
+        state.update_include_files(
+            BTreeSet::from([current.clone()]),
+            &[folder.clone(), nested],
+            &[folder],
+        );
+        assert_eq!(state.include_files, BTreeSet::from([retained, current]));
+        assert!(!state.include_files.contains(&old));
+    }
+
     #[test]
     fn folder_relative_globs() {
         assert!(glob_matches("**/*.mod", "root.mod"));

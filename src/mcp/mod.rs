@@ -1425,7 +1425,7 @@ pub(crate) const WORKSPACE_DIAGNOSE_BOTH: &str =
     "pass either a nonempty files map and roots, or a nonempty paths list, not both";
 pub(crate) const WORKSPACE_DIAGNOSE_NEITHER: &str =
     "pass a nonempty files map and roots, or a nonempty paths list";
-pub(crate) const WORKSPACE_DIAGNOSE_NO_FILES: &str = "no .mod files found";
+pub(crate) const WORKSPACE_DIAGNOSE_NO_FILES: &str = "no .mod or .dyn files found";
 
 /// Batch diagnostics.
 ///
@@ -2398,7 +2398,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_workspace_diagnose",
         input_schema = mcp_input_schema::<WorkspaceDiagnoseParams>(),
-        description = "Diagnose root .mod files from a files map and roots, or from file and directory paths. Each root is reported on its own, with a summary; one failed root does not drop the others."
+        description = "Diagnose model roots from a files map and roots, or from file and directory paths. Directory discovery includes .mod and .dyn files. Each root is reported on its own, with a summary; one failed root does not drop the others."
     )]
     fn workspace_diagnose_tool(
         &self,

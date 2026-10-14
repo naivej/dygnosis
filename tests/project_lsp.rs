@@ -224,11 +224,13 @@ async fn folder_only_cli_discovery_checked_errors_and_identical_push_pull() {
     files.write("sub/bad.mod", "var y; model; y=unknown; end;\n");
     files.write("+generated/skip.mod", "broken");
     files.write("ordinary.dyn", MODEL);
+    files.write("includes/unused.inc", "parameters unused;\n");
+    files.write("+generated/skip.inc", "broken");
     let mut wire = Wire::new();
     wire.start(vec![files.folder("")], json!({}), vec![], true)
         .await;
     let status = wire.complete().await;
-    assert_eq!(status["counts"]["checked"], 2);
+    assert_eq!(status["counts"]["checked"], 3);
     assert_eq!(status["coverage_complete"], true);
     assert!(
         root(&status, &files.uri("sub/bad.mod"))["errors"]
@@ -236,7 +238,15 @@ async fn folder_only_cli_discovery_checked_errors_and_identical_push_pull() {
             .unwrap()
             > 0
     );
-    let cli = dygnosis::check_walk::collect_mod_files(&files.0).unwrap();
+    assert_eq!(
+        status["include_files"],
+        json!([files.uri("includes/unused.inc")])
+    );
+    assert_eq!(
+        root(&status, &files.uri("ordinary.dyn"))["state"],
+        "checked"
+    );
+    let cli = dygnosis::check_walk::collect_model_files(&files.0).unwrap();
     assert_eq!(status["roots"].as_array().unwrap().len(), cli.len());
     for path in cli {
         let uri = Url::from_file_path(&path).unwrap().to_string();
@@ -282,6 +292,69 @@ async fn folder_only_cli_discovery_checked_errors_and_identical_push_pull() {
         &wire.pull(&files.uri("ordinary.dyn")).await,
         "E020"
     ));
+}
+
+#[tokio::test]
+async fn include_inventory_and_dyn_roots_follow_saved_file_lifetimes() {
+    let files = Files::new();
+    files.write("root.mod", MODEL);
+    files.write("nested/variant.DYN", MODEL);
+    files.write("includes/shared.INC", "parameters p;\n");
+    let mut wire = Wire::new();
+    wire.start(
+        vec![files.folder(""), files.folder("includes")],
+        json!({}),
+        vec![json!({"uri":files.uri(""),"settings":{"projectExcludePaths":["excluded/**"]}})],
+        true,
+    )
+    .await;
+    let status = wire.complete().await;
+    assert_eq!(status["counts"]["checked"], 2);
+    assert_eq!(
+        status["include_files"],
+        json!([files.uri("includes/shared.INC")])
+    );
+
+    files.write("excluded/new.dyn", MODEL);
+    files.write("excluded/unreferenced.inc", "parameters q;\n");
+    wire.changed(&files.uri("excluded/new.dyn"), 1);
+    wire.changed(&files.uri("excluded/unreferenced.inc"), 1);
+    let status = wire.complete().await;
+    assert_eq!(
+        root(&status, &files.uri("excluded/new.dyn"))["state"],
+        "excluded"
+    );
+    assert_eq!(status["counts"]["checked"], 2);
+    assert_eq!(status["include_files"].as_array().unwrap().len(), 2);
+    assert_eq!(status["roots"].as_array().unwrap().len(), 3);
+
+    fs::rename(
+        files.0.join("includes/shared.INC"),
+        files.0.join("includes/renamed.inc"),
+    )
+    .unwrap();
+    wire.changed(&files.uri("includes/shared.INC"), 3);
+    wire.changed(&files.uri("includes/renamed.inc"), 1);
+    let status = wire.complete().await;
+    assert_eq!(
+        status["include_files"],
+        json!([
+            files.uri("excluded/unreferenced.inc"),
+            files.uri("includes/renamed.inc")
+        ])
+    );
+
+    fs::remove_file(files.0.join("nested/variant.DYN")).unwrap();
+    fs::remove_file(files.0.join("includes/renamed.inc")).unwrap();
+    wire.changed(&files.uri("nested/variant.DYN"), 3);
+    wire.changed(&files.uri("includes/renamed.inc"), 3);
+    let status = wire.complete().await;
+    assert_eq!(status["counts"]["checked"], 1);
+    assert_eq!(status["roots"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        status["include_files"],
+        json!([files.uri("excluded/unreferenced.inc")])
+    );
 }
 
 #[tokio::test]
@@ -506,6 +579,47 @@ async fn monotonic_document_versions_coalescing_root_deletion_and_rename() {
         "checked"
     );
     assert!(wire.pull(&files.uri("root.mod")).await.is_empty());
+}
+
+#[tokio::test]
+async fn failed_folder_walk_retains_include_inventory_until_folder_removal() {
+    let files = Files::new();
+    files.write("a/retained.inc", "// retained\n");
+    files.write("b/current.inc", "// current\n");
+    let mut wire = Wire::new();
+    wire.start(
+        vec![files.folder("a"), files.folder("b")],
+        json!({}),
+        vec![],
+        true,
+    )
+    .await;
+    let before = wire.complete().await;
+    fs::rename(files.0.join("a"), files.0.join("unavailable-a")).unwrap();
+    wire.command("dynare/recheckProject").await;
+    let failed = wire.complete().await;
+    assert_eq!(failed["include_files"], before["include_files"]);
+    assert_eq!(failed["coverage_complete"], false);
+    assert_eq!(
+        failed["discovery_failures"][0]["folder_uri"],
+        files.uri("a")
+    );
+    assert!(failed["discovery_failures"][0]["failure"]
+        .as_str()
+        .unwrap()
+        .contains("include files"));
+    assert!(failed["roots"].as_array().unwrap().is_empty());
+
+    wire.notify(
+        "workspace/didChangeWorkspaceFolders",
+        json!({"event":{"added":[],"removed":[files.folder("a")]}}),
+    );
+    let removed = wire.complete().await;
+    assert_eq!(
+        removed["include_files"],
+        json!([files.uri("b/current.inc")])
+    );
+    assert_eq!(removed["coverage_complete"], true);
 }
 
 #[tokio::test]

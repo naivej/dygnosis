@@ -23,7 +23,7 @@ Folders follow the diagnostic code. File names start with the same code (`w010_u
 | `w120/` | determinacy, leads/lags, `Inf` / `NaN` |
 | `w130/` | steady-state assignment order, `model(linear)`, `bytecode` / `simul` options |
 | `format/` | ugly spacing / macros / `verbatim`. Pair is `name.mod` plus `name.formatted.mod`. No `// inventory:` line. |
-| `check_dir/` | a tree for saved-model discovery (recurse `*.mod`, skip `+` directories; an explicit `.inc` path is still diagnosed) |
+| `check_dir/` | a tree for saved-model discovery (recurse `.mod` and `.dyn` models, skip `+` directories; an explicit `.inc` path is still diagnosed) |
 | `equations/` | counted equation object (library reader + MCP duplicate `[name=]` tag) |
 | `writing/` | I208–I209 writing summaries: equation name tags and declaration `long_name` |
 | `equation_names/` | I208 bulk naming action. No `// inventory:` line. |

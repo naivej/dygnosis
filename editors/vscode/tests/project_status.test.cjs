@@ -42,7 +42,7 @@ const vscode = {
   Disposable, EventEmitter: Emitter, CancellationTokenSource,
   Uri: { parse: uri, file }, ThemeIcon: class { constructor(id) { this.id = id; } },
   TreeItem: class { constructor(label, collapsibleState) { this.label = label; this.collapsibleState = collapsibleState; } },
-  TreeItemCollapsibleState: { None: 0, Expanded: 2 }, StatusBarAlignment: { Left: 1 },
+  TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 }, StatusBarAlignment: { Left: 1 },
   RelativePattern: class { constructor(baseUri, pattern) { this.baseUri = baseUri; this.pattern = pattern; } },
   ConfigurationTarget: { WorkspaceFolder: 3 },
   window: {
@@ -53,7 +53,7 @@ const vscode = {
       host.items.push(item); return item;
     },
     createTreeView: (id, options) => {
-      const view = { id, options, disposed: false, dispose() { this.disposed = true; } };
+      const view = { id, options, onDidCollapseElement: host.collapsed.event, onDidExpandElement: host.expanded.event, disposed: false, dispose() { this.disposed = true; } };
       host.views.push(view); return view;
     },
     onDidChangeActiveTextEditor: listener => host.active.event(listener),
@@ -65,7 +65,7 @@ const vscode = {
     showInputBox: async options => { host.inputs.push(options); return host.inputValues.shift(); },
   },
   workspace: {
-    get workspaceFolders() { return host.folders; },
+    get workspaceFolders() { return host.freshFolders ? host.folders.map(folder => ({ ...folder })) : host.folders; },
     asRelativePath: (value, includeFolder) => {
       host.relativePaths.push({ value, includeFolder });
       return value.path.split("/").slice(-1)[0];
@@ -107,7 +107,7 @@ function facts(roots = [root()], extra = {}) {
   for (const entry of roots) ++counts[entry.state];
   const complete = counts.pending === 0 && counts.checking === 0;
   return { schema_version: 1, pass_revision: 1, enabled: true, discovery: "complete", cancelled: false, complete,
-    coverage_complete: complete && !counts.incomplete && !counts.failed, counts, roots, discovery_failures: [],
+    coverage_complete: complete && !counts.incomplete && !counts.failed, counts, roots, include_files: [], discovery_failures: [],
     metrics: { discovery_ms: 5, analysis_ms: 20, completed_jobs: 1, reused_jobs: 0, elapsed_ms: 25 }, ...extra };
 }
 const capability = { schema_version: 1, status_command: "dynare/projectStatus", recheck_command: "dynare/recheckProject", cancel_command: "dynare/cancelProject",
@@ -124,7 +124,7 @@ function connection(result = initializeResult()) {
 function setup(options = {}) {
   host = { folders: options.folders ?? [folder()], settings: options.settings ?? {}, resources: new Map(), scopes: [],
     editor: options.editor, items: [], views: [], watchers: [], picks: [], choices: [], inputs: [], inputValues: [], updates: [], executed: [], relativePaths: [], commands: new Map(), notifications: [],
-    active: new Emitter(), folderChanged: new Emitter(), configured: new Emitter(), edited: new Emitter(), closed: new Emitter() };
+    collapsed: new Emitter(), expanded: new Emitter(), active: new Emitter(), folderChanged: new Emitter(), configured: new Emitter(), edited: new Emitter(), closed: new Emitter() };
   const changed = new Emitter(), updated = new Emitter();
   const service = { client: options.client, currentInstance: 1, starts: 0, queries: [], logged: [], status: options.status ?? facts(), onDidChange: changed.event,
     log: message => service.logged.push(message), onDidUpdateModelInfo: updated.event,
@@ -136,6 +136,7 @@ function setup(options = {}) {
   return { host, service, changed, updated, configure };
 }
 function rows(env) { return env.host.views[0].options.treeDataProvider.getChildren().filter(row => row.id !== "help"); }
+function child(item, label) { return item.children.find(row => row.label === label); }
 function liveWatchers(env, pattern) { return env.host.watchers.filter(watcher => !watcher.disposed && (!pattern || watcher.pattern.pattern === pattern)); }
 
 test("capability requires supported schema, exact commands, notification names and command advertisement", () => {
@@ -170,6 +171,7 @@ test("coverage is independent of diagnostics and distinguishes failure, incomple
   assert.match(projectStatusContent(parseProjectStatus(facts([root("pending")], { cancelled: true }))).text, /cancelled/);
   assert.match(projectStatusContent(parseProjectStatus(facts([], { enabled: false, discovery: "disabled", complete: false, coverage_complete: false }))).text, /off/);
   assert.match(projectStatusContent(parseProjectStatus(facts([]))).text, /no root models/);
+  assert.match(projectStatusContent(parseProjectStatus(facts([root("excluded")]))).text, /all root models excluded/);
   assert.match(projectStatusContent(parseProjectStatus(facts([], { discovery: "discovering", complete: false, coverage_complete: false }))).text, /discovering/);
 });
 test("default-on folder-only startup uses native coverage and folder tree without opening documents", async () => {
@@ -192,6 +194,68 @@ test("off and virtual/no-folder windows do not start project work", async () => 
     assert.equal(env.service.starts, 0); assert.equal(env.service.queries.length, 0); assert.equal(liveWatchers(env).length, 0);
     assert.match(env.host.items[0].text, options.settings ? /off/ : /no folders/); registration.dispose();
   }
+});
+
+test("nested model and include rows use basenames, sorted folders and exact open targets", async () => {
+  const env = setup({ status: facts([
+    root("checked", { root_uri: `${project}/models/deep/variant.dyn`, errors: 1 }),
+    root("checked", { root_uri: `${project}/sibling/main.mod` }), root(),
+  ], { include_files: [`${project}/models/shared.inc`, `${project}/includes/unused.inc`] }) });
+  const registration = registerProjectStatus(env.service); await flush();
+  const top = rows(env)[0];
+  assert.deepEqual(top.children.map(item => item.label), ["includes", "models", "sibling", "main.mod"]);
+  const variant = child(child(child(top, "models"), "deep"), "variant.dyn");
+  assert.equal(variant.description, "Checked · 1 Error, 0 Warnings");
+  assert.equal(variant.command.arguments[0].toString(), `${project}/models/deep/variant.dyn`);
+  const include = child(child(top, "includes"), "unused.inc");
+  assert.equal(include.description, "Include file");
+  assert.equal(include.collapsibleState, vscode.TreeItemCollapsibleState.None);
+  assert.equal(include.command.arguments[0].toString(), `${project}/includes/unused.inc`);
+  assert.match(env.host.items[0].text, /3\/3 checked/);
+  registration.dispose();
+});
+
+test("collapsed branches survive refresh and removal preserves include-only folders", async () => {
+  const uri = `${project}/models/main.mod`, include = `${project}/models/part.inc`;
+  const env = setup({ status: facts([root("checked", { root_uri: uri })], { include_files: [include] }) });
+  const registration = registerProjectStatus(env.service); await flush();
+  const branch = child(rows(env)[0], "models");
+  env.host.collapsed.fire({ element: branch });
+  env.service.client.notify(facts([root("checked", { root_uri: uri, errors: 2 })], { include_files: [include] }));
+  assert.equal(child(rows(env)[0], "models").id, branch.id);
+  assert.equal(child(rows(env)[0], "models").collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+  env.service.client.notify(facts([], { include_files: [include] }));
+  assert.deepEqual(child(rows(env)[0], "models").children.map(item => item.label), ["part.inc"]);
+  assert.ok(child(rows(env)[0], "No root .mod or .dyn models"));
+  env.host.expanded.fire({ element: child(rows(env)[0], "models") });
+  env.service.client.notify(facts([], { include_files: [include] }));
+  assert.equal(child(rows(env)[0], "models").collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
+  env.service.client.notify(facts([], { include_files: [] }));
+  assert.equal(child(rows(env)[0], "models"), undefined);
+  registration.dispose();
+});
+
+test("overlapping workspace folders own each file once, including trailing folder separators", async () => {
+  const env = setup({ folders: [folder(`${project}/`), folder(`${project}/models`, "nested")],
+    status: facts([root(), root("checked", { root_uri: `${project}/models/main.mod` })],
+      { include_files: [`${project}/models/part.inc`] }) });
+  const registration = registerProjectStatus(env.service); await flush();
+  assert.deepEqual(rows(env)[0].children.map(item => item.label), ["main.mod"]);
+  assert.deepEqual(rows(env)[1].children.map(item => item.label), ["main.mod", "part.inc"]);
+  assert.equal(rows(env)[1].children[0].command.arguments[0].toString(), `${project}/models/main.mod`);
+  assert.ok(rows(env).every(row => row.contextValue === "dygnosis.projectFolder"));
+  registration.dispose();
+});
+
+test("include inventory is validated and old engines explain the missing file list", async () => {
+  for (const include_files of ["bad", ["https://example.com/file.inc"], [`${project}/wrong.txt`], [`${project}/a.inc`, `${project}/a.inc`]]) {
+    assert.throws(() => parseProjectStatus(facts([], { include_files })), /Unsupported project status/);
+  }
+  const env = setup({ status: facts([root("checked", { dependency_candidates: [`${project}/missing.inc`] })], { include_files: undefined }) });
+  const registration = registerProjectStatus(env.service); await flush();
+  assert.match(env.host.views[0].message, /Include files are not listed by this engine/);
+  assert.deepEqual(rows(env)[0].children.map(item => item.label), ["main.mod"]);
+  registration.dispose();
 });
 test("failed startup is unavailable instead of indefinitely starting", async () => {
   const env = setup(); env.service.ensureStarted = async () => {};
@@ -292,11 +356,11 @@ test("unchanged dependency directories reuse watchers while candidate sets updat
 });
 test("root creation and deletion are watched per folder; removed folders and exclusions clear watchers", async () => {
   const env = setup({ folders: [folder(), folder(other, "other")] }); const registration = registerProjectStatus(env.service); await flush();
-  assert.equal(liveWatchers(env, "**/*.mod").length, 2);
-  const removed = liveWatchers(env, "**/*.mod")[1]; env.host.folders = [folder()];
+  assert.equal(liveWatchers(env, "**/*.{[mM][oO][dD],[dD][yY][nN],[iI][nN][cC]}").length, 2);
+  const removed = liveWatchers(env, "**/*.{[mM][oO][dD],[dD][yY][nN],[iI][nN][cC]}")[1]; env.host.folders = [folder()];
   env.service.status = facts([], { pass_revision: 2 }); env.host.folderChanged.fire(); await flush();
   assert.equal(removed.disposed, true); assert.equal(rows(env).length, 1);
-  const watcher = liveWatchers(env, "**/*.mod")[0]; watcher.created.fire(uri(`${project}/new.mod`)); watcher.deleted.fire(uri(`${project}/old.mod`)); await flush();
+  const watcher = liveWatchers(env, "**/*.{[mM][oO][dD],[dD][yY][nN],[iI][nN][cC]}")[0]; watcher.created.fire(uri(`${project}/new.mod`)); watcher.deleted.fire(uri(`${project}/old.mod`)); await flush();
   assert.deepEqual(env.service.client.sent.filter(value => value.name === "workspace/didChangeWatchedFiles").map(value => value.params.changes[0].type), [1, 3]);
   registration.dispose();
 });
@@ -364,7 +428,7 @@ test("a buffered old-instance completion cannot replace a restarted instance's s
   env.service.client = connection(); ++env.service.currentInstance; env.service.execute = async () => facts([], { pass_revision: 0 }); env.changed.fire(); await flush();
   pending.resolve(facts([root("pending")], { pass_revision: 2 })); await flush();
   assert.match(env.host.items[0].text, /no root models/);
-  assert.equal(rows(env)[0].children[0].label, "No root .mod models"); registration.dispose();
+  assert.equal(rows(env)[0].children[0].label, "No root .mod or .dyn models"); registration.dispose();
 });
 test("cancel reply defeats a same-pass pre-cancel notification while retaining a newer cancelled report", async () => {
   for (const newerCancelled of [false, true]) {
@@ -408,10 +472,10 @@ test("server replacement drops old subscriptions, watchers and responses, then q
   const registration = registerProjectStatus(env.service); await flush();
   const second = connection(); env.service.client = second; ++env.service.currentInstance; env.service.execute = async () => facts([], { pass_revision: 0 }); env.changed.fire(); await flush();
   assert.equal(first.subscriptions.get(capability.status_notification).listeners.size, 0);
-  assert.equal(liveWatchers(env, "**/*.mod").length, 1); assert.match(env.host.items[0].text, /no root models/);
+  assert.equal(liveWatchers(env, "**/*.{[mM][oO][dD],[dD][yY][nN],[iI][nN][cC]}").length, 1); assert.match(env.host.items[0].text, /no root models/);
   pending.resolve(facts([root("checked", { errors: 99 })])); first.notify(facts([root("checked", { errors: 99 })])); await flush();
   assert.match(env.host.items[0].text, /no root models/);
-  assert.equal(rows(env)[0].children[0].label, "No root .mod models");
+  assert.equal(rows(env)[0].children[0].label, "No root .mod or .dyn models");
   assert.ok(second.sent.some(value => value.name === capability.active_model_notification));
   second.running = false; env.changed.fire(); assert.equal(second.subscriptions.get(capability.status_notification).listeners.size, 0); assert.equal(liveWatchers(env).length, 0);
   registration.dispose();
@@ -466,6 +530,67 @@ test("per-folder exclusion controls write only the chosen resource and reset its
   assert.equal(env.host.updates[0].resource.toString(), other);
   env.host.choices.push("reset"); await env.host.commands.get("dygnosis.configureProjectExclusions")(rows(env)[1]); assert.equal(env.host.updates[1].value, undefined);
   env.host.choices.push("remove", "old/**"); await env.host.commands.get("dygnosis.configureProjectExclusions")(rows(env)[1]); assert.deepEqual(env.host.updates[2].value, []);
+  registration.dispose();
+});
+
+test("Ignore this folder adds a scoped subtree once and preserves include entries", async () => {
+  const include = `${other}/models/part.inc`;
+  const env = setup({ folders: [folder(), folder(other, "other")], status: facts([
+    root(), root("checked", { root_uri: `${other}/models/main.dyn` }),
+  ], { include_files: [include] }) });
+  env.host.resources.set(other, { projectExcludePaths: ["existing/**"] });
+  const registration = registerProjectStatus(env.service); await flush();
+  const subtree = child(rows(env)[1], "models");
+  assert.equal(subtree.contextValue, "dygnosis.projectDirectory");
+  await env.host.commands.get("dygnosis.ignoreProjectFolder")(subtree);
+  assert.deepEqual(env.host.updates[0].value, ["existing/**", "models/**"]);
+  assert.equal(env.host.updates[0].resource.toString(), other);
+  assert.equal(env.host.updates[0].target, vscode.ConfigurationTarget.WorkspaceFolder);
+  assert.equal(env.host.picks.length, 0);
+  env.host.resources.set(other, { projectExcludePaths: env.host.updates[0].value });
+  await env.host.commands.get("dygnosis.ignoreProjectFolder")(subtree);
+  assert.equal(env.host.updates.length, 1);
+  await env.host.commands.get("dygnosis.ignoreProjectFolder")(rows(env)[1]);
+  assert.deepEqual(env.host.updates[1].value, ["existing/**", "models/**", "**"]);
+  assert.ok(child(child(rows(env)[1], "models"), "part.inc"));
+  await env.host.commands.get("dygnosis.ignoreProjectFolder")(child(subtree, "part.inc"));
+  assert.match(env.host.notifications.at(-1), /Choose a folder/);
+  assert.equal(env.host.updates.length, 2);
+  env.host.folders = [folder()];
+  await env.host.commands.get("dygnosis.ignoreProjectFolder")(subtree);
+  assert.match(env.host.notifications.at(-1), /workspace folder changed/);
+  assert.equal(env.host.updates.length, 2);
+  registration.dispose();
+});
+
+test("Ignore this folder refuses a literal name that the exclusion grammar cannot represent", async () => {
+  const env = setup({ status: facts([root("checked", { root_uri: `${project}/a%3Fb/main.mod` })]) });
+  const registration = registerProjectStatus(env.service); await flush();
+  await env.host.commands.get("dygnosis.ignoreProjectFolder")(child(rows(env)[0], "a?b"));
+  assert.equal(env.host.updates.length, 0);
+  assert.match(env.host.notifications[0], /No exclusion was added/);
+  registration.dispose();
+});
+
+test("Ignore this folder accepts the plain item payload delivered by the native row action", async () => {
+  const env = setup({ status: facts([root("checked", { root_uri: `${project}/alpha/main.mod` })]) });
+  const registration = registerProjectStatus(env.service); await flush();
+  const item = child(rows(env)[0], "alpha");
+  const nativePayload = Object.fromEntries(Object.entries(item));
+  await env.host.commands.get("dygnosis.ignoreProjectFolder")(nativePayload);
+  assert.equal(env.host.updates.length, 1);
+  assert.deepEqual(env.host.updates[0].value, ["alpha/**"]);
+  assert.equal(env.host.updates[0].resource.toString(), project);
+  registration.dispose();
+});
+
+test("Ignore this folder resolves its owner when workspace snapshots return new folder objects", async () => {
+  const env = setup({ status: facts([root("checked", { root_uri: `${project}/alpha/main.mod` })]) });
+  env.host.freshFolders = true;
+  const registration = registerProjectStatus(env.service); await flush();
+  await env.host.commands.get("dygnosis.ignoreProjectFolder")(Object.fromEntries(Object.entries(child(rows(env)[0], "alpha"))));
+  assert.deepEqual(env.host.updates[0].value, ["alpha/**"]);
+  assert.equal(env.host.updates[0].resource.toString(), project);
   registration.dispose();
 });
 test("malformed notification clears stale coverage, and disposal prevents late updates and releases every listener", async () => {

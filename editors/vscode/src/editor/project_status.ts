@@ -17,6 +17,7 @@ export interface ProjectStatus {
   cancelled: boolean; complete: boolean; coverage_complete: boolean;
   counts: Record<RootState, number>; roots: ProjectRoot[];
   discovery_failures: { folder_uri: string; failure: string }[];
+  include_files?: string[];
   metrics: { discovery_ms: number; analysis_ms: number; completed_jobs: number; reused_jobs: number; elapsed_ms: number | null };
 }
 export interface ProjectCapability {
@@ -47,7 +48,7 @@ function fileUri(value: unknown): value is string {
   try { const uri = new URL(value); return uri.protocol === "file:" && uri.pathname.startsWith("/") && !uri.search && !uri.hash; } catch { return false; }
 }
 function identity(uri: vscode.Uri): string {
-  return uri.scheme === "file" && process.platform === "win32" ? uri.fsPath.toLowerCase() : uri.toString();
+  return uri.scheme === "file" && process.platform === "win32" ? uri.fsPath.toLowerCase().replace(/[\\/]+$/, "") : uri.toString().replace(/\/+$/, "");
 }
 function nullableText(value: unknown): value is string | null { return value === null || typeof value === "string"; }
 function diagnostics(count: number, noun: "Error" | "Warning"): string { return `${count} ${noun}${count === 1 ? "" : "s"}`; }
@@ -75,6 +76,16 @@ export function parseProjectStatus(value: unknown): ProjectStatus {
     if (!record(failure) || !fileUri(failure.folder_uri) || typeof failure.failure !== "string") return invalid();
     return { folder_uri: failure.folder_uri, failure: failure.failure };
   });
+  let includeFiles: string[] | undefined;
+  if (value.include_files !== undefined) {
+    if (!Array.isArray(value.include_files)) return invalid();
+    const keys = new Set<string>();
+    includeFiles = value.include_files.map((file: unknown) => {
+      if (!fileUri(file) || !/\.inc$/i.test(vscode.Uri.parse(file).path)) return invalid();
+      const key = identity(vscode.Uri.parse(file));
+      if (keys.has(key)) return invalid(); keys.add(key); return file;
+    });
+  }
   const metrics = value.metrics;
   if (!duration(metrics.discovery_ms) || !duration(metrics.analysis_ms) || !integer(metrics.completed_jobs) ||
       !integer(metrics.reused_jobs) || (metrics.elapsed_ms !== null && !duration(metrics.elapsed_ms))) return invalid();
@@ -82,7 +93,7 @@ export function parseProjectStatus(value: unknown): ProjectStatus {
       (value.complete && (value.cancelled || value.discovery !== "complete" || counts.pending > 0 || counts.checking > 0)) ||
       (value.coverage_complete && (!value.complete || failures.length > 0 || counts.failed > 0 || counts.incomplete > 0))) return invalid();
   return { schema_version: 1, pass_revision: value.pass_revision, enabled: value.enabled, discovery: value.discovery as DiscoveryState,
-    cancelled: value.cancelled, complete: value.complete, coverage_complete: value.coverage_complete, counts, roots, discovery_failures: failures,
+    cancelled: value.cancelled, complete: value.complete, coverage_complete: value.coverage_complete, counts, roots, include_files: includeFiles, discovery_failures: failures,
     metrics: { discovery_ms: metrics.discovery_ms, analysis_ms: metrics.analysis_ms, completed_jobs: metrics.completed_jobs,
       reused_jobs: metrics.reused_jobs, elapsed_ms: metrics.elapsed_ms } };
 }
@@ -108,10 +119,10 @@ export function projectStatusContent(status: ProjectStatus): StatusContent {
   else if (status.discovery === "pending" || status.discovery === "discovering") { label = "discovering"; icon = "sync~spin"; }
   else if (!status.complete) { label = `${finished}/${selected} finished`; icon = "sync~spin"; }
   else if (!status.coverage_complete) { label = `incomplete · ${counts.checked}/${selected} checked`; icon = "warning"; }
-  else if (!selected) { label = "no root models"; icon = "info"; }
+  else if (!selected) { label = status.roots.length ? "all root models excluded" : "no root models"; icon = "info"; }
   else { label = `${counts.checked}/${selected} checked`; icon = "check"; }
   const details = [
-    "Project diagnostics: unopened saved .mod models",
+    "Project diagnostics: unopened saved .mod and .dyn models",
     ...states.map(state => `${state[0].toUpperCase()}${state.slice(1)}: ${counts[state]}`),
     `Folder discovery failures: ${status.discovery_failures.length}`,
     "Checked models may contain diagnostic Errors. Incomplete and failed models do not have complete coverage.",
@@ -122,6 +133,7 @@ export function projectStatusContent(status: ProjectStatus): StatusContent {
   return { text: `$(${icon}) Dynare project: ${label}`, tooltip: details, accessibilityLabel: `Dynare project: ${label}. Open project checks.` };
 }
 class ProjectItem extends vscode.TreeItem {
+  declare label: string;
   constructor(id: string, label: string, icon: string, readonly children: ProjectItem[] = [], readonly folder?: vscode.WorkspaceFolder) {
     super(label, children.length ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None);
     this.id = id; this.iconPath = new vscode.ThemeIcon(icon);
@@ -143,29 +155,59 @@ function containingFolder(uri: vscode.Uri, candidates: readonly vscode.Workspace
   return candidates.filter(folder => { const base = identity(folder.uri).replace(/[\\/]$/, ""); return key === base || key.startsWith(`${base}${uri.scheme === "file" && process.platform === "win32" ? path.sep : "/"}`); })
     .sort((left, right) => right.uri.path.length - left.uri.path.length)[0];
 }
-function treeRows(status: ProjectStatus, currentFolders: readonly vscode.WorkspaceFolder[]): ProjectItem[] {
+function treeRows(status: ProjectStatus, currentFolders: readonly vscode.WorkspaceFolder[], collapsed: ReadonlySet<string>): ProjectItem[] {
   return currentFolders.map(folder => {
-    const roots = status.roots.filter(root => containingFolder(vscode.Uri.parse(root.root_uri), currentFolders) === folder).map(root => {
-      const uri = vscode.Uri.parse(root.root_uri), label = vscode.workspace.asRelativePath(uri, false);
+    const row = new ProjectItem(identity(folder.uri), folder.name, "folder", [], folder);
+    row.contextValue = "dygnosis.projectFolder"; row.resourceUri = folder.uri;
+    const directories = new Map<string, ProjectItem>([[identity(folder.uri), row]]);
+    const directory = (uri: vscode.Uri): ProjectItem => {
+      const key = identity(uri), existing = directories.get(key);
+      if (existing) return existing;
+      const item = new ProjectItem(key, path.basename(uri.fsPath), "folder", [], folder);
+      item.contextValue = "dygnosis.projectDirectory";
+      item.resourceUri = uri; directories.set(key, item);
+      directory(vscode.Uri.file(path.dirname(uri.fsPath))).children.push(item);
+      return item;
+    };
+    const addFile = (uri: vscode.Uri, item: ProjectItem): void => {
+      directory(vscode.Uri.file(path.dirname(uri.fsPath))).children.push(item);
+    };
+    const roots = status.roots.filter(root => containingFolder(vscode.Uri.parse(root.root_uri), currentFolders) === folder);
+    for (const root of roots) {
+      const uri = vscode.Uri.parse(root.root_uri), label = path.basename(uri.fsPath);
       const detail = `${root.state === "checked" ? "Checked" : root.state[0].toUpperCase() + root.state.slice(1)}${root.state === "checked" ? ` · ${diagnostics(root.errors, "Error")}, ${diagnostics(root.warnings, "Warning")}` : ""}`;
-      const item = new ProjectItem(root.root_uri, label, root.state === "failed" || root.state === "incomplete" ? "warning" :
+      const item = new ProjectItem(identity(uri), label, root.state === "failed" || root.state === "incomplete" ? "warning" :
         root.state === "checked" ? root.errors ? "error" : "check" : root.state === "checking" ? "sync~spin" : root.state === "excluded" ? "circle-slash" : "clock");
       item.resourceUri = uri; item.description = detail;
       item.tooltip = `${uri.fsPath}\n${detail}${root.failure ? `\n${root.failure}` : ""}`;
       item.accessibilityInformation = { label: `${label}. ${detail}` };
       item.command = { command: "vscode.open", title: "Open model", arguments: [uri] };
-      return item;
-    });
+      addFile(uri, item);
+    }
+    for (const file of status.include_files ?? []) {
+      const uri = vscode.Uri.parse(file);
+      if (containingFolder(uri, currentFolders) !== folder) continue;
+      const item = new ProjectItem(identity(uri), path.basename(uri.fsPath), "file-code");
+      item.resourceUri = uri; item.description = "Include file";
+      item.tooltip = `${uri.fsPath}\nInclude file`;
+      item.accessibilityInformation = { label: `${item.label}. Include file` };
+      item.command = { command: "vscode.open", title: "Open file", arguments: [uri] };
+      addFile(uri, item);
+    }
     const failures = status.discovery_failures.filter(failure => identity(vscode.Uri.parse(failure.folder_uri)) === identity(folder.uri)).map((failure, index) => {
       const item = new ProjectItem(`${folder.uri.toString()}:failure:${index}`, "Discovery failed", "warning");
       item.description = failure.failure; item.tooltip = failure.failure;
       item.accessibilityInformation = { label: `Discovery failed. ${failure.failure}` }; return item;
     });
-    if (!roots.length && !failures.length) roots.push(new ProjectItem(`${folder.uri.toString()}:empty`,
+    for (const item of directories.values()) {
+      item.children.sort((left, right) => Number(!directories.has(left.id!)) - Number(!directories.has(right.id!)) ||
+        left.label.localeCompare(right.label));
+      item.collapsibleState = collapsed.has(item.id!) ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded;
+    }
+    if (!roots.length && !failures.length) row.children.push(new ProjectItem(`${folder.uri.toString()}:empty`,
       status.discovery === "pending" || status.discovery === "discovering" ? "Discovering root models…" :
-        status.discovery === "cancelled" ? "Discovery cancelled" : "No root .mod models", "info"));
-    const row = new ProjectItem(folder.uri.toString(), folder.name, "folder", [...failures, ...roots], folder);
-    row.contextValue = "dygnosis.projectFolder"; row.resourceUri = folder.uri;
+        status.discovery === "cancelled" ? "Discovery cancelled" : "No root .mod or .dyn models", "info"));
+    row.children.unshift(...failures);
     return row;
   });
 }
@@ -175,6 +217,7 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
   const item = vscode.window.createStatusBarItem("dygnosis.projectCoverage", vscode.StatusBarAlignment.Left, 39);
   item.name = "Dynare project coverage"; item.command = "dygnosis.projectStatus";
   const tree = new ProjectTree(), view = vscode.window.createTreeView("dygnosis.project", { treeDataProvider: tree, showCollapseAll: true });
+  const collapsed = new Set<string>();
   let disposed = false, connection: ProjectConnection | undefined, instance = -1;
   let capability: ProjectCapability | undefined, status: ProjectStatus | undefined, generation = 0, response = 0, minPass = 0;
   let barrier = false, activeRoot: string | null | undefined;
@@ -203,7 +246,7 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
     if (disposed) return;
     if (!enabled()) { message("off", "circle-slash", "Project diagnostics are off. Enable dynare.projectDiagnostics in Settings."); return; }
     if (!folders().length) {
-      message("no folders", "info", "Open a file-backed workspace folder to check unopened .mod models.");
+      message("no folders", "info", "Open a file-backed workspace folder to list Dynare files and check saved .mod and .dyn models.");
       view.message = undefined; tree.replace([]); return;
     }
     if (!status) { message(capability ? "updating" : connection || startupFailed ? "unavailable" : "starting", capability || (!connection && !startupFailed) ? "sync~spin" : "warning",
@@ -211,11 +254,12 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
         startupFailed ? "Dygnosis is unavailable. Restart the language server or open Dygnosis Output for details." : "Starting Dygnosis project checks."); return; }
     const content = projectStatusContent(status); item.text = content.text; item.tooltip = content.tooltip;
     item.accessibilityInformation = { label: content.accessibilityLabel }; item.show();
-    view.message = status.cancelled ? "Cancelled until a file edit/change or Recheck." :
-      status.discovery_failures.length ? "Coverage is incomplete: folder discovery failed." :
+    const outcome = status.cancelled ? "Cancelled until a file edit/change or Recheck." :
+      status.discovery_failures.length ? "Coverage and the file list are incomplete: folder discovery failed. Previous entries remain visible for folders that could not be read." :
       status.counts.failed || status.counts.incomplete ? "Coverage is incomplete. Open affected models for details." : undefined;
+    view.message = [outcome, status.include_files === undefined ? "Include files are not listed by this engine. Use the bundled binary or update dynare.serverPath." : undefined].filter(Boolean).join("\n") || undefined;
     view.description = `${status.counts.checked} checked`;
-    const rows = treeRows(status, folders());
+    const rows = treeRows(status, folders(), collapsed);
     if (status.discovery_failures.length || status.counts.failed || status.counts.incomplete || status.roots.every(root => root.state === "excluded")) {
       const help = new ProjectItem("help", "Open Dygnosis Help", "question");
       help.command = { command: "dygnosis.openHelp", title: "Open Dygnosis Help", arguments: ["project-checks"] };
@@ -305,14 +349,21 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
     for (const [key, watcher] of dependencies) if (!groups.has(key)) { watcher.dispose(); dependencies.delete(key); dependencyTargets.delete(key); }
     for (const [key, group] of groups) {
       dependencyTargets.set(key, group.targets);
-      if (!dependencies.has(key)) dependencies.set(key, watch(new vscode.RelativePattern(group.directory, "*"), uri => dependencyTargets.get(key)?.has(identity(uri)) ?? false));
+      if (!dependencies.has(key)) dependencies.set(key, watch(new vscode.RelativePattern(group.directory, "*"), uri =>
+        !watchedProjectFile(uri) && (dependencyTargets.get(key)?.has(identity(uri)) ?? false)));
     }
   }
   const updateRootWatchers = (): void => {
     clearWatchers(watchers);
     if (!enabled() || !capability || !connection) return;
-    for (const folder of folders()) watchers.set(folder.uri.toString(), watch(new vscode.RelativePattern(folder.uri, "**/*.mod"), () => true));
+    for (const folder of folders()) watchers.set(folder.uri.toString(), watch(new vscode.RelativePattern(folder.uri,
+      "**/*.{[mM][oO][dD],[dD][yY][nN],[iI][nN][cC]}"), watchedProjectFile));
   };
+  function watchedProjectFile(uri: vscode.Uri): boolean {
+    const folder = containingFolder(uri, folders());
+    return !!folder && /\.(mod|dyn|inc)$/i.test(uri.path) &&
+      !path.relative(folder.uri.fsPath, uri.fsPath).split(path.sep).slice(0, -1).some(part => part.startsWith("+"));
+  }
   const sendActiveRoot = (): void => {
     if (!connection || !capability || !(connection.isRunning?.() ?? true)) return;
     const document = vscode.window.activeTextEditor?.document;
@@ -395,6 +446,33 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
     if (!folders().some(currentFolder => currentFolder.uri.toString() === folder.uri.toString())) refuse("The project folder changed. Configure its exclusions again.");
     await config.update("projectExcludePaths", value, vscode.ConfigurationTarget.WorkspaceFolder);
   };
+  const ignoreFolder = async (target: unknown): Promise<void> => {
+    // Native row actions marshal the item as plain data, without its class prototype.
+    if (!record(target) || !record(target.folder) || typeof target.contextValue !== "string" ||
+        !["dygnosis.projectFolder", "dygnosis.projectDirectory"].includes(target.contextValue)) {
+      refuse("Choose a folder in Dynare project checks before ignoring it.");
+    }
+    const filePath = (value: unknown): string | undefined => record(value) && value.scheme === "file" &&
+      typeof value.fsPath === "string" && path.isAbsolute(value.fsPath) ? value.fsPath : undefined;
+    const ownerPath = filePath(target.folder.uri), directoryPath = filePath(target.resourceUri);
+    if (ownerPath === undefined || directoryPath === undefined) refuse("The folder action has no saved folder path. Choose a folder in project checks again.");
+    const owner = vscode.Uri.file(ownerPath), directoryUri = vscode.Uri.file(directoryPath), currentFolders = folders();
+    const folder = currentFolders.find(value => identity(value.uri) === identity(owner));
+    if (!folder || containingFolder(directoryUri, currentFolders) !== folder) {
+      refuse("The workspace folder changed. Choose its folder in project checks again.");
+    }
+    const relative = path.relative(folder.uri.fsPath, directoryUri.fsPath);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      refuse("This folder is outside its workspace folder. Choose a folder in project checks again.");
+    }
+    if (relative.split(path.sep).some(part => /[*?\\]/.test(part))) {
+      refuse("This folder name contains wildcard or path-separator characters that project exclusions cannot match literally. No exclusion was added. Use Configure project exclusions to choose a broader path.");
+    }
+    const pattern = relative ? `${relative.split(path.sep).join("/")}/**` : "**";
+    const config = vscode.workspace.getConfiguration("dynare", folder.uri), raw: unknown = config.get("projectExcludePaths", []);
+    const existing = Array.isArray(raw) ? raw.filter((entry): entry is string => typeof entry === "string") : [];
+    if (!disposed && !existing.includes(pattern)) await config.update("projectExcludePaths", [...existing, pattern], vscode.ConfigurationTarget.WorkspaceFolder);
+  };
   const runAction = (kind: "recheck" | "cancel"): Promise<void> => {
     if (!capability) { render(); refuse("Project checks are unavailable. Enable dynare.projectDiagnostics and use an engine that supports project checks."); }
     if (kind === "recheck" && status) minPass = status.pass_revision + 1;
@@ -403,6 +481,8 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
     return refresh(kind === "recheck" ? capability.recheck_command : capability.cancel_command);
   };
   const subscriptions = [
+    view.onDidCollapseElement(event => { if (event.element.id) collapsed.add(event.element.id); }),
+    view.onDidExpandElement(event => { if (event.element.id) collapsed.delete(event.element.id); }),
     service.onDidChange(synchronize), vscode.window.onDidChangeActiveTextEditor(sendActiveRoot),
     service.onDidUpdateModelInfo(info => {
       if (!disposed && info.client_instance === service.currentInstance && instance === info.client_instance && connection === service.client) sendActiveRoot();
@@ -415,6 +495,7 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
     vscode.commands.registerCommand("dygnosis.recheckProject", () => runCommand(service, () => runAction("recheck"), () => !disposed)),
     vscode.commands.registerCommand("dygnosis.cancelProject", () => runCommand(service, () => runAction("cancel"), () => !disposed)),
     vscode.commands.registerCommand("dygnosis.configureProjectExclusions", (target: unknown) => runCommand(service, () => configureExclusions(target), () => !disposed)),
+    vscode.commands.registerCommand("dygnosis.ignoreProjectFolder", (target: unknown) => runCommand(service, () => ignoreFolder(target), () => !disposed)),
   ];
   if (service.onDidReady) subscriptions.push(service.onDidReady(synchronize));
   synchronize(); startFolders();

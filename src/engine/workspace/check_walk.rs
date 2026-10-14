@@ -1,5 +1,4 @@
-//! Directory walk for path-mode workspace diagnosis.
-//! Recurse `*.mod`, skip directories whose names start with `+`.
+//! Saved model roots and include-file inventory; skip generated `+` directories.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -23,17 +22,40 @@ pub fn starts_with_plus(path: &Path) -> bool {
         .is_some_and(|n| n.starts_with('+'))
 }
 
-pub fn collect_mod_files(dir: &Path) -> io::Result<Vec<String>> {
-    let mut out = Vec::new();
+pub fn is_model_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("mod") || ext.eq_ignore_ascii_case("dyn"))
+}
+
+pub fn is_include_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("inc"))
+}
+
+#[derive(Default)]
+pub struct ProjectFiles {
+    pub models: Vec<String>,
+    pub includes: Vec<String>,
+}
+
+pub fn collect_model_files(dir: &Path) -> io::Result<Vec<String>> {
+    Ok(collect_project_files(dir)?.models)
+}
+
+pub fn collect_project_files(dir: &Path) -> io::Result<ProjectFiles> {
+    let mut out = ProjectFiles::default();
     if starts_with_plus(dir) {
         return Ok(out);
     }
     collect_into(dir, &mut out)?;
-    out.sort();
+    out.models.sort();
+    out.includes.sort();
     Ok(out)
 }
 
-fn collect_into(dir: &Path, out: &mut Vec<String>) -> io::Result<()> {
+fn collect_into(dir: &Path, out: &mut ProjectFiles) -> io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -43,8 +65,10 @@ fn collect_into(dir: &Path, out: &mut Vec<String>) -> io::Result<()> {
                 continue;
             }
             collect_into(&path, out)?;
-        } else if path.extension().is_some_and(|ext| ext == "mod") {
-            out.push(path.to_string_lossy().into_owned());
+        } else if is_model_path(&path) {
+            out.models.push(path.to_string_lossy().into_owned());
+        } else if is_include_path(&path) {
+            out.includes.push(path.to_string_lossy().into_owned());
         }
     }
     Ok(())

@@ -1,10 +1,10 @@
-# Run isolated native acceptance; folding, presentation and Rename require CDP.
+# Run isolated native acceptance; visual scopes require CDP.
 $ErrorActionPreference = 'Stop'
 $electronRunAsNode = $env:ELECTRON_RUN_AS_NODE
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 $extensionRoot = Split-Path -Parent $PSScriptRoot
 $scope = $env:DYGNOSIS_HOST_SCOPE
-if ($scope -and $scope -notin @('all', 'mcp', 'semantic', 'folding', 'presentation', 'rename')) { throw 'DYGNOSIS_HOST_SCOPE must be all, mcp, semantic, folding, presentation, or rename.' }
+if ($scope -and $scope -notin @('all', 'mcp', 'semantic', 'folding', 'presentation', 'rename', 'project')) { throw 'DYGNOSIS_HOST_SCOPE must be all, mcp, semantic, folding, presentation, rename, or project.' }
 $testRoot = Join-Path $extensionRoot '.test-data'
 $runId = [Guid]::NewGuid().ToString()
 $hostRoot = Join-Path $testRoot $runId
@@ -16,7 +16,7 @@ if (-not $vscodeExecutable) {
 }
 if (-not (Test-Path -LiteralPath $vscodeExecutable)) { throw 'Set DYGNOSIS_VSCODE_EXECUTABLE to the minimum/current VS Code executable.' }
 if (-not $env:DYGNOSIS_TEST_BINARY) { throw 'Set DYGNOSIS_TEST_BINARY to the matching built engine.' }
-$visualEnabled = $env:DYGNOSIS_HOST_VISUAL -eq '1' -or $scope -in @('folding', 'presentation', 'rename')
+$visualEnabled = $env:DYGNOSIS_HOST_VISUAL -eq '1' -or $scope -in @('folding', 'presentation', 'rename', 'project')
 if ($visualEnabled) {
     $cdpPort = 0
     if ($env:DYGNOSIS_HOST_CDP_PORT) {

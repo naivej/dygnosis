@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.11.25
+
+- Project checks show `.mod` and `.dyn` models in collapsible folder and
+  subfolder groups. Saved `.inc` files appear once at their actual paths as
+  **Include file** entries, even when unreferenced or stored in a folder with
+  no root models. Include entries open the file but have no separate check
+  state or project counts. Exclusions affect background root checks and do not
+  hide include entries. Choose **Ignore this folder** on a workspace or
+  subfolder row to exclude its model roots from background checks; the toolbar
+  gear opens **Configure project exclusions**. Generated `+` directories
+  remain skipped.
+
 ## v0.11.24
 
 - The Reference page lists commands, check codes and command options. MCP tools

@@ -145,7 +145,7 @@ fn delete_model_end_emits_e001() {
 
 #[test]
 fn saved_model_walk_skips_plus_directories_and_non_mod_files() {
-    let files = check_walk::collect_mod_files(&check_dir_root()).expect("walk");
+    let files = check_walk::collect_model_files(&check_dir_root()).expect("walk");
     let joined = files.join("\n").replace('\\', "/");
     assert!(!joined.contains("bad.mod"), "{joined}");
     assert!(!joined.contains("fragment.inc"), "{joined}");
