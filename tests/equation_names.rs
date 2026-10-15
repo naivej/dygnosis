@@ -406,7 +406,7 @@ async fn naming_on_i208(
 }
 
 #[tokio::test]
-async fn included_writing_notes_route_to_their_files_and_clear_after_edits() {
+async fn included_writing_notes_keep_owner_context_until_last_helper_closes() {
     let dir = std::env::temp_dir().join(format!(
         "dygnosis-writing-owner-{}-{}",
         std::process::id(),
@@ -479,7 +479,26 @@ async fn included_writing_notes_route_to_their_files_and_clear_after_edits() {
     service
         .inner()
         .did_close(DidCloseTextDocumentParams {
-            text_document: TextDocumentIdentifier { uri: root_uri },
+            text_document: TextDocumentIdentifier {
+                uri: root_uri.clone(),
+            },
+        })
+        .await;
+    // The still-open helper uses the current saved parent after its tab closes.
+    let retained: Vec<_> = items(&service, &decl_uri)
+        .await
+        .into_iter()
+        .filter(|diag| diag_code(diag) == "I209")
+        .collect();
+    assert_eq!(retained.len(), 1);
+    assert_eq!(
+        retained[0].data.as_ref().unwrap()["root"],
+        root_uri.as_str()
+    );
+    service
+        .inner()
+        .did_close(DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri: eq_uri },
         })
         .await;
     assert!(items(&service, &decl_uri)
@@ -606,13 +625,75 @@ async fn shared_included_i208_offers_one_action_per_root() {
     service
         .inner()
         .did_close(DidCloseTextDocumentParams {
-            text_document: TextDocumentIdentifier { uri: a_uri },
+            text_document: TextDocumentIdentifier { uri: a_uri.clone() },
         })
         .await;
     let remaining: Vec<_> = items(&service, &child_uri)
         .await
         .into_iter()
         .filter(|d| diag_code(d) == "I208")
+        .collect();
+    // Closing A does not remove its verified context from the open helper.
+    assert_eq!(remaining.len(), 2);
+    let retained_roots: BTreeSet<_> = remaining
+        .iter()
+        .map(|note| note.data.as_ref().unwrap()["root"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        retained_roots,
+        BTreeSet::from([a_uri.as_str(), b_uri.as_str()])
+    );
+    assert_eq!(
+        naming_actions(&actions_for(&service, &child_uri, remaining[0].range).await).len(),
+        2
+    );
+
+    // A real saved include removal withdraws only A's note and edit context.
+    fs::write(&a, "var y, a; model; y=2; a=0; end;\n").unwrap();
+    service
+        .inner()
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: a_uri.clone(),
+                typ: FileChangeType::CHANGED,
+            }],
+        })
+        .await;
+    let old_a = remaining
+        .iter()
+        .find(|note| note.data.as_ref().unwrap()["root"] == a_uri.as_str())
+        .unwrap();
+    let stale = service
+        .inner()
+        .code_action(CodeActionParams {
+            text_document: TextDocumentIdentifier {
+                uri: child_uri.clone(),
+            },
+            range: old_a.range,
+            context: CodeActionContext {
+                diagnostics: vec![old_a.clone()],
+                ..CodeActionContext::default()
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|item| match item {
+            CodeActionOrCommand::CodeAction(action) => Some(action),
+            CodeActionOrCommand::Command(_) => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        naming_actions(&stale).is_empty(),
+        "an old A note cannot select B's current action"
+    );
+    let remaining: Vec<_> = items(&service, &child_uri)
+        .await
+        .into_iter()
+        .filter(|diag| diag_code(diag) == "I208")
         .collect();
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0].data.as_ref().unwrap()["root"], b_uri.as_str());
