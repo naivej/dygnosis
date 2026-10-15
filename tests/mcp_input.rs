@@ -867,3 +867,36 @@ fn configured_work_reaches_auxiliary_checks_and_edit_reparses_over_stdio() {
         fixed["outcome"]
     );
 }
+
+#[test]
+fn repeated_partial_splices_keep_the_actual_first_written_cause_over_stdio() {
+    // Guards identical requests spending shared splice work in hash order and
+    // attaching a different included source/caller to the same actual stop.
+    let table = (0..4097)
+        .map(|n| format!("\"{n}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    let args = json!({
+        "source":{"kind":"map","root":"/root.mod","files":{
+            "/root.mod":"@#include \"table0.inc\"\n@#include \"table1.inc\"\nvar y; model; y=0; end;\n",
+            "/table0.inc":format!("@#define a0=[{table}]\n// @{{a0[1]}}\n"),
+            "/table1.inc":format!("@#define a1=[{table}]\n// @{{a1[1]}}\n")}},
+        "macro_work_limit":250000,"detail":"compact"
+    });
+    let canonical = |reply: Value| -> Value {
+        assert!(reply.get("error").is_none(), "{reply}");
+        serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+    };
+    let mut wire = McpWire::new();
+    let first = canonical(wire.call("dynare_model_info", args.clone()));
+    assert_eq!(first["coverage"][0]["complete"], false);
+    let reason = &first["coverage"][0]["reasons"][0];
+    assert_eq!(reason["code"], "I211");
+    assert_eq!(reason["source"]["file"], "/table0.inc");
+    assert_eq!(reason["include_chain"][0]["range"]["line"], 1);
+    assert_eq!(reason["limit"]["ceiling"], 250000);
+    for _ in 0..15 {
+        let current = canonical(wire.call("dynare_model_info", args.clone()));
+        assert_eq!(current, first, "same inputs must retain the actual stop");
+    }
+}

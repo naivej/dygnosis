@@ -2514,10 +2514,8 @@ impl Workspace {
         let mut claimed_loops: Vec<Span> = Vec::new();
         let mut series = Vec::new();
         budget.spend_work(sites.len().max(1))?;
-        for (file, span) in sites {
-            if file != key {
-                continue;
-            }
+        let written_sites = written_include_sites(key, sites);
+        for span in &written_sites {
             let Some(plan) = targets.sites.get(&(key.to_string(), *span)) else {
                 continue;
             };
@@ -2591,9 +2589,9 @@ impl Workspace {
             }
         }
         budget.spend_work(sites.len().saturating_mul(claimed_loops.len() + 2).max(1))?;
-        let stable_sites: Vec<Span> = sites
+        let stable_sites: Vec<Span> = written_sites
             .iter()
-            .filter_map(|(file, span)| (file == key).then_some(*span))
+            .copied()
             .filter(|span| !seen_spans.contains(span))
             .filter(|span| {
                 !claimed_loops
@@ -2776,10 +2774,13 @@ impl Workspace {
                 _ => return Ok(false),
             }
         }
-        for ((owner, _), plan) in &targets.sites {
-            if owner != &left.path {
-                continue;
-            }
+        let mut written_plans: Vec<_> = targets
+            .sites
+            .iter()
+            .filter_map(|((owner, span), plan)| (owner == &left.path).then_some((*span, plan)))
+            .collect();
+        written_plans.sort_by_key(|(span, _)| (span.start, span.end));
+        for (_, plan) in written_plans {
             budget.spend_work(plan.hits.len().max(1))?;
             let mut left_hits = hits_for_call(plan, Some(left.call));
             let mut right_hits = hits_for_call(plan, Some(right.call));
@@ -2818,12 +2819,12 @@ impl Workspace {
         let mut context = parent_context.to_vec();
         context.push((header, frame));
         let mut cuts: Vec<(u32, u32, BodyCut)> = Vec::new();
-        for (file, span) in sites {
-            if file != key || span.start < from || span.end > to {
+        for span in written_include_sites(key, sites) {
+            if span.start < from || span.end > to {
                 continue;
             }
             let loops =
-                crate::engine::language::macro_expand::loops_containing(source, *span, budget)?;
+                crate::engine::language::macro_expand::loops_containing(source, span, budget)?;
             let nested = loops
                 .iter()
                 .position(|item| item.header == header)
@@ -2844,7 +2845,7 @@ impl Workspace {
                 }
                 continue;
             }
-            let Some(plan) = targets.sites.get(&(key.to_string(), *span)) else {
+            let Some(plan) = targets.sites.get(&(key.to_string(), span)) else {
                 continue;
             };
             budget.spend_work(plan.hits.len().saturating_mul(context.len() + 1).max(1))?;
@@ -2952,6 +2953,17 @@ impl Workspace {
 enum BodyCut {
     Loop(crate::engine::language::macro_expand::ContainingLoop),
     Child(String, usize),
+}
+
+/// A hash set proves membership; budgeted splice traversal follows written order.
+/// Repeated executions stay in SitePlan.hits, in their recorded call order.
+fn written_include_sites(key: &str, sites: &HashSet<(String, Span)>) -> Vec<Span> {
+    let mut written: Vec<_> = sites
+        .iter()
+        .filter_map(|(file, span)| (file == key).then_some(*span))
+        .collect();
+    written.sort_by_key(|span| (span.start, span.end));
+    written
 }
 
 /// Include calls in one execution of their written file.
@@ -3415,6 +3427,67 @@ fn read_text(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod include_load_budget_tests {
     use super::*;
+
+    #[test]
+    fn splice_work_stop_visits_siblings_in_written_order() {
+        // Guards hash iteration changing the actual child whose source-copy
+        // charge fails after an otherwise complete macro execution walk.
+        let table = (0..4097)
+            .map(|n| format!("\"{n}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let root = "/root.mod";
+        let files = BTreeMap::from([
+            (
+                root.to_string(),
+                "@#include \"table0.inc\"\n@#include \"table1.inc\"\nvar y; model; y=0; end;\n"
+                    .to_string(),
+            ),
+            (
+                "/table0.inc".to_string(),
+                format!("@#define a0=[{table}]\n// @{{a0[1]}}\n"),
+            ),
+            (
+                "/table1.inc".to_string(),
+                format!("@#define a1=[{table}]\n// @{{a1[1]}}\n"),
+            ),
+        ]);
+        for _ in 0..32 {
+            let mut workspace = Workspace::overlay_documents_with_work_limit(
+                &files,
+                None,
+                MacroWorkLimit::new(250_000).unwrap(),
+            );
+            let IncludeWalk {
+                mut proof, targets, ..
+            } = workspace.walk_graph(root);
+            assert!(
+                proof.complete && proof.limit.is_none(),
+                "execution must complete before the splice stop"
+            );
+            let remaining = proof.budget.remaining_work();
+            assert!(matches!(
+                workspace.splice_with_map(
+                    root,
+                    &proof.sites,
+                    &targets,
+                    &mut Vec::new(),
+                    None,
+                    &mut proof.budget
+                ),
+                Err(MacroEvalError::Limit("iteration work"))
+            ));
+            let failure = targets.splice_failure.borrow();
+            let (site, call) = failure.as_ref().expect("actual splice stop");
+            assert_eq!(
+                site.file, "/table0.inc",
+                "remaining={remaining} call={call:?}"
+            );
+            let chain = Workspace::splice_call_chain(&targets, *call);
+            assert_eq!(chain.len(), 1);
+            assert_eq!(chain[0].span.start, 0);
+        }
+    }
 
     #[test]
     fn root_work_changes_replace_cached_facts_without_changing_another_root() {
