@@ -80,7 +80,10 @@ fn usage_parse_constructor_cancellations_match_pinned_dynare() {
         let model = parse(&source);
         let rows = check_w022(&model);
         assert_eq!(rows.len(), 1, "{term}: {rows:?}");
-        assert_eq!(rows[0].message, "Parameter(s) p not used in the model");
+        assert_eq!(
+            rows[0].message,
+            "Parameter(s) p not used in the model block"
+        );
         assert_eq!(rows[0].severity, Severity::Warning);
         assert_eq!(
             &source[rows[0].span.start as usize..rows[0].span.end as usize],
@@ -250,7 +253,10 @@ fn usage_w022_roots_match_official_consumers() {
         official(source, true, Some("p"));
         let rows = check_w022(&parse(source));
         assert_eq!(rows.len(), 1, "{source}: {rows:?}");
-        assert_eq!(rows[0].message, "Parameter(s) p not used in the model");
+        assert_eq!(
+            rows[0].message,
+            "Parameter(s) p not used in the model block"
+        );
     }
     for source in ["var y; parameters p; p=1; model; y=p; end;", "var y; parameters p; p=1; model; [static] y=p; [dynamic] y=0; end;", "var y; parameters p; p=1; model; y=0; end; steady_state_model; y=p; end;", "var y; parameters p; model; y=0; end; steady_state_model; p=1; y=0; end;", "var y; parameters p; model; y=0; end; steady_state_model; [y,p]=helper(1); end;", "heterogeneity_dimension d; var(heterogeneity=d) yh; parameters p; p=1; model(heterogeneity=d); yh=p; end;"] {
         official(source, true, None);
@@ -362,27 +368,48 @@ fn usage_written_references_and_include_owners_stay_available() {
 }
 
 #[test]
-fn pac_model_discount_counts_as_a_parameter_use() {
-    let source = "var y; varexo e; parameters beta unused; beta=0.99; unused=0.5; model; y=0.9*y(-1)+e; end; pac_model(model_name=pac_y, auxiliary_model_name=target_var, discount=beta);";
-    // Check warns before transform substitutes the discount. That warning is
-    // intentional silence here, including when the option word keeps its case.
-    official(source, true, Some("beta"));
-    let rows = check_w022(&parse(source));
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!(rows[0].message, "Parameter(s) unused not used in the model");
-    let reported = analyze(&parse(source));
-    assert!(
-        reported
-            .iter()
-            .all(|row| row.code != "W022"
-                || row.message == "Parameter(s) unused not used in the model"),
-        "{reported:?}"
-    );
-    let cased = source.replace("discount=beta", "Discount=beta");
-    assert!(
-        check_w022(&parse(&cased))
-            .iter()
-            .all(|row| row.message == "Parameter(s) unused not used in the model"),
-        "{cased}"
-    );
+fn pac_model_only_parameters_warn_until_used_in_model_equations() {
+    // Guard Check agreement for both PAC options and keep equation uses quiet.
+    for (name, other, options) in [
+        ("beta", "g", "discount=beta"),
+        ("beta", "g", "Discount=beta"),
+        ("g", "beta", "discount=beta, growth=g"),
+        ("g", "beta", "discount=beta, Growth=g"),
+    ] {
+        for used_in_equation in [false, true] {
+            let term = if used_in_equation { name } else { "0" };
+            let source = format!("var y; varexo e; parameters {name} {other} unused; {name}=0.99; {other}=0.01; unused=0.5; model; y=0.9*y(-1)+e+{other}+{term}; end; pac_model(model_name=pac_y, auxiliary_model_name=target_var, {options});");
+            official(
+                &source,
+                true,
+                Some(if used_in_equation { "unused" } else { name }),
+            );
+            let model = parse(&source);
+            for rows in [
+                check_w022(&model),
+                analyze(&model)
+                    .into_iter()
+                    .filter(|row| row.code == "W022")
+                    .collect(),
+            ] {
+                let expected = if used_in_equation {
+                    vec!["unused"]
+                } else {
+                    vec![name, "unused"]
+                };
+                assert_eq!(rows.len(), expected.len(), "{source}: {rows:?}");
+                for (row, parameter) in rows.iter().zip(expected) {
+                    assert_eq!(
+                        row.message,
+                        format!("Parameter(s) {parameter} not used in the model block")
+                    );
+                    assert_eq!(row.severity, Severity::Warning);
+                    assert_eq!(
+                        &source[row.span.start as usize..row.span.end as usize],
+                        parameter
+                    );
+                }
+            }
+        }
+    }
 }

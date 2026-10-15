@@ -68,7 +68,10 @@ fn complete_no_model_roots_keep_check_before_transform_and_writing_information()
             .find(|diag| diag.code == "W022")
             .expect("unused parameter warning");
         assert_eq!(warning.severity, dygnosis::Severity::Warning);
-        assert_eq!(warning.message, "Parameter(s) alppha not used in the model");
+        assert_eq!(
+            warning.message,
+            "Parameter(s) alppha not used in the model block"
+        );
         assert_eq!(
             &source[warning.span.start as usize..warning.span.end as usize],
             "alppha"

@@ -242,9 +242,8 @@ impl<'a> Usage<'a> {
         names
     }
 
-    /// Parameters with a surviving model or steady-state use, plus a
-    /// `pac_model` discount name. Dynare's unused-parameter check runs before
-    /// transform substitutes that discount, so the pin still warns.
+    /// Parameters with a surviving model or steady-state use. PAC discount
+    /// and growth options do not add uses before transform substitutes them.
     pub(crate) fn parameter_names(&self) -> HashSet<Name> {
         let mut names = self.names(
             model_roots(self.model).chain(
@@ -265,10 +264,6 @@ impl<'a> Usage<'a> {
                     .map(|target| target.name),
             );
         }
-        if crate::engine::control::cancelled() {
-            return Default::default();
-        }
-        names.extend(pac_discount_parameters(self.model));
         names
     }
 
@@ -307,22 +302,6 @@ impl<'a> Usage<'a> {
         }
         names
     }
-}
-
-fn pac_discount_parameters(model: &Model) -> impl Iterator<Item = Name> + '_ {
-    model
-        .semi_structural_commands
-        .iter()
-        .filter(|command| command.kind == SemiStructuralKind::PacModel)
-        .flat_map(|command| &command.options)
-        .filter_map(|option| match &option.value {
-            SemiStructuralValue::Symbol { name, .. }
-                if option.name.eq_ignore_ascii_case("discount") =>
-            {
-                Some(*name)
-            }
-            _ => None,
-        })
 }
 
 fn model_roots(model: &Model) -> impl Iterator<Item = ExprId> + '_ {

@@ -2,6 +2,10 @@
 
 ## v0.11.26
 
+- W022 again reports a parameter used only by `pac_model`'s `discount` option,
+  as Dynare does. Parameters used only by `growth` also warn. The message now
+  says `Parameter(s) g not used in the model block` to clarify that the
+  parameter can be used elsewhere.
 - Large indexed macro tables copy only the selected values. The unmodified
   basic and growth DynareTransformationEngine examples now complete.
 - Configure macro work with `dynare.macroWorkLimit` in the editor or
@@ -36,10 +40,6 @@
   reference.
 - The Reference entry for W102 opens its explanation. A bracket in a check
   title no longer ends that link early.
-- A parameter named by `pac_model`'s `discount` option is not reported as
-  unused. For example, `discount=beta` in
-  `pac_model(model_name=pac_y, auxiliary_model_name=target_var, discount=beta);`
-  does not produce W022 for `beta`.
 - References and Rename include the parameter named by `pac_model`'s `discount`
   option. Rename updates that option together with the declaration and other
   bound uses.

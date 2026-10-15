@@ -300,7 +300,7 @@ pub fn check_w022(model: &Model) -> Vec<Diagnostic> {
             p.span,
             Severity::Warning,
             "W022",
-            format!("Parameter(s) {name} not used in the model"),
+            format!("Parameter(s) {name} not used in the model block"),
         ));
     }
     diagnostics

@@ -1135,7 +1135,7 @@ fn heterogeneous_only_model_still_checks_unused_names() {
         .iter()
         .find(|diag| diag.code == "W022")
         .unwrap_or_else(|| panic!("missing W022: {diagnostics:?}"));
-    assert_eq!(ours.message, "Parameter(s) p not used in the model");
+    assert_eq!(ours.message, "Parameter(s) p not used in the model block");
     if let Some(ref binary) = binary {
         let (accepted, report) = official_check(&source, binary);
         assert!(accepted, "{report}");

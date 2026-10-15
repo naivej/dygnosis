@@ -180,7 +180,7 @@ fn w010_unassigned_referenced_param() {
     );
     assert_eq!(
         by_code(&got, "W022").message,
-        "Parameter(s) orphan_p not used in the model"
+        "Parameter(s) orphan_p not used in the model block"
     );
 }
 
@@ -199,7 +199,7 @@ fn w010_and_w022_unassigned_unref_param() {
     assert_eq!(w022.severity, 2);
     assert!(w022
         .message
-        .contains("Parameter(s) orphan_p not used in the model"));
+        .contains("Parameter(s) orphan_p not used in the model block"));
     assert_last_ident(&text, w022, "parameters rho betta orphan_p;", "orphan_p");
 }
 
@@ -351,7 +351,10 @@ fn w022_param_used_only_in_stderr() {
     let got = rust_family(&check_mod("w010/w022_stderr.mod"));
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].code, "W022");
-    assert_eq!(got[0].message, "Parameter(s) sigma_z not used in the model");
+    assert_eq!(
+        got[0].message,
+        "Parameter(s) sigma_z not used in the model block"
+    );
 }
 
 #[test]
@@ -368,5 +371,8 @@ fn w022_param_used_only_in_initval() {
     let got = rust_family(&check_mod("w010/w022_initval.mod"));
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].code, "W022");
-    assert_eq!(got[0].message, "Parameter(s) kss not used in the model");
+    assert_eq!(
+        got[0].message,
+        "Parameter(s) kss not used in the model block"
+    );
 }
