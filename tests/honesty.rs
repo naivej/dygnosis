@@ -6008,27 +6008,6 @@ stoch_simul(order=1, irf=0, nograph);
 }
 
 #[test]
-fn extra_cycle_warning_is_library_only() {
-    let path = fixture("e060/cycle/a.mod");
-    let path_str = path.to_str().expect("utf-8 path");
-    let text = read_path(&path);
-    let analyzed = analyze(&parse(&text));
-    assert!(
-        analyzed.iter().all(|d| d.code != "W062"),
-        "analyze() must not emit W062, got {:?}",
-        analyzed.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
-    );
-    let own = check_file(&text, path_str);
-    assert!(
-        own.iter()
-            .any(|d| d.code == "W062" && d.severity == Severity::Warning),
-        "check_file on cycle a.mod must emit W062 Warning, got {:?}",
-        own.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
-    );
-    assert_no_p_digits(&own, "e060/cycle check_file");
-}
-
-#[test]
 fn e103_planner_objective_without_optim_weights_is_quiet() {
     let Some(pp) = find_preprocessor(None) else {
         eprintln!("skipping honesty: dynare-preprocessor not found");

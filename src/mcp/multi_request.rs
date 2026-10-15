@@ -262,7 +262,6 @@ fn batch(arguments: Value, control: RequestControl) -> Result<CallToolResult, rm
                 coverages.push(snapshot.coverage.clone());
                 let include_failure=snapshot.workspace.include_records(&snapshot.root).and_then(|records| {
                     if !records.unresolved.is_empty() {Some(("MISSING_INCLUDE","A required include is unresolved; this root has no diagnostic result"))}
-                    else if !records.cycles.is_empty() {Some(("INCLUDE_CYCLE","A required include forms a cycle; diagnostic checks were withheld"))}
                     else {None}
                 });
                 if let Some((code, failure)) = include_failure {

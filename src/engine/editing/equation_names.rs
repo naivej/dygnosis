@@ -801,9 +801,6 @@ pub(crate) fn metadata_completion(
         if !report.model_map.complete
             || crate::engine::diagnostics::check_writing::model_structure_incomplete(&model)
             || !candidate.find_unresolved_includes(root).is_empty()
-            || candidate
-                .include_records(root)
-                .is_some_and(|records| !records.cycles.is_empty())
         {
             continue;
         }

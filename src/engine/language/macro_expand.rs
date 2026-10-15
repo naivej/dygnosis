@@ -597,6 +597,7 @@ struct MacroFiles<'a> {
     sites: HashSet<(String, Span)>,
     limit: Option<(String, Span, &'static str)>,
     refusal: Option<MacroFileRefusal>,
+    stop_chain: Vec<(String, Span)>,
     next_call: usize,
     calls: Vec<usize>,
     output: String,
@@ -611,6 +612,7 @@ pub(crate) struct MacroFileProof {
     pub budget: MacroBudget,
     pub limit: Option<(String, Span, &'static str)>,
     pub refusal: Option<MacroFileRefusal>,
+    pub stop_chain: Vec<(String, Span)>,
     pub output: String,
     pub messages: Vec<MacroMessage>,
     pub loop_occurrences: Vec<MacroLoopOccurrence>,
@@ -635,6 +637,22 @@ struct MacroFileRun {
     refusal: Option<(Span, &'static str, String)>,
 }
 
+impl MacroFiles<'_> {
+    fn note_limit(&mut self, file: String, span: Span, name: &'static str) {
+        if self.limit.is_none() && self.refusal.is_none() {
+            self.stop_chain = self.parents.clone();
+            self.limit = Some((file, span, name));
+        }
+    }
+
+    fn note_refusal(&mut self, file: String, span: Span, code: &'static str, message: String) {
+        if self.limit.is_none() && self.refusal.is_none() {
+            self.stop_chain = self.parents.clone();
+            self.refusal = Some((file, span, code, message));
+        }
+    }
+}
+
 impl MacroFileVisitor for MacroFiles<'_> {
     fn visit(
         &mut self,
@@ -656,7 +674,7 @@ impl MacroFileVisitor for MacroFiles<'_> {
                 .saturating_add(self.calls.len())
                 .saturating_add(1),
         ) {
-            self.limit.get_or_insert((file, span, name));
+            self.note_limit(file, span, name);
             return MacroFileVisit::Aborted;
         }
         let call = self.next_call;
@@ -676,14 +694,11 @@ impl MacroFileVisitor for MacroFiles<'_> {
         let (target, source) = match loaded {
             Some(MacroFileLoad::Source { file, source }) => (file, source),
             Some(MacroFileLoad::Limit(limit)) => {
-                self.limit.get_or_insert((file, span, limit));
+                self.note_limit(file, span, limit);
                 return MacroFileVisit::Aborted;
             }
             _ => return MacroFileVisit::Missing,
         };
-        if self.files.contains(&target) {
-            return MacroFileVisit::Missing;
-        }
         self.parents.push((file, span));
         self.files.push(target.clone());
         self.calls.push(call);
@@ -691,10 +706,10 @@ impl MacroFileVisitor for MacroFiles<'_> {
         // a missing include when its own blocks or later directives fail.
         let child = macro_file_complete(&source, defines, self, budget);
         if let Some((span, name)) = child.limit {
-            self.limit.get_or_insert((target.clone(), span, name));
+            self.note_limit(target.clone(), span, name);
         }
         if let Some((span, code, message)) = child.refusal {
-            self.refusal.get_or_insert((target, span, code, message));
+            self.note_refusal(target, span, code, message);
         }
         self.files.pop();
         self.parents.pop();
@@ -727,17 +742,17 @@ impl MacroFileVisitor for MacroFiles<'_> {
             parent_calls: &self.calls,
         });
         if let Some(MacroFileLoad::Limit(limit)) = loaded {
-            self.limit.get_or_insert((file.clone(), span, limit));
+            self.note_limit(file.clone(), span, limit);
             return Err(MacroEvalError::Limit(limit));
         }
         let valid = matches!(loaded, Some(MacroFileLoad::Path));
         if !valid {
-            self.refusal.get_or_insert((
+            self.note_refusal(
                 file.clone(),
                 span,
                 "E304",
                 format!("{path} does not evaluate to a valid directory"),
-            ));
+            );
         }
         Ok(valid)
     }
@@ -825,6 +840,7 @@ pub(crate) fn walk_macro_files_with_budget(
         sites: HashSet::new(),
         limit: None,
         refusal: None,
+        stop_chain: Vec::new(),
         next_call: 1,
         calls: Vec::new(),
         output: String::new(),
@@ -847,6 +863,7 @@ pub(crate) fn walk_macro_files_with_budget(
         budget,
         limit: includes.limit,
         refusal: includes.refusal,
+        stop_chain: includes.stop_chain,
         output: includes.output,
         messages: includes.messages,
         loop_occurrences: includes.loop_occurrences,

@@ -409,35 +409,30 @@ pub fn resolve_source(
                 "Source inputs changed while reading them; repeat the request",
             ));
         }
-        let records = workspace.include_records(owner).cloned();
         let includes_complete = workspace.includes_complete(owner);
         let causes = crate::engine::control::run(Some(Arc::clone(&control.cancelled)), || {
-            crate::engine::analysis::model_info::incomplete_reason_records(&model, records.as_ref())
+            crate::engine::analysis::model_info::incomplete_causes(&mut workspace, owner, &model)
         })
         .map_err(|_| SourceError::failure("CANCELLED", "The request was cancelled"))?;
-        let reasons: Vec<_> = causes
-        .into_iter()
-        .map(|(span, code, message)| {
-            let mut reason = json!({"code":code,"message":message});
-            // The first and last bytes must map continuously to one captured
-            // written source. A split or synthesized range gains no location.
-            if matches!(code, "INCOMPLETE_BLOCK" | "INCOMPLETE_STATEMENT") && let Some((file, written)) = workspace.map_effective_origin(owner, span) {
-                let continuous = span.is_empty() || workspace.map_effective_origin(owner, Span {start:span.end-1,end:span.end})
-                    .is_some_and(|(last_file,last)| last_file==file && last.start==written.start+span.end-span.start-1);
-                if continuous && let Some(raw)=workspace.source_for_normalized_key(&file) {
-                    let normalized=crate::engine::language::parser::normalize_newlines(raw);
-                    let index=LineIndex::new(&normalized);
-                    let start=index.position(&normalized,written.start);
-                    let end=index.position(&normalized,written.end);
-                    if normalized.get(written.start as usize..written.end as usize).is_some() {
-                        reason["source"]=json!({"file":if kind=="text" {Value::Null}else {json!(file)},
-                            "range":{"line":start.line+1,"column":start.character+1,"end_line":end.line+1,"end_column":end.character+1}});
-                    }
-                }
+        let reasons: Vec<_> = causes.into_iter().map(|cause| {
+            let mut reason = cause.outcome_json();
+            let mut location = |site: &crate::engine::workspace::IncludeSite| {
+                let raw = workspace.source_for_normalized_key(&site.file)?;
+                let normalized = crate::engine::language::parser::normalize_newlines(raw);
+                normalized.get(site.span.start as usize..site.span.end as usize)?;
+                let index = LineIndex::new(&normalized);
+                let start = index.position(&normalized, site.span.start);
+                let end = index.position(&normalized, site.span.end);
+                Some(json!({"file":if kind=="text" {Value::Null}else {json!(site.file)},
+                    "range":{"line":start.line+1,"column":start.character+1,"end_line":end.line+1,"end_column":end.character+1}}))
+            };
+            if let Some(source) = cause.origin.as_ref().and_then(&mut location) {
+                reason["source"] = source;
             }
+            let chain: Vec<_> = cause.include_chain.iter().filter_map(location).collect();
+            if !chain.is_empty() { reason["include_chain"] = json!(chain); }
             reason
-        })
-        .collect();
+        }).collect();
         control.check()?;
         let complete =
             crate::engine::analysis::model_info::incomplete_model_status(&model, includes_complete)

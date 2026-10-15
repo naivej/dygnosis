@@ -2122,18 +2122,30 @@ impl Backend {
     }
 
     fn model_info_reasons(&self, inner: &mut Inner, root: &Url) -> Value {
-        let includes = inner.workspace.include_records(root.as_str()).cloned();
         let model = inner.workspace.get_effective_model(root.as_str()).cloned();
         let mut reasons = Vec::new();
         if let Some(model) = model {
-            for (span, code, message) in
-                crate::engine::analysis::model_info::incomplete_reason_records(
-                    &model,
-                    includes.as_ref(),
-                )
-            {
-                let location = incomplete_reason_location(inner, root, span, code == "E061");
-                reasons.push(json!({"code":code, "message":message, "location":location}));
+            for cause in crate::engine::analysis::model_info::incomplete_causes(
+                &mut inner.workspace,
+                root.as_str(),
+                &model,
+            ) {
+                let location = cause
+                    .origin
+                    .as_ref()
+                    .map(|site| incomplete_written_location(inner, root, &site.file, site.span))
+                    .unwrap_or(Value::Null);
+                let chain: Vec<_> = cause
+                    .include_chain
+                    .iter()
+                    .map(|site| incomplete_written_location(inner, root, &site.file, site.span))
+                    .collect();
+                let mut reason = cause.outcome_json();
+                reason["location"] = location;
+                if !chain.is_empty() {
+                    reason["include_chain"] = json!(chain);
+                }
+                reasons.push(reason);
             }
         }
         if reasons.is_empty() {
@@ -3388,26 +3400,13 @@ fn preview_written_location(
     )
 }
 
-fn incomplete_reason_location(
+fn incomplete_written_location(
     inner: &mut Inner,
     root: &Url,
-    span: crate::engine::language::span::Span,
-    root_written: bool,
+    file: &str,
+    written: crate::engine::language::span::Span,
 ) -> Value {
-    // E061 records already anchor at the written root include site. Macro
-    // failures instead carry offsets in the include-spliced effective source.
-    let origin = if root_written {
-        Some((
-            crate::engine::workspace::include_resolver::normalize_uri(root.as_str()),
-            span,
-        ))
-    } else {
-        inner.workspace.map_effective_origin(root.as_str(), span)
-    };
-    let Some((file, written)) = origin else {
-        return Value::Null;
-    };
-    let Some(text) = inner.workspace.get_source(&file) else {
+    let Some(text) = inner.workspace.get_source(file) else {
         return Value::Null;
     };
     let Some(range) = crate::lsp::model_map::written_range(text, written) else {
@@ -3419,7 +3418,7 @@ fn incomplete_reason_location(
         .chain(std::iter::once(root))
         .find(|uri| crate::engine::workspace::include_resolver::normalize_uri(uri.as_str()) == file)
         .cloned()
-        .or_else(|| file_url_from_path_key(&file))
+        .or_else(|| file_url_from_path_key(file))
     else {
         return Value::Null;
     };

@@ -470,6 +470,59 @@ pub fn incomplete_reason_records(
     reasons
 }
 
+/// An incomplete cause with verified written locations. Both transports use
+/// this conversion; no caller derives a resource name from diagnostic prose.
+pub(crate) struct IncompleteCause {
+    pub code: &'static str,
+    pub message: String,
+    pub origin: Option<crate::engine::workspace::IncludeSite>,
+    pub include_chain: Vec<crate::engine::workspace::IncludeSite>,
+    pub limit: Option<Value>,
+}
+
+impl IncompleteCause {
+    pub(crate) fn outcome_json(&self) -> Value {
+        let mut result = json!({"code":self.code,"message":self.message,
+            "available":"verified emitted prefix and already established facts",
+            "omitted":"authoritative model counts, complete source navigation and edits that need the complete model"});
+        if let Some(limit) = &self.limit {
+            result["limit"] = limit.clone();
+        }
+        result
+    }
+}
+
+pub(crate) fn incomplete_causes(
+    workspace: &mut crate::engine::workspace::Workspace,
+    root: &str,
+    model: &Model,
+) -> Vec<IncompleteCause> {
+    let includes = workspace.include_records(root).cloned();
+    let limits = macro_work_limits(model, Some(root));
+    incomplete_reason_records(model, includes.as_ref())
+        .into_iter()
+        .map(|(span, code, message)| {
+            let (origin, include_chain) = workspace.incomplete_cause_origin(root, span, code);
+            let limit = model
+                .incomplete_reasons
+                .iter()
+                .find(|reason| {
+                    reason.span == span && reason.code == code && reason.message == message
+                })
+                .and_then(|reason| reason.limit_name)
+                .and_then(|name| limits.iter().find(|limit| limit["limit"] == name))
+                .cloned();
+            IncompleteCause {
+                code,
+                message,
+                origin,
+                include_chain,
+                limit,
+            }
+        })
+        .collect()
+}
+
 /// The same include/companion rows, with each transport retaining its path keys.
 pub(crate) fn related_files_json(
     includes: &crate::engine::workspace::IncludeRecords,

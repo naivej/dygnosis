@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use dygnosis::span::LineIndex;
-use dygnosis::{analyze, check_e060_family, check_e060_family_on_model, parse, Workspace};
+use dygnosis::{check_e060_family, check_e060_family_on_model, parse, Workspace};
 
-const FAMILY: &[&str] = &["E061", "E062", "E063", "E064", "E065", "W061", "W062"];
+const FAMILY: &[&str] = &["E061", "E062", "E063", "E064", "E065", "W061"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Diag {
@@ -251,21 +251,14 @@ fn e060_clean_fixtures_empty() {
 
 #[test]
 fn e060_cycle() {
-    assert_workspace_fire(
-        "e060/cycle",
-        "a.mod",
-        "W062",
-        "a.mod -> b.inc -> a.mod",
-        "@#include \"b.inc\"",
-    );
-    let text = check_mod("e060/cycle/a.mod");
-    let got = rust_fixture_dir("e060/cycle", "a.mod");
-    assert_eq!(got[0].severity, 2, "cycle must be Warning, got {got:?}");
-    let analyzed = analyze(&parse(&text));
+    let path = fixture_path("e060/cycle/a.mod");
+    let diagnostics = dygnosis::check_file(&check_mod("e060/cycle/a.mod"), path.to_str().unwrap());
     assert!(
-        analyzed.iter().all(|d| d.code != "W062"),
-        "analyze() must not emit W062, got {:?}",
-        analyzed.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "I211"
+                && diagnostic.message.contains("execution depth")),
+        "{diagnostics:?}"
     );
 }
 

@@ -1431,7 +1431,6 @@
     {
       "id": "e060_clean_swff",
       "codes": [
-        "W062",
         "E061",
         "E062",
         "E063",
@@ -1449,7 +1448,6 @@
     {
       "id": "e060_clean_zlb_qe",
       "codes": [
-        "W062",
         "E061",
         "E062",
         "E063",
@@ -1467,7 +1465,6 @@
     {
       "id": "e060_clean_US_RE09_rep",
       "codes": [
-        "W062",
         "E061",
         "E062",
         "E063",
@@ -1485,12 +1482,12 @@
     {
       "id": "e060_cycle",
       "codes": [
-        "W062"
+        "I211"
       ],
       "kind": "fire",
       "package": "include",
       "fixture": "tests/fixtures/e060/cycle",
-      "source": "e060.rs::e060_cycle_swff_params_overlay",
+      "source": "e060.rs::e060_cycle",
       "cluster": "e060/cycle",
       "notes": "directory: a.mod <-> b.inc cycle"
     },

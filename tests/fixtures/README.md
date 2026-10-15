@@ -15,7 +15,7 @@ Folders follow the diagnostic code. File names start with the same code (`w010_u
 | `e020/` | a name used in the model that was never declared |
 | `e030/` | the same name declared twice (for example `var` and `varexo`) |
 | `shape/` | equation or block shape: duplicate equations, missing `initval`, no steady-state block (`W054`–`W057`, `W042`, `E058`, `W051`, `W052`, `E059`, `I050`) |
-| `e060/` | `@#include` and `@#if` / `@#for` mistakes. Cycle is extra Warning `W062`. Some cases are a **directory** of files (`cycle/`, `missing/`, `nested/`, `w061_*`), not one `.mod`. |
+| `e060/` | `@#include` and `@#if` / `@#for` mistakes. Some cases are a **directory** of files (`cycle/`, `missing/`, `nested/`, `w061_*`), not one `.mod`. |
 | `w010/` | unused or never-assigned parameters and variables |
 | `w090/` | estimation and observed variables |
 | `w100/` | Ramsey, OSR, planner objective |

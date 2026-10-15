@@ -9,6 +9,7 @@ pub mod companion;
 pub mod include_resolver;
 pub mod model_map;
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
@@ -50,18 +51,9 @@ pub struct UnresolvedInclude {
     pub included_from: Option<String>,
     /// Directories that were searched for this include.
     pub searched: Vec<String>,
-}
-
-/// One include cycle, canonicalized so rotations are not reported twice.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CycleRecord {
-    /// Absolute path keys around the cycle, including the closing repeat.
-    pub chain: Vec<String>,
-    /// Original-file directive span (root include that reaches the cycle).
-    pub span: Span,
-    /// Verified written include edges, independent of the root warning anchor.
-    pub earlier: IncludeSite,
-    pub closing: IncludeSite,
+    /// Actual written site and executed caller chain, separate from the root anchor.
+    pub site: IncludeSite,
+    pub chain: Vec<IncludeSite>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,7 +67,6 @@ pub struct IncludeSite {
 pub struct IncludeRecords {
     pub resolved: Vec<ResolvedInclude>,
     pub unresolved: Vec<UnresolvedInclude>,
-    pub cycles: Vec<CycleRecord>,
 }
 
 struct Doc {
@@ -97,6 +88,9 @@ struct SplicedSource {
     include_search: Vec<PathBuf>,
     /// A bound reached before joined text could be allocated or scanned.
     limit: Option<IncompleteReason>,
+    /// Written cause before include splicing, which may stop before this file is joined.
+    limit_site: Option<IncludeSite>,
+    stop_chain: Vec<IncludeSite>,
     /// First refusal in a separately read macro file, before joined parsing.
     refusal: Option<crate::engine::language::macro_expand::MacroFileRefusal>,
     /// Actual text and debug messages emitted before an incomplete execution.
@@ -129,7 +123,7 @@ struct IncludeIteration {
 #[derive(Clone, Debug, Default)]
 struct SitePlan {
     hits: Vec<IncludeHit>,
-    /// Missing, cyclic, or not certain. The directive stays in the spliced text.
+    /// Missing or not certain. The directive stays in the spliced text.
     unresolved: bool,
 }
 
@@ -137,6 +131,8 @@ struct SitePlan {
 struct IncludeTargets {
     sites: HashMap<(String, Span), SitePlan>,
     loop_occurrences: Vec<crate::engine::language::macro_expand::MacroLoopOccurrence>,
+    /// First failed splice occurrence, retained while errors unwind to the root.
+    splice_failure: RefCell<Option<(IncludeSite, Option<usize>)>>,
 }
 
 fn note_unresolved(targets: &mut IncludeTargets, site: (String, Span)) {
@@ -160,15 +156,10 @@ fn note_resolved(
     });
 }
 
-/// End of the earliest missing or cyclic include. A taken miss stops the root,
+/// End of the earliest missing include. A taken miss stops the root,
 /// including a miss inside `@#if` or `@#for`.
 fn fatal_include_cut(records: &IncludeRecords) -> Option<u32> {
-    records
-        .unresolved
-        .iter()
-        .map(|item| item.span.end)
-        .chain(records.cycles.iter().map(|item| item.span.end))
-        .min()
+    records.unresolved.iter().map(|item| item.span.end).min()
 }
 
 struct IncludeWalk {
@@ -1116,18 +1107,14 @@ impl Workspace {
     }
 
     /// Parse of the joined source: executed include bodies replace directives;
-    /// required unresolved/cyclic edges stay empty. Dormant sites remain for
+    /// required unresolved edges stay empty. Dormant sites remain for
     /// the ordinary macro branch/loop expansion to skip.
     pub fn get_effective_model(&mut self, uri: &str) -> Option<&Model> {
         let key = self.ensure_loaded(uri)?;
         if !self.effective.contains_key(&key) {
             let spliced = self.spliced_source(&key);
             let fatal = self.records.get(&key).and_then(|records| {
-                let span = records
-                    .unresolved
-                    .first()
-                    .map(|item| item.span)
-                    .or_else(|| records.cycles.first().map(|item| item.span))?;
+                let span = records.unresolved.first().map(|item| item.span)?;
                 Some(span)
             });
             let same_root = self.docs.get(&key).filter(|doc| {
@@ -1277,7 +1264,7 @@ impl Workspace {
             let incomplete = self
                 .records
                 .get(&key)
-                .map(|records| !records.unresolved.is_empty() || !records.cycles.is_empty())
+                .map(|records| !records.unresolved.is_empty())
                 .unwrap_or(false);
             let mut report = expand_report_from_spliced_controlled(
                 &spliced.text,
@@ -1337,12 +1324,13 @@ impl Workspace {
 
     /// Transitively included files (root excluded).
     pub fn resolve_all_includes(&mut self, uri: &str) -> HashMap<String, Model> {
+        let root_key = self.ensure_loaded(uri);
         let records = self.include_records(uri).cloned().unwrap_or_default();
         let mut out = HashMap::new();
         let mut seen = HashSet::new();
         for resolved in &records.resolved {
             let key = self.include_key(&resolved.path);
-            if !seen.insert(key.clone()) {
+            if root_key.as_deref() == Some(key.as_str()) || !seen.insert(key.clone()) {
                 continue;
             }
             if let Some(model) = self.model_for_key(&key).cloned() {
@@ -1352,19 +1340,13 @@ impl Workspace {
         out
     }
 
-    pub fn find_circular_includes(&mut self, uri: &str) -> Vec<CycleRecord> {
-        self.include_records(uri)
-            .map(|r| r.cycles.clone())
-            .unwrap_or_default()
-    }
-
     pub fn find_unresolved_includes(&mut self, uri: &str) -> Vec<UnresolvedInclude> {
         self.include_records(uri)
             .map(|r| r.unresolved.clone())
             .unwrap_or_default()
     }
 
-    /// Executed include records (written spans, resolved targets, misses, cycles).
+    /// Executed include records (written spans, resolved targets and misses).
     pub fn include_records(&mut self, uri: &str) -> Option<&IncludeRecords> {
         let key = self.ensure_loaded(uri)?;
         if !self.records.contains_key(&key) {
@@ -1747,7 +1729,6 @@ impl Workspace {
         let mut targets = IncludeTargets::default();
         let mut active_search = Vec::new();
         let mut seen_sites = HashSet::new();
-        let mut seen_cycles = HashSet::new();
         let source = self.docs.get(root_key).expect("loaded root").source.clone();
         let mut proof = crate::engine::language::macro_expand::walk_macro_files_with_budget(
             root_key,
@@ -1847,56 +1828,23 @@ impl Workspace {
                             included_from: (!event.parents.is_empty())
                                 .then(|| file_basename(event.file)),
                             searched,
+                            site: IncludeSite {
+                                file: event.file.to_string(),
+                                span: event.span,
+                            },
+                            chain: event
+                                .parents
+                                .iter()
+                                .map(|(file, span)| IncludeSite {
+                                    file: file.clone(),
+                                    span: *span,
+                                })
+                                .collect(),
                         });
                     }
                     return None;
                 };
                 let target = self.include_key(&path);
-                let callers: Vec<_> = event
-                    .parents
-                    .iter()
-                    .map(|(file, _)| file.clone())
-                    .chain(std::iter::once(event.file.to_string()))
-                    .collect();
-                if let Some(index) = callers.iter().position(|file| file == &target) {
-                    let mut chain = callers[index..].to_vec();
-                    let min_index = chain
-                        .iter()
-                        .enumerate()
-                        .min_by_key(|(_, file)| *file)
-                        .map(|(index, _)| index)
-                        .unwrap();
-                    let canonical: Vec<_> = chain[min_index..]
-                        .iter()
-                        .chain(&chain[..min_index])
-                        .cloned()
-                        .collect();
-                    chain.push(target);
-                    if seen_cycles.insert(canonical) {
-                        let earlier = event
-                            .parents
-                            .get(index.saturating_sub(1))
-                            .map(|(file, span)| IncludeSite {
-                                file: file.clone(),
-                                span: *span,
-                            })
-                            .unwrap_or_else(|| IncludeSite {
-                                file: event.file.to_string(),
-                                span: event.span,
-                            });
-                        records.cycles.push(CycleRecord {
-                            chain,
-                            span: root_span,
-                            earlier,
-                            closing: IncludeSite {
-                                file: event.file.to_string(),
-                                span: event.span,
-                            },
-                        });
-                    }
-                    note_unresolved(&mut targets, site);
-                    return None;
-                }
                 note_resolved(&mut targets, site, target.clone(), &event, true);
                 if !records.resolved.iter().any(|record| record.path == path) {
                     records.resolved.push(ResolvedInclude {
@@ -1932,6 +1880,7 @@ impl Workspace {
             .resolved
             .iter()
             .map(|record| self.include_key(&record.path))
+            .filter(|file| file != root_key)
             .collect();
         self.include_owners.insert(root_key.to_string(), included);
         IncludeWalk {
@@ -1979,18 +1928,76 @@ impl Workspace {
             ),
         };
         let (text, segments, gaps) = pieces;
-        let limit = splice_limit.or_else(|| proof.limit.as_ref().map(|(file, span, limit)| {
-            let root_span = if file == key { *span } else {
-                proof.sites.iter()
+        // Execution errors precede the work needed to join their retained text.
+        // A later splice stop must not replace an earlier refusal or miss.
+        let actual_limit = proof
+            .limit
+            .as_ref()
+            .map(|(file, span, limit)| {
+                (
+                    IncludeSite {
+                        file: file.clone(),
+                        span: *span,
+                    },
+                    *limit,
+                    proof
+                        .stop_chain
+                        .iter()
+                        .map(|(file, span)| IncludeSite {
+                            file: file.clone(),
+                            span: *span,
+                        })
+                        .collect(),
+                )
+            })
+            .or_else(|| {
+                if proof.refusal.is_some() || !records.unresolved.is_empty() {
+                    return None;
+                }
+                let (span, limit) = splice_limit?;
+                let failure = targets.splice_failure.borrow();
+                let site = failure
+                    .as_ref()
+                    .map(|(site, _)| site.clone())
+                    .unwrap_or(IncludeSite {
+                        file: key.to_string(),
+                        span,
+                    });
+                let call = failure.as_ref().and_then(|(_, call)| *call);
+                let chain = Self::splice_call_chain(&targets, call);
+                Some((site, limit, chain))
+            });
+        let limit_site = actual_limit.as_ref().map(|(site, _, _)| site.clone());
+        let stop_chain = actual_limit
+            .as_ref()
+            .map(|(_, _, chain)| chain.clone())
+            .unwrap_or_else(|| {
+                proof
+                    .stop_chain
+                    .iter()
+                    .map(|(file, span)| IncludeSite {
+                        file: file.clone(),
+                        span: *span,
+                    })
+                    .collect()
+            });
+        let limit = actual_limit.map(|(site, limit, _)| {
+            let span = if site.file == key {
+                site.span
+            } else {
+                proof
+                    .sites
+                    .iter()
                     .filter_map(|(file, span)| (file == key).then_some(*span))
-                    .min_by_key(|span| span.start).unwrap_or_default()
+                    .min_by_key(|span| span.start)
+                    .unwrap_or_default()
             };
-            (root_span, *limit)
-        })).map(|(span, limit)| IncompleteReason {
-            span,
-            code: "I211",
-            message: format!("Macro expansion stopped at the {limit} limit; some model checks were withheld."),
-            limit_name: Some(limit),
+            IncompleteReason {
+                span,
+                code: "I211",
+                message: crate::engine::language::macro_expand::i211_limit_message(limit),
+                limit_name: Some(limit),
+            }
         });
         let targets_complete = targets
             .sites
@@ -2010,7 +2017,6 @@ impl Workspace {
         // dormant includes and synthetic headers whose values are metadata.
         // Model/preview expansion checks that buffer with the same metadata.
         let includes_complete = records.unresolved.is_empty()
-            && records.cycles.is_empty()
             && targets_complete
             && limit.is_none()
             && (proof.complete
@@ -2024,6 +2030,8 @@ impl Workspace {
             navigation,
             include_search,
             limit,
+            limit_site,
+            stop_chain,
             refusal: proof.refusal,
             emitted_prefix: incomplete_execution.then_some(proof.output),
             macro_messages: proof.messages,
@@ -2040,6 +2048,83 @@ impl Workspace {
     ) -> Option<crate::engine::language::macro_expand::MacroFileRefusal> {
         let key = self.ensure_loaded(uri)?;
         self.spliced_source(&key).refusal.clone()
+    }
+
+    /// Written cause and include chain for one incomplete result. Evaluator
+    /// stops can be outside the retained splice, so their receipt owns location.
+    pub(crate) fn incomplete_cause_origin(
+        &mut self,
+        root: &str,
+        span: Span,
+        code: &str,
+    ) -> (Option<IncludeSite>, Vec<IncludeSite>) {
+        let Some(key) = self.ensure_loaded(root) else {
+            return (None, Vec::new());
+        };
+        let source = self.spliced_source(&key);
+        if code == "I211"
+            && let Some(site) = &source.limit_site
+        {
+            return (Some(site.clone()), source.stop_chain.clone());
+        }
+        if let Some((file, written, actual, _)) = &source.refusal
+            && *actual == code
+        {
+            return (
+                Some(IncludeSite {
+                    file: file.clone(),
+                    span: *written,
+                }),
+                source.stop_chain.clone(),
+            );
+        }
+        if code == "E061"
+            && let Some(miss) = self
+                .records
+                .get(&key)
+                .and_then(|records| records.unresolved.iter().find(|miss| miss.span == span))
+        {
+            return (Some(miss.site.clone()), miss.chain.clone());
+        }
+        let origin = self
+            .map_effective_origin(root, span)
+            .map(|(file, mut written)| {
+                // A span that crosses splice pieces has no continuous written end,
+                // even when its first byte maps to a valid root-file position.
+                let continuous = source.segments.iter().any(|segment| {
+                    segment.file.as_deref() == Some(file.as_str())
+                        && segment.spliced.start <= span.start
+                        && span.end <= segment.spliced.end
+                        && written.end <= segment.origin.end
+                });
+                if !continuous {
+                    let first_character = self
+                        .docs
+                        .get(&file)
+                        .and_then(|document| document.model.source.get(written.start as usize..))
+                        .and_then(|tail| tail.chars().next())
+                        .map_or(0, char::len_utf8);
+                    written.end = written.start + first_character as u32;
+                }
+                IncludeSite {
+                    file,
+                    span: written,
+                }
+            });
+        (origin, Vec::new())
+    }
+
+    pub(crate) fn macro_file_limit(
+        &mut self,
+        root: &str,
+    ) -> Option<(IncludeSite, IncompleteReason, Vec<IncludeSite>)> {
+        let key = self.ensure_loaded(root)?;
+        let source = self.spliced_source(&key);
+        Some((
+            source.limit_site.clone()?,
+            source.limit.clone()?,
+            source.stop_chain.clone(),
+        ))
     }
 
     /// Retain a small written prefix when an include cannot be safely joined.
@@ -2149,6 +2234,36 @@ impl Workspace {
         crate::engine::language::expand::splice_evaluations(&self.spliced_source(&key).segments)
     }
 
+    fn splice_call_chain(targets: &IncludeTargets, call: Option<usize>) -> Vec<IncludeSite> {
+        let Some(call) = call else {
+            return Vec::new();
+        };
+        let Some(hit) = targets
+            .sites
+            .values()
+            .flat_map(|plan| &plan.hits)
+            .find(|hit| hit.call == call)
+        else {
+            return Vec::new();
+        };
+        hit.parent_calls
+            .iter()
+            .copied()
+            .chain(std::iter::once(call))
+            .filter_map(|call| {
+                targets.sites.iter().find_map(|((file, span), plan)| {
+                    plan.hits
+                        .iter()
+                        .any(|hit| hit.call == call)
+                        .then(|| IncludeSite {
+                            file: file.clone(),
+                            span: *span,
+                        })
+                })
+            })
+            .collect()
+    }
+
     /// Splice only executed sites, using the targets selected in execution order.
     /// Dormant directives stay in place so ordinary branch expansion skips them.
     fn splice_with_map(
@@ -2160,13 +2275,37 @@ impl Workspace {
         call: Option<usize>,
         budget: &mut MacroBudget,
     ) -> Result<SplicedPieces, MacroEvalError> {
-        if stack.iter().any(|file| file == key) {
-            return Ok((String::new(), Vec::new(), Vec::new()));
+        let result = self.splice_call_with_map(key, sites, targets, stack, call, budget);
+        if result.is_err() {
+            targets.splice_failure.borrow_mut().get_or_insert_with(|| {
+                (
+                    IncludeSite {
+                        file: key.to_string(),
+                        span: Span::new(
+                            0,
+                            self.docs.get(key).map(|doc| doc.source.len()).unwrap_or(0),
+                        ),
+                    },
+                    call,
+                )
+            });
         }
+        result
+    }
+
+    fn splice_call_with_map(
+        &self,
+        key: &str,
+        sites: &HashSet<(String, Span)>,
+        targets: &IncludeTargets,
+        stack: &mut Vec<String>,
+        call: Option<usize>,
+        budget: &mut MacroBudget,
+    ) -> Result<SplicedPieces, MacroEvalError> {
         let Some(source) = self.docs.get(key).map(|document| document.source.as_str()) else {
             return Ok((String::new(), Vec::new(), Vec::new()));
         };
-        if stack.len() >= crate::engine::language::macro_expr::EXEC_DEPTH_CAP {
+        if stack.len() > crate::engine::language::macro_expr::EXEC_DEPTH_CAP {
             return Err(MacroEvalError::Limit("execution depth"));
         }
         budget.spend_work(source.len().max(1))?;
@@ -2187,8 +2326,13 @@ impl Workspace {
             if hits.is_empty() {
                 continue;
             }
-            let varies = hits.iter().any(|hit| hit.path != hits[0].path)
-                || self.descendants_vary(&hits[0].path, targets, &mut HashSet::new(), 0, budget)?;
+            let mut varies = false;
+            for hit in hits.iter().skip(1) {
+                if !Self::same_call_shape(hits[0], hit, targets, 0, budget)? {
+                    varies = true;
+                    break;
+                }
+            }
             if varies {
                 series.push(*span);
             }
@@ -2388,37 +2532,68 @@ impl Workspace {
         Ok((text, segments, gaps))
     }
 
-    fn descendants_vary(
-        &self,
-        file: &str,
+    /// Compare executed occurrences, not filenames. A recursive invocation may
+    /// reach a different target or stop before a site reached by its caller.
+    fn same_call_shape(
+        left: &IncludeHit,
+        right: &IncludeHit,
         targets: &IncludeTargets,
-        seen: &mut HashSet<String>,
         depth: usize,
         budget: &mut MacroBudget,
     ) -> Result<bool, MacroEvalError> {
-        budget.spend_work(file.len() + targets.sites.len() + 1)?;
-        if !seen.insert(file.to_string()) {
+        budget.spend_work(left.path.len() + right.path.len() + targets.sites.len() + 1)?;
+        if left.path != right.path || left.resolved != right.resolved {
             return Ok(false);
         }
-        if depth >= crate::engine::language::macro_expr::EXEC_DEPTH_CAP {
+        if depth > crate::engine::language::macro_expr::EXEC_DEPTH_CAP {
             return Err(MacroEvalError::Limit("execution depth"));
         }
+        // Reconstructed loops carry evaluated inputs in private replay points.
+        // Identical target paths do not make those values interchangeable.
+        budget.spend_work(targets.loop_occurrences.len().max(1))?;
+        let mut left_loops = targets
+            .loop_occurrences
+            .iter()
+            .filter(|item| item.parent_call == Some(left.call));
+        let mut right_loops = targets
+            .loop_occurrences
+            .iter()
+            .filter(|item| item.parent_call == Some(right.call));
+        loop {
+            match (left_loops.next(), right_loops.next()) {
+                (None, None) => break,
+                (Some(a), Some(b)) => {
+                    budget.spend_work(
+                        a.input.len() + b.input.len() + a.context.len() + b.context.len() + 1,
+                    )?;
+                    if a.header != b.header
+                        || a.id != b.id
+                        || a.context != b.context
+                        || a.input != b.input
+                    {
+                        return Ok(false);
+                    }
+                }
+                _ => return Ok(false),
+            }
+        }
         for ((owner, _), plan) in &targets.sites {
-            if owner != file {
+            if owner != &left.path {
                 continue;
             }
             budget.spend_work(plan.hits.len().max(1))?;
-            let Some(first) = plan.hits.first() else {
-                continue;
-            };
-            if plan.hits.iter().any(|hit| hit.path != first.path) {
-                return Ok(true);
-            }
-            if self.descendants_vary(&first.path, targets, seen, depth + 1, budget)? {
-                return Ok(true);
+            let mut left_hits = hits_for_call(plan, Some(left.call));
+            let mut right_hits = hits_for_call(plan, Some(right.call));
+            loop {
+                match (left_hits.next(), right_hits.next()) {
+                    (None, None) => break,
+                    (Some(a), Some(b))
+                        if Self::same_call_shape(a, b, targets, depth + 1, budget)? => {}
+                    _ => return Ok(false),
+                }
             }
         }
-        Ok(false)
+        Ok(true)
     }
 
     #[allow(clippy::too_many_arguments)]

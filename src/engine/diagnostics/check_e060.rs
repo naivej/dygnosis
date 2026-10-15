@@ -1,4 +1,4 @@
-//! E061–E065 / W061 / W062 include and macro-file-text diagnostics.
+//! E061–E065 / W061 include and macro-file-text diagnostics.
 //!
 //! Walks recorded include records, `MacroDir` / `MacroInterp` lists, and
 //! `ExprKind::SteadyState` — not a regex port of `diagnostics.py`.
@@ -15,41 +15,6 @@ use crate::engine::workspace::include_resolver::normalize_uri;
 use crate::engine::workspace::{IncludeRecords, Workspace};
 
 const CONDITIONAL_OPENERS: &[&str] = &["if", "ifdef", "ifndef"];
-
-pub fn check_e060(records: &IncludeRecords) -> Vec<Diagnostic> {
-    records
-        .cycles
-        .iter()
-        .map(|cycle| {
-            let chain = cycle
-                .chain
-                .iter()
-                .map(|p| file_basename(p))
-                .collect::<Vec<_>>()
-                .join(" -> ");
-            let diagnostic = Diagnostic::new(
-                cycle.span,
-                Severity::Warning,
-                "W062",
-                format!("Circular @#include detected: {chain}."),
-            )
-            .with_related(crate::engine::diagnostics::RelatedDiagnostic::written(
-                cycle.earlier.file.clone(),
-                cycle.earlier.span,
-                "Earlier include in this cycle",
-            ));
-            if cycle.closing != cycle.earlier {
-                diagnostic.with_related(crate::engine::diagnostics::RelatedDiagnostic::written(
-                    cycle.closing.file.clone(),
-                    cycle.closing.span,
-                    "Include that closes this cycle",
-                ))
-            } else {
-                diagnostic
-            }
-        })
-        .collect()
-}
 
 pub fn check_e061(records: &IncludeRecords) -> Vec<Diagnostic> {
     records
@@ -342,7 +307,7 @@ pub fn check_w061(ws: &mut Workspace, uri: &str) -> Vec<Diagnostic> {
 
 pub fn check_e060_family(ws: &mut Workspace, uri: &str) -> Vec<Diagnostic> {
     let records = ws.include_records(uri).cloned().unwrap_or_default();
-    let mut out = check_e060(&records);
+    let mut out = Vec::new();
     out.extend(check_e061(&records));
     let model_diags = ws
         .get_model(uri)

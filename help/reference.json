@@ -1,6 +1,6 @@
 {
   "version": "0.11.25",
-  "fingerprint": "4fd6a767ca0b373e848cebb37282a2850d7c724c3cc72d63919b9e4283705ca7",
+  "fingerprint": "e3cdcca05a351f10e625dc49b42efcaf48a1fe5bf9d48c6ac23c19ac03307d50",
   "tools": [
     {
       "name": "dynare_diagnose",
@@ -7064,12 +7064,6 @@
       "kind": "added",
       "title": "Ambiguous include parent context",
       "markdown": "### W061: Ambiguous include parent context\n\nThe active include file is reachable from more than one parent model, so the editor cannot tell which parent's declarations apply.\n\n**Fix**\n\nOpen the intended parent `.mod` file.\n"
-    },
-    {
-      "code": "W062",
-      "kind": "added",
-      "title": "Circular @#include detected",
-      "markdown": "### W062: Circular @#include detected\n\nTwo or more files include each other in a loop. The message names the chain, for example `a.mod -> b.mod -> a.mod`.\n\n**Common causes**\n\n- A submodel was refactored and now includes its parent\n- Two helper files cross-include each other for shared\n  parameters or steady-state definitions\n- A copy-paste mistake duplicated the include in the wrong\n  direction\n\n**Fix**\n\nBreak the cycle by removing one `@#include` along the chain. If both files genuinely need a shared block, extract that block into a third file and have both parents include it.\n"
     },
     {
       "code": "W091",

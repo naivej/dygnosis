@@ -79,8 +79,8 @@ pub use check_d_surgery::check_d_surgery;
 pub use check_e020::check_e020;
 pub use check_e030::check_e030;
 pub use check_e060::{
-    check_e060, check_e060_family, check_e060_family_on_model, check_e061, check_e062, check_e063,
-    check_e064, check_e065, check_w061,
+    check_e060_family, check_e060_family_on_model, check_e061, check_e062, check_e063, check_e064,
+    check_e065, check_w061,
 };
 pub use check_estimated_params::check_estimated_params;
 pub use check_estimation::check_estimation;
@@ -148,6 +148,6 @@ pub use preprocessor::{find_preprocessor, run_preprocessor, JsonStage, Preproces
 pub use refs::{
     ident_at, is_legal_ident, occurrences, option_command_at, option_owner_at, rename_in_text,
 };
-pub use workspace::{CycleRecord, IncludeRecords, ResolvedInclude, UnresolvedInclude, Workspace};
+pub use workspace::{IncludeRecords, ResolvedInclude, UnresolvedInclude, Workspace};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

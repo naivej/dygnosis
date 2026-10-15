@@ -67,9 +67,7 @@ fn tmp_unique() -> PathBuf {
 
 fn no_include_codes(model: &dygnosis::Model) {
     let codes: Vec<_> = analyze(model).into_iter().map(|d| d.code).collect();
-    for banned in [
-        "E061", "E062", "E063", "E064", "E065", "W060", "W061", "W062",
-    ] {
+    for banned in ["E061", "E062", "E063", "E064", "E065", "W060", "W061"] {
         assert!(
             !codes.iter().any(|c| c == banned),
             "slice 06 must not emit {banned}; got {codes:?}"
@@ -223,7 +221,6 @@ fn workspace_swff_zero_cycles_one_resolved() {
     ws.load_from_disk(&path).expect("load swff");
     let uri = path.to_str().unwrap();
     let records = ws.include_records(uri).expect("records").clone();
-    assert!(records.cycles.is_empty());
     assert!(records.unresolved.is_empty());
     assert_eq!(records.resolved.len(), 1);
     assert!(
@@ -276,38 +273,25 @@ fn drop_include_records_unresolved() {
     assert_eq!(unresolved.len(), 1);
     assert_eq!(unresolved[0].filename, "no_such_file.inc");
     assert!(unresolved[0].span.end > unresolved[0].span.start);
-    assert!(ws.find_circular_includes(uri).is_empty());
     no_include_codes(ws.get_model(uri).unwrap());
 }
 
 #[test]
-fn cycle_records_include_swff_mod() {
+fn recursive_includes_stop_at_a_resource_bound() {
     let path = swff_path();
     let inc_path = swff_inc_path();
     let uri = path.to_str().unwrap();
-    let inc_uri = inc_path.to_str().unwrap();
     let mut ws = Workspace::new();
     ws.update_document(uri, swff_text());
-    ws.update_document(inc_uri, "@#include \"swff.mod\"\n");
-    let cycles = ws.find_circular_includes(uri);
-    assert!(
-        cycles.iter().any(|c| c
-            .chain
-            .iter()
-            .any(|p| p.ends_with("swff.mod") || Path::new(p).ends_with("swff.mod"))),
-        "expected swff.mod in cycle names, got {cycles:?}"
-    );
-    assert!(cycles.iter().all(|c| c.span.end > c.span.start));
-    no_include_codes(ws.get_model(uri).unwrap());
+    ws.update_document(inc_path.to_str().unwrap(), "@#include \"swff.mod\"\n");
+    assert!(ws.find_unresolved_includes(uri).is_empty());
     let effective = ws.get_effective_model(uri).unwrap();
-    assert!(
-        effective.macro_incomplete(),
-        "a cyclic include is fatal and must stop the root"
-    );
-    assert!(
-        effective.written_equations.is_empty(),
-        "equations after the cyclic include must not be parsed"
-    );
+    assert!(effective.macro_incomplete());
+    assert!(effective
+        .incomplete_reasons
+        .iter()
+        .any(|reason| reason.message.contains("limit")));
+    assert!(effective.written_equations.is_empty());
 }
 
 #[test]

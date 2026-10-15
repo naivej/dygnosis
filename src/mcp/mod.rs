@@ -970,25 +970,25 @@ fn comparison_incomplete_reasons(
     model: &Model,
     files: Option<&HashMap<String, String>>,
 ) -> Value {
-    let includes = workspace.include_records(root).cloned();
-    let reasons =
-        crate::engine::analysis::model_info::incomplete_reason_records(model, includes.as_ref());
-    json!(reasons
+    let causes = crate::engine::analysis::model_info::incomplete_causes(workspace, root, model);
+    json!(causes
         .into_iter()
-        .map(|(span, code, message)| {
-            let mut reason = json!({"code":code,"message":message});
-            let origin = if code == "E061" {
-                Some((normalize_uri(root), span))
-            } else {
-                workspace.map_effective_origin(root, span)
-            };
-            if let Some((file, span)) = origin {
-                if let Some(text) = workspace.source_for_normalized_key(&file) {
-                    reason["range"] = range_json(span, text);
-                }
+        .map(|cause| {
+            let mut reason = cause.outcome_json();
+            let mut location = |site: &crate::engine::workspace::IncludeSite| {
+                let text = workspace.source_for_normalized_key(&site.file)?;
+                let mut result = json!({"range":range_json(site.span, text)});
                 if let Some(files) = files {
-                    reason["file"] = json!(related_file_path(Path::new(&file), files));
+                    result["file"] = json!(related_file_path(Path::new(&site.file), files));
                 }
+                Some(result)
+            };
+            if let Some(Value::Object(source)) = cause.origin.as_ref().and_then(&mut location) {
+                reason.as_object_mut().unwrap().extend(source);
+            }
+            let chain: Vec<_> = cause.include_chain.iter().filter_map(location).collect();
+            if !chain.is_empty() {
+                reason["include_chain"] = json!(chain);
             }
             reason
         })

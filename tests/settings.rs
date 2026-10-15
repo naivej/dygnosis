@@ -75,6 +75,91 @@ async fn open(backend: &Backend, uri: Url, text: &str) {
         .await;
 }
 
+#[tokio::test]
+async fn partial_model_commands_keep_macro_causes_in_written_include_coordinates() {
+    // Guards status and preview reporting a generic cause or root coordinates
+    // when the actual refusal was in an included file.
+    let files = Files::new();
+    let root_text = "@#include \"child.inc\"\nvar y; model; y=0; end;\n";
+    files.write("root.mod", root_text);
+    for (child, code, message) in [
+        (
+            "/* 🚀 */\n@#include \"child.inc\"\n",
+            "I211",
+            "execution depth",
+        ),
+        (
+            "/* 🚀 */\n@#include \"absent.inc\"\n",
+            "E061",
+            "Could not open absent.inc",
+        ),
+        ("/* 🚀 */\n@#define bad=1 in 2\n", "E285", "Second argument"),
+    ] {
+        files.write("child.inc", child);
+        let (service, _socket) = new_service();
+        let backend = service.inner();
+        let root = files.uri("root.mod");
+        let included = files.uri("child.inc");
+        open(backend, root.clone(), root_text).await;
+        for command in ["dynare/modelInfo", "dynare/showEffectiveModel"] {
+            let result = backend
+                .execute_command(ExecuteCommandParams {
+                    command: command.to_string(),
+                    arguments: vec![json!({"root_uri":root})],
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            let reason = &result["incomplete_reasons"][0];
+            assert_eq!(reason["code"], code, "{command}: {result}");
+            assert!(
+                reason["message"].as_str().unwrap().contains(message),
+                "{reason}"
+            );
+            assert_eq!(reason["location"]["uri"], included.as_str(), "{reason}");
+            assert_eq!(reason["location"]["range"]["start"]["line"], 1, "{reason}");
+            assert_eq!(reason["include_chain"][0]["uri"], root.as_str(), "{reason}");
+            assert!(!reason["omitted"].as_str().unwrap().is_empty(), "{reason}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn split_source_syntax_cause_keeps_only_its_verified_lsp_anchor() {
+    // Guards an include-spanning syntax range escaping into root coordinates.
+    let files = Files::new();
+    let text = "var y; model;\ny=\n@#include \"term.inc\"\nend;";
+    files.write("term.inc", "0");
+    let root = files.uri("root.mod");
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(backend, root.clone(), text).await;
+    for command in ["dynare/modelInfo", "dynare/showEffectiveModel"] {
+        let result = backend
+            .execute_command(ExecuteCommandParams {
+                command: command.to_string(),
+                arguments: vec![json!({"root_uri":root})],
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let reason = result["incomplete_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|reason| reason["code"] == "E001")
+            .unwrap();
+        assert_eq!(reason["location"]["uri"], root.as_str(), "{reason}");
+        assert_eq!(
+            reason["location"]["range"],
+            json!({"start":{"line":1,"character":0},"end":{"line":1,"character":1}}),
+            "{reason}"
+        );
+    }
+}
+
 async fn codes(backend: &Backend, uri: Url) -> Vec<String> {
     let result = backend
         .diagnostic(DocumentDiagnosticParams {
@@ -571,7 +656,7 @@ async fn failed_includes_withhold_facts_and_keep_only_earlier_text() {
     let backend = service.inner();
     for (name, target, code) in [
         ("missing.mod", "missing.inc", "E061"),
-        ("cycle.mod", "cycle.inc", "W062"),
+        ("cycle.mod", "cycle.inc", "I211"),
     ] {
         let uri = files.uri(name);
         let text = format!("var y;\nmodel;\ny=0;\nend;\n@#include \"{target}\"\n");

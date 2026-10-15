@@ -154,7 +154,7 @@ pub struct DiagnosticSet {
 /// Thin families for one parsed model. If `check_parse` is nonempty, return
 /// those E001 rows only (cascade). Otherwise concatenate equation-count (W013), E020, E030,
 /// OccBin, written clash, estimation, shape, W010, E062–E065, W090, W100, W110 (includes W060), W120, W130, symbol lists, D-block.
-/// W062 / E061 / W061 / W160 and I050 quiet are workspace-only (`check_file`), not here.
+/// E061 / W061 / W160 and I050 quiet are workspace-only (`check_file`), not here.
 pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = analyze_positions(model);
     crate::engine::diagnostics::diagnostic_anchors::apply(model, &mut diagnostics, |_, _| true);
@@ -640,7 +640,7 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     out
 }
 
-/// One-document workspace check: `analyze()` plus W062 / E061 / W061 / W160 and I050 quiet.
+/// One-document workspace check: `analyze()` plus E061 / W061 / W160 and I050 quiet.
 ///
 /// `abs_path` is the workspace key (includes resolve against that file's
 /// directory). Falls back to `analyze(&parse(text))` if setup fails.
@@ -713,12 +713,46 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
             origins: vec![Some(DiagnosticOrigin { file, text, span })],
         });
     }
+    if let Some((site, reason, chain)) = ws.macro_file_limit(abs_path) {
+        let text: Arc<str> = Arc::from(crate::engine::language::parser::normalize_newlines(
+            ws.get_source(&site.file)?,
+        ));
+        let mut diagnostic = Diagnostic::new(
+            site.span,
+            Severity::Information,
+            reason.code,
+            reason.message,
+        );
+        for parent in chain {
+            diagnostic = diagnostic.with_related(RelatedDiagnostic::written(
+                parent.file,
+                parent.span,
+                "Included from here",
+            ));
+        }
+        let mut diagnostics = vec![diagnostic];
+        crate::engine::diagnostics::diagnostic_links::map_related(
+            ws,
+            abs_path,
+            &mut diagnostics,
+            &mut HashMap::new(),
+        );
+        return Some(DiagnosticSet {
+            root: root_key(ws, abs_path),
+            diagnostics,
+            origins: vec![Some(DiagnosticOrigin {
+                file: site.file,
+                text,
+                span: site.span,
+            })],
+        });
+    }
     let model = ws.get_effective_model(abs_path)?.clone();
     let mut diags = analyze_positions(&model);
     let records = ws.include_records(abs_path).cloned().unwrap_or_default();
     // Missing includes own the status even when splicing removed the directive
     // and a later name looked undefined. Fall through so E061 is emitted.
-    if model.macro_incomplete() && records.unresolved.is_empty() && records.cycles.is_empty() {
+    if model.macro_incomplete() && records.unresolved.is_empty() {
         // An unevaluated macro can change declarations, command options, and
         // which includes exist. Keep only the macro result already established
         // by analyze; file and companion checks would use an unfinished tree.
@@ -744,9 +778,9 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
     diags.extend(
         crate::engine::diagnostics::check_d_open::check_workspace_d_open(ws, &model, abs_path),
     );
-    // Missing and cyclic includes are workspace records. The spliced model no
+    // Missing includes are workspace records. The spliced model no
     // longer contains the directive, so `model_structure_incomplete` cannot see them.
-    let expansion_blocked = !records.unresolved.is_empty() || !records.cycles.is_empty();
+    let expansion_blocked = !records.unresolved.is_empty();
     if expansion_blocked {
         let no_model = model.model_block.is_none() && model.heterogeneous_models.is_empty();
         let unresolved = !records.unresolved.is_empty();
@@ -775,7 +809,6 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
         });
     }
     let mut extra = Vec::new();
-    extra.extend(crate::engine::diagnostics::check_e060::check_e060(&records));
     if !ws.is_virtual_root(abs_path) {
         extra.extend(crate::engine::diagnostics::check_e060::check_e061(&records));
     }
@@ -871,7 +904,7 @@ fn safely_mapped_keyword(ws: &mut Workspace, root: &str, span: Span, keyword: &s
 
 /// These workspace checks already use root-file coordinates.
 pub(crate) fn is_root_text_code(code: &str) -> bool {
-    matches!(code, "W060" | "W061" | "W062" | "W160" | "E061")
+    matches!(code, "W060" | "W061" | "W160" | "E061")
 }
 
 fn diagnostic_origin(

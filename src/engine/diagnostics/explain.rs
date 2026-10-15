@@ -120,11 +120,6 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "A line that looks like a model equation appears outside the `model` ... `end;` block.\n\n**Fix**\n\nMove the equation inside the `model` block, or convert it to a parameter assignment if it belongs at the top level.",
         kind: ExplainKind::Added,
     }),
-    ("W062", ExplainEntry {
-        title: "Circular @#include detected",
-        body: "Two or more files include each other in a loop. The message names the chain, for example `a.mod -> b.mod -> a.mod`.\n\n**Common causes**\n\n- A submodel was refactored and now includes its parent\n- Two helper files cross-include each other for shared\n  parameters or steady-state definitions\n- A copy-paste mistake duplicated the include in the wrong\n  direction\n\n**Fix**\n\nBreak the cycle by removing one `@#include` along the chain. If both files genuinely need a shared block, extract that block into a third file and have both parents include it.",
-        kind: ExplainKind::Added,
-    }),
     ("E061", ExplainEntry {
         title: "Could not open @#include target",
         body: "An `@#include` directive names a file that could not be opened. Dynare refuses: `Could not open F. The following directories were searched` (then the directories actually searched).\n\n**Common causes**\n\n- A typo in the filename\n- The included file lives in a directory that isn't on the search paths\n- The file was renamed or moved without updating the   directive\n\n**Fix**\n\nCorrect the filename, add the missing file, or extend the search paths so the directory containing the include is visible.",

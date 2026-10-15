@@ -145,7 +145,7 @@ async fn related_locations_use_independent_utf16_sources_and_keep_root_merge_set
 }
 
 #[tokio::test]
-async fn cycles_link_earlier_and_closing_include_edges_in_their_own_files() {
+async fn recursive_depth_stop_keeps_its_written_site_and_caller_chain() {
     let temp = Scratch::new();
     let root_text = "@#include \"b.inc\"\nvar y; model; y=0; end;";
     let root = temp.file("a.mod", root_text);
@@ -154,8 +154,9 @@ async fn cycles_link_earlier_and_closing_include_edges_in_their_own_files() {
     let (service, _socket) = new_service();
     let server = service.inner();
     open(server, &root, root_text, 1).await;
-    let rows = pull(server, &root).await;
-    let row = rows.iter().find(|row| is_code(row, "W062")).unwrap();
+    let rows = pull(server, &c).await;
+    let row = rows.iter().find(|row| is_code(row, "I211")).unwrap();
+    assert!(row.message.contains("execution depth"));
     let sites = row.related_information.as_ref().unwrap();
     assert!(sites
         .iter()
@@ -163,7 +164,7 @@ async fn cycles_link_earlier_and_closing_include_edges_in_their_own_files() {
     assert!(sites
         .iter()
         .any(|site| site.location.uri == c && site.location.range.start == Position::new(1, 0)));
-    assert!(!sites.iter().any(|site| site.location.uri == b));
+    assert!(sites.iter().any(|site| site.location.uri == b));
 }
 
 #[tokio::test]

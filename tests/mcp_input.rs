@@ -72,6 +72,104 @@ impl Drop for McpWire {
 }
 
 #[test]
+fn partial_model_tools_keep_the_actual_macro_cause_and_written_source_over_stdio() {
+    // Guards generic I211 replacements, missing source ownership and invented
+    // limit receipts on ordinary missing-file or official type failures.
+    let mut wire = McpWire::new();
+    let root = "@#include \"child.inc\"\nvar y; model; y=0; end;\n";
+    for (child, code, message, limit) in [
+        (
+            "/* 🚀 */\n@#include \"child.inc\"\n",
+            "I211",
+            "execution depth",
+            true,
+        ),
+        (
+            "/* 🚀 */\n@#include \"absent.inc\"\n",
+            "E061",
+            "Could not open absent.inc",
+            false,
+        ),
+        (
+            "/* 🚀 */\n@#define bad=1 in 2\n",
+            "E285",
+            "Second argument",
+            false,
+        ),
+    ] {
+        for tool in [
+            "dynare_diagnose",
+            "dynare_model_info",
+            "dynare_expand",
+            "dynare_equations",
+        ] {
+            let reply = wire.call(tool, json!({"source":{"kind":"map","root":"root.mod","files":{"root.mod":root,"child.inc":child}},"detail":"compact"}));
+            assert!(reply.get("error").is_none(), "{reply}");
+            let result: Value = serde_json::from_str(
+                reply["result"]["content"]
+                    .as_array()
+                    .unwrap()
+                    .last()
+                    .unwrap()["text"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(result["outcome"]["status"], "partial", "{tool}: {result}");
+            let reason = &result["coverage"][0]["reasons"][0];
+            assert_eq!(reason["code"], code, "{tool}: {result}");
+            assert!(
+                reason["message"].as_str().unwrap().contains(message),
+                "{reason}"
+            );
+            assert_eq!(reason["source"]["file"], "child.inc", "{reason}");
+            assert_eq!(reason["source"]["range"]["line"], 2, "{reason}");
+            assert_eq!(reason["include_chain"][0]["file"], "root.mod", "{reason}");
+            assert!(!reason["omitted"].as_str().unwrap().is_empty(), "{reason}");
+            assert_eq!(
+                result["limits"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|row| row["code"] == "MACRO_LIMIT"),
+                limit,
+                "{result}"
+            );
+        }
+    }
+}
+
+#[test]
+fn split_source_syntax_cause_keeps_only_its_verified_written_anchor_over_stdio() {
+    // Guards an effective equation span being presented as if its included
+    // bytes occupied the root's removed include directive.
+    let mut wire = McpWire::new();
+    let root = "var y; model;\ny=\n@#include \"term.inc\"\nend;";
+    let reply = wire.call("dynare_model_info", json!({"source":{"kind":"map","root":"root.mod","files":{"root.mod":root,"term.inc":"0"}},"detail":"compact"}));
+    let result: Value = serde_json::from_str(
+        reply["result"]["content"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["text"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let reason = result["coverage"][0]["reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reason| reason["code"] == "E001")
+        .unwrap();
+    assert_eq!(
+        reason["source"],
+        json!({"file":"root.mod","range":{"line":2,"column":1,"end_line":2,"end_column":2}}),
+        "{reason}"
+    );
+}
+
+#[test]
 fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_stdio() {
     let directory = std::env::temp_dir().join(format!(
         "dygnosis stdio history {} {}",

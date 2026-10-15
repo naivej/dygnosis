@@ -288,8 +288,7 @@ fn prepare(request: &ExtractRequest) -> Option<Unit> {
     let mut ws = Workspace::overlay_documents(&files);
     let model = ws.get_effective_model(active).cloned()?;
     let report = ws.expand_report(active).cloned()?;
-    let missing_include = !ws.find_unresolved_includes(active).is_empty()
-        || !ws.find_circular_includes(active).is_empty();
+    let missing_include = !ws.find_unresolved_includes(active).is_empty();
     Some(Unit {
         model,
         report,
