@@ -825,27 +825,20 @@ fn interp_atoms(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < chars.len() {
-        if let Some(end) = match_interp_atom(&chars, i) {
-            out.push(chars[i..end].iter().collect());
+        let start = i;
+        while i < chars.len() && is_word(chars[i]) {
+            i += 1;
+        }
+        // '@' cannot occur inside the word prefix. Check its end once instead
+        // of rescanning every suffix of a long identifier or quoted value.
+        if let Some(end) = match_interp_groups(&chars, i) {
+            out.push(chars[start..end].iter().collect());
             i = end;
-        } else {
+        } else if i == start {
             i += 1;
         }
     }
     out
-}
-
-fn match_interp_atom(chars: &[char], start: usize) -> Option<usize> {
-    let mut word_end = start;
-    while word_end < chars.len() && is_word(chars[word_end]) {
-        word_end += 1;
-    }
-    for prefix_end in (start..=word_end).rev() {
-        if let Some(end) = match_interp_groups(chars, prefix_end) {
-            return Some(end);
-        }
-    }
-    None
 }
 
 fn match_interp_groups(chars: &[char], mut i: usize) -> Option<usize> {
@@ -1021,6 +1014,42 @@ fn suffix_chars(s: &str, n: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interpolation_atoms_keep_word_affixes_and_adjacent_groups() {
+        // Guards a forward scan dropping an identifier prefix/suffix or joining
+        // atoms across a word boundary, including Unicode word characters.
+        let source = "plain _pre2@{i}尾@{j}_tail + @{k}@{l} + αβ_2@{n}ζ";
+        assert_eq!(
+            interp_atoms(source),
+            ["_pre2@{i}尾@{j}_tail", "@{k}@{l}", "αβ_2@{n}ζ"]
+        );
+        for (joined, separated) in [
+            ("pre@{i}", "pre @{i}"),
+            ("@{i}tail", "@{i} tail"),
+            ("@{i}@{j}", "@{i} @{j}"),
+            ("αβ@{i}尾", "αβ @{i}尾"),
+        ] {
+            assert_ne!(canonical(joined), canonical(separated));
+        }
+    }
+
+    #[test]
+    fn interpolation_atoms_keep_completed_groups_before_malformed_text() {
+        // Guards advancing past a rejected group and losing a later atom, or
+        // changing the existing first-closing-brace treatment of nested text.
+        for (source, expected) in [
+            ("prefix@{missing\nnext@{ok}suffix", vec!["next@{ok}suffix"]),
+            (
+                "prefix@{a}@{missing\nnext@{b}",
+                vec!["prefix@{a}", "next@{b}"],
+            ),
+            ("prefix@{outer@{inner}}tail", vec!["prefix@{outer@{inner}"]),
+            ("prefix.@{i}suffix", vec!["@{i}suffix"]),
+        ] {
+            assert_eq!(interp_atoms(source), expected, "{source}");
+        }
+    }
 
     #[test]
     fn empty_and_ws_is_unchanged() {
