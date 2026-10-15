@@ -37,9 +37,9 @@ impl LocalView {
 }
 
 fn views(inner: &mut Inner, uri: &Url) -> Vec<LocalView> {
-    let mut roots = inner.known_owner_roots(uri);
-    if roots.is_empty() && is_model_root(uri) {
-        roots.push(uri.clone());
+    let mut roots = inner.context_roots(uri);
+    if inner.context_ambiguous(uri) {
+        return Vec::new();
     }
     let standalone = roots.is_empty();
     if standalone {

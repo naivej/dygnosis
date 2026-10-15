@@ -152,7 +152,8 @@ export function registerModelNavigation(service: DygnosisClient): vscode.Disposa
         !currentDocument(document, version, pick.info.client_instance)) {
       refuse("The model changed. Choose its owner again.");
     }
-    service.selectOwner(document.uri, pick.root);
+    await service.applyOwner(document, pick.root, fresh);
+    await service.reportDocumentContextOutcome();
   };
   const action = (run: () => Promise<void>) => (): Promise<void | undefined> => runCommand(service, run, () => !disposed);
   const listeners = [

@@ -140,7 +140,10 @@ impl ProjectState {
         self.roots
             .iter()
             .filter(|(_, entry)| {
-                entry.identity != key && entry.selected && entry.owner_files.contains(&key)
+                entry.identity != key
+                    && entry.selected
+                    && entry.revision.is_some()
+                    && entry.owner_files.contains(&key)
             })
             .map(|(root, _)| root.clone())
             .collect()
@@ -360,6 +363,11 @@ impl Inner {
         for root in retained {
             roots.insert(self.project.observed_identity(&root));
         }
+        roots.extend(
+            self.document_contexts
+                .values()
+                .map(|root| normalize_uri(root.as_str())),
+        );
         self.workspace.retain_analysis_roots(&roots);
         // Project dependency provenance lives in ProjectState, independently
         // of this bounded cache and model-info subscription bookkeeping.

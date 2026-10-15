@@ -35,7 +35,7 @@ export function extendCapabilities(capabilities: ClientCapabilities): void {
     semantic.tokenModifiers = [...new Set([...semantic.tokenModifiers, ...timingModifiers])];
   }
   const experimental: Record<string, unknown> = record(capabilities.experimental) ? capabilities.experimental : {};
-  experimental.dygnosis = { modelInfo: { schema_version: 1 }, modelInfoChanged: true, configuration: { schema_version: 1 },
+  experimental.dygnosis = { modelInfo: { schema_version: 1 }, modelInfoChanged: true, documentContext: { schema_version: 1 }, configuration: { schema_version: 1 },
     compareModels: { navigation_schema_version: 1 }, compareModelSnapshots: { schema_version: 1, navigation_schema_version: 2 }, effectivePreview: { navigation_schema_version: 1, dependency_candidates: true },
     projectStatusChanged: true };
   capabilities.experimental = experimental;
@@ -106,6 +106,13 @@ export class DygnosisClient implements vscode.Disposable {
   private readonly selectedOwners = new Map<string, string>();
   private readonly explicitOwnerDocuments = new Set<string>();
   private readonly ownedDocuments = new Set<string>();
+  private readonly standaloneDocuments = new Set<string>();
+  // A newer attempt stops stale proofs, but only an accepted choice can replace
+  // a delayed server acknowledgment. File lifecycle changes invalidate both.
+  private readonly contextGenerations = new Map<string, number>();
+  private readonly acceptedContextGenerations = new Map<string, number>();
+  private readonly contextLifecycles = new Map<string, number>();
+  private documentContextSupported = false;
   private instanceSubscriptions: vscode.Disposable[] = [];
   private instance = 0;
   private readonly dependencyWatchers = new Map<string, vscode.Disposable>();
@@ -169,9 +176,12 @@ export class DygnosisClient implements vscode.Disposable {
         }
       }),
       vscode.workspace.onDidCloseTextDocument(document => {
-        if (isAnalysisDocument(document)) { this.explicitOwnerDocuments.delete(document.uri.toString()); this.pruneSourceLinks(document.uri); this.invalidate(undefined, document.uri); }
+        if (isAnalysisDocument(document)) {
+          const key = document.uri.toString();
+          this.clearDocumentContext(key); this.pruneSourceLinks(document.uri); this.invalidate(undefined, document.uri);
+        }
       }),
-      vscode.workspace.onDidChangeWorkspaceFolders(() => { this.selectedOwners.clear(); this.explicitOwnerDocuments.clear(); this.ownedDocuments.clear(); void this.sendSettings().catch(error => this.log(String(error))); }),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => { this.clearDocumentContexts(); void this.sendSettings().catch(error => this.log(String(error))); }),
       vscode.workspace.onDidChangeConfiguration(event => {
         if (!event.affectsConfiguration("dynare") || macroTintOnlyChange(event)) return;
         if (event.affectsConfiguration("dynare.serverPath")) void this.restart().catch(error => this.log(String(error)));
@@ -202,6 +212,8 @@ export class DygnosisClient implements vscode.Disposable {
   }
   private invalidateLifecycle(): void {
     ++this.instance;
+    this.clearDocumentContexts();
+    this.documentContextSupported = false;
     this.invalidateInputs({ reason: "lifecycle" });
   }
   private invalidateInputs(event: InputInvalidation): void {
@@ -268,6 +280,9 @@ export class DygnosisClient implements vscode.Disposable {
         const experimental: unknown = client.initializeResult?.capabilities.experimental;
         this.modelInfoSupported = record(experimental) && record(experimental.dygnosis) &&
           record(experimental.dygnosis.modelInfo) && experimental.dygnosis.modelInfo.schema_version === 1;
+        this.documentContextSupported = record(experimental) && record(experimental.dygnosis) &&
+          record(experimental.dygnosis.documentContext) && experimental.dygnosis.documentContext.schema_version === 1 &&
+          experimental.dygnosis.documentContext.command === "dynare/setDocumentContext";
         this.instanceSubscriptions.push(client.onNotification("dynare/modelInfoChanged", (value: unknown) => {
           if (client === this.client && record(value) && value.schema_version === 1 && typeof value.root_uri === "string")
             this.invalidate(value.root_uri, undefined, typeof value.input_revision === "string" ? value.input_revision : undefined,
@@ -388,10 +403,12 @@ export class DygnosisClient implements vscode.Disposable {
       const info = parseModelInfo(value, rootKey, documentKey);
       const currentVersion = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === documentKey)?.version ?? null;
       if (info.document_version !== currentVersion) return undefined;
+      const ownersBefore = this.knownOwners(document).map(owner => owner.toString()).sort().join("\n");
       this.infos.set(rootKey, info);
       this.watchDependencies(info);
       const snapshot = { ...info, client_instance: this.instance };
       this.modelInfoUpdated.fire(snapshot);
+      if (ownersBefore !== this.knownOwners(document).map(owner => owner.toString()).sort().join("\n")) this.changed.fire();
       return snapshot;
     }).catch((error: unknown) => {
       if (cancellation.token.isCancellationRequested || this.closed) return undefined;
@@ -424,8 +441,11 @@ export class DygnosisClient implements vscode.Disposable {
     }
   }
   knownOwners(document: vscode.Uri): vscode.Uri[] {
-    return [...this.infos.values()].filter(info => this.ownsDocument(info, document))
-      .map(info => vscode.Uri.parse(info.root_uri));
+    const roots = [...this.infos.values()].flatMap(info => [
+      ...(!sameUri(vscode.Uri.parse(info.root_uri), document) && this.ownsDocument(info, document) ? [info.root_uri] : []),
+      ...(sameUri(vscode.Uri.parse(info.document_uri), document) ? info.owner_roots.filter(root => !sameUri(vscode.Uri.parse(root), document)) : []),
+    ]);
+    return [...new Set(roots)].map(root => vscode.Uri.parse(root));
   }
   /** Written include paths with a current known owner, for resource menus. */
   knownIncludedFiles(): string[] {
@@ -439,17 +459,21 @@ export class DygnosisClient implements vscode.Disposable {
   chosenRootForDocument(document: vscode.TextDocument): vscode.Uri | undefined {
     if (this.closed || document.isClosed || !isAnalysisDocument(document)) return undefined;
     const key = document.uri.toString(), selected = this.selectedOwners.get(key);
+    if (this.standaloneDocuments.has(key)) return document.uri;
     if (selected) {
       if (!this.explicitOwnerDocuments.has(key)) return undefined;
       const info = this.infos.get(selected);
       return info && this.ownsDocument(info, document.uri) ? vscode.Uri.parse(selected) : undefined;
     }
-    return isRootUri(document.uri) && !this.ownedDocuments.has(key) ? document.uri : undefined;
+    return isRootUri(document.uri) && !this.ownedDocuments.has(key) && this.knownOwners(document.uri).length === 0 ? document.uri : undefined;
   }
   async ownerChoices(document: vscode.TextDocument, token?: vscode.CancellationToken): Promise<vscode.Uri[]> {
     if (token?.isCancellationRequested) return [];
-    const roots = new Set(vscode.workspace.textDocuments.filter(doc => isRootUri(doc.uri) && !this.ownedDocuments.has(doc.uri.toString())).map(doc => doc.uri.toString()));
-    for (const root of this.selectedOwners.values()) roots.add(root);
+    // A document cannot prove itself to be its parent. Its ordinary model-info
+    // request owns cancellation; do not block actions on a second self-discovery
+    // request before that action can create its cancellable result.
+    const roots = new Set(vscode.workspace.textDocuments.filter(doc => isRootUri(doc.uri) && !sameUri(doc.uri, document.uri) && !this.ownedDocuments.has(doc.uri.toString())).map(doc => doc.uri.toString()));
+    for (const root of [...this.selectedOwners.values(), ...this.knownOwners(document.uri).map(owner => owner.toString())]) if (!sameUri(vscode.Uri.parse(root), document.uri)) roots.add(root);
     await Promise.all([...roots].map(root => {
       const uri = vscode.Uri.parse(root);
       return this.modelInfo(uri, uri, false, token);
@@ -460,7 +484,8 @@ export class DygnosisClient implements vscode.Disposable {
   async rootForDocument(document: vscode.TextDocument, prompt = false, token?: vscode.CancellationToken): Promise<vscode.Uri | undefined> {
     if (!isAnalysisDocument(document) || token?.isCancellationRequested) return undefined;
     const key = document.uri.toString(), selected = this.selectedOwners.get(key);
-    if (selected) {
+    if (this.standaloneDocuments.has(key)) return document.uri;
+    if (selected && this.explicitOwnerDocuments.has(key)) {
       const root = vscode.Uri.parse(selected);
       const info = await this.modelInfo(root, root, false, token);
       if (token?.isCancellationRequested) return undefined;
@@ -469,20 +494,25 @@ export class DygnosisClient implements vscode.Disposable {
       if (this.ownsDocument(info, document.uri)) return root;
       this.selectedOwners.delete(key);
       this.explicitOwnerDocuments.delete(key);
+      this.ownedDocuments.delete(key);
     }
-    if (isRootUri(document.uri) && !this.ownedDocuments.has(key)) return document.uri;
     // Discover owners only from available models, never analyze an include as a root.
     const selection = this.selectedOwners.get(key);
     const owners = await this.ownerChoices(document, token);
     if (token?.isCancellationRequested) return undefined;
     if (this.selectedOwners.get(key) !== selection) return undefined;
     if (owners.length === 1) { this.rememberOwner(document.uri, owners[0], false); return owners[0]; }
-    if (!prompt || owners.length === 0) return undefined;
+    if (owners.length === 0) {
+      this.selectedOwners.delete(key); this.ownedDocuments.delete(key);
+      return isRootUri(document.uri) ? document.uri : undefined;
+    }
+    if (!prompt) return undefined;
     const pick = await vscode.window.showQuickPick(owners.map(root => ({ label: vscode.workspace.asRelativePath(root), description: root.fsPath, root })), { placeHolder: "Choose the model that owns this include" }, token);
     if (token?.isCancellationRequested) return undefined;
     if (this.selectedOwners.get(key) !== selection) return undefined;
     if (!pick) throw new CommandCancelled();
-    this.selectOwner(document.uri, pick.root);
+    await this.applyOwner(document, pick.root);
+    await this.reportDocumentContextOutcome();
     return pick.root;
   }
   private ownsDocument(info: ModelInfo, document: vscode.Uri): boolean {
@@ -525,14 +555,70 @@ export class DygnosisClient implements vscode.Disposable {
   selectOwner(document: vscode.Uri, root: vscode.Uri): void {
     this.rememberOwner(document, root, true);
   }
+  /** Accept the same guarded choice in the server before changing the view. */
+  async applyOwner(document: vscode.TextDocument, root: vscode.Uri, info?: ModelSnapshot, guard: () => boolean = () => true): Promise<void> {
+    await this.applyDocumentContext(document, root, () => this.selectOwner(document.uri, root), info, guard);
+  }
+  async treatDocumentAsRoot(document: vscode.TextDocument): Promise<void> {
+    if (!isAnalysisDocument(document) || !isRootUri(document.uri)) refuse("Open a .mod or .dyn file before treating it as a model root.");
+    await this.applyDocumentContext(document, document.uri, () => this.rememberStandalone(document.uri));
+    await this.reportDocumentContextOutcome();
+  }
+  /** The explicit command owns the explanation for older configured engines. */
+  async reportDocumentContextOutcome(): Promise<void> {
+    if (!this.documentContextSupported) await vscode.window.showInformationMessage(
+      "The model choice applies to model information and macro preview. Editor diagnostics still use the engine's automatic context because the selected engine cannot accept owner choices. Use the bundled binary or update dynare.serverPath to apply this choice to diagnostics too.");
+  }
+  private async applyDocumentContext(document: vscode.TextDocument, root: vscode.Uri, accepted: () => void, proof?: ModelSnapshot, guard: () => boolean = () => true): Promise<void> {
+    await this.ensureStarted();
+    if (this.closed || document.isClosed || !guard()) refuse("The document or source changed. Request the model action again.");
+    if (!this.documentContextSupported) {
+      this.log("The selected engine cannot apply owner choices to editor diagnostics; this choice applies to model information and macro preview only.");
+      accepted();
+      return;
+    }
+    const key = document.uri.toString(), version = document.version, instance = this.instance;
+    const generation = (this.contextGenerations.get(key) ?? 0) + 1;
+    this.contextGenerations.set(key, generation);
+    const lifecycle = this.contextLifecycles.get(key) ?? 0;
+    const sameLifecycle = (): boolean => !this.closed && !document.isClosed && this.instance === instance && (this.contextLifecycles.get(key) ?? 0) === lifecycle;
+    const current = (): boolean => sameLifecycle() && this.contextGenerations.get(key) === generation && document.version === version && guard();
+    const info = proof ?? await this.modelInfo(root, document.uri, true);
+    if (!current() || !info || info.document_version !== version || info.client_instance !== instance) refuse("The document or model changed. Choose its model context again.");
+    await this.execute("dynare/setDocumentContext", [{ document_uri: key, document_version: version, root_uri: root.toString(), expected_revision: info.revision }]);
+    if (!sameLifecycle() || (this.acceptedContextGenerations.get(key) ?? 0) > generation) refuse("A newer model choice or a closed or restarted document replaced this choice. Run the model action again.");
+    const actionCurrent = current();
+    const newerAttempt = this.contextGenerations.get(key) !== generation;
+    this.acceptedContextGenerations.set(key, generation);
+    accepted();
+    this.scheduleSymbolRefresh();
+    if (newerAttempt) refuse("The model choice was applied, but its pending action stopped because another model choice was requested. Complete that choice or run the action again.");
+    if (!actionCurrent) refuse("The model choice was applied, but the pending action stopped because the source or model changed. Run the action again.");
+  }
+  private clearDocumentContext(key: string): void {
+    this.contextGenerations.set(key, (this.contextGenerations.get(key) ?? 0) + 1);
+    this.contextLifecycles.set(key, (this.contextLifecycles.get(key) ?? 0) + 1);
+    this.acceptedContextGenerations.delete(key);
+    this.selectedOwners.delete(key); this.explicitOwnerDocuments.delete(key); this.ownedDocuments.delete(key); this.standaloneDocuments.delete(key);
+  }
+  private clearDocumentContexts(): void {
+    for (const key of new Set([...this.selectedOwners.keys(), ...this.standaloneDocuments, ...this.contextGenerations.keys()])) this.clearDocumentContext(key);
+  }
   private rememberOwner(document: vscode.Uri, root: vscode.Uri, explicit: boolean): void {
     if (document.toString() === root.toString()) return;
     const key = document.toString();
+    const changed = this.selectedOwners.get(key) !== root.toString() || this.explicitOwnerDocuments.has(key) !== explicit || this.standaloneDocuments.has(key);
+    this.standaloneDocuments.delete(key);
     this.selectedOwners.set(key, root.toString()); this.ownedDocuments.add(key);
     if (explicit) this.explicitOwnerDocuments.add(key); else this.explicitOwnerDocuments.delete(key);
-    this.changed.fire();
+    if (changed) this.changed.fire();
   }
-  treatAsRoot(document: vscode.Uri): void { this.selectedOwners.delete(document.toString()); this.explicitOwnerDocuments.delete(document.toString()); this.ownedDocuments.delete(document.toString()); this.changed.fire(); this.scheduleRootRefresh(); }
+  private rememberStandalone(document: vscode.Uri): void {
+    const key = document.toString();
+    this.selectedOwners.delete(key); this.explicitOwnerDocuments.delete(key); this.ownedDocuments.delete(key); this.standaloneDocuments.add(key);
+    this.changed.fire(); this.scheduleRootRefresh();
+  }
+  treatAsRoot(document: vscode.Uri): void { this.clearDocumentContext(document.toString()); this.rememberStandalone(document); }
   async openLocation(location: { uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } }, root?: vscode.Uri, guard?: NavigationGuard, options?: { viewColumn?: vscode.ViewColumn; reuseOpen?: boolean }): Promise<void> {
     const uri = vscode.Uri.parse(location.uri);
     const range = new vscode.Range(location.range.start.line, location.range.start.character, location.range.end.line, location.range.end.character);
@@ -540,13 +626,18 @@ export class DygnosisClient implements vscode.Disposable {
   }
   private async openSource(uri: vscode.Uri, root?: vscode.Uri, guard?: NavigationGuard, selection?: vscode.Range, options?: { viewColumn?: vscode.ViewColumn; reuseOpen?: boolean }): Promise<void> {
     if (!["file", "untitled"].includes(uri.scheme)) throw new Error("This source location is unavailable to native analysis.");
+    if (root) await this.ensureStarted();
     const document = await vscode.workspace.openTextDocument(uri);
     const decision = guard ? await guard(document) : true;
     // An asynchronous proof may expire before this continuation can reveal it.
     if (typeof decision === "boolean" ? !decision : decision.isCurrent() !== true) {
       refuse("The model or source changed while loading this location. Request the source jump again.");
     }
-    if (root) this.selectOwner(document.uri, root);
+    const epoch = this.epoch, instance = this.instance, editor = vscode.window.activeTextEditor, version = document.version;
+    const current = (): boolean => !document.isClosed && document.version === version && this.epoch === epoch && this.instance === instance &&
+      vscode.window.activeTextEditor === editor && (typeof decision === "boolean" ? decision : decision.isCurrent());
+    if (root && !sameUri(document.uri, root)) await this.applyOwner(document, root, undefined, current);
+    if (!current()) refuse("The model or source changed while preparing this location. Request the source jump again.");
     const viewColumn = options?.reuseOpen ? reuseOpenViewColumn(document.uri) : options?.viewColumn;
     await vscode.window.showTextDocument(document, { viewColumn, selection });
   }

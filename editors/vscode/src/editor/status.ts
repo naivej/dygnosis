@@ -119,7 +119,14 @@ export function registerStatus(service: DygnosisClient): vscode.Disposable {
     const update = async (): Promise<void> => {
       const root = await service.rootForDocument(document);
       if (!current()) return;
-      if (!root) { unavailable(); return; }
+      if (!root) {
+        content({
+          text: "$(info) Dynare: choose model owner",
+          tooltip: "This file needs a model owner for model counts. Run Dygnosis: Choose model owner from the Command Palette. Open its parent model first if no owner is listed.",
+          accessibilityLabel: "Dynare model counts need a model owner. Run Dygnosis: Choose model owner from the Command Palette.",
+        });
+        return;
+      }
       const client = service.client;
       const info = await service.modelInfo(root, document.uri);
       if (!current() || client !== service.client) return;

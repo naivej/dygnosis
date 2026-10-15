@@ -114,6 +114,8 @@ function setup(doc = document()) {
       service.jumps.push({ target, root: root.toString() });
     },
     selectOwner: (current, root) => { service.selected.set(current.toString(), root); changed.fire(); },
+    applyOwner: async (current, root) => { service.selectOwner(current.uri, root); },
+    reportDocumentContextOutcome: async () => {},
     invalidate: () => changed.fire(),
   };
   const registration = registerModelNavigation(service);

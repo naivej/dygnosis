@@ -263,6 +263,15 @@ test("a mod opened as an include uses its chosen root while preferences use the 
   assert.match(env.host.items[0].tooltip, /\/project\/owner.mod/);
   registration.dispose();
 });
+test("ambiguous background model counts explain the owner-selection action", async () => {
+  const env = setup(document("file:///project/helper.mod"));
+  env.service.rootForDocument = async () => undefined;
+  const registration = registerStatus(env.service); await flush();
+  assert.match(env.host.items[0].text, /choose model owner/);
+  assert.match(env.host.items[0].tooltip, /Dygnosis: Choose model owner/);
+  assert.equal(env.service.requests.length, 0);
+  registration.dispose();
+});
 test("edit invalidation removes numbers immediately and superseded versions cannot restore them", async () => {
   const env = setup();
   const registration = registerStatus(env.service);

@@ -10,6 +10,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+mod document_context;
 mod project;
 
 mod ordering;
@@ -215,6 +216,8 @@ struct Inner {
     settings: SettingsStore,
     tracked_roots: HashMap<Url, String>,
     model_info_notifications: bool,
+    document_context_enabled: bool,
+    document_contexts: HashMap<String, Url>,
     token_refresh: bool,
     hint_refresh: bool,
     semantic_mapping: SemanticMapping,
@@ -235,6 +238,8 @@ impl Default for Inner {
             settings: SettingsStore::default(),
             tracked_roots: HashMap::new(),
             model_info_notifications: false,
+            document_context_enabled: false,
+            document_contexts: HashMap::new(),
             token_refresh: false,
             hint_refresh: false,
             semantic_mapping: SemanticMapping::default(),
@@ -264,9 +269,9 @@ impl Inner {
         &mut self,
         uri: &Url,
     ) -> Option<Vec<(Model, crate::engine::workspace::model_map::WrittenModelMap)>> {
-        let mut roots = self.known_owner_roots(uri);
-        if roots.is_empty() && is_model_root(uri) {
-            roots.push(uri.clone());
+        let roots = self.context_roots(uri);
+        if self.context_ambiguous(uri) {
+            return None;
         }
         if roots.is_empty() {
             let model = self.workspace.get_model(uri.as_str())?.clone();
@@ -356,17 +361,38 @@ impl Inner {
         &mut self,
         first: Option<&Url>,
     ) -> Vec<(Url, Option<i32>, Vec<Diagnostic>)> {
-        let mut roots: Vec<Url> = self.docs.keys().cloned().collect();
-        roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-        for uri in roots {
-            if !is_model_root(&uri) && !self.known_owner_roots(&uri).is_empty() {
-                self.reports.remove(&uri);
-                continue;
-            }
-            if is_model_root(&uri) {
-                self.root_revision(&uri);
+        let documents: Vec<Url> = self.docs.keys().cloned().collect();
+        // Discover every open model before resolving a helper's context. Its
+        // filename sort order must not decide whether it has an owner.
+        let mut discover_roots: HashSet<_> = documents
+            .iter()
+            .filter(|uri| is_model_root(uri))
+            .cloned()
+            .collect();
+        for document in &documents {
+            discover_roots.extend(self.known_owner_roots(document));
+        }
+        discover_roots.extend(self.document_contexts.values().cloned());
+        for uri in discover_roots {
+            self.root_revision(&uri);
+        }
+        self.revalidate_document_contexts();
+        let mut roots = HashSet::new();
+        for document in &documents {
+            let contexts = self.context_roots(document);
+            if contexts.is_empty() && !self.context_ambiguous(document) {
+                roots.insert(document.clone());
             } else {
-                self.prepare_root(&uri);
+                roots.extend(contexts);
+            }
+        }
+        let mut roots: Vec<_> = roots.into_iter().collect();
+        roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        for uri in &roots {
+            if is_model_root(uri) {
+                self.root_revision(uri);
+            } else {
+                self.prepare_root(uri);
             }
             let set = check_in_workspace_with_origins(&mut self.workspace, uri.as_str());
             let revision = self
@@ -374,14 +400,15 @@ impl Inner {
                 .input_revision(uri.as_str())
                 .unwrap_or_default();
             let text = self
-                .document(&uri)
+                .document(uri)
                 .map(|doc| Arc::from(doc.text.as_str()))
+                .or_else(|| self.workspace.get_source(uri.as_str()).map(Arc::from))
                 .unwrap_or_default();
-            let report = prepare_root_report(&uri, set, text, revision);
-            self.reports.insert(uri, Arc::new(report));
+            let report = prepare_root_report(uri, set, text, revision);
+            self.reports.insert(uri.clone(), Arc::new(report));
         }
         self.reports
-            .retain(|root, _| self.docs.contains_key(root) || self.project.is_selected(root));
+            .retain(|root, _| roots.contains(root) || self.project.is_selected(root));
         self.merge_diagnostics(first)
     }
 
@@ -423,6 +450,19 @@ impl Inner {
             .map(|uri| (identity(uri), uri.clone()))
             .collect();
         source_identities.extend(self.docs.keys().map(|uri| (identity(uri), uri.clone())));
+        let contexts: HashMap<_, _> = self
+            .docs
+            .keys()
+            .map(|document| {
+                (
+                    identity(document),
+                    self.context_roots(document)
+                        .iter()
+                        .map(&mut identity)
+                        .collect::<HashSet<_>>(),
+                )
+            })
+            .collect();
         for (root, report) in &checks {
             for (source, rows) in &report.routes {
                 let key = identity(source);
@@ -430,6 +470,16 @@ impl Inner {
                     .get(&key)
                     .cloned()
                     .unwrap_or_else(|| source.clone());
+                if let Some(owners) = contexts.get(&key) {
+                    let owner = identity(root);
+                    // Unknown non-model fragments retain their written check.
+                    // Ambiguous native contexts withhold owner-specific notes.
+                    if !owners.contains(&owner)
+                        && (!owners.is_empty() || self.context_ambiguous(&uri))
+                    {
+                        continue;
+                    }
+                }
                 for row in rows {
                     routed_library
                         .entry(uri.clone())
@@ -726,12 +776,10 @@ impl Backend {
         let mut inner = self.lock_inner();
         let text = inner.document(uri)?.text.clone();
         let preferences = inner.presentation_for(uri);
-        let owners = inner.known_owner_roots(uri);
-        let roots = if owners.is_empty() && is_model_root(uri) {
-            vec![uri.clone()]
-        } else {
-            owners
-        };
+        let roots = inner.context_roots(uri);
+        if inner.context_ambiguous(uri) {
+            return None;
+        }
         let mut views = Vec::new();
         for root in &roots {
             inner.root_revision(root);
@@ -786,11 +834,9 @@ impl Backend {
         if !inner.presentation_for(uri).parameter_value_hints {
             return Vec::new();
         }
-        let owners = inner.known_owner_roots(uri);
-        let root = if owners.len() == 1 {
-            owners[0].clone()
-        } else if owners.is_empty() && is_model_root(uri) {
-            uri.clone()
+        let roots = inner.context_roots(uri);
+        let root = if roots.len() == 1 {
+            roots[0].clone()
         } else {
             return Vec::new();
         };
@@ -864,17 +910,7 @@ impl Backend {
     }
 
     fn decl_location(&self, pos: &TextDocumentPositionParams) -> Option<Location> {
-        let inner = self.lock_inner();
-        let doc = inner.document(&pos.text_document.uri)?;
-        let index = LineIndex::new(&doc.text);
-        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
-        let (word, _) = ident_at(&doc.text, byte)?;
-        let model = inner.workspace.get_model(pos.text_document.uri.as_str())?;
-        let decl = find_decl(model, &word)?;
-        Some(Location::new(
-            pos.text_document.uri.clone(),
-            span_range(&index, &doc.text, decl.span),
-        ))
+        rename::definition(&mut self.lock_inner(), pos)
     }
 
     fn definition_at(&self, pos: &TextDocumentPositionParams) -> Option<GotoDefinitionResponse> {
@@ -915,13 +951,7 @@ impl Backend {
                 _ => Some(GotoDefinitionResponse::Array(locs)),
             };
         }
-        let (word, _) = ident_at(&text, byte)?;
-        let model = inner.workspace.get_model(uri.as_str())?;
-        let decl = find_decl(model, &word)?;
-        Some(GotoDefinitionResponse::Scalar(Location::new(
-            uri.clone(),
-            span_range(&index, &text, decl.span),
-        )))
+        rename::definition(&mut inner, pos).map(GotoDefinitionResponse::Scalar)
     }
 
     fn ident_highlights(&self, pos: &TextDocumentPositionParams) -> Option<Vec<DocumentHighlight>> {
@@ -2307,6 +2337,15 @@ impl LanguageServer for Backend {
                 .and_then(|value| value.get("modelInfoChanged"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
+            inner.document_context_enabled = params
+                .capabilities
+                .experimental
+                .as_ref()
+                .and_then(|value| value.get("dygnosis"))
+                .and_then(|value| value.get("documentContext"))
+                .and_then(|value| value.get("schema_version"))
+                .and_then(Value::as_u64)
+                == Some(1);
             inner.project.notifications = params
                 .capabilities
                 .experimental
@@ -2451,6 +2490,7 @@ impl LanguageServer for Backend {
             inner.docs.retain(|candidate, _| {
                 crate::engine::workspace::include_resolver::normalize_uri(candidate.as_str()) != key
             });
+            inner.document_contexts.remove(&key);
             inner.workspace.remove_document(uri.as_str());
             inner.project_changed(&uri, false);
             inner.refresh_diagnostics(Some(&uri))
@@ -2745,6 +2785,9 @@ impl LanguageServer for Backend {
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
         ordering::ready().await;
+        if params.command == "dynare/setDocumentContext" {
+            return Ok(Some(self.set_document_context(&params.arguments).await));
+        }
         if matches!(
             params.command.as_str(),
             "dynare/projectStatus" | "dynare/recheckProject" | "dynare/cancelProject"
@@ -2783,6 +2826,7 @@ impl LanguageServer for Backend {
             inner
                 .settings
                 .change_folders(params.event.added, params.event.removed);
+            inner.document_contexts.clear();
             inner.project_reconfigure(true);
             inner.refresh_diagnostics(None)
         };
@@ -2880,6 +2924,7 @@ pub fn initialize_result() -> InitializeResult {
                     "dynare/showEffectiveModel".into(),
                     "dynare/captureRename".into(),
                     "dynare/modelInfo".into(),
+                    "dynare/setDocumentContext".into(),
                     "dynare/projectStatus".into(),
                     "dynare/recheckProject".into(),
                     "dynare/cancelProject".into(),
@@ -2898,6 +2943,7 @@ pub fn initialize_result() -> InitializeResult {
             experimental: Some(json!({"dygnosis": {
                 "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true, "model_locals": true},
                 "modelInfoChanged": true,
+                "documentContext": {"command":"dynare/setDocumentContext", "schema_version":1},
                 "rename": {"command":"dynare/captureRename", "schema_version":1, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES},
                 "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
                 "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
@@ -3719,10 +3765,7 @@ fn ranges_overlap(left: Range, right: Range) -> bool {
 }
 
 fn metadata_completion_item(inner: &mut Inner, uri: &Url, byte: u32) -> Option<CompletionItem> {
-    let mut roots = inner.known_owner_roots(uri);
-    if roots.is_empty() && is_model_root(uri) {
-        roots.push(uri.clone());
-    }
+    let roots = inner.context_roots(uri);
     let mut agreed = None;
     for root in roots {
         inner.prepare_root(&root);

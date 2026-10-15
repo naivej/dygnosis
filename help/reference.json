@@ -1,6 +1,6 @@
 {
   "version": "0.11.25",
-  "fingerprint": "e3cdcca05a351f10e625dc49b42efcaf48a1fe5bf9d48c6ac23c19ac03307d50",
+  "fingerprint": "55dc800c29ff7e0e11f8ddfa61e12227b6c855f1046f05a6b58954b4530070a2",
   "tools": [
     {
       "name": "dynare_diagnose",

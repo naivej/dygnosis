@@ -2,15 +2,53 @@
 
 ## Model roots and includes
 
-A **model root** is the main `.mod` or `.dyn` file. An included file uses the
-context of the root that includes it, called its **model owner**.
-Open a root to make its include context available.
-For example, if `main.mod` includes `equations.inc`, open `main.mod` before
-working in `equations.inc` so its checks can use the declarations in `main.mod`.
-With an include active, run **Dygnosis: Choose model owner** from the Command
-Palette and select the main model from the list.
-**Dygnosis: Treat this file as a model root** makes an included `.mod` or `.dyn`
-its own main model again.
+A **model root** is the main `.mod` or `.dyn` file. A helper file can use macro
+values and declarations supplied by a model that includes it. That model root
+is the helper's **model owner**. This applies even when the helper's filename
+ends in `.mod` or `.dyn`.
+
+```text
+main.mod          defines the number of regions, then includes variables.mod
+  variables.mod   uses that number to declare each region's variables
+```
+
+Open `main.mod` to make its include context available. Dygnosis must have
+checked the include relationship; files in the same folder are not necessarily
+part of the same model.
+
+The editor uses these rules:
+
+| Known context | Editor behavior |
+|---|---|
+| You chose a model owner | Use that owner while it still includes this file. |
+| You chose to treat this file as a model root | Check the `.mod` or `.dyn` file by itself. |
+| Exactly one owner is known | Use that owner automatically. |
+| Several owners are known | Ask you to choose when you run a model action. Background model features wait for that choice. |
+| No owner is known | Check a `.mod` or `.dyn` file by itself. Open the parent model to establish an include relationship. Other helper files need a known owner for full model features. |
+
+To choose an owner, open the helper, press **Ctrl+Shift+P**, and run
+**Dygnosis: Choose model owner**. Select the parent model from the dropdown;
+each entry shows its file path. Run the command again to change the owner.
+To check a `.mod` or `.dyn` helper by itself, run
+**Dygnosis: Treat this file as a model root** from the Command Palette.
+Opening a helper through an include link or a model source jump also selects
+that link's model owner.
+
+The choice controls editor diagnostics, definitions, references, Outline,
+model counts, equation navigation and the macro preview. Rename also checks
+the other known models that use files it would change. Unsaved edits update
+the chosen model's analysis. If an edit removes the include relationship, the
+editor resolves the context again. Closing the file, restarting the server or
+changing workspace folders clears the choice; reopening uses the rules above.
+
+Project-wide checking remains separate. It checks each selected saved model
+root and reports counts for that root. Choosing a helper's editor owner does
+not remove the helper from the project's saved-model list.
+
+These selection commands are available in VS Code with the bundled engine.
+Other LSP clients also use a single known owner automatically. With several
+owners, clients without owner selection can show combined diagnostics and
+withhold navigation when the models disagree.
 
 Related files include recognized include, parameter, data and external-function
 files. Hover over an include filename or a recognized file reference in the

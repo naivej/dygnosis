@@ -32,11 +32,11 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
     vscode.commands.registerCommand("dygnosis.showOutput", () => client.output.show()),
     vscode.commands.registerCommand("dygnosis.openSettings", () => vscode.commands.executeCommand("workbench.action.openSettings", "@ext:CoconutWater.dygnosis")),
     vscode.commands.registerCommand("dygnosis.editSettingsJson", () => vscode.commands.executeCommand("workbench.action.openSettingsJson")),
-    vscode.commands.registerCommand("dygnosis.treatAsRoot", () => {
+    vscode.commands.registerCommand("dygnosis.treatAsRoot", () => runCommand(client, async () => {
       const document = vscode.window.activeTextEditor?.document;
-      if (document) client.treatAsRoot(document.uri);
-      else void vscode.window.showInformationMessage("Open a Dynare model file before treating it as a root.");
-    }),
+      if (document) await client.treatDocumentAsRoot(document);
+      else await vscode.window.showInformationMessage("Open a Dynare model file before treating it as a root.");
+    })),
   );
   let contextGeneration = 0;
   const updateContext = (): void => {

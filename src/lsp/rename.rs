@@ -32,12 +32,22 @@ pub(super) fn decide(
     let text = doc.text.clone();
     let version = doc.version;
     let byte = LineIndex::new(&text).offset_utf16(&text, span_pos(pos.position));
-    let mut roots = inner.known_owner_roots(uri);
+    if inner.context_ambiguous(uri) {
+        return Err("Choose a model owner before requesting Rename for this file.");
+    }
+    let mut roots = inner.context_roots(uri);
     if roots.is_empty() && (is_model_root(uri) || uri.scheme() == "untitled") {
         roots.push(uri.clone());
     }
     if roots.is_empty() || !matches!(uri.scheme(), "file" | "untitled") {
         return Err("Rename requires a file or untitled source with a known model owner.");
+    }
+    // The displayed context selects the binding and its collision scope. Every
+    // known owner still has to accept edits to these same written bytes.
+    for owner in inner.known_owner_roots(uri) {
+        if !roots.contains(&owner) {
+            roots.push(owner);
+        }
     }
     let file = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
     let mut views = Vec::new();
@@ -170,6 +180,31 @@ pub(super) fn decide(
 }
 
 /// Ordinary references use accepted sites; callers convert the shared byte spans.
+/// Ordinary names follow the displayed model; older multi-owner clients only
+/// get a target when every known owner agrees on its written declaration.
+pub(super) fn definition(inner: &mut Inner, pos: &TextDocumentPositionParams) -> Option<Location> {
+    let uri = &pos.text_document.uri;
+    let text = inner.document(uri)?.text.clone();
+    let byte = LineIndex::new(&text).offset_utf16(&text, span_pos(pos.position));
+    let file = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
+    let roots = inner.context_roots(uri);
+    let mut agreed = None;
+    for root in roots {
+        let view = capture(inner, &root).ok()?;
+        let binding = view.select(Selector::Target { file: &file, byte }).ok()??;
+        let (file, span) = binding.declaration?;
+        let target = naming_edit_url(inner, &root, &file)?;
+        let source = view.sources.get(&file)?;
+        source.get(span.start as usize..span.end as usize)?;
+        let location = Location::new(target, span_range(&LineIndex::new(source), source, span));
+        if agreed.as_ref().is_some_and(|prior| prior != &location) {
+            return None;
+        }
+        agreed = Some(location);
+    }
+    agreed
+}
+
 pub(super) fn references(
     inner: &mut Inner,
     pos: &TextDocumentPositionParams,
@@ -179,7 +214,10 @@ pub(super) fn references(
     let byte = LineIndex::new(&text).offset_utf16(&text, span_pos(pos.position));
     let file =
         crate::engine::workspace::include_resolver::normalize_uri(pos.text_document.uri.as_str());
-    let mut roots = inner.known_owner_roots(&pos.text_document.uri);
+    let mut roots = inner.context_roots(&pos.text_document.uri);
+    if inner.context_ambiguous(&pos.text_document.uri) {
+        return None;
+    }
     if roots.is_empty() {
         roots.push(pos.text_document.uri.clone());
     }

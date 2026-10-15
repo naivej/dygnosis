@@ -144,6 +144,38 @@ impl Wire {
         )
         .await
     }
+    async fn command_args(&mut self, command: &str, arguments: Value) -> Value {
+        self.request(
+            "workspace/executeCommand",
+            json!({"command":command,"arguments":[arguments]}),
+        )
+        .await
+    }
+    async fn start_context(&mut self, files: &Files, project: bool) {
+        let init = self
+            .request(
+                "initialize",
+                json!({"workspaceFolders":[files.folder("")],
+            "capabilities":{"experimental":{"dygnosis":{"documentContext":{"schema_version":1}}}},
+            "initializationOptions":{"dynare":{"projectDiagnostics":project}}}),
+            )
+            .await;
+        assert_eq!(
+            init["capabilities"]["experimental"]["dygnosis"]["documentContext"]["schema_version"],
+            1
+        );
+        self.notify("initialized", json!({}));
+    }
+    async fn choose_context(&mut self, document: &str, version: i32, root: &str) -> Value {
+        let info = self
+            .command_args(
+                "dynare/modelInfo",
+                json!({"root_uri":root,"document_uri":document}),
+            )
+            .await;
+        assert!(info.get("error").is_none(), "{info}");
+        self.command_args("dynare/setDocumentContext", json!({"document_uri":document,"document_version":version,"root_uri":root,"expected_revision":info["revision"]})).await
+    }
     async fn complete(&mut self) -> Value {
         tokio::time::timeout(Duration::from_secs(15), async {
             loop {
@@ -203,6 +235,281 @@ fn root<'a>(status: &'a Value, uri: &str) -> &'a Value {
         .iter()
         .find(|entry| entry["root_uri"] == uri)
         .unwrap_or_else(|| panic!("root absent {uri}: {status}"))
+}
+
+// Guards phantom standalone macro errors and project contributions leaking into
+// a helper's selected editor context, including unsaved and reopened inputs.
+#[tokio::test]
+async fn mod_helper_context_routes_real_macro_cause_and_keeps_project_inventory() {
+    for project in [false, true] {
+        let files = Files::new();
+        let parent = "@#define supplied = 1\n@#include \"helper.mod\"\n";
+        let helper = "@#define rejected = supplied + \"text\"\n";
+        files.write("parent.mod", parent);
+        files.write("helper.mod", helper);
+        let (p, h) = (files.uri("parent.mod"), files.uri("helper.mod"));
+        let mut wire = Wire::new();
+        wire.start_context(&files, project).await;
+        if project {
+            wire.complete().await;
+        }
+        wire.open(&p, parent, 1);
+        wire.open(&h, helper, 1);
+        let notes = wire.pull(&h).await;
+        assert!(has_code(&notes, "E285"), "{notes:?}");
+        assert!(
+            !has_code(&notes, "E063"),
+            "standalone error leaked: {notes:?}"
+        );
+        assert_eq!(
+            notes.iter().find(|note| note["code"] == "E285").unwrap()["range"]["start"]["line"],
+            0
+        );
+        let before = if project {
+            Some(wire.complete().await)
+        } else {
+            None
+        };
+        let standalone = wire.choose_context(&h, 1, &h).await;
+        assert!(standalone.get("error").is_none(), "{standalone}");
+        let notes = wire.pull(&h).await;
+        assert!(has_code(&notes, "E063"), "{notes:?}");
+        assert!(
+            !has_code(&notes, "E285"),
+            "owner error leaked into standalone: {notes:?}"
+        );
+        if let Some(before) = before {
+            let after = wire.complete().await;
+            assert_eq!(
+                after["roots"], before["roots"],
+                "editor choice changed saved-model reports"
+            );
+            assert_eq!(after["roots"].as_array().unwrap().len(), 2);
+        }
+        let stale = wire
+            .command_args(
+                "dynare/setDocumentContext",
+                json!({"document_uri":h,"document_version":0,"root_uri":null}),
+            )
+            .await;
+        assert_eq!(stale["code"], "STALE_DOCUMENT");
+        assert!(has_code(&wire.pull(&h).await, "E063"));
+        let selected = wire.choose_context(&h, 1, &p).await;
+        assert!(selected.get("error").is_none(), "{selected}");
+        assert!(!has_code(&wire.pull(&h).await, "E063"));
+        let old = wire
+            .command_args("dynare/modelInfo", json!({"root_uri":p,"document_uri":h}))
+            .await;
+        wire.change(&p, "@#define supplied = 2\n@#include \"helper.mod\"\n", 2);
+        let stale = wire.command_args("dynare/setDocumentContext", json!({"document_uri":h,"document_version":1,"root_uri":p,"expected_revision":old["revision"]})).await;
+        assert_eq!(stale["code"], "STALE_MODEL");
+        wire.change(&h, "@#define accepted = supplied + 1\n", 2);
+        let notes = wire.pull(&h).await;
+        assert!(
+            !has_code(&notes, "E063") && !has_code(&notes, "E285"),
+            "{notes:?}"
+        );
+        wire.change(&p, "@#define supplied = 2\n", 3);
+        assert!(
+            has_code(&wire.pull(&h).await, "E063"),
+            "removed owner must restore ordinary resolution (project={project})"
+        );
+        wire.change(&p, parent, 4);
+        wire.choose_context(&h, 2, &h).await;
+        assert!(has_code(&wire.pull(&h).await, "E063"));
+        wire.close(&h);
+        wire.open(&h, helper, 3);
+        let notes = wire.pull(&h).await;
+        assert!(
+            has_code(&notes, "E285") && !has_code(&notes, "E063"),
+            "reopen retained stale standalone mode: {notes:?}"
+        );
+    }
+}
+
+// Guards one selected semantic context while Rename still validates all owners
+// of the written bytes it would change.
+#[tokio::test]
+async fn ambiguous_context_waits_for_choice_and_navigation_follows_it_without_weakening_rename() {
+    let files = Files::new();
+    let parent = "var y; parameters p;\n@#include \"helper.mod\"\n";
+    let helper = "model;\ny = p;\nend;\n";
+    for name in ["a.mod", "b.mod", "unrelated.mod"] {
+        files.write(
+            name,
+            parent
+                .replace(
+                    "helper.mod",
+                    if name == "unrelated.mod" {
+                        "absent.inc"
+                    } else {
+                        "helper.mod"
+                    },
+                )
+                .as_str(),
+        );
+    }
+    files.write("helper.mod", helper);
+    let (a, b, h) = (
+        files.uri("a.mod"),
+        files.uri("b.mod"),
+        files.uri("helper.mod"),
+    );
+    let mut wire = Wire::new();
+    wire.start_context(&files, false).await;
+    wire.open(&a, parent, 1);
+    wire.open(&b, parent, 1);
+    wire.open(&h, helper, 1);
+    let position = json!({"textDocument":{"uri":h},"position":{"line":1,"character":4}});
+    assert!(
+        wire.pull(&h).await.is_empty(),
+        "ambiguous context must not choose standalone or a parent"
+    );
+    assert!(wire
+        .request("textDocument/definition", position.clone())
+        .await
+        .is_null());
+    for owner in [&a, &b] {
+        let selected = wire.choose_context(&h, 1, owner).await;
+        assert!(selected.get("error").is_none(), "{selected}");
+        let definition = wire
+            .request("textDocument/definition", position.clone())
+            .await;
+        assert_eq!(definition["uri"], *owner, "{definition}");
+        let references = wire.request("textDocument/references", json!({"textDocument":{"uri":h},"position":{"line":1,"character":4},"context":{"includeDeclaration":true}})).await;
+        assert!(references
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|site| site["uri"] == *owner));
+        assert!(!references
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|site| site["uri"] == *if owner == &a { &b } else { &a }));
+    }
+    let rename = wire.command_args("dynare/captureRename", json!({"textDocument":{"uri":h},"position":{"line":1,"character":4},"newName":"changed"})).await;
+    assert_eq!(rename["code"], "RENAME_REFUSED", "{rename}");
+    let unrelated = files.uri("unrelated.mod");
+    let proof = wire
+        .command_args("dynare/modelInfo", json!({"root_uri":unrelated}))
+        .await;
+    let unproven = wire.command_args("dynare/setDocumentContext", json!({"document_uri":h,"document_version":1,"root_uri":unrelated,"expected_revision":proof["revision"]})).await;
+    assert_eq!(unproven["code"], "DOCUMENT_NOT_OWNED");
+    assert_eq!(
+        wire.request("textDocument/definition", position.clone())
+            .await["uri"],
+        b
+    );
+    let cleared = wire
+        .command_args(
+            "dynare/setDocumentContext",
+            json!({"document_uri":h,"document_version":1,"root_uri":null}),
+        )
+        .await;
+    assert!(cleared.get("error").is_none());
+    assert!(wire
+        .request("textDocument/definition", position)
+        .await
+        .is_null());
+}
+
+// Guards the .mod helper fix for ordinary LSP clients which have no owner picker,
+// and rejects an explicit context command unless its capability was negotiated.
+#[tokio::test]
+async fn legacy_client_uses_unique_owner_without_enabling_explicit_context_commands() {
+    let files = Files::new();
+    let parent = "@#define supplied = 1\n@#include \"helper.mod\"\n";
+    let helper = "@#define rejected = supplied + \"text\"\n";
+    files.write("parent.mod", parent);
+    files.write("helper.mod", helper);
+    let (p, h) = (files.uri("parent.mod"), files.uri("helper.mod"));
+    let mut wire = Wire::new();
+    wire.start(
+        vec![files.folder("")],
+        json!({"projectDiagnostics":false}),
+        vec![],
+        false,
+    )
+    .await;
+    wire.open(&p, parent, 1);
+    wire.open(&h, helper, 1);
+    let notes = wire.pull(&h).await;
+    assert!(
+        has_code(&notes, "E285") && !has_code(&notes, "E063"),
+        "{notes:?}"
+    );
+    let result = wire
+        .command_args(
+            "dynare/setDocumentContext",
+            json!({"document_uri":h,"document_version":1,"root_uri":null}),
+        )
+        .await;
+    assert_eq!(result["code"], "UNSUPPORTED_CAPABILITY");
+    assert!(has_code(&wire.pull(&h).await, "E285"));
+}
+
+// Guards collision checking in the displayed standalone helper as well as every
+// parent which would consume the same edited declaration.
+#[tokio::test]
+async fn standalone_helper_rename_checks_its_own_macro_branch_before_all_other_owners() {
+    let files = Files::new();
+    let parent = "@#define inside = 1\n@#include \"helper.mod\"\n";
+    let helper = "@#ifndef inside\nparameters clash;\n@#endif\nparameters p;\n";
+    files.write("parent.mod", parent);
+    files.write("helper.mod", helper);
+    let (p, h) = (files.uri("parent.mod"), files.uri("helper.mod"));
+    let mut wire = Wire::new();
+    wire.start_context(&files, false).await;
+    wire.open(&p, parent, 1);
+    wire.open(&h, helper, 1);
+    let selected = wire.choose_context(&h, 1, &h).await;
+    assert!(selected.get("error").is_none(), "{selected}");
+    let rename = wire.command_args("dynare/captureRename", json!({"textDocument":{"uri":h},"position":{"line":3,"character":11},"newName":"clash"})).await;
+    assert_eq!(rename["code"], "RENAME_REFUSED", "{rename}");
+    assert!(
+        rename["error"]
+            .as_str()
+            .unwrap()
+            .contains("already declared"),
+        "{rename}"
+    );
+    let safe = wire.command_args("dynare/captureRename", json!({"textDocument":{"uri":h},"position":{"line":3,"character":11},"newName":"renamed"})).await;
+    assert!(safe.get("error").is_none(), "{safe}");
+    assert_eq!(
+        safe["owners"].as_array().unwrap().len(),
+        2,
+        "the standalone view must retain the parent safety audit"
+    );
+}
+
+// Guards same-refresh fallback when a closed saved owner removes its include.
+#[tokio::test]
+async fn a_changed_closed_owner_rechecks_the_open_helpers_standalone_fallback_immediately() {
+    let files = Files::new();
+    let parent = "@#define supplied = 1\n@#include \"helper.mod\"\n";
+    let helper = "@#define accepted = supplied + 1\n";
+    files.write("parent.mod", parent);
+    files.write("helper.mod", helper);
+    let (p, h) = (files.uri("parent.mod"), files.uri("helper.mod"));
+    let mut wire = Wire::new();
+    wire.start_context(&files, false).await;
+    wire.open(&p, parent, 1);
+    wire.open(&h, helper, 1);
+    assert!(!has_code(&wire.pull(&h).await, "E063"));
+    wire.close(&p);
+    assert!(!has_code(&wire.pull(&h).await, "E063"));
+    files.write("parent.mod", "@#define supplied = 1\n");
+    wire.changed(&p, 2);
+    let notes = wire.pull(&h).await;
+    assert!(
+        has_code(&notes, "E063"),
+        "the helper fallback was not checked in the watched-file refresh: {notes:?}"
+    );
+    let info = wire
+        .command_args("dynare/modelInfo", json!({"root_uri":h}))
+        .await;
+    assert_eq!(info["owner_roots"], json!([]));
 }
 fn has_code(items: &[Value], code: &str) -> bool {
     items.iter().any(|diag| diag["code"] == code)

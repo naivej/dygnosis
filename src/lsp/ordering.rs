@@ -155,7 +155,10 @@ fn changes_input(request: &Request) -> bool {
             .and_then(|params| params.get("command"))
             .and_then(serde_json::Value::as_str)
             .is_some_and(|command| {
-                matches!(command, "dynare/recheckProject" | "dynare/cancelProject")
+                matches!(
+                    command,
+                    "dynare/recheckProject" | "dynare/cancelProject" | "dynare/setDocumentContext"
+                )
             }))
 }
 
