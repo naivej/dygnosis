@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.11.26
+
+- Large indexed macro tables copy only the selected values. The unmodified
+  basic and growth DynareTransformationEngine examples now complete.
+- Configure macro work with `dynare.macroWorkLimit` in the editor or
+  `macro_work_limit` in MCP model requests. Each checked root or comparison
+  side receives its own finite allowance. Other resource bounds stay separate.
+- Terminating recursive includes expand with written origins. Unbounded
+  recursion stops at its actual resource limit; the filename-cycle warning
+  W062 is retired. Partial results name the cause and unavailable work.
+- Included `.mod` helpers use a unique known model owner automatically. Choose
+  an owner or standalone analysis with the existing selection commands; the
+  choice applies to diagnostics and model features. Closing the last editor
+  tab clears it. Help explains the selection rule.
+- An equation with an empty right-hand side, such as `y=;`, reports E001.
+- Formatting files with long macro string values is faster.
+
 ## v0.11.25
 
 - Project checks show `.mod` and `.dyn` models in collapsible folder and

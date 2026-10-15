@@ -162,7 +162,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("I211", ExplainEntry {
         title: "Macro expansion incomplete",
-        body: "Dygnosis stopped this macro expansion. A limit note names that limit: expression depth, value depth, execution depth, string size, range size, collection size, output size, message size, iteration work, source mapping, source context, or a non-UTF-8 byte slice. An unsupported expression names that expression. A supported macro expression is expanded; this note is not a Dynare refusal. Official macro Errors keep precedence. A limit stops later directives in that root, including enclosing files and loops. Source mapping or source context means the emitted text cannot retain the required written-file proof. A non-UTF-8 byte slice cannot cross a text or include-path contract; internal byte length and indexing still work. Model checks that need the expanded text were withheld, and the status hover under Dynare: incomplete repeats each retained reason.\n\n**Next step**\n\nShrink the named macro expression, or run the official Dynare preprocessor for its full expansion.",
+        body: "Dygnosis stopped this macro expansion. A limit note names that limit: expression depth, value depth, value size, execution depth, string size, range size, collection size, output size, message size, iteration work, source mapping, source context, or a non-UTF-8 byte slice. An unsupported expression names that expression. A supported macro expression is expanded; this note is not a Dynare refusal. Official macro Errors keep precedence. A limit stops later directives in that root, including enclosing files and loops. Source mapping or source context means the emitted text cannot retain the required written-file proof. A non-UTF-8 byte slice cannot cross a text or include-path contract; internal byte length and indexing still work. Model checks that need the expanded text were withheld, and the status hover under Dynare: incomplete repeats each retained reason.\n\n**Next step**\n\nFor an iteration-work stop, adjust **Dynare: Macro Work Limit** in Settings or `macro_work_limit` in the MCP request. Other limits remain separate. Reduce the work that reaches the named bound, or run the official Dynare preprocessor for its full expansion.",
         kind: ExplainKind::Added,
     }),
     ("W010", ExplainEntry {
@@ -227,7 +227,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W061", ExplainEntry {
         title: "Ambiguous include parent context",
-        body: "The active include file is reachable from more than one parent model, so the editor cannot tell which parent's declarations apply.\n\n**Fix**\n\nOpen the intended parent `.mod` file.",
+        body: "The include file belongs to more than one model, so its declarations depend on the selected model.\n\n**Fix**\n\nIn VS Code, run **Dygnosis: Choose model owner** from the helper file. In another client, inspect the intended parent model directly.",
         kind: ExplainKind::Added,
     }),
     ("E090", ExplainEntry {

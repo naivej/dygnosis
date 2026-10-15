@@ -1,6 +1,6 @@
 {
-  "version": "0.11.25",
-  "fingerprint": "55dc800c29ff7e0e11f8ddfa61e12227b6c855f1046f05a6b58954b4530070a2",
+  "version": "0.11.26",
+  "fingerprint": "b42ad2d7818e47c9a656ea4de103e93bc26fd4f5b7f6e27c2d68b71bf7cff04d",
   "tools": [
     {
       "name": "dynare_diagnose",
@@ -53,6 +53,11 @@
               "compact"
             ],
             "type": "string"
+          },
+          "MacroWorkLimit": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
           },
           "SourceInput": {
             "oneOf": [
@@ -245,6 +250,15 @@
               "null"
             ]
           },
+          "macro_work_limit": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MacroWorkLimit"
+              }
+            ],
+            "default": 2000000,
+            "description": "Finite macro work units per checked root, from 1 to 100000000. Omission uses the default. Source, output, value-size and depth bounds remain separate."
+          },
           "page_size": {
             "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
@@ -292,7 +306,7 @@
     },
     {
       "name": "dynare_model_info",
-      "description": "Inspect model names, counts, timing and local definitions. Select summary, declarations, assignments, model_locals, statements, blocks, includes or scope sections. For large saved models use source.kind=disk, detail=compact, selected sections and an explicit page_size, for example 10. Compact detail alone does not limit rows. Read selection.collections counts and request selection.continuation only when more rows are needed. Assignment values are proven at their execution positions; unknown values stay null. Counts describe written equations before Dynare transformations. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. Single-model tools accept source text/map/disk or legacy supplied inputs. Maps use exact keys and no disk fallback. Coordinates are one-based Unicode scalars, with exclusive ends. Limits: 1,000,000 bytes per file, 8 MiB source/expansion/output, 256 files or lookup candidates per request, 64 owners, 1,000,000 macro work units, 1–1000 rows per page. No numerical execution.",
+      "description": "Inspect model names, counts, timing and local definitions. Select summary, declarations, assignments, model_locals, statements, blocks, includes or scope sections. For large saved models use source.kind=disk, detail=compact, selected sections and an explicit page_size, for example 10. Compact detail alone does not limit rows. Read selection.collections counts and request selection.continuation only when more rows are needed. Assignment values are proven at their execution positions; unknown values stay null. Counts describe written equations before Dynare transformations. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. Single-model tools accept source text/map/disk or legacy supplied inputs. Maps use exact keys and no disk fallback. Coordinates are one-based Unicode scalars, with exclusive ends. Limits: 1,000,000 bytes per file, 8 MiB source/expansion/output, 256 files or lookup candidates per request, 64 owners, 1–1000 rows per page. macro_work_limit selects a finite allowance per checked root; other bounds remain separate. No numerical execution.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -341,6 +355,11 @@
               "compact"
             ],
             "type": "string"
+          },
+          "MacroWorkLimit": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
           },
           "SourceInput": {
             "oneOf": [
@@ -519,6 +538,15 @@
               "null"
             ]
           },
+          "macro_work_limit": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MacroWorkLimit"
+              }
+            ],
+            "default": 2000000,
+            "description": "Finite macro work units per checked root, from 1 to 100000000. Omission uses the default. Source, output, value-size and depth bounds remain separate."
+          },
           "page_size": {
             "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
@@ -570,6 +598,11 @@
               "compact"
             ],
             "type": "string"
+          },
+          "MacroWorkLimit": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
           },
           "RepositorySelector": {
             "oneOf": [
@@ -830,6 +863,15 @@
             },
             "type": "array"
           },
+          "macro_work_limit": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MacroWorkLimit"
+              }
+            ],
+            "default": 2000000,
+            "description": "Finite macro work units applied separately to Before and After, from 1 to 100000000. Omission uses the default; source and comparison limits are independent."
+          },
           "page_size": {
             "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
@@ -926,6 +968,11 @@
               "compact"
             ],
             "type": "string"
+          },
+          "MacroWorkLimit": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
           },
           "SourceInput": {
             "oneOf": [
@@ -1268,6 +1315,15 @@
               "null"
             ]
           },
+          "macro_work_limit": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MacroWorkLimit"
+              }
+            ],
+            "default": 2000000,
+            "description": "Finite macro work units per checked root, from 1 to 100000000. Omission uses the default. Source, output, value-size and depth bounds remain separate."
+          },
           "occurrences": {
             "description": "Return separate expanded occurrences beside deduplicated written locations.",
             "type": [
@@ -1333,7 +1389,7 @@
     },
     {
       "name": "dynare_rename",
-      "description": "Propose a complete semantic Rename without writing files. Select exactly one old_name, target or binding_id. Collisions, incomplete inputs, generated names and incompatible checked owners refuse the whole proposal. Literal endogenous/mcp tag names retain surrounding quotes and text. Default leading content is rewritten text or a changed-file map; the canonical object includes complete edits and guards. changed means proposed text changed. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. proposal.inputs contains guards for every checked file and missing lookup candidate; text_sha256 hashes original UTF-8 text, and missing candidates have exists=false with null hashes. proposal.edits contains original-source ranges, expected_text and new_text. proposal.revision binds these inputs, source_policy, checked_owners and include_dirs. Recheck saved disk inputs with expected_revision, verify all guards and expected text, then apply the complete proposal with external file tools. Proposals are atomic and do not reserve files. Identities require their original expected_revision.",
+      "description": "Propose a complete semantic Rename without writing files. Select exactly one old_name, target or binding_id. Collisions, incomplete inputs, generated names and incompatible checked owners refuse the whole proposal. Literal endogenous/mcp tag names retain surrounding quotes and text. Default leading content is rewritten text or a changed-file map; the canonical object includes complete edits and guards. changed means proposed text changed. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. proposal.inputs contains guards for every checked file and missing lookup candidate; text_sha256 hashes original UTF-8 text, and missing candidates have exists=false with null hashes. proposal.edits contains original-source ranges, expected_text and new_text. proposal.revision binds these inputs, source_policy, checked_owners, include_dirs and macro_work_limit. Recheck saved disk inputs with expected_revision, verify all guards and expected text, then apply the complete proposal with external file tools. Proposals are atomic and do not reserve files. Identities require their original expected_revision.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -1382,6 +1438,11 @@
               "compact"
             ],
             "type": "string"
+          },
+          "MacroWorkLimit": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
           },
           "SourceInput": {
             "oneOf": [
@@ -1717,6 +1778,15 @@
               "null"
             ]
           },
+          "macro_work_limit": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MacroWorkLimit"
+              }
+            ],
+            "default": 2000000,
+            "description": "Finite macro work units per checked root, from 1 to 100000000. Omission uses the default. Source, output, value-size and depth bounds remain separate."
+          },
           "new_name": {
             "description": "Legal, non-reserved replacement identifier. Rename returns a proposal and never writes files.",
             "type": [
@@ -1785,7 +1855,7 @@
     },
     {
       "name": "dynare_auto_fix",
-      "description": "Propose proven stored diagnostic fixes, optionally selected by code, diagnostic_id or written target. Each fix must repair its owning diagnostic. The result states applied and skipped work and diagnostics remaining in proposed source. No files are written. Default leading items retain resulting text and outcome details. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. proposal.inputs contains guards for every checked file and missing lookup candidate; text_sha256 hashes original UTF-8 text, and missing candidates have exists=false with null hashes. proposal.edits contains original-source ranges, expected_text and new_text. proposal.revision binds these inputs, source_policy, checked_owners and include_dirs. Recheck saved disk inputs with expected_revision, verify all guards and expected text, then apply the complete proposal with external file tools. Proposals are atomic and do not reserve files. Identities require their original expected_revision.",
+      "description": "Propose proven stored diagnostic fixes, optionally selected by code, diagnostic_id or written target. Each fix must repair its owning diagnostic. The result states applied and skipped work and diagnostics remaining in proposed source. No files are written. Default leading items retain resulting text and outcome details. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. proposal.inputs contains guards for every checked file and missing lookup candidate; text_sha256 hashes original UTF-8 text, and missing candidates have exists=false with null hashes. proposal.edits contains original-source ranges, expected_text and new_text. proposal.revision binds these inputs, source_policy, checked_owners, include_dirs and macro_work_limit. Recheck saved disk inputs with expected_revision, verify all guards and expected text, then apply the complete proposal with external file tools. Proposals are atomic and do not reserve files. Identities require their original expected_revision.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -1834,6 +1904,11 @@
               "compact"
             ],
             "type": "string"
+          },
+          "MacroWorkLimit": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
           },
           "SourceInput": {
             "oneOf": [
@@ -2053,6 +2128,15 @@
               "object",
               "null"
             ]
+          },
+          "macro_work_limit": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MacroWorkLimit"
+              }
+            ],
+            "default": 2000000,
+            "description": "Finite macro work units per checked root, from 1 to 100000000. Omission uses the default. Source, output, value-size and depth bounds remain separate."
           },
           "page_size": {
             "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
@@ -2391,6 +2475,11 @@
             ],
             "type": "string"
           },
+          "MacroWorkLimit": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
+          },
           "ScopedEquation": {
             "properties": {
               "dimension": {
@@ -2662,6 +2751,15 @@
               "null"
             ]
           },
+          "macro_work_limit": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MacroWorkLimit"
+              }
+            ],
+            "default": 2000000,
+            "description": "Finite macro work units per checked root, from 1 to 100000000. Omission uses the default. Source, output, value-size and depth bounds remain separate."
+          },
           "name": {
             "description": "Exact equation display-name filter, or code/catalog text filter where documented.",
             "type": [
@@ -2791,6 +2889,11 @@
               "compact"
             ],
             "type": "string"
+          },
+          "MacroWorkLimit": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
           },
           "SourceInput": {
             "oneOf": [
@@ -2969,6 +3072,15 @@
               "null"
             ]
           },
+          "macro_work_limit": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MacroWorkLimit"
+              }
+            ],
+            "default": 2000000,
+            "description": "Finite macro work units per checked root, from 1 to 100000000. Omission uses the default. Source, output, value-size and depth bounds remain separate."
+          },
           "page_size": {
             "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
@@ -3110,6 +3222,11 @@
               "end_line"
             ],
             "type": "object"
+          },
+          "MacroWorkLimit": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
           },
           "SourceInput": {
             "oneOf": [
@@ -3317,6 +3434,15 @@
             ],
             "description": "Whole-line formatting or expanded-text selection, one-based and inclusive."
           },
+          "macro_work_limit": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MacroWorkLimit"
+              }
+            ],
+            "default": 2000000,
+            "description": "Finite macro work units per checked root, from 1 to 100000000. Omission uses the default. Source, output, value-size and depth bounds remain separate."
+          },
           "page_size": {
             "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
@@ -3357,7 +3483,7 @@
     },
     {
       "name": "dynare_format",
-      "description": "Propose whitespace formatting for the root or selected source file. line_range selects whole lines, one-based and inclusive; reversed/out-of-file ranges are input errors. Preserves native MATLAB, verbatim layout and source outside the selected lines. formatIndent is tab or one to eight spaces. No file is written. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. proposal.inputs contains guards for every checked file and missing lookup candidate; text_sha256 hashes original UTF-8 text, and missing candidates have exists=false with null hashes. proposal.edits contains original-source ranges, expected_text and new_text. proposal.revision binds these inputs, source_policy, checked_owners and include_dirs. Recheck saved disk inputs with expected_revision, verify all guards and expected text, then apply the complete proposal with external file tools. Proposals are atomic and do not reserve files. Identities require their original expected_revision.",
+      "description": "Propose whitespace formatting for the root or selected source file. line_range selects whole lines, one-based and inclusive; reversed/out-of-file ranges are input errors. Preserves native MATLAB, verbatim layout and source outside the selected lines. formatIndent is tab or one to eight spaces. No file is written. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. proposal.inputs contains guards for every checked file and missing lookup candidate; text_sha256 hashes original UTF-8 text, and missing candidates have exists=false with null hashes. proposal.edits contains original-source ranges, expected_text and new_text. proposal.revision binds these inputs, source_policy, checked_owners, include_dirs and macro_work_limit. Recheck saved disk inputs with expected_revision, verify all guards and expected text, then apply the complete proposal with external file tools. Proposals are atomic and do not reserve files. Identities require their original expected_revision.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -3427,6 +3553,11 @@
               "end_line"
             ],
             "type": "object"
+          },
+          "MacroWorkLimit": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
           },
           "SourceInput": {
             "oneOf": [
@@ -3626,6 +3757,15 @@
             ],
             "description": "Whole-line formatting or expanded-text selection, one-based and inclusive."
           },
+          "macro_work_limit": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MacroWorkLimit"
+              }
+            ],
+            "default": 2000000,
+            "description": "Finite macro work units per checked root, from 1 to 100000000. Omission uses the default. Source, output, value-size and depth bounds remain separate."
+          },
           "page_size": {
             "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
@@ -3715,6 +3855,11 @@
               "compact"
             ],
             "type": "string"
+          },
+          "MacroWorkLimit": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
           },
           "ScopedEquation": {
             "properties": {
@@ -3943,6 +4088,15 @@
               "null"
             ]
           },
+          "macro_work_limit": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MacroWorkLimit"
+              }
+            ],
+            "default": 2000000,
+            "description": "Finite macro work units per checked root, from 1 to 100000000. Omission uses the default. Source, output, value-size and depth bounds remain separate."
+          },
           "names": {
             "default": [],
             "description": "Extraction name selectors combine with OR; names and tag filters combine with AND.",
@@ -4010,6 +4164,11 @@
               "compact"
             ],
             "type": "string"
+          },
+          "MacroWorkLimit": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "oneOf": [
@@ -4107,6 +4266,15 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "macro_work_limit": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MacroWorkLimit"
+              }
+            ],
+            "default": 2000000,
+            "description": "Finite macro work units applied separately to each checked root, from 1 to 100000000. Omission uses the default; source and batch limits are independent."
           },
           "page_size": {
             "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
@@ -4220,6 +4388,11 @@
               "compact"
             ],
             "type": "string"
+          },
+          "MacroWorkLimit": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
           },
           "SourceInput": {
             "oneOf": [
@@ -4555,6 +4728,15 @@
               "null"
             ]
           },
+          "macro_work_limit": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MacroWorkLimit"
+              }
+            ],
+            "default": 2000000,
+            "description": "Finite macro work units per checked root, from 1 to 100000000. Omission uses the default. Source, output, value-size and depth bounds remain separate."
+          },
           "page_size": {
             "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
@@ -4613,7 +4795,7 @@
     },
     {
       "name": "dynare_code_actions",
-      "description": "List available diagnostic fixes, equation tags, long names and commented shock templates at a written target. Each action is a separate complete proposal. Select action_id with expected_revision to return that action's top-level proposal; alternatives are not combined. No files are written. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. proposal.inputs contains guards for every checked file and missing lookup candidate; text_sha256 hashes original UTF-8 text, and missing candidates have exists=false with null hashes. proposal.edits contains original-source ranges, expected_text and new_text. proposal.revision binds these inputs, source_policy, checked_owners and include_dirs. Recheck saved disk inputs with expected_revision, verify all guards and expected text, then apply the complete proposal with external file tools. Proposals are atomic and do not reserve files. Identities require their original expected_revision.",
+      "description": "List available diagnostic fixes, equation tags, long names and commented shock templates at a written target. Each action is a separate complete proposal. Select action_id with expected_revision to return that action's top-level proposal; alternatives are not combined. No files are written. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. proposal.inputs contains guards for every checked file and missing lookup candidate; text_sha256 hashes original UTF-8 text, and missing candidates have exists=false with null hashes. proposal.edits contains original-source ranges, expected_text and new_text. proposal.revision binds these inputs, source_policy, checked_owners, include_dirs and macro_work_limit. Recheck saved disk inputs with expected_revision, verify all guards and expected text, then apply the complete proposal with external file tools. Proposals are atomic and do not reserve files. Identities require their original expected_revision.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -4662,6 +4844,11 @@
               "compact"
             ],
             "type": "string"
+          },
+          "MacroWorkLimit": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
           },
           "SourceInput": {
             "oneOf": [
@@ -4895,6 +5082,15 @@
               "object",
               "null"
             ]
+          },
+          "macro_work_limit": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MacroWorkLimit"
+              }
+            ],
+            "default": 2000000,
+            "description": "Finite macro work units per checked root, from 1 to 100000000. Omission uses the default. Source, output, value-size and depth bounds remain separate."
           },
           "page_size": {
             "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
@@ -6967,7 +7163,7 @@
       "code": "I211",
       "kind": "added",
       "title": "Macro expansion incomplete",
-      "markdown": "### I211: Macro expansion incomplete\n\nDygnosis stopped this macro expansion. A limit note names that limit: expression depth, value depth, execution depth, string size, range size, collection size, output size, message size, iteration work, source mapping, source context, or a non-UTF-8 byte slice. An unsupported expression names that expression. A supported macro expression is expanded; this note is not a Dynare refusal. Official macro Errors keep precedence. A limit stops later directives in that root, including enclosing files and loops. Source mapping or source context means the emitted text cannot retain the required written-file proof. A non-UTF-8 byte slice cannot cross a text or include-path contract; internal byte length and indexing still work. Model checks that need the expanded text were withheld, and the status hover under Dynare: incomplete repeats each retained reason.\n\n**Next step**\n\nShrink the named macro expression, or run the official Dynare preprocessor for its full expansion.\n"
+      "markdown": "### I211: Macro expansion incomplete\n\nDygnosis stopped this macro expansion. A limit note names that limit: expression depth, value depth, value size, execution depth, string size, range size, collection size, output size, message size, iteration work, source mapping, source context, or a non-UTF-8 byte slice. An unsupported expression names that expression. A supported macro expression is expanded; this note is not a Dynare refusal. Official macro Errors keep precedence. A limit stops later directives in that root, including enclosing files and loops. Source mapping or source context means the emitted text cannot retain the required written-file proof. A non-UTF-8 byte slice cannot cross a text or include-path contract; internal byte length and indexing still work. Model checks that need the expanded text were withheld, and the status hover under Dynare: incomplete repeats each retained reason.\n\n**Next step**\n\nFor an iteration-work stop, adjust **Dynare: Macro Work Limit** in Settings or `macro_work_limit` in the MCP request. Other limits remain separate. Reduce the work that reaches the named bound, or run the official Dynare preprocessor for its full expansion.\n"
     },
     {
       "code": "W010",
@@ -7063,7 +7259,7 @@
       "code": "W061",
       "kind": "added",
       "title": "Ambiguous include parent context",
-      "markdown": "### W061: Ambiguous include parent context\n\nThe active include file is reachable from more than one parent model, so the editor cannot tell which parent's declarations apply.\n\n**Fix**\n\nOpen the intended parent `.mod` file.\n"
+      "markdown": "### W061: Ambiguous include parent context\n\nThe include file belongs to more than one model, so its declarations depend on the selected model.\n\n**Fix**\n\nIn VS Code, run **Dygnosis: Choose model owner** from the helper file. In another client, inspect the intended parent model directly.\n"
     },
     {
       "code": "W091",

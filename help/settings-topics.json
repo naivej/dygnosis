@@ -1,6 +1,7 @@
 {
   "dynare.serverPath": "troubleshoot",
   "dynare.searchPaths": "model-and-includes",
+  "dynare.macroWorkLimit": "effective-model",
   "dynare.formatIndent": "edit-models",
   "dynare.outline.sections": "navigate-code",
   "dynare.outline.equationNumbers": "navigate-code",

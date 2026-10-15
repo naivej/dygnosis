@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.25",
+  "version": "0.11.26",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -384,9 +384,9 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 100000000,
-            "default": 1000000,
+            "default": 2000000,
             "scope": "resource",
-            "description": "Maximum macro work units for each checked model root. Increase this finite limit for large macro programs. Zero does not disable it. Output size, source size, value size and nesting limits remain separate. An included file uses its selected model root's value."
+            "description": "Macro work allowance for each checked model root. Increase this finite limit for large macro programs. Zero does not disable it. Output size, source size, value size and nesting limits remain separate. An included file uses its selected model root's value."
           },
           "dynare.formatIndent": {
             "oneOf": [

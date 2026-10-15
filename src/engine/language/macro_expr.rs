@@ -4649,8 +4649,10 @@ mod tests {
         let mut defines = HashMap::new();
         defines.insert("a".into(), MacroVal::Text(chunk.clone()));
         defines.insert("b".into(), MacroVal::Text(chunk));
+        // Charge the copies against an explicit allowance before string joining.
+        let mut budget = MacroBudget::with_limit(MacroWorkLimit::new(1_000_000).unwrap(), None);
         assert!(matches!(
-            eval_macro_expr("a+b", &mut defines),
+            eval_macro_expr_budget("a+b", &mut defines, &mut budget),
             Err(MacroEvalError::Limit("iteration work"))
         ));
         let mut defines = HashMap::new();

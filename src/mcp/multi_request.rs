@@ -1498,7 +1498,10 @@ mod tests {
                 .unwrap_or_else(|| {
                     panic!("an applied macro work stop must be a canonical limit receipt: {result}")
                 });
-            assert_eq!(receipt["ceiling"], 1_000_000);
+            assert_eq!(
+                receipt["ceiling"],
+                crate::engine::macro_work::MacroWorkLimit::DEFAULT
+            );
             assert_eq!(receipt["unit"], "work units");
             assert!(receipt["omitted"].is_string());
         }

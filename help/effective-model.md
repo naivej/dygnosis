@@ -9,6 +9,9 @@ regions. [Editor actions](settings:dynare.editorActions) controls where model
 actions appear in title bars and context menus; commands remain in the Command
 Palette.
 
+For large macro programs, you can adjust the
+[macro work limit](settings:dynare.macroWorkLimit) for their model root.
+
 | Action | Result |
 |---|---|
 | Dygnosis: Go to written source | With the preview active, opens the line in your model file that produced the text at the cursor or selection. A generated name such as `beta_1` leads to `beta_@{j}`. |

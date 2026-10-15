@@ -934,7 +934,10 @@ mod tests {
             .find(|limit| limit["limit"] == "iteration work")
             .unwrap();
         assert_eq!(receipt["code"], "MACRO_LIMIT");
-        assert_eq!(receipt["ceiling"], 1_000_000);
+        assert_eq!(
+            receipt["ceiling"],
+            crate::engine::macro_work::MacroWorkLimit::DEFAULT
+        );
         assert_eq!(receipt["root"], "main.mod");
         assert!(result.get("semantic").is_none());
     }

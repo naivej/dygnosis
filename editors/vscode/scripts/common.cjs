@@ -151,6 +151,10 @@ async function probeMcp(executable, version) {
     }
     const info = results.dynare_model_info.data;
     assert.equal(info.n_endogenous, 1); assert.equal(info.n_equations, 1);
+    // Guards a packaged engine using a different default from Native Settings.
+    const manifest = JSON.parse(await fs.readFile(path.join(extensionRoot, "package.json"), "utf8"));
+    const workDefault = Object.assign({}, ...manifest.contributes.configuration.map(group => group.properties))["dynare.macroWorkLimit"].default;
+    assert.equal(results.dynare_model_info.inputs[0].macro_work_limit, workDefault);
     const reference = JSON.parse(await fs.readFile(path.join(productRoot, "help/reference.json"), "utf8"));
     assert.deepEqual(list.tools, reference.tools, "Packaged MCP metadata differs from Help");
     assert.match(JSON.stringify(results.dynare_explain.data), /E001/);

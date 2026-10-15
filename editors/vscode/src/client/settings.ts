@@ -45,7 +45,7 @@ export function engineSettings(resource: vscode.Uri | undefined, log: Log) {
   const formatIndent = rawIndent === "tab" || (typeof rawIndent === "number" && Number.isInteger(rawIndent) && rawIndent >= 1 && rawIndent <= 8) ? rawIndent : "tab";
   if (formatIndent !== rawIndent) log("Invalid dynare.formatIndent; using a tab.");
   return {
-    searchPaths, macroWorkLimit: valueSetting("macroWorkLimit", resource, 1_000_000), formatIndent, projectExcludePaths: stringListSetting("projectExcludePaths", resource, log),
+    searchPaths, macroWorkLimit: valueSetting("macroWorkLimit", resource, 2_000_000), formatIndent, projectExcludePaths: stringListSetting("projectExcludePaths", resource, log),
     nameDetails: {
       longName: booleanSetting("nameDetails.longName", resource, true, log),
       tex: booleanSetting("nameDetails.tex", resource, true, log),

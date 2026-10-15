@@ -25,6 +25,11 @@ test("loose files use user defaults while folders receive complete workspace set
   const snapshot = configurationSnapshot(message => logged.push(message)).dynare.configuration;
   assert.deepEqual(snapshot.loose.searchPaths, ["user"]);
   assert.equal(snapshot.loose.formatIndent, 2);
+  // Guards a client fallback that silently overrides the advertised default.
+  const manifest = require("../package.json");
+  const workDefault = Object.assign({}, ...manifest.contributes.configuration.map(group => group.properties))["dynare.macroWorkLimit"].default;
+  assert.equal(snapshot.loose.macroWorkLimit, workDefault);
+  assert.equal(snapshot.folders[0].settings.macroWorkLimit, workDefault);
   assert.equal(snapshot.loose.nameDetails.tex, false);
   assert.deepEqual(snapshot.folders[0].settings.searchPaths, ["workspace"]);
   assert.equal(snapshot.folders[0].settings.formatIndent, 6);

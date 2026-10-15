@@ -21,7 +21,7 @@ impl JsonSchema for MacroWorkLimit {
 }
 
 impl MacroWorkLimit {
-    pub const DEFAULT: usize = 1_000_000;
+    pub const DEFAULT: usize = 2_000_000;
     pub const MAX: usize = 100_000_000;
 
     pub fn new(value: u64) -> Result<Self, &'static str> {
