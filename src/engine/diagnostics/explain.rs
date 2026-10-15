@@ -191,8 +191,8 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         kind: ExplainKind::Shared,
     }),
     ("W022", ExplainEntry {
-        title: "Parameter not used in the model block",
-        body: "A parameter has no surviving use in aggregate dynamic or static-only equations, live model-local definitions, heterogeneous equations, or `steady_state_model`. Parameters assigned as targets in `steady_state_model` count as used. Calibration, `initval`, shock expressions, and the `discount` or `growth` options of `pac_model` do not count as model uses. A parameter can still be used in these other places. The check also applies to a complete file without a `model` block. An included declaration keeps the warning in that file, once for each requested root analysis.\n\n**Warrant**\n\nDynare accepts and warns: `Parameter(s) unused_p not used in the model`. Dygnosis adds `block` to make the checked scope clear. It reports one warning per written unused parameter and omits generated names such as `optimal_policy_discount_factor` to keep each warning on a written declaration.",
+        title: "Parameter not used in model equations or steady_state_model",
+        body: "A parameter has no surviving use in aggregate dynamic or static-only equations, live model-local definitions, heterogeneous equations, or `steady_state_model`. Parameters assigned as targets in `steady_state_model` count as used. Calibration, `initval`, shock expressions, and the `discount` or `growth` options of `pac_model` do not count as model uses. A parameter can still be used in these other places. The check also applies to a complete file without a `model` block. An included declaration keeps the warning in that file, once for each requested root analysis.\n\n**Warrant**\n\nDynare accepts and warns: `Parameter(s) unused_p not used in the model`. Dygnosis names model equations and `steady_state_model` to make the checked scope clear. It reports one warning per written unused parameter and omits generated names such as `optimal_policy_discount_factor` to keep each warning on a written declaration.",
         kind: ExplainKind::Shared,
     }),
     ("W042", ExplainEntry {

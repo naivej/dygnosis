@@ -4,8 +4,8 @@
 
 - W022 again reports a parameter used only by `pac_model`'s `discount` option,
   as Dynare does. Parameters used only by `growth` also warn. The message now
-  says `Parameter(s) g not used in the model block` to clarify that the
-  parameter can be used elsewhere.
+  says `Parameter(s) g not used in model equations or steady_state_model` to
+  name the full checked scope. The parameter can still be used elsewhere.
 - Large indexed macro tables copy only the selected values. The unmodified
   basic and growth DynareTransformationEngine examples now complete.
 - Configure macro work with `dynare.macroWorkLimit` in the editor or

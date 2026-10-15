@@ -82,7 +82,7 @@ fn usage_parse_constructor_cancellations_match_pinned_dynare() {
         assert_eq!(rows.len(), 1, "{term}: {rows:?}");
         assert_eq!(
             rows[0].message,
-            "Parameter(s) p not used in the model block"
+            "Parameter(s) p not used in model equations or steady_state_model"
         );
         assert_eq!(rows[0].severity, Severity::Warning);
         assert_eq!(
@@ -255,7 +255,7 @@ fn usage_w022_roots_match_official_consumers() {
         assert_eq!(rows.len(), 1, "{source}: {rows:?}");
         assert_eq!(
             rows[0].message,
-            "Parameter(s) p not used in the model block"
+            "Parameter(s) p not used in model equations or steady_state_model"
         );
     }
     for source in ["var y; parameters p; p=1; model; y=p; end;", "var y; parameters p; p=1; model; [static] y=p; [dynamic] y=0; end;", "var y; parameters p; p=1; model; y=0; end; steady_state_model; y=p; end;", "var y; parameters p; model; y=0; end; steady_state_model; p=1; y=0; end;", "var y; parameters p; model; y=0; end; steady_state_model; [y,p]=helper(1); end;", "heterogeneity_dimension d; var(heterogeneity=d) yh; parameters p; p=1; model(heterogeneity=d); yh=p; end;"] {
@@ -401,7 +401,7 @@ fn pac_model_only_parameters_warn_until_used_in_model_equations() {
                 for (row, parameter) in rows.iter().zip(expected) {
                     assert_eq!(
                         row.message,
-                        format!("Parameter(s) {parameter} not used in the model block")
+                        format!("Parameter(s) {parameter} not used in model equations or steady_state_model")
                     );
                     assert_eq!(row.severity, Severity::Warning);
                     assert_eq!(

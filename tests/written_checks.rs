@@ -70,7 +70,7 @@ fn complete_no_model_roots_keep_check_before_transform_and_writing_information()
         assert_eq!(warning.severity, dygnosis::Severity::Warning);
         assert_eq!(
             warning.message,
-            "Parameter(s) alppha not used in the model block"
+            "Parameter(s) alppha not used in model equations or steady_state_model"
         );
         assert_eq!(
             &source[warning.span.start as usize..warning.span.end as usize],

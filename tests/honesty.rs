@@ -598,7 +598,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         fixture: "w010/w022_unused.mod",
         kind: HonestyKind::Warning,
         their_needle: "not used in the model",
-        our_needle: "not used in the model",
+        our_needle: "not used in model equations or steady_state_model",
         stage: JsonStage::Check,
     },
     HonestyRow {
@@ -4136,7 +4136,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         fixture: "d_ms/quiet_option_shapes.mod",
         kind: HonestyKind::Warning,
         their_needle: "not used in the model",
-        our_needle: "not used in the model",
+        our_needle: "not used in model equations or steady_state_model",
         stage: JsonStage::Check,
     },
     HonestyRow {
@@ -4144,7 +4144,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         fixture: "d_ms/quiet_shape_neighbours.mod",
         kind: HonestyKind::Warning,
         their_needle: "not used in the model",
-        our_needle: "not used in the model",
+        our_needle: "not used in model equations or steady_state_model",
         stage: JsonStage::Check,
     },
     HonestyRow {
@@ -4152,7 +4152,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         fixture: "d_ms/quiet_handed_over_statement_shapes.mod",
         kind: HonestyKind::Warning,
         their_needle: "not used in the model",
-        our_needle: "not used in the model",
+        our_needle: "not used in model equations or steady_state_model",
         stage: JsonStage::Check,
     },
     HonestyRow {
@@ -4160,7 +4160,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         fixture: "d_ms/e001_native_assign_pair.mod",
         kind: HonestyKind::Warning,
         their_needle: "not used in the model",
-        our_needle: "not used in the model",
+        our_needle: "not used in model equations or steady_state_model",
         stage: JsonStage::Check,
     },
     HonestyRow {
@@ -4168,7 +4168,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         fixture: "d_ms/native_assign_heads.mod",
         kind: HonestyKind::Warning,
         their_needle: "not used in the model",
-        our_needle: "not used in the model",
+        our_needle: "not used in model equations or steady_state_model",
         stage: JsonStage::Check,
     },
     HonestyRow {
@@ -4306,7 +4306,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         fixture: "d_ms/quiet_native_statement_boundaries.mod",
         kind: HonestyKind::Warning,
         their_needle: "not used in the model",
-        our_needle: "not used in the model",
+        our_needle: "not used in model equations or steady_state_model",
         stage: JsonStage::Check,
     },
     HonestyRow {
@@ -4314,7 +4314,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         fixture: "d_ms/quiet_skipped_block_bodies.mod",
         kind: HonestyKind::Warning,
         their_needle: "not used in the model",
-        our_needle: "not used in the model",
+        our_needle: "not used in model equations or steady_state_model",
         stage: JsonStage::Check,
     },
     HonestyRow {

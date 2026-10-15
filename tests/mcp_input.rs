@@ -573,7 +573,10 @@ fn slice21_checks_use_unsaved_root_and_include_text_on_the_wire() {
         .iter()
         .find(|d| d["code"] == "W022")
         .expect("unused p");
-    assert_eq!(p["message"], "Parameter(s) p not used in the model block");
+    assert_eq!(
+        p["message"],
+        "Parameter(s) p not used in model equations or steady_state_model"
+    );
     assert!(
         p["file"].is_null(),
         "root-owned diagnostics omit the file key"

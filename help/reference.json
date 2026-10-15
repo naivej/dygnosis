@@ -1,6 +1,6 @@
 {
   "version": "0.11.26",
-  "fingerprint": "5cb301de9b53de2ffd15be179ba5a71e1fbbd1fe5f6e3ff7779afa86ac8b546f",
+  "fingerprint": "e7f876d731383ac004a917a8454e0196adbdfc07f8f3104fd1ea3f882d8d3557",
   "tools": [
     {
       "name": "dynare_diagnose",
@@ -7198,8 +7198,8 @@
     {
       "code": "W022",
       "kind": "shared",
-      "title": "Parameter not used in the model block",
-      "markdown": "### W022: Parameter not used in the model block\n\nA parameter has no surviving use in aggregate dynamic or static-only equations, live model-local definitions, heterogeneous equations, or `steady_state_model`. Parameters assigned as targets in `steady_state_model` count as used. Calibration, `initval`, shock expressions, and the `discount` or `growth` options of `pac_model` do not count as model uses. A parameter can still be used in these other places. The check also applies to a complete file without a `model` block. An included declaration keeps the warning in that file, once for each requested root analysis.\n\n**Warrant**\n\nDynare accepts and warns: `Parameter(s) unused_p not used in the model`. Dygnosis adds `block` to make the checked scope clear. It reports one warning per written unused parameter and omits generated names such as `optimal_policy_discount_factor` to keep each warning on a written declaration.\n"
+      "title": "Parameter not used in model equations or steady_state_model",
+      "markdown": "### W022: Parameter not used in model equations or steady_state_model\n\nA parameter has no surviving use in aggregate dynamic or static-only equations, live model-local definitions, heterogeneous equations, or `steady_state_model`. Parameters assigned as targets in `steady_state_model` count as used. Calibration, `initval`, shock expressions, and the `discount` or `growth` options of `pac_model` do not count as model uses. A parameter can still be used in these other places. The check also applies to a complete file without a `model` block. An included declaration keeps the warning in that file, once for each requested root analysis.\n\n**Warrant**\n\nDynare accepts and warns: `Parameter(s) unused_p not used in the model`. Dygnosis names model equations and `steady_state_model` to make the checked scope clear. It reports one warning per written unused parameter and omits generated names such as `optimal_policy_discount_factor` to keep each warning on a written declaration.\n"
     },
     {
       "code": "W031",

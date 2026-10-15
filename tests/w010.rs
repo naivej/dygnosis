@@ -180,7 +180,7 @@ fn w010_unassigned_referenced_param() {
     );
     assert_eq!(
         by_code(&got, "W022").message,
-        "Parameter(s) orphan_p not used in the model block"
+        "Parameter(s) orphan_p not used in model equations or steady_state_model"
     );
 }
 
@@ -199,7 +199,7 @@ fn w010_and_w022_unassigned_unref_param() {
     assert_eq!(w022.severity, 2);
     assert!(w022
         .message
-        .contains("Parameter(s) orphan_p not used in the model block"));
+        .contains("Parameter(s) orphan_p not used in model equations or steady_state_model"));
     assert_last_ident(&text, w022, "parameters rho betta orphan_p;", "orphan_p");
 }
 
@@ -353,7 +353,7 @@ fn w022_param_used_only_in_stderr() {
     assert_eq!(got[0].code, "W022");
     assert_eq!(
         got[0].message,
-        "Parameter(s) sigma_z not used in the model block"
+        "Parameter(s) sigma_z not used in model equations or steady_state_model"
     );
 }
 
@@ -373,6 +373,6 @@ fn w022_param_used_only_in_initval() {
     assert_eq!(got[0].code, "W022");
     assert_eq!(
         got[0].message,
-        "Parameter(s) kss not used in the model block"
+        "Parameter(s) kss not used in model equations or steady_state_model"
     );
 }

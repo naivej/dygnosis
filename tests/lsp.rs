@@ -419,7 +419,10 @@ async fn slice21_checks_follow_unsaved_full_changes() {
         .iter()
         .find(|d| diag_code(d) == "W022")
         .expect("unused p after edit");
-    assert_eq!(p.message, "Parameter(s) p not used in the model block");
+    assert_eq!(
+        p.message,
+        "Parameter(s) p not used in model equations or steady_state_model"
+    );
     assert_eq!(p.severity, Some(DiagnosticSeverity::WARNING));
 
     service
