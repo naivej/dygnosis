@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use dygnosis::explain::{explain, known_codes, render_markdown};
 use dygnosis::span::{LineIndex, Position};
 use dygnosis::{
-    analyze, auto_fix, check_e060, check_e061, check_w061, check_w160, count_gap, dynare_auto_fix,
+    analyze, auto_fix, check_e061, check_w061, check_w160, count_gap, dynare_auto_fix,
     dynare_compare_models, dynare_diagnose, dynare_equations, dynare_expand, dynare_explain,
     dynare_extract, dynare_find_references, dynare_format, dynare_list_diagnostic_codes,
     dynare_list_options, dynare_model_info, dynare_related_files, dynare_rename, explain_equation,
@@ -449,7 +449,6 @@ fn workspace_own(active: &str, files: &HashMap<String, String>) -> Vec<Diagnosti
         Some(model) => {
             let mut diags = analyze(&model);
             let records = ws.include_records(active).cloned().unwrap_or_default();
-            diags.extend(check_e060(&records));
             diags.extend(check_e061(&records));
             diags.extend(check_w061(&mut ws, active));
             let companions = ws
