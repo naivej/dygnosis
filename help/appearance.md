@@ -1,53 +1,50 @@
 # Read labels, hints and colors
 
-Dygnosis uses colors, labels and value hints to make model code easier to read.
-Click a settings link below to open its control in VS Code. These settings
-apply to the displayed file and can differ by workspace folder.
+Dygnosis uses metadata labels, inline value hints, block shading and semantic
+colors to make models easier to read. Click any setting link below to open it
+in VS Code's Settings editor.
 
 ## Name details
 
-Hover over a declared name, select it in the suggestion list, or look at its
-entry in Outline to see its `long_name` and TeX label from the model file.
-[Long names](settings:dynare.nameDetails.longName) and [TeX names](settings:dynare.nameDetails.tex) can be hidden independently.
-For example, a TeX label `$\beta$` appears as text rather than a rendered formula.
+Hovering over a declared symbol, viewing it in the completion list, or browsing
+**Outline** shows its `long_name` and literal TeX label (such as `$\beta$`)
+from the model file. Toggle them independently with [Dynare › Name Details:
+Long Name](settings:dynare.nameDetails.longName) and [Dynare › Name Details:
+Tex](settings:dynare.nameDetails.tex).
 
 ## Block backgrounds
 
-The editor can shade the lines inside recognized Dynare blocks. The shading
-updates while you type. [Block tint](settings:dynare.blockTint.enabled) turns it
-on or off. Run **Dygnosis: Open Settings** and search for `blockTint` to choose
-**Off**, **Subtle** or **Model-strength** for individual block types.
-[Dimension overrides](settings:dynare.blockTint.heterogeneousModels) give named heterogeneity dimensions their own styles.
+Dygnosis shades recognized Dynare blocks while you edit. Toggle block shading
+with [Dynare › Block Tint: Enabled](settings:dynare.blockTint.enabled), or run
+**Dygnosis: Open Settings** and filter by `blockTint` under **Dygnosis:
+Appearance** to set individual block types to **Off**, **Subtle** or
+**Model-strength**.
 
-Colors follow the current theme. To set your own background colors, run
-**Dygnosis: Edit in settings.json** and add `dynare.blockTint.modelBackground`
-or `dynare.blockTint.subtleBackground` under `workbench.colorCustomizations`.
-Their high-contrast defaults are transparent.
+Use [Dynare › Block Tint: Heterogeneous
+Models](settings:dynare.blockTint.heterogeneousModels) to override the shading
+style for specific heterogeneity dimensions (for example `{"households":
+"off"}`).
 
 ## Expression value hints
 
-An assignment such as `beta = 1 / 1.04;` can show a small value hint beside the
-expression in the editor. A plain number such as `beta = 0.99;` needs no hint.
-Unknown inputs or MATLAB execution, except simple arithmetic, can make a
-value unavailable.
+Top-level parameter expressions such as `beta = 1 / 1.04;` show an inline value
+hint (`= 0.961538...`) when Dygnosis can evaluate the expression statically
+(plain numbers such as `beta = 0.99;` omit the hint).
 
-Turn [Value hints](settings:dynare.parameterValueHints) on or off to control
-these annotations. VS Code's `editor.inlayHints.enabled` setting must also
-permit them; search for that setting in the Settings editor.
+Toggle these hints with [Dynare: Parameter Value
+Hints](settings:dynare.parameterValueHints). VS Code's **Editor › Inlay Hints:
+Enabled** (`editor.inlayHints.enabled`) must also allow inlay hints.
 
 ## Custom colors
 
-Name colors can distinguish endogenous variables, exogenous variables and
-parameters. They depend on your theme and VS Code's
-`editor.semanticHighlighting.enabled` setting.
+Semantic highlighting distinguishes endogenous variables, exogenous variables,
+parameters and model-local variables, as well as declared dimensions, trends,
+external functions and named models. It follows your active color theme and VS
+Code's `editor.semanticHighlighting.enabled` setting. Native MATLAB lines and
+`verbatim` blocks keep their own highlighting.
 
-Accepted PAC and VAR syntax, macro directives, model operators, and declared
-dimensions, trends, external functions and named models also receive syntax or
-name highlighting. Native MATLAB and `verbatim` text keep their own language
-context.
-
-To change a name color, run **Dygnosis: Edit in settings.json** and put a rule
-under `editor.semanticTokenColorCustomizations`. For example:
+To customize symbol colors, run **Dygnosis: Edit in settings.json** and add
+rules under `editor.semanticTokenColorCustomizations`:
 
 ```json
 {
@@ -59,16 +56,21 @@ under `editor.semanticTokenColorCustomizations`. For example:
 }
 ```
 
-The rule's key selects which names it applies to. Use the keys below to choose
-other roles. Timing classes have no separate style by default.
-
 | Role | Semantic token selector |
 |---|---|
 | Endogenous variable | `dynareEndogenous:dynare` |
-| Exogenous variable, including deterministic exogenous | `dynareExogenous:dynare` |
+| Exogenous variable (including `varexo_det`) | `dynareExogenous:dynare` |
 | Parameter | `dynareParameter:dynare` |
 | Model-local variable | `dynareModelLocal:dynare` |
 | Forward-looking endogenous variable | `dynareEndogenous.forwardLooking:dynare` |
 | Predetermined endogenous variable | `dynareEndogenous.predetermined:dynare` |
 
-Mixed timing can carry both timing modifiers. Themes can display several roles alike.
+To customize background shading and comparison accent colors, add keys under
+`workbench.colorCustomizations` via **Dygnosis: Edit in settings.json**:
+
+| Theme color key | Used for |
+|---|---|
+| `dynare.blockTint.modelBackground` | Whole-line background for **Model-strength** blocks. |
+| `dynare.blockTint.subtleBackground` | Whole-line background for **Subtle** blocks. |
+| `dynare.effectiveModel.macroBackground` | Background highlight for macro-expanded ranges in the macro expansion preview. |
+| `dynare.diff.changedForeground` | Accent color for paired **Replaced** rows in **Dygnosis Changes**. |

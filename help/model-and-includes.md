@@ -2,105 +2,86 @@
 
 ## Model roots and includes
 
-A **model root** is the main `.mod` or `.dyn` file. A helper file can use macro
-values and declarations supplied by a model that includes it. That model root
-is the helper's **model owner**.
+A **model root** is a main `.mod` or `.dyn` file. An included file (such as an
+`.inc` file or a helper `.mod`/`.dyn` file) can use macro values and
+declarations from the parent model that includes it—its **model owner**.
 
-The editor uses these rules:
-
-| Known context | Editor behavior |
+| Context | Editor behavior |
 |---|---|
-| You chose a model owner | Use that owner while it still includes this file. |
-| You chose to treat this file as a model root | Check the `.mod` or `.dyn` file by itself. |
-| Exactly one owner is known | Use that owner automatically. |
-| Several owners are known | Ask you to choose when you run a model action. Background model features wait for that choice. |
-| No owner is known | Check a `.mod` or `.dyn` file by itself. Open the parent model to establish an include relationship. Other helper files need a known owner for full model features. |
+| Single known owner | Uses that parent model automatically. |
+| Several known owners | Shows **Dynare: choose model owner** on the status bar and waits for your choice before running model-wide features. |
+| Chosen model owner | Uses your chosen parent model while it still includes this file in the current session. |
+| Standalone `.mod` or `.dyn` | Checks the file as its own model root when no parent includes it, or after you run **Dygnosis: Treat this file as a model root**. |
+| Unowned `.inc` helper | Open the parent `.mod` or `.dyn` file first so Dygnosis can connect them. |
 
-To choose an owner, open the helper, press **Ctrl+Shift+P**, and run
-**Dygnosis: Choose model owner**. Select the parent model from the dropdown;
-each entry shows its file path. Run the command again to change the owner.
-To check a `.mod` or `.dyn` helper by itself, run
-**Dygnosis: Treat this file as a model root** from the Command Palette.
-Opening a helper through an include link or a model source jump also selects
-that link's model owner.
+To select or switch an owner for the active file, press `F1` and run
+**Dygnosis: Choose model owner**, then pick the parent model path from the
+dropdown. Following an `@#include` link or jumping to source from a model view
+also sets that model as the owner. To check an included `.mod` or `.dyn` file on
+its own instead, run **Dygnosis: Treat this file as a model root**.
 
-The choice controls editor diagnostics, definitions, references, Outline,
-model counts, equation navigation and the macro preview. Rename also checks
-the other known models that use files it would change. Unsaved edits update
-the chosen model's analysis. If an edit removes the include relationship, the
-editor resolves the context again. Closing the file's last editor tab in VS Code,
-restarting the server or changing workspace folders clears the choice; reopening
-uses the rules above.
+The selected owner controls editor diagnostics, definitions, references,
+**Outline**, status bar counts, equation navigation and macro expansion
+previews, and updates live as you edit.
 
-Project-wide checking remains separate. It checks each selected saved model
-root and reports counts for that root. Choosing a helper's editor owner does
-not remove the helper from the project's saved-model list.
-
-Related files include recognized include, parameter, data and external-function
-files. Hover over an include filename or a recognized file reference in the
-editor. If the file is found, VS Code shows a link that opens it; use the
-modifier key shown in the hover to follow the link.
-[Additional include directories](settings:dynare.searchPaths) extend the model
-root's file lookup. Relative paths use its workspace folder, or its directory
-for a loose saved file.
+Hover over an `@#include` path or a recognized parameter, data or
+external-function filename in the editor to open it through VS Code's document
+link. Add lookup folders in [Dynare: Search Paths](settings:dynare.searchPaths)
+(resolved relative to the workspace folder, or the model root's folder for a
+loose file).
 
 ## Model structure and counts
 
-The [model counts](settings:dynare.statusBar.enabled) appear as numbers beside
-variable and equation icons on the left of the status bar for the active `.mod`
-or `.dyn` file. Hover over those numbers to see counts under **Aggregate model
-before transformation** and each dimension name, such as **Heterogeneous model:
-households**. Click the numbers to open **Outline**.
-Each endogenous line in the hover includes
-static, predetermined, forward-looking and mixed counts, including zero.
-Screen readers announce the same counts.
+For the active `.mod` or `.dyn` file, the status bar shows endogenous,
+exogenous and equation counts beside their icons on the left. Hover over the
+counts to read the breakdown under **Aggregate model before transformation** and
+each **Heterogeneous model: `<dimension>`**, including static, predetermined,
+forward-looking and mixed endogenous counts. Click the status bar item to focus
+**Outline**.
 
-The [count setting](settings:dynare.statusBar.counts) chooses which counts
-appear and their order in the hover and on the status bar. Hiding
-endogenous also hides its class counts. These choices apply to the displayed
-file. Outline shows model structure and heterogeneity dimensions; variable
-hover and declaration detail show timing.
+If macro expansion or parsing is incomplete, the status bar item shows
+**Dynare: incomplete** and its hover explains the cause.
+
+Toggle the status bar item with [Dynare › Status Bar:
+Enabled](settings:dynare.statusBar.enabled) and choose which counts appear (and
+their order) in [Dynare › Status Bar: Counts](settings:dynare.statusBar.counts).
 
 ## Equations
 
-| Action | Available result |
+| Action | Result |
 |---|---|
-| Dygnosis: Jump to equation... in the Command Palette | Opens a searchable list of every counted equation in the active model, including unnamed equations. |
-| Click Jump to equation... above a model block | Opens a list of that block's counted equations, including equations repeated by macros. The [equation action](settings:dynare.codeLens.modelEquations) can be hidden. |
-| Click Find references above a declaration | Opens the references list for that name. If the declaration lists several names, choose one first. The [declaration action](settings:dynare.codeLens.declarationReferences) is optional. |
-| Click Expand macros above the first model block | Opens the macro preview. The [preview action](settings:dynare.codeLens.effectiveModel) is optional. |
+| **Dygnosis: Jump to equation...** in the Command Palette | Opens the **Jump to an equation before transformation** picker for every counted equation in the active model. |
+| Click **Jump to equation...** above a `model` block | Opens the equation picker filtered to that block ([Dynare › Code Lens: Model Equations](settings:dynare.codeLens.modelEquations)). |
+| Click **Find references** above a declaration | Runs **Find All References** for that symbol, or lets you pick a symbol when the declaration lists several ([Dynare › Code Lens: Declaration References](settings:dynare.codeLens.declarationReferences)). |
+| Click **Expand macros** above the first `model` block | Opens the macro expansion preview ([Dynare › Code Lens: Effective Model](settings:dynare.codeLens.effectiveModel)). |
 
-Each equation row shows its number and name, **Aggregate** or a dimension name,
-filename and line, and equation text. A macro loop can also show a value such as
-`j=1`. Type a number, name or part of the equation to filter the list. Choose a
-row to open the line in your model file.
+Each picker row shows `<number> · <name or Unnamed equation>`, **Aggregate** or
+**Dimension `<name>`**, `filename:line`, and the equation text (plus macro loop
+values such as `j=1`). Type a number, tag, symbol or expression fragment to
+filter the list, then press `Enter` to jump to that line.
 
-These clickable labels above code are called **CodeLens** in VS Code. To show
-them, enable **Editor: Code Lens** in Settings and the relevant Dygnosis setting.
+The clickable labels above blocks and declarations are VS Code **CodeLens**
+actions. They require **Editor: Code Lens** (`editor.codeLens`) and the
+corresponding setting under **Dygnosis: Actions**.
 
-Trend declarations retain their TeX label as name metadata. When a declared
-trend or named VAR/PAC model is selected, its accepted uses can be followed
-through the model. PAC and VAR expectation references open the named model
-chosen for that operation.
-
-Equation numbers are assigned before Dynare's equation transformations and can
-differ from numbers in MATLAB or Octave results. Model locals, static-only
-replacement rows and removed equations have no counted number. Repeated macro
-occurrences can have distinct numbers but the same written source.
+Equation numbers reflect the model before Dynare's equation transformations and
+can differ from numbers printed by MATLAB or Octave. Model-local `#`
+definitions, `[static]` replacement rows and removed equations are not
+numbered.
 
 ## Timing classes
 
 | Class | Equation use |
 |---|---|
-| Static | No lead or lag. |
-| Predetermined | Lags, no leads. |
-| Forward-looking | Leads, no lags. |
+| Static | Current period only (no lead or lag). |
+| Predetermined | Lags only, no leads. |
+| Forward-looking | Leads only, no lags. |
 | Mixed | Both leads and lags. |
 
-Variable hover shows the timing class. For a valid `predetermined_variables k;`
-declaration, it adds the convention:
+Variable hover and **Outline** show each endogenous variable's timing class.
+When a variable is listed in `predetermined_variables k;`, its hover adds:
 
 Timing: **predetermined**, end-of-period convention
 
-The class still comes from the equations, so it can be static, forward-looking
-or mixed. Written `k(+1)` is current `k` for timing analysis, and written `k` is `k(-1)`.
+With `predetermined_variables`, written `k(+1)` is current-period `k` for
+timing classification, and written `k` is lagged `k(-1)`.

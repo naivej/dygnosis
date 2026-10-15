@@ -1,79 +1,75 @@
 # Write equations and commands
 
-Dygnosis supports the declarations, equations and computing instructions in a
-Dynare model. [Checks](diagnostics.md) update while you edit.
+Dygnosis provides completion, hover, signature help, snippets, templates and
+formatting for Dynare files while updating [model checks](diagnostics.md) as
+you type.
 
-Type part of a name or command to see suggestions. To open the list yourself,
-run **Trigger Suggest** from the Command Palette, or press Ctrl+Space. Select
-a suggestion and press Enter. Hover over a name, command or option to read
-its description.
+Start typing a symbol, command, block or option to see suggestions, or press
+`Ctrl+Space` (**Trigger Suggest**). Hover over any declared name, command,
+operator or option to read its description.
 
 ## Names and parameters
 
-Completion offers declared names. Hover shows a name's kind, written long name
-and TeX label, known parameter value and timing.
-[Labels and value hints](appearance.md) have their own visibility controls.
+Completion offers declared endogenous variables, exogenous variables and
+parameters with their `long_name` and TeX metadata. Hover displays a symbol's
+kind, timing class, known parameter value, `long_name` and TeX label (configured
+in [Read labels, hints and colors](appearance.md)).
 
-When you edit a declaration's `long_name`, the suggestion list offers the
-symbol's name as a label. To fill several labels at once, open Quick Fix on an
-`I209` message and choose **Add long names**. This fills the missing or empty
-labels counted by that message, including in included files. Existing values
-stay unchanged.
+Inside `long_name='...'`, completion offers the symbol's name. To fill missing
+or empty `long_name` labels across a declaration statement (including in
+included files), place the cursor on the declaration keyword (`var`, `varexo`,
+`varexo_det` or `parameters`) with an `I209` note, open **Quick Fix...**
+(`Ctrl+.` or the lightbulb), and choose **Add long names**. Existing nonempty
+labels stay unchanged.
 
 ## Equations
 
-Type `model` and choose its block snippet from the suggestions to insert an
-empty `model` block. Equation-tag suggestions offer an editable name such as
-`[name='eq1']`. To name several equations at once, open Quick Fix on an `I208`
-message and choose **Add equation tags**. This fills the missing or empty
-names counted by that message and keeps existing values.
+Type `model` at the top level and select the `model block` snippet to insert an
+empty `model; ... end;` block. Inside `[name='...']`, completion suggests an
+editable equation tag such as `[name='eq1']`.
 
-[Definition, reference and rename actions](navigate-code.md) connect an
-equation's names to the rest of the model. Naming actions and fixes can
-change included files.
+To tag all unnamed equations in a `model` or `model_replace` block at once,
+open **Quick Fix...** on the block keyword's `I208` note and choose **Add
+equation tags**.
+
+[Navigation and rename actions](navigate-code.md) connect every symbol in an
+equation to its declaration and other uses across the model.
 
 ### Model-local variables
 
-Model-local variables (`#name = expression;`) have completion and expression
-hover within their model, plus [navigation and rename](navigate-code.md#model-local-variables).
-Hover over a model-local name to see its expression. If macros changed that
-expression, the hover identifies it as expanded. It shows the expression
-without calculating its value.
+Model-local variables (`#name = expression;`) have completion and hover within
+their model, plus [scoped navigation and
+rename](navigate-code.md#model-local-variables). Hovering over a model-local
+name displays its written or macro-expanded expression.
 
 ## Steady state, shocks and experiment commands
 
-Block snippets also provide empty `steady_state_model`, `initval`, `endval`
-and `shocks` blocks. Command and option completion, hover and signature help
-cover recognized commands and their arguments. While the cursor is inside a
-command's parentheses, **Trigger Parameter Hints** in the Command Palette
-opens the argument help. The [option reference](reference.md)
-lists the supported options.
+Top-level block snippets also insert `steady_state_model`, `initval`, `endval`
+and `shocks` blocks. Inside a command's or block's parentheses, typing `(`, `,`
+or `=` (or running **Trigger Parameter Hints**) opens option help. See the
+[option reference](reference.md) for all supported options.
 
-When the model has no ordinary `shocks` block, place the cursor on an eligible
-exogenous declaration and open **Refactor...** from the editor context menu.
-Choose **Insert stochastic shocks template** or **Insert deterministic shocks
-template** from the available actions.
-These actions insert commented examples for you to fill with shock sizes or periods.
+When the model has no standard `shocks` block, place the cursor on an exogenous
+declaration in `varexo`, open **Refactor...** from the editor context menu, and
+choose **Insert stochastic shocks template** or **Insert deterministic shocks
+template** to insert a commented `shocks; ... end;` block.
 
-Type `@#` at the start of a line to see macro directive suggestions such as
-`define`, `if` and `for`.
-[Macro expansion](effective-model.md) shows the resulting model text.
-
-Macro definitions also appear in Outline as named entries. Select one to open
-its written definition; macro loops and conditional branches remain folding
-regions.
+Type `@#` at the start of a line to complete macro directives such as `define`,
+`if`, `for` and `include`. Use [Expand macros](effective-model.md) to inspect
+the expanded model text.
 
 ## Source edits
 
-Right-click in the editor and choose **Format Document** to format the file,
-or select text and choose **Format Selection** to format that selection. Both use
-[tabs or spaces](settings:dynare.formatIndent). Native MATLAB lines and
-`verbatim` text keep their spacing. Run **Expand Selection** from the Command
-Palette to select a larger source region; run it again to grow the selection.
-Formatting follows recognized block boundaries, including later blocks.
-Enable **Editor: Linked Editing** in Settings to edit accepted occurrences of a
-declared name together when the complete change belongs to one document.
-Use **Rename symbol** for a change across files.
+Right-click in the editor and choose **Format Document** or **Format
+Selection**. Indentation uses [Dynare: Format
+Indent](settings:dynare.formatIndent) (`tab` or `1`–`8` spaces), while native
+MATLAB lines and `verbatim` blocks keep their spacing.
 
-[Quick Fix](diagnostics.md) offers available repairs for a selected check,
-such as a missing declaration, identifier or semicolon.
+Run **Expand Selection** from the Command Palette to expand the selection from
+an expression to its statement and enclosing block.
+
+Enable **Editor: Linked Editing** (`editor.linkedEditing`) in Settings to edit
+all uses of a declared name together when it only appears in the current file;
+use **Rename symbol** (`F2`) when the name is shared with included files.
+[Quick Fix](diagnostics.md#actions) offers repairs for common diagnostics such
+as missing declarations, typos or missing semicolons.

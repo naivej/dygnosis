@@ -1,79 +1,56 @@
 # Follow equations and names
 
-Navigation uses the current model and its known includes.
+Navigation works across the active model and its known `@#include` files.
 
-Place the cursor on a name, then right-click to find **Go to Definition**,
-**Find All References** and **Rename symbol**. You can also press F1 and search
-for a command's title. **Go to Definition** opens the declaration in an editor;
-**Peek Definition** shows it in a small view inside the current editor.
+Place the cursor on a symbol and right-click in the editor, or press `F1` to
+run a command from the Command Palette.
 
 | Action | What you see |
 |---|---|
-| Go to Definition / Peek Definition | The source declaration or model-local definition. |
-| Go to Declaration / Go to Type Definition | Opens the name's declaration. |
-| Find All References | A list of the name's uses across the model and its includes. Click a result to open its line. |
-| Click a declared name | Its occurrences are highlighted in the current file. |
-| **Rename symbol** | Rename a symbol across the model and its known includes. Press F2 or choose **Rename symbol** from the editor context menu. |
-| Show Call Hierarchy | Equations that use a variable. |
-| Go to Symbol in Editor... | A searchable list of declarations, equations and other entries in the current file. |
-| Go to Symbol in Workspace... | A searchable list of symbols in models that Dygnosis has analyzed. |
-| Click a folding arrow beside a line number | Collapses a complete Dynare block, macro loop or conditional branch, or a multiline declaration, command or Dynare assignment. Hover beside the line numbers to see the arrows. |
+| **Go to Definition** / **Peek Definition** | Opens or previews the symbol's declaration or `#name` model-local definition. |
+| **Go to Declaration** / **Go to Type Definition** | Opens the symbol's declaration. |
+| **Find All References** | Lists every use of the symbol across the model and its includes. |
+| Click a declared name | Highlights its occurrences in the current file. |
+| **Rename symbol** (`F2` or **Dygnosis: Rename symbol**) | Opens **Dygnosis: Rename symbol** and renames the symbol across the model, its includes, and other known models that share those files. |
+| **Show Call Hierarchy** | On a symbol, incoming calls list the equations that use it; on an equation, outgoing calls list the declared symbols it uses in the current file. |
+| **Go to Symbol in Editor...** | Lists declarations, blocks, commands and equations in the current file. |
+| **Go to Symbol in Workspace...** | Searches symbols across models analyzed by Dygnosis. |
+| Click a folding arrow beside a line number | Collapses a Dynare block, `@#for` loop, `@#if` branch, or multiline declaration, command or assignment. |
 
-[Equation navigation](model-and-includes.md#equations) reaches equations across
-the model, including repeated macro occurrences.
+Use [Jump to equation...](model-and-includes.md#equations) to filter and jump to
+equations across the model, including repeated macro copies.
 
-Rename follows model ownership across `.mod`, `.dyn` and included source
-files, and supports untitled Dynare documents. Type the new name in the box
-titled **Dygnosis: Rename symbol**, then press Enter. MATLAB companion text is
-outside its scope.
+**Rename symbol** also updates literal symbol names inside equation `endogenous`
+and `mcp` tags while keeping existing quotes. Equation `name` tags, symbol
+`long_name` labels and MATLAB `.m` files stay unchanged.
 
-Declared heterogeneity dimensions, trends, named subsamples, and VAR/PAC model
-names can also be navigated and renamed when their full source relationship is
-known. A trend's TeX label remains metadata when its name changes. Database and
-external function names also have definition and reference navigation. Built-in
-operators such as `EXPECTATION` and `STEADY_STATE` have call references and help;
-they have no user declaration to rename.
-
-Rename also updates literal references in an equation's `endogenous` or
-`mcp` tag. Existing quotes around the tag value stay in place.
-Equation `name` tags and symbol `long_name` labels remain unchanged.
+Declared heterogeneity dimensions, trends (`trend_var`, `log_trend_var`), named
+subsamples, and named `var_model`, `trend_component_model`,
+`var_expectation_model` and `pac_model` definitions also support navigation and
+rename. Database and external-function names support **Go to Definition** and
+**Find All References**. Built-in operators such as `EXPECTATION` and
+`STEADY_STATE` support **Find All References** and hover help.
 
 ## Outline
 
-Open **Outline** in Explorer and click an entry to open its line in the editor.
-The symbol trail above the editor is called **breadcrumbs**; click a name in
-that trail to browse nearby entries. [Outline sections](settings:dynare.outline.sections)
-and [equation number labels](settings:dynare.outline.equationNumbers) control
-which entries and numbers appear.
+Open **Outline** in Explorer or click the **breadcrumbs** trail above the
+editor to browse the file's structure. Choose which groups appear in [Dynare ›
+Outline: Sections](settings:dynare.outline.sections) and toggle equation
+numbers in [Dynare › Outline: Equation
+Numbers](settings:dynare.outline.equationNumbers).
 
-Two or more consecutive top-level Dynare assignments and MATLAB statements
-shown in Outline form a collapsible **MATLAB expressions** group. Parameter
-assignments stay named children, for example `rho = 0.9`. A single statement
-stays a separate row. Declarations, Dynare commands and blocks start a new
-group, even when their Outline section is hidden. Comments and blank lines
-do not split a group. The [commands section](settings:dynare.outline.sections)
-controls these groups.
-
-Model equations and assignments inside blocks keep their current places.
-Each Outline row opens its written source; repeated macro copies do not add
-duplicate rows for the same statement.
-
-Named macro definitions appear as Outline entries. Declared dimensions, trends,
-external functions and named VAR/PAC model identities appear under their
-declarations. Expression operators such as `diff`, `log`, `SUM`,
-`EXPECTATION` and `STEADY_STATE` remain part of their expression row.
-
-Heterogeneous `model`, `var` and `varexo` headings show their written option,
-for example `model(heterogeneity=households)` and
-`var(heterogeneity=households)`. An aggregate heading keeps its plain name.
-A later type change keeps each declared name under its written declaration.
-One written statement that expands into different dimensions shows
-**multiple expansions** instead of selecting one dimension.
+Under declarations, each variable row shows its timing class, `long_name` and
+`$TeX$` label beside the name. Heterogeneous blocks and declarations include
+their dimension (such as `model(heterogeneity=households)`), and consecutive
+top-level parameter assignments and MATLAB statements collapse into a **MATLAB
+expressions** group (controlled by `commands` in [Dynare › Outline:
+Sections](settings:dynare.outline.sections)). Named `@#define` macros also
+appear as entries.
 
 ## Model-local variables
 
-**Go to Definition** opens the `#name` definition. **Go to Declaration** prefers
-an explicit `model_local_variable` declaration. **Find All References** and
-**Rename symbol** follow that definition's uses; a local with the same spelling
-in another model or
-heterogeneity dimension remains separate.
+For a model-local variable (`#name = expression;`), **Go to Definition** opens
+the `#name` definition and **Go to Declaration** opens an explicit
+`model_local_variable` declaration when present. **Find All References** and
+**Rename symbol** follow that local within its model or heterogeneity
+dimension.

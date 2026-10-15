@@ -1,53 +1,52 @@
 # Work with an agent
 
-The `use-dynare` skill gives an agent instructions for working with Dynare
-models. To install it, run `npx skills add naivej/dygnosis` in a terminal.
+The `use-dynare` skill gives AI coding agents domain instructions for building,
+checking and replicating Dynare models. To install it in your project, run
+`npx skills add naivej/dygnosis` in a terminal.
 
-Dygnosis also provides model analysis and editing tools through MCP, the
-protocol that lets agents call external tools. After connecting the server,
-ask your agent to inspect a model, find a name's uses or propose a change.
-The tables below use the names shown in the agent's tool list; click a name
-to read its reference. Editing tools return proposed changes for the agent to
-apply.
+Dygnosis also provides an MCP server so agents can inspect, check, compare and
+edit Dynare models directly. Click any tool name below to view its reference
+and parameters. Editing tools return proposed changes for your agent to apply.
 
 ## Understand the model
 
-| Tool | Available result |
+| Tool | What it provides |
 |---|---|
-| [dynare_model_info](tool:dynare_model_info) | Model overview, with selected timing, declaration, assignment, local definition and source relationships. |
-| [dynare_equations](tool:dynare_equations) | Equations, tags, identifiers, timing and source locations. |
-| [dynare_expand](tool:dynare_expand) | Expanded model text, selected ranges and verified written source locations. |
-| [dynare_symbol_info](tool:dynare_symbol_info) | One name's declaration, definition, labels, timing, selected assignments and accepted uses. |
+| [dynare_model_info](tool:dynare_model_info) | Model summary, counts, variable timing classes, declarations, parameter assignments, model locals and included files. |
+| [dynare_equations](tool:dynare_equations) | Equations, tags, used symbols, timing and source locations. |
+| [dynare_expand](tool:dynare_expand) | Macro- and include-expanded model text with links back to the written source lines. |
+| [dynare_symbol_info](tool:dynare_symbol_info) | A symbol's declaration, metadata (`long_name`, TeX), timing, parameter assignments and references. |
 
 ## Write and revise
 
-| Tool | Available result |
+| Tool | What it provides |
 |---|---|
-| [dynare_syntax](tool:dynare_syntax) | Dynare commands, blocks, instructions, options, functions, operators and macros, with contexts and signatures. |
-| [dynare_rename](tool:dynare_rename) | Proposed edits to rename a symbol across the selected model, with checks that its source has not changed. |
-| [dynare_actions](tool:dynare_actions) | Available source action summaries, selected complete proposals or compatible proven diagnostic fixes. |
-| [dynare_format](tool:dynare_format) | Formatted model text or selected whole lines. |
-| [dynare_extract](tool:dynare_extract) | Selected equations with required declarations and model locals, as a fragment. |
+| [dynare_syntax](tool:dynare_syntax) | Reference for Dynare commands, blocks, options, functions, operators and macro directives. |
+| [dynare_rename](tool:dynare_rename) | Proposed edits to rename a symbol safely across the model and its includes. |
+| [dynare_actions](tool:dynare_actions) | Available source refactorings (such as shock templates or bulk naming) and diagnostic quick fixes. |
+| [dynare_format](tool:dynare_format) | Indented, formatted model text for a file or selected line range. |
+| [dynare_extract](tool:dynare_extract) | Standalone model fragment containing selected equations with their required declarations and model locals. |
 
 ## Check and compare
 
-| Tool | Available result |
+| Tool | What it provides |
 |---|---|
-| [dynare_diagnose](tool:dynare_diagnose) | Problems in one model or a batch of explicit roots or saved paths, with each root's status. |
-| [dynare_diagnostic_info](tool:dynare_diagnostic_info) | Diagnostic search and correction guidance, with Shared, Added and Skipped classifications. |
-| [dynare_compare_models](tool:dynare_compare_models) | Model and source changes between supplied models or Git and saved Working inputs. |
+| [dynare_diagnose](tool:dynare_diagnose) | Diagnostics and check status for a model or a batch of model roots. |
+| [dynare_diagnostic_info](tool:dynare_diagnostic_info) | Explanations and fix guidance for diagnostic codes (`Shared`, `Added` and `Skipped`). |
+| [dynare_compare_models](tool:dynare_compare_models) | Structural and text differences between two models or between Git revisions and working files. |
 
 ## Connect MCP
 
-For supported agents such as GitHub Copilot, run **MCP: List Servers** from the
-Command Palette and select **Dygnosis**. That list provides the server's start,
-stop and Output actions.
+For VS Code agents such as GitHub Copilot, run **MCP: List Servers** from the
+Command Palette and select **Dygnosis** to start, stop or inspect the server's
+output.
 
-For other agents, open your project folder and run **Dygnosis: Set up MCP for
-this project** from the Command Palette. It creates or updates `.mcp.json` in
-the project. Point your agent to that configuration if it does not load the
-file automatically. The command fills in the executable path; the example
-below shows the file's structure.
+For external agents, open a trusted project folder and run **Dygnosis: Set up
+MCP for this project** from the Command Palette. This creates or updates
+`.mcp.json` in your project root using a managed copy of the bundled executable
+(or the custom binary set in [Dynare: Server
+Path](settings:dynare.serverPath), available from [GitHub
+Releases](https://github.com/naivej/dygnosis/releases)):
 
 ```json
 {
@@ -63,4 +62,6 @@ below shows the file's structure.
 }
 ```
 
-[Server path](settings:dynare.serverPath) selects a user-managed executable (available from [GitHub Releases](https://github.com/naivej/dygnosis/releases)) for the editor and VS Code MCP. Run project setup again to update an existing project config.
+If `.mcp.json` already contains a different `dygnosis` configuration or unsaved
+edits, VS Code opens a diff preview so you can review and click **Save reviewed
+setup**. Run the command again whenever you want to update `.mcp.json`.

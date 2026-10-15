@@ -1,68 +1,78 @@
 # Dynare workflow
 
 Dygnosis adds Dynare language support to VS Code for `.mod`, `.dyn` and `.inc`
-files. Analysis works without a separate Dynare, MATLAB or Octave installation.
+files. Editing and source analysis work without a separate Dynare, MATLAB or
+Octave installation.
 
-Open a model file and check that the language name at the bottom right is
-**Dynare**. If it shows another language, click it and select **Dynare**.
+Open a model file and check that the language mode in the bottom-right status
+bar is **Dynare**. If it shows another language, click it and select
+**Dynare**.
 
-Press F1 to open the **Command Palette**. Type `Dygnosis` to find the extension's
-commands, such as **Dygnosis: Expand macros**. Help uses the command titles
-shown in that list. For VS Code commands such as **Go to Definition**, search
-for that title.
+Press `F1` to open the **Command Palette** and type `Dygnosis` to run extension
+commands such as **Dygnosis: Open Help**, **Dygnosis: Expand macros** or
+**Dygnosis: Open Settings**. Common actions also appear in the editor title
+bar, the editor right-click menu, **Outline**, **Problems**, and **Dynare
+project checks** in Explorer.
 
-In Help, use **Search** at the top to find a feature or check code. A settings
-link opens the matching control in VS Code's Settings editor.
+In **Dygnosis Help**, use **Search** at the top to find a feature, command,
+setting or check code. Use **←** and **→** to move through your reading
+history, **Copy topic link** to copy a link to the current topic, and **Copy
+example** on any code block. Clicking a setting link opens that setting in VS
+Code's Settings editor.
 
 ## Understand the model
 
-[Model files and structure](model-and-includes.md) brings together includes,
-related files, counts and timing. [Equation and name navigation](navigate-code.md)
-connects declarations to their uses across the model.
+[Understand the model and files](model-and-includes.md) covers model roots,
+`@#include` files, status bar counts and equation navigation. [Follow equations
+and names](navigate-code.md) connects declarations to their uses across the
+model with **Go to Definition**, **Find All References**, **Rename symbol**,
+**Outline** and **Show Call Hierarchy**.
 
 ## Write equations and experiment setup
 
-[Editing support](edit-models.md) covers declarations, parameters, equations,
-steady-state blocks, shocks and commands. [Labels, hints and colors](appearance.md)
-make names, known values and block structure easier to read.
+[Write equations and commands](edit-models.md) covers declarations, parameters,
+equations, steady-state blocks, shock templates, formatting and quick fixes.
+[Read labels, hints and colors](appearance.md) configures `long_name` and TeX
+labels, parameter value hints, block shading and semantic colors.
 
 ## Inspect and check
 
-[Macro expansion](effective-model.md) shows the text produced by includes,
-loops and substitutions. [Model checks](diagnostics.md) report problems while
-you edit, with explanations and available fixes.
+[Inspect macro expansion](effective-model.md) previews the text produced by
+includes, loops and substitutions, with jumps back to the written source.
+[Check the model](diagnostics.md) explains **Problems**, check severities,
+related locations and quick fixes.
 
 ## Review changes and model variants
 
-[Model comparison](structural-diff.md) shows changes against Git history or
-another model. [Project checks](project-checks.md) cover unopened saved models
-alongside the one being edited.
+[Review model changes](structural-diff.md) compares a model against Git history
+or another `.mod` file in **Dygnosis Changes**. [Check project
+models](project-checks.md) checks unopened saved models across your workspace in
+**Dynare project checks**.
 
-## Numerical work
+## Numerical work and agents
 
-Official Dynare with MATLAB or Octave performs steady-state calculations,
-simulation, estimation and other numerical tasks. Dygnosis supports the source
-work above; it does not run those tasks. [About Dygnosis](about.md)
-describes what its results establish.
+Official Dynare in MATLAB or Octave computes steady states, checks the
+Blanchard-Kahn conditions, and runs simulations and estimation. Dygnosis checks
+and navigates the source files before you run them; a clean **Problems** panel
+does not guarantee that Dynare will solve the model numerically.
 
-[Agent tools](agents.md) support the same source workflow through MCP.
+[Work with an agent](agents.md) provides the same source analysis and editing
+tools through MCP and the `use-dynare` skill.
 
-**Dygnosis: Open Settings** contains the full configuration list. Feature pages
-mention configuration where it changes that feature's behavior or appearance.
-The [reference](reference.md) lists commands, check codes and command options;
-[support](troubleshoot.md) provides extension controls and problem-report details.
+Run **Dygnosis: Open Settings** to browse all settings. The
+[reference](reference.md) lists commands, shortcuts, diagnostic codes and
+command options; [support](troubleshoot.md) covers output logs, server restarts
+and problem reports; [About Dygnosis](about.md) lists compatibility and license
+details.
 
 ## Availability
 
-The extension requires **VS Code 1.102.0 or later**. Packages target Windows,
-macOS and Linux on x64 and ARM64. Remote workspaces use the package on the
-remote host. Virtual filesystems have syntax coloring only; browser-only,
-Alpine and 32-bit hosts are outside the package targets.
+Requires **VS Code 1.102.0 or later**. Install from the [VS Code
+Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis)
+or download packages and standalone binaries from [GitHub
+Releases](https://github.com/naivej/dygnosis/releases).
 
-Loose and untitled Dynare models receive editor analysis. A saved model gives
-includes a disk location. An included file needs a known
-[model owner](model-and-includes.md#model-roots-and-includes).
-
-[Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis)
-provides the extension; [GitHub Releases](https://github.com/naivej/dygnosis/releases)
-provides candidate packages and standalone binaries when available.
+Untitled and loose files receive editor analysis. Resolving `@#include` and
+related files requires a saved file path, and an included helper file uses its
+[model owner](model-and-includes.md#model-roots-and-includes). Virtual
+filesystems provide syntax highlighting only.

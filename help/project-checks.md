@@ -1,50 +1,38 @@
 # Check project models
 
-Open a folder in VS Code to check its unopened saved `.mod` and `.dyn` models.
-Background checking is on by default and can be
-[turned off](settings:dynare.projectDiagnostics) while retaining checks for
-open models.
+Opening a folder in VS Code automatically checks its unopened saved `.mod` and
+`.dyn` root models in the background (skipping generated `+` directories) and
+lists their diagnostics in **Problems**. Toggle background checking in [Dynare:
+Project Diagnostics](settings:dynare.projectDiagnostics) while keeping live
+checks for open files.
 
-Run **Dygnosis: Show project checks** from the Command Palette, or click
-**Dynare project: ...** on the status bar. This opens **Dynare project checks**
-in Explorer. Expand folders and subfolders to see model files by their file
-names. Model rows show their check state and Error or Warning counts. Click a
-model to open it. The messages themselves appear in **Problems**.
+Click **`Dynare project: ...`** on the status bar (for example, **`Dynare
+project: 3/3 checked`**) or run **Dygnosis: Show project checks** from the
+Command Palette to focus **Dynare project checks** in Explorer:
 
-Saved `.inc` files appear once at their actual folder path, including files
-that no model currently includes. These rows say **Include file** and open the
-file. They have no separate check state or counts. Their diagnostics appear in
-**Problems** when the file is open or checked as part of a model that includes
-it. A folder can contain include files even when no root models were found.
-The include entries remain visible and the folder reports that no root models
-were found. A discovery failure explains when the model or include file list is
-incomplete.
+- **Model rows** (`.mod`, `.dyn`) show their check state—such as `Checked · 0 Errors, 0 Warnings`, `Checking`, `Pending`, `Incomplete`, `Failed` or `Excluded`—and open the model when clicked.
+- **Include rows** (`.inc`) are labeled **Include file** and open the file when clicked. Their diagnostics appear in **Problems** when the file is open or included by a checked model. Folders without root models display **No root .mod or .dyn models**.
+- **View toolbar buttons**: Use the icons in the **Dynare project checks** title bar (or the Command Palette) for **Recheck project** (`$(refresh)`), **Cancel project checks** (`$(debug-stop)`), **Configure project exclusions** (`$(settings-gear)`) and **Open Help** (`$(question)`).
 
-**Dygnosis: Recheck project** finds and checks the models again.
-**Dygnosis: Cancel project checks** stops the current pass until a file
-change or Recheck. Completed results remain.
-
-For example, **3/3 checked** on the status bar means that analysis finished for
-three models. Those models can still have Errors or Warnings in Problems.
+Note that **`3/3 checked`** on the status bar means background analysis
+finished for all three models; those models may still report Errors or Warnings
+in **Problems**.
 
 ## Scope and exclusions
 
-[Project exclusions](settings:dynare.projectExcludePaths) and
-**Dygnosis: Configure project exclusions** select excluded paths per workspace
-folder. The toolbar gear opens **Configure project exclusions**, where you can
-choose **Add exclusion…**, **Remove exclusion…**, **Reset folder exclusions**
-or **Open project settings**. To ignore one folder directly, choose **Ignore
-this folder** on its workspace or subfolder row. This adds `**` for a workspace
-folder, or `<folder path>/**` for a subfolder, to that workspace folder's
-exclusions. For example, ignoring `models/old` adds `models/old/**`. The model
-roots beneath that path stop receiving background checks. Saved `.inc` entries
-remain visible. Patterns are relative to the workspace folder: `*` and `?`
-match within a path component, `**` crosses folders, and a trailing `/`
-includes descendants.
+To exclude a folder from background checks, hover over a workspace folder or
+subfolder row in **Dynare project checks** and click **Ignore this folder**
+(`$(exclude)`). This adds `<folder path>/**` (or `**` for a workspace root) to
+[Dynare: Project Exclude Paths](settings:dynare.projectExcludePaths).
 
-Background checks discover `.mod` and `.dyn` root models beneath each
-workspace folder. They skip generated `+` directories. Loose files and
-excluded models still receive editor checks when open. Exclusions control
-which roots are checked in the background. They do not hide `.inc` entries,
-and excluding a file from root discovery does not remove it from another
-model's includes.
+You can also click **Configure project exclusions** (`$(settings-gear)`) in the
+view title bar to **Add exclusion…**, **Remove exclusion…**, **Reset folder
+exclusions** or **Open project settings**. Patterns are relative to the
+workspace folder: `*` and `?` match within a folder or file name, `**` matches
+across subdirectories, and a trailing `/` matches everything inside that
+folder.
+
+Exclusions only skip background root discovery under those paths. Saved `.inc`
+files remain listed in the tree, and excluded `.mod` or `.dyn` files are still
+checked whenever you open them in the editor or include them from another
+checked model.

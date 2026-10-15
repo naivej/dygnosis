@@ -1,14 +1,11 @@
 # Reference
 
-This reference lists Dygnosis commands, diagnostic explanations and recognized
-Dynare command options from the installed Help edition.
-Click a command title below to open its Help topic, a check code to read its
-explanation, or a Dynare command name to see its options. For an explanation
-from the selected engine, use [Explain a check](diagnostics.md#actions); Help
-shows that engine's version with the result.
+This reference lists Dygnosis commands, keyboard shortcuts, diagnostic codes
+and recognized Dynare command options included with this Help edition.
 
-Configuration controls are in **Dygnosis: Open Settings** and linked from each
-[workflow topic](get-started.md). [Keyboard Shortcuts](action:shortcuts) contains
-the Dygnosis commands and their assigned keys. To check a VS Code shortcut
-such as Alt+F8, clear that editor's search field and search for the command name
-or key instead.
+- Click a **command** below to open its feature topic.
+- Click a **diagnostic code** (such as `E001` or `W013`) to read its explanation and fix guidance, or run [Explain this check](diagnostics.md#actions) to query the active engine directly.
+- Click a **Dynare command or block** to view its recognized options.
+
+Run **Dygnosis: Open Settings** to configure the extension, or open [Keyboard
+Shortcuts](action:shortcuts) to view and customize Dygnosis keybindings.

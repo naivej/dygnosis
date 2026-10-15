@@ -1,18 +1,20 @@
 # Support and problem reports
 
-Help stays available before a model opens and when the engine cannot run.
-These commands provide access to extension details and controls.
-Press F1 and type `Dygnosis` to find them in the Command Palette.
+**Dygnosis Help** works offline even before a model opens or when the language
+server cannot start. Press `F1` and type `Dygnosis` to run these support
+commands from the Command Palette:
 
-| Command | Use |
+| Command or setting | Use |
 |---|---|
-| [Dygnosis: Show Output](action:output) | Opens the Output panel. Select Dygnosis from its channel list to read startup, analysis and failure details. |
-| [Dygnosis: Restart language server](action:restart) | Restarts model analysis. |
-| **Dygnosis: Open Settings** | Opens VS Code's Settings editor filtered to Dygnosis. |
+| [Dygnosis: Show Output](action:output) | Opens the **Output** panel. Select **Dygnosis** from the channel dropdown to inspect startup, analysis and error logs. |
+| [Dygnosis: Restart language server](action:restart) | Restarts the Dygnosis analysis engine. |
+| **Dygnosis: Open Settings** | Opens VS Code's Settings editor filtered to `@ext:CoconutWater.dygnosis`. |
+| [Dynare: Server Path](settings:dynare.serverPath) | Selects a custom `dygnosis` executable in user/machine settings. Leave it empty to use the bundled binary. |
 
 ## Report a problem
 
-The [issue tracker](https://github.com/naivej/dygnosis/issues) accepts reports.
-Useful details are the extension and selected engine versions, OS, remote
-workspace status, relevant Output and a small shareable model that shows the
-expected and actual result.
+Open an issue on the [GitHub issue
+tracker](https://github.com/naivej/dygnosis/issues) and include the extension
+and engine versions, your OS (and whether you are using a Remote workspace),
+relevant lines from **Dygnosis** in **Output**, and a minimal `.mod` example
+showing the expected and actual behavior.

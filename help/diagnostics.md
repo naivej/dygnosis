@@ -1,63 +1,58 @@
 # Check the model
 
-Dygnosis underlines problems in open models and their included files. It also
-lists them in VS Code's **Problems** panel. [Project checks](project-checks.md)
-add problems from unopened saved models.
+Dygnosis underlines issues in open `.mod`, `.dyn` and `.inc` files and lists
+them in VS Code's **Problems** panel (**View > Problems**). [Project
+checks](project-checks.md) add issues from unopened saved models in your
+workspace.
 
 ## Find a problem
 
-Open **View > Problems**. Click a problem's message to open its file at the
-reported line. Hover over an underlined name or expression in the editor to
-read the message there.
-
-With the editor focused, **Alt+F8** opens the next problem in the current file
-and shows its details. **F8** moves through problems across files. These are
-the default shortcuts; VS Code's **Keyboard Shortcuts** editor shows your
-current bindings.
+Click an entry in **Problems** to jump to its file and line, or hover over an
+underlined token in the editor to read the message. Press `Alt+F8` to step
+through problems in the active file with details expanded, or `F8` to move
+across files.
 
 | Severity | Meaning |
 |---|---|
-| Error | An identified source problem that would make the official Dynare preprocessor refuse the model. |
-| Warning | A potential problem that does not itself cause that refusal. |
-| Information | A point to review, such as missing equation names or incomplete analysis. |
+| Error | A source problem that would cause the official Dynare preprocessor to refuse the model. |
+| Warning | A likely modeling mistake or inconsistency that Dynare accepts with a warning or without stopping. |
+| Information | A style or completeness note, such as missing equation `name` tags (`I208`), missing `long_name` labels (`I209`) or incomplete macro expansion (`I211`). |
 
-Each message has a check code, such as `W031`. Search for that code in Help
-or open the [diagnostic code list](reference.md) for its explanation.
-A clean Problems panel does not establish that Dynare can accept or solve the model; see [About Dygnosis](about.md).
+Each diagnostic has a code such as `W031`. Search for the code in Help or
+browse the [diagnostic code list](reference.md). A clean
+**Problems** panel means no static source issues were detected; run official
+Dynare in MATLAB or Octave to verify steady states and solver conditions.
 
 ## Follow a related location
 
-Some problems have an extra entry that points to another line involved in the
-problem. In the Problems tree view, click the small arrow beside the problem's
-message, then click the entry below it to open that line. In the details opened
-by Alt+F8, click the extra entry's filename.
+When a diagnostic involves a second location, expand the arrow beside its
+message in **Problems** (or inspect the `Alt+F8` peek view) and click the
+linked location below it.
 
-For example, these two declarations produce [W031](check:W031) on the second `y`:
+For example, declaring `y` twice produces [W031](check:W031) on the second
+declaration:
 
 ```dynare
 var y;
 var y;
 ```
 
-Expand that warning in Problems. The entry **Earlier declaration or creating
-occurrence** points to the first `y`, so you can see both declarations.
+Expanding the warning in **Problems** reveals **Earlier declaration or creating
+occurrence**, which jumps directly to the first `var y;`.
 
 ## Actions
 
-Place the cursor on an underlined problem and open **Quick Fix...** from the
-editor context menu, or click the lightbulb beside the line. Choose a repair,
-**Explain this check**, or **Ignore this check** from the action list.
+Place the cursor on an underlined diagnostic and click the lightbulb (`Ctrl+.`)
+or choose **Quick Fix...** from the editor context menu.
 
 | Action | Result |
 |---|---|
-| Quick Fix | An available repair for the selected check. |
-| Explain this check | Opens this problem's explanation in Help. Its [Quick Fix entry](settings:dynare.diagnosticActions.explain) is optional. |
-| Dygnosis: Explain a check in the Command Palette | Asks for a code, such as `W031`, then opens its explanation in Help. |
-| Ignore this check | Hides every diagnostic with that code in this window, including its attached fixes. Its [Quick Fix entry](settings:dynare.diagnosticActions.ignore) is optional. |
-| Dygnosis: Show a hidden check / Dygnosis: Show all hidden checks in the Command Palette | Restores one hidden code or all hidden codes. |
+| Repair action | Applies an available source fix for the selected diagnostic. |
+| **Explain this check (`<code>`)** | Opens the check's explanation in **Dygnosis Help** ([Dynare › Diagnostic Actions: Explain](settings:dynare.diagnosticActions.explain)). |
+| **Dygnosis: Explain a check** (Command Palette) | Prompts for a check code (such as `W031`) and opens its explanation from the active engine. |
+| **Ignore this check (`<code>`)** | Hides all diagnostics with that code in the current window ([Dynare › Diagnostic Actions: Ignore](settings:dynare.diagnosticActions.ignore)). |
+| **Dygnosis: Show a hidden check** / **Dygnosis: Show all hidden checks** (Command Palette) | Restores one hidden check code or all hidden check codes. |
 
-Hiding affects only this window's display. It does not change model files or
-agent results. The status bar shows **1 hidden check**, for example. Click
-that item to choose a code to show again.
-The list clears when the window reloads or workspace folders change; restarting
-the language server keeps it.
+When any check code is hidden, the status bar displays **`1 hidden check`** (or
+the hidden count). Click that status bar item to restore a hidden check. Hiding
+applies only to the current window and does not modify your files.

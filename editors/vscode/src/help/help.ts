@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
-import { escapeHtml, HelpBundle, helpMarkdown, helpPages } from "./help_content";
+import { escapeHtml, HelpBundle, helpMarkdown, helpPages, userDiagnosticMarkdown } from "./help_content";
 import { record } from "../client/protocol";
 
 export interface HelpRequest { topic?: string; code?: string; markdown?: string; engineVersion?: string }
@@ -20,7 +20,7 @@ export function registerHelp(context: vscode.ExtensionContext): vscode.Disposabl
   const pages = helpPages(bundle);
   const explanationPage = (request: HelpRequest) => request.code && request.markdown ? {
     id: `check:${request.code}`, title: `${request.code}: active engine explanation`, keywords: [request.code],
-    html: helpMarkdown(`${request.markdown}\n\n[Use diagnostic actions](help:diagnostics) · [Diagnostic code index](help:reference#diagnostic-codes)`, () => undefined), edition: `Active engine ${request.engineVersion ?? "unknown version"}; Help ${bundle.version}`,
+    html: helpMarkdown(`${userDiagnosticMarkdown(request.markdown)}\n\n[Use diagnostic actions](help:diagnostics) · [Diagnostic code index](help:reference#diagnostic-codes)`, () => undefined), edition: `Active engine ${request.engineVersion ?? "unknown version"}; Help ${bundle.version}`,
     explanation: { code: request.code, markdown: request.markdown, engineVersion: request.engineVersion },
   } : undefined;
   const send = (request: HelpRequest): void => {
