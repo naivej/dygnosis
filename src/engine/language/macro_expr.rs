@@ -1975,9 +1975,9 @@ fn eval_expr(
                 )?;
                 flatten_index(value, &mut flat)?;
             }
-            let target = lookup_var(global, local.as_deref(), name, budget)?;
+            let target = lookup_var_ref(global, local.as_deref(), name)?;
             if indexes.is_empty() {
-                return Ok(target);
+                return clone_macro_val(target, budget);
             }
             apply_index(target, &flat, budget)
         }
@@ -2220,13 +2220,21 @@ fn lookup_var(
     name: &str,
     budget: &mut MacroBudget,
 ) -> Result<MacroVal, MacroEvalError> {
+    clone_macro_val(lookup_var_ref(global, local, name)?, budget)
+}
+
+fn lookup_var_ref<'a>(
+    global: &'a HashMap<String, MacroVal>,
+    local: Option<&'a HashMap<String, MacroVal>>,
+    name: &str,
+) -> Result<&'a MacroVal, MacroEvalError> {
     let found = local
         .and_then(|map| map.get(name))
         .or_else(|| global.get(name));
     match found {
         Some(MacroVal::Unresolved) => Err(MacroEvalError::PriorFailure),
         Some(MacroVal::Function { .. }) => Err(MacroEvalError::UnknownVariable(name.to_string())),
-        Some(value) => clone_macro_val(value, budget),
+        Some(value) => Ok(value),
         None => Err(MacroEvalError::UnknownVariable(name.to_string())),
     }
 }
@@ -3259,7 +3267,7 @@ fn index_int(value: &MacroVal) -> Result<i64, MacroEvalError> {
 }
 
 fn apply_index(
-    value: MacroVal,
+    value: &MacroVal,
     indexes: &[i64],
     budget: &mut MacroBudget,
 ) -> Result<MacroVal, MacroEvalError> {
@@ -3268,13 +3276,13 @@ fn apply_index(
         MacroVal::Real(_) => Err(official("E285", "You cannot index a real")),
         MacroVal::Tuple(_) => Err(official("E285", "You cannot index a tuple")),
         MacroVal::Text(text) => index_text(text.as_bytes(), indexes, budget),
-        MacroVal::Bytes(text) => index_text(&text, indexes, budget),
+        MacroVal::Bytes(text) => index_text(text, indexes, budget),
         MacroVal::Array(items) => {
             if indexes.len() > RANGE_CAP {
                 return Err(MacroEvalError::Limit("collection size"));
             }
             budget.spend_work(indexes.len().max(1))?;
-            let mut picked = Vec::new();
+            let mut picked = Vec::with_capacity(indexes.len());
             for index in indexes {
                 let pos = index_pos(*index, items.len())?;
                 if pos == items.len() {
@@ -3290,7 +3298,7 @@ fn apply_index(
         }
         other => Err(official(
             "E285",
-            format!("You cannot index a {}", type_name(&other)),
+            format!("You cannot index a {}", type_name(other)),
         )),
     }
 }
@@ -4353,6 +4361,7 @@ mod tests {
                 ]),
             ),
             ("flag".into(), MacroVal::Bool(true)),
+            ("nested".into(), val("[[1,2], (3,4)]")),
         ];
         let mut defines = HashMap::new();
         for (name, value) in text {
@@ -4375,6 +4384,17 @@ mod tests {
         assert_eq!(show("cafe[4:5]", &mut defines), "é");
         assert_eq!(show("a[2]", &mut defines), "2");
         assert_eq!(show("a[2,2]", &mut defines), "[2, 2]");
+        // Guards the distinction between no index, an empty selection, and
+        // reordered/duplicate selections, including nested selected values.
+        assert_eq!(show("a[]", &mut defines), "[1, 2, 3]");
+        assert_eq!(show("a[[]]", &mut defines), "[]");
+        assert_eq!(show("s[[]]", &mut defines), "");
+        assert_eq!(show("a[3,1,3]", &mut defines), "[3, 1, 3]");
+        assert_eq!(show("nested[1]", &mut defines), "[1, 2]");
+        assert_eq!(
+            show("nested[2,1,2]", &mut defines),
+            "[(3, 4), [1, 2], (3, 4)]"
+        );
         for source in ["s[5]", "s[0]", "s[-1]", "a[4]", "a[0]"] {
             match eval_macro_expr(source, &mut defines) {
                 Err(MacroEvalError::Official { message, .. }) => {
@@ -4403,6 +4423,56 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert_eq!(show("length(bytes[1])", &mut defines), "1");
+    }
+
+    #[test]
+    fn indexed_lookup_keeps_scope_errors_and_index_side_effects() {
+        // Guards local argument precedence and fetching the target only after
+        // the index expressions have updated the macro environment.
+        let (value, _) = defined(
+            "first([3,4])",
+            &[
+                ("a", val("[1,2]")),
+                (
+                    "first",
+                    MacroVal::Function {
+                        params: vec!["a".into()],
+                        body: "a[1]".into(),
+                    },
+                ),
+            ],
+        );
+        assert_eq!(interpolate(&value), "3");
+        let (value, map) = defined("a[[1 for a in [[3,4]]]]", &[("a", val("[1,2]"))]);
+        assert_eq!(interpolate(&value), "3");
+        assert_eq!(interpolate(map.get("a").unwrap()), "[3, 4]");
+
+        // Guards the shared lookup errors when indexing a stored failed
+        // definition, a function name, or an absent name.
+        let mut defines = HashMap::from([
+            ("failed".into(), MacroVal::Unresolved),
+            (
+                "function".into(),
+                MacroVal::Function {
+                    params: Vec::new(),
+                    body: "1".into(),
+                },
+            ),
+        ]);
+        assert!(matches!(
+            eval_macro_expr("failed[1]", &mut defines),
+            Err(MacroEvalError::PriorFailure)
+        ));
+        for name in ["function", "missing"] {
+            assert!(matches!(
+                eval_macro_expr(&format!("{name}[1]"), &mut defines),
+                Err(MacroEvalError::UnknownVariable(found)) if found == name
+            ));
+        }
+        assert!(matches!(
+            eval_macro_expr("missing[unknown_index]", &mut defines),
+            Err(MacroEvalError::UnknownVariable(found)) if found == "unknown_index"
+        ));
     }
 
     #[test]

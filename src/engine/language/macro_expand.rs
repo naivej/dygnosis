@@ -567,7 +567,10 @@ pub(crate) enum MacroFileDirective<'a> {
 }
 
 pub(crate) enum MacroFileLoad {
-    Source { file: String, source: String },
+    Source {
+        file: String,
+        source: std::sync::Arc<String>,
+    },
     Path,
     Limit(&'static str),
 }
@@ -4122,6 +4125,82 @@ fn is_simple_ident(s: &str) -> bool {
 #[cfg(test)]
 mod budget_regressions {
     use super::*;
+
+    #[test]
+    fn repeated_scalar_table_reads_complete_with_the_root_budget() {
+        // Guards copying all 4,097 stored strings for every scalar read. The
+        // table and both loops must fit the existing 1,000,000-unit allowance.
+        let numbers = (0..=4096)
+            .map(|number| format!("\"{number}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let source = format!(
+            "@#define numbers = [{numbers}]\n\
+             @#for i in 1:128\n\
+             var x@{{numbers[i+1]}};\n\
+             @#endfor\n\
+             model;\n\
+             @#for i in 1:128\n\
+             x@{{numbers[i+1]}}=0;\n\
+             @#endfor\n\
+             end;\n"
+        );
+        let (tokens, errors, incomplete, reasons) =
+            expand_macros_with_status_lines_and_evaluations_budget(
+                &source,
+                crate::engine::language::lexer::tokenize(&source),
+                &[],
+                &[],
+                &mut MacroBudget::new(),
+            );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(incomplete.is_none(), "{reasons:?}");
+        let mut expected = String::new();
+        for number in 1..=128 {
+            expected.push_str(&format!("var x{number};\n"));
+        }
+        expected.push_str("model;\n");
+        for number in 1..=128 {
+            expected.push_str(&format!("x{number}=0;\n"));
+        }
+        expected.push_str("end;\n");
+        let actual = tokens
+            .iter()
+            .map(|token| token.text(&source))
+            .collect::<Vec<_>>();
+        let expected_tokens = crate::engine::language::lexer::tokenize(&expected);
+        let expected = expected_tokens
+            .iter()
+            .map(|token| token.text(&expected))
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn loops_without_emitted_text_still_stop_at_the_work_limit() {
+        // Guards an empty output prefix allowing substantial nested macro work
+        // to run without consuming the root's total-work allowance.
+        let source = "@#for i in 1:1000\n\
+                      @#for j in 1:1000\n\
+                      @#define ignored = i+j\n\
+                      @#endfor\n\
+                      @#endfor\n\
+                      var after;\n";
+        let (tokens, errors, incomplete, reasons) =
+            expand_macros_with_status_lines_and_evaluations_budget(
+                source,
+                crate::engine::language::lexer::tokenize(source),
+                &[],
+                &[],
+                &mut MacroBudget::new(),
+            );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(incomplete.is_some());
+        assert!(reasons
+            .iter()
+            .any(|reason| reason.limit_name == Some("iteration work")));
+        assert!(tokens.iter().all(|token| token.kind == TokenKind::Eof));
+    }
 
     #[test]
     fn adjacent_interpolations_stop_on_the_supplied_root_budget() {

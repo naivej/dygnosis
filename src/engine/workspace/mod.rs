@@ -15,7 +15,7 @@ use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 static INPUT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
@@ -70,10 +70,33 @@ pub struct IncludeRecords {
 }
 
 struct Doc {
-    source: String,
-    model: Arc<Model>,
+    source: Arc<String>,
+    model: OnceLock<Arc<Model>>,
     overlay: bool,
     input_generation: u64,
+}
+
+impl Doc {
+    /// An acquired include needs only its source for execution in its parent.
+    /// Parse it independently only when a standalone document query needs it.
+    fn model(&self, cancellation: Option<Arc<AtomicBool>>) -> Option<&Arc<Model>> {
+        let mut budget = MacroBudget::with_cancellation(cancellation);
+        let flag = budget.cancellation();
+        if crate::engine::control::flag_cancelled(flag.as_deref()) {
+            return None;
+        }
+        if let Some(model) = self.model.get() {
+            return Some(model);
+        }
+        let model = crate::engine::language::parser::parse_with_budget(&self.source, &mut budget);
+        // A canceled parser can retain unfinished facts without a macro reason.
+        // Shared document caches must publish only an uninterrupted parse.
+        if crate::engine::control::flag_cancelled(flag.as_deref()) {
+            return None;
+        }
+        let _ = self.model.set(Arc::new(model));
+        self.model.get()
+    }
 }
 
 /// One joined include source and its written-file map. The model, expand view,
@@ -467,7 +490,7 @@ impl Workspace {
     fn overlay_generation(&self, key: &str, source: &str) -> u64 {
         self.docs
             .get(key)
-            .filter(|doc| doc.source == source)
+            .filter(|doc| doc.source.as_str() == source)
             .map(|doc| doc.input_generation)
             .unwrap_or_else(|| INPUT_GENERATION.fetch_add(1, Ordering::Relaxed))
     }
@@ -482,8 +505,8 @@ impl Workspace {
         self.docs.insert(
             key.to_string(),
             Arc::new(Doc {
-                source,
-                model: Arc::new(model),
+                source: Arc::new(source),
+                model: OnceLock::from(Arc::new(model)),
                 overlay: true,
                 input_generation,
             }),
@@ -515,8 +538,8 @@ impl Workspace {
         self.docs.insert(
             key.clone(),
             Arc::new(Doc {
-                source,
-                model: Arc::new(model),
+                source: Arc::new(source),
+                model: OnceLock::from(Arc::new(model)),
                 overlay: true,
                 input_generation,
             }),
@@ -551,7 +574,10 @@ impl Workspace {
     pub fn load_from_disk(&mut self, path: &Path) -> Option<&Model> {
         let key = path_key(path);
         if self.docs.get(&key).is_some_and(|d| d.overlay) {
-            return self.docs.get(&key).map(|d| d.model.as_ref());
+            return self
+                .docs
+                .get(&key)
+                .and_then(|d| d.model(self.cancellation.clone()).map(Arc::as_ref));
         }
         if self.overlay_only {
             return None;
@@ -596,8 +622,8 @@ impl Workspace {
         self.docs.insert(
             key.clone(),
             Arc::new(Doc {
-                source,
-                model: Arc::new(model),
+                source: Arc::new(source),
+                model: OnceLock::from(Arc::new(model)),
                 overlay: false,
                 input_generation: 0,
             }),
@@ -608,7 +634,9 @@ impl Workspace {
         self.expand.clear();
         self.records.clear();
         self.companions.clear();
-        self.docs.get(&key).map(|d| d.model.as_ref())
+        self.docs
+            .get(&key)
+            .and_then(|d| d.model(self.cancellation.clone()).map(Arc::as_ref))
     }
 
     pub fn add_search_path(&mut self, path: PathBuf) {
@@ -982,7 +1010,7 @@ impl Workspace {
             };
             let decoded = String::from_utf8(bytes.clone())
                 .unwrap_or_else(|_| bytes.iter().map(|&byte| byte as char).collect());
-            document.source == decoded
+            document.source.as_str() == decoded
         })
     }
 
@@ -1048,7 +1076,9 @@ impl Workspace {
         } else {
             normalize_uri(uri)
         };
-        self.docs.get(&key).map(|d| d.model.as_ref())
+        self.docs
+            .get(&key)
+            .and_then(|d| d.model(self.cancellation.clone()).map(Arc::as_ref))
     }
 
     pub fn get_source(&self, uri: &str) -> Option<&str> {
@@ -1117,30 +1147,35 @@ impl Workspace {
                 let span = records.unresolved.first().map(|item| item.span)?;
                 Some(span)
             });
-            let same_root = self.docs.get(&key).filter(|doc| {
+            let same_root_doc = self.docs.get(&key).filter(|_| {
                 let [segment] = spliced.segments.as_slice() else {
                     return false;
                 };
                 spliced.gaps.is_empty()
-                    && doc.model.source == spliced.text
                     && segment.file.as_deref() == Some(key.as_str())
                     && segment.spliced == Span::new(0, spliced.text.len())
                     && segment.origin == segment.spliced
                     && segment.line == 1
                     && segment.evaluation.is_none()
             });
+            let same_root = if let Some(doc) = same_root_doc {
+                let model = doc.model(self.cancellation.clone())?;
+                (model.source == spliced.text).then_some(model)
+            } else {
+                None
+            };
             if fatal.is_none()
                 && spliced.limit.is_none()
                 && spliced.refusal.is_none()
-                && let Some(doc) = same_root
+                && let Some(model) = same_root
             {
-                self.effective.insert(key.clone(), Arc::clone(&doc.model));
+                self.effective.insert(key.clone(), Arc::clone(model));
                 return self.effective.get(&key).map(Arc::as_ref);
             }
             // A one-segment unchanged root already has the same parser input,
             // original lines and macro evaluation context. Reuse its facts.
-            let mut model = if let Some(doc) = same_root {
-                doc.model.as_ref().clone()
+            let mut model = if let Some(model) = same_root {
+                model.as_ref().clone()
             } else {
                 let lines: Vec<_> = spliced
                     .segments
@@ -1397,7 +1432,10 @@ impl Workspace {
 
     fn model_for_key(&mut self, key: &str) -> Option<&Model> {
         if self.docs.contains_key(key) {
-            return self.docs.get(key).map(|d| d.model.as_ref());
+            return self
+                .docs
+                .get(key)
+                .and_then(|d| d.model(self.cancellation.clone()).map(Arc::as_ref));
         }
         if self.overlay_only {
             return None;
@@ -1406,14 +1444,16 @@ impl Workspace {
         if path.exists() {
             self.load_from_disk(&path)?;
         }
-        self.docs.get(key).map(|d| d.model.as_ref())
+        self.docs
+            .get(key)
+            .and_then(|d| d.model(self.cancellation.clone()).map(Arc::as_ref))
     }
 
     fn source_for_key(
         &mut self,
         key: &str,
         budget: &mut MacroBudget,
-    ) -> Result<Option<String>, MacroEvalError> {
+    ) -> Result<Option<Arc<String>>, MacroEvalError> {
         if self.cancelled() {
             return Err(MacroEvalError::Limit("request cancelled"));
         }
@@ -1444,8 +1484,8 @@ impl Workspace {
             }
         }
         if let Some(doc) = self.docs.get(key) {
-            budget.spend_work(doc.source.len().max(1))?;
-            return Ok(Some(doc.source.clone()));
+            budget.spend_work(1)?;
+            return Ok(Some(Arc::clone(&doc.source)));
         }
         if self.overlay_only {
             if let Some(lookup) = &mut self.snapshot_lookup {
@@ -1457,14 +1497,14 @@ impl Workspace {
         let Some(source) = read_include_text(&path, budget)? else {
             return Ok(None);
         };
-        let model = crate::engine::language::parser::parse_with_budget(&source, budget);
-        budget.spend_work(source.len().max(1))?;
-        let returned = source.clone();
+        budget.spend_work(1)?;
+        let source = Arc::new(source);
+        let returned = Arc::clone(&source);
         self.docs.insert(
             key.to_string(),
             Arc::new(Doc {
                 source,
-                model: Arc::new(model),
+                model: OnceLock::new(),
                 overlay: false,
                 input_generation: 0,
             }),
@@ -1695,7 +1735,10 @@ impl Workspace {
             let Some(doc) = self.docs.get(root_key) else {
                 return Vec::new();
             };
-            (doc.model.source.clone(), doc.model.clone())
+            let Some(model) = doc.model(self.cancellation.clone()) else {
+                return Vec::new();
+            };
+            (model.source.clone(), Arc::clone(model))
         };
         let stem = Path::new(root_key)
             .file_stem()
@@ -2101,9 +2144,17 @@ impl Workspace {
                     let first_character = self
                         .docs
                         .get(&file)
-                        .and_then(|document| document.model.source.get(written.start as usize..))
-                        .and_then(|tail| tail.chars().next())
-                        .map_or(0, char::len_utf8);
+                        .and_then(|document| {
+                            let source = crate::engine::language::parser::normalize_newlines(
+                                &document.source,
+                            );
+                            source
+                                .get(written.start as usize..)?
+                                .chars()
+                                .next()
+                                .map(char::len_utf8)
+                        })
+                        .unwrap_or(0);
                     written.end = written.start + first_character as u32;
                 }
                 IncludeSite {
@@ -3218,22 +3269,25 @@ mod include_load_budget_tests {
     use super::*;
 
     #[test]
-    fn cached_child_is_refused_before_a_full_source_copy() {
+    fn cached_child_reuses_source_without_a_byte_copy() {
+        // Guards a cached include copying all its bytes before execution. The
+        // caller receives the same immutable source with a small work balance.
         let mut workspace = Workspace::new();
         let child = "@#if 0\n".to_string() + &" ".repeat(1_024) + "\n@#endif\n";
         workspace.update_document("/budget/child.inc", child);
         let key = normalize_uri("/budget/child.inc");
         let mut budget = MacroBudget::new();
         budget.spend_work(budget.remaining_work() - 8).unwrap();
-        assert!(matches!(
-            workspace.source_for_key(&key, &mut budget),
-            Err(MacroEvalError::Limit("iteration work"))
-        ));
-        assert_eq!(budget.remaining_work(), 8);
+        let source = workspace
+            .source_for_key(&key, &mut budget)
+            .unwrap()
+            .unwrap();
+        assert!(Arc::ptr_eq(&source, &workspace.docs[&key].source));
+        assert_eq!(budget.remaining_work(), 7);
     }
 
     #[test]
-    fn disk_child_is_bounded_before_read_and_initial_parse() {
+    fn disk_child_is_bounded_before_read() {
         let folder = std::env::temp_dir().join(format!(
             "dyg-include-budget-{}-{}",
             std::process::id(),
@@ -3257,6 +3311,161 @@ mod include_load_budget_tests {
         assert_eq!(budget.remaining_work(), 8);
         let resolved = folder.canonicalize().unwrap();
         let temporary = std::env::temp_dir().canonicalize().unwrap();
+        assert!(resolved.starts_with(&temporary) && resolved != temporary);
+        std::fs::remove_dir_all(resolved).unwrap();
+    }
+
+    #[test]
+    fn acquired_tables_use_parent_work_without_unused_standalone_parses() {
+        // Guards acquisition spending the root allowance on unused standalone
+        // child parses and full source copies before real parent execution.
+        let folder = std::env::temp_dir().join(format!(
+            "dyg-acquired-tables-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&folder).unwrap();
+        let table = (0..=4096)
+            .map(|number| format!("\"{number}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut source = String::new();
+        for number in 0..3 {
+            let name = format!("table{number}.inc");
+            std::fs::write(
+                folder.join(&name),
+                format!("@#define table{number} = [{table}]\n"),
+            )
+            .unwrap();
+            source.push_str(&format!("@#include \"{name}\"\n"));
+        }
+        source.push_str("var y; model; y=@{(real)table0[2]+(real)table2[3]}; end;\n");
+        let root = folder.join("root.mod");
+        std::fs::write(&root, source).unwrap();
+        let root = path_key(&root);
+        let mut workspace = Workspace::new();
+        let model = workspace.get_effective_model(&root).unwrap();
+        assert!(!model.macro_incomplete(), "{:?}", model.incomplete_reasons);
+        assert!(model.macro_type_errors.is_empty());
+        assert_eq!(model.equations.len(), 1);
+        let expanded = workspace.expand_report(&root).unwrap();
+        assert!(expanded.complete);
+        assert!(
+            expanded.effective_text.contains("y = 3"),
+            "{}",
+            expanded.effective_text
+        );
+        let temporary = std::env::temp_dir().canonicalize().unwrap();
+        let resolved = folder.canonicalize().unwrap();
+        assert!(resolved.starts_with(&temporary) && resolved != temporary);
+        std::fs::remove_dir_all(resolved).unwrap();
+    }
+
+    #[test]
+    fn acquired_child_standalone_facts_do_not_replace_parent_context() {
+        // Guards lazy standalone queries and shared snapshots contaminating a
+        // child's real parent context or hiding an actual parent-context error.
+        let folder = std::env::temp_dir().join(format!(
+            "dyg-acquired-context-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&folder).unwrap();
+        let child = folder.join("child.inc");
+        std::fs::write(&child, "@#if flag[1]\nvar y;\n@#endif\n").unwrap();
+        let root = folder.join("root.mod");
+        let body = "@#include \"child.inc\"\nmodel; y=0; end;\n";
+        std::fs::write(&root, format!("@#define flag=[1]\n{body}")).unwrap();
+        let root = path_key(&root);
+        let child = path_key(&child);
+        let mut workspace = Workspace::new();
+        let model = workspace.get_effective_model(&root).unwrap();
+        assert!(!model.macro_incomplete());
+        assert!(model.macro_type_errors.is_empty());
+        assert_eq!(model.endogenous.len(), 1);
+        let standalone = workspace.get_model(&child).unwrap();
+        assert!(standalone
+            .macro_type_errors
+            .iter()
+            .any(|(_, code, message)| *code == "E063" && message.contains("flag")));
+        for _ in 0..2 {
+            let mut snapshot = workspace.snapshot_with_root_settings(&root);
+            let model = snapshot.get_effective_model(&root).unwrap();
+            assert!(!model.macro_incomplete());
+            assert!(model.macro_type_errors.is_empty());
+            assert_eq!(model.endogenous.len(), 1);
+        }
+        workspace.update_document(&root, format!("@#define flag=true\n{body}"));
+        let model = workspace.get_effective_model(&root).unwrap();
+        assert!(model
+            .macro_type_errors
+            .iter()
+            .any(|(_, code, message)| *code == "E285" && message == "You cannot index a boolean"));
+        let temporary = std::env::temp_dir().canonicalize().unwrap();
+        let resolved = folder.canonicalize().unwrap();
+        assert!(resolved.starts_with(&temporary) && resolved != temporary);
+        std::fs::remove_dir_all(resolved).unwrap();
+    }
+
+    #[test]
+    fn canceled_lazy_snapshot_does_not_publish_a_shared_standalone_model() {
+        // Guards an interrupted lazy parse poisoning the immutable Doc shared
+        // by the original workspace and later uncanceled worker snapshots.
+        let folder = std::env::temp_dir().join(format!(
+            "dyg-lazy-cancel-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&folder).unwrap();
+        let child = folder.join("child.mod");
+        std::fs::write(&child, "var y; model; y=0; end;\n").unwrap();
+        let key = path_key(&child);
+        for mode in ["explicit before", "inherited before", "during parse"] {
+            let mut workspace = Workspace::new();
+            workspace
+                .source_for_key(&key, &mut MacroBudget::new())
+                .unwrap()
+                .unwrap();
+            let mut interrupted = workspace.snapshot_with_root_settings(&key);
+            let flag = Arc::new(AtomicBool::new(false));
+            if mode == "inherited before" {
+                assert!(crate::engine::control::run(Some(Arc::clone(&flag)), || {
+                    flag.store(true, Ordering::Relaxed);
+                    assert!(interrupted.get_model(&key).is_none());
+                })
+                .is_err());
+            } else {
+                interrupted.cancellation = Some(Arc::clone(&flag));
+                if mode == "during parse" {
+                    // The first checkpoint enters Doc::model; the next is the
+                    // expanded parser, after macro expansion has completed.
+                    crate::engine::control::cancel_after(&flag, 1);
+                } else {
+                    flag.store(true, Ordering::Relaxed);
+                }
+                assert!(interrupted.get_model(&key).is_none(), "{mode}");
+            }
+            assert!(flag.load(Ordering::Relaxed), "{mode}");
+            assert!(workspace.docs[&key].model.get().is_none(), "{mode}");
+            let fresh = workspace.snapshot_with_root_settings(&key);
+            let model = fresh.get_model(&key).unwrap();
+            assert!(!model.macro_incomplete(), "{mode}");
+            assert_eq!(model.endogenous.len(), 1, "{mode}");
+            assert_eq!(model.equations.len(), 1, "{mode}");
+            let original = workspace.get_model(&key).unwrap();
+            assert_eq!(original.equations.len(), 1, "{mode}");
+        }
+        let temporary = std::env::temp_dir().canonicalize().unwrap();
+        let resolved = folder.canonicalize().unwrap();
         assert!(resolved.starts_with(&temporary) && resolved != temporary);
         std::fs::remove_dir_all(resolved).unwrap();
     }
