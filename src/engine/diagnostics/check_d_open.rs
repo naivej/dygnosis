@@ -574,7 +574,10 @@ fn check_includepath_dirs(ws: &mut Workspace, model: &Model, abs_path: &str) -> 
     if model.includepaths.is_empty() {
         return out;
     }
-    let executed = crate::engine::language::macro_expand::executed_includepaths(&model.source);
+    let executed = crate::engine::language::macro_expand::executed_includepaths(
+        &model.source,
+        model.macro_work_limit,
+    );
     for (span, literal) in executed {
         if crate::engine::control::cancelled() {
             return Default::default();

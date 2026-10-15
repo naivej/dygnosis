@@ -7,6 +7,7 @@ use serde_json::Value;
 use tower_lsp::lsp_types::{Url, WorkspaceFolder};
 
 use crate::engine::editing::format::parse_format_indent;
+use crate::engine::macro_work::MacroWorkLimit;
 use crate::engine::workspace::include_resolver::{normalize_uri, path_key};
 
 pub const CONFIGURATION_SCHEMA_VERSION: u32 = 1;
@@ -56,6 +57,7 @@ impl Default for PresentationSettings {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ResourceSettings {
+    pub macro_work_limit: MacroWorkLimit,
     pub search_paths: Vec<PathBuf>,
     pub format_indent_unit: String,
     pub presentation: PresentationSettings,
@@ -65,6 +67,7 @@ pub struct ResourceSettings {
 impl Default for ResourceSettings {
     fn default() -> Self {
         Self {
+            macro_work_limit: MacroWorkLimit::default(),
             search_paths: Vec::new(),
             format_indent_unit: "\t".to_owned(),
             presentation: PresentationSettings::default(),
@@ -281,6 +284,12 @@ fn read_settings(value: &Value, settings: &mut ResourceSettings, explanations: &
     }
     if let Some(raw) = object.get("searchPaths") {
         settings.search_paths = read_paths(raw, explanations);
+    }
+    if let Some(raw) = object.get("macroWorkLimit") {
+        settings.macro_work_limit = MacroWorkLimit::from_json(raw).unwrap_or_else(|| {
+            explanations.push(format!("Invalid dynare.macroWorkLimit; use the default of {} work units. Choose a whole number from 1 to {}.", MacroWorkLimit::DEFAULT, MacroWorkLimit::MAX));
+            MacroWorkLimit::default()
+        });
     }
     if let Some(raw) = object.get("formatIndent") {
         settings.format_indent_unit = parse_format_indent(raw).unwrap_or_else(|| {

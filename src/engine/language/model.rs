@@ -1136,6 +1136,8 @@ pub struct AssignmentSyntax {
 #[derive(Clone, Debug, Default)]
 pub struct Model {
     pub source: String,
+    /// Resolved analysis context for auxiliary macro checks and edit proofs.
+    pub(crate) macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
     pub(crate) setting_receipts: HashMap<&'static str, SettingReceipt>,
     pub(crate) fact_receipts: HashMap<&'static str, Vec<RetainedFactReceipt>>,
     /// Tokens after macro expansion. Equation and assignment `active_tokens`

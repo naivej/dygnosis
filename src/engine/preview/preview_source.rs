@@ -3,10 +3,11 @@
 use crate::engine::language::expand::ExpandReport;
 use crate::engine::language::lexer::{tokenize, Token, TokenKind};
 use crate::engine::language::macro_expand::{
-    expand_macros_with_source_layout_and_evaluations, MacroReplay, SourceFragment, SourceLayoutGap,
+    expand_macros_with_source_layout_and_evaluations, IncompleteReason, MacroReplay,
+    SourceFragment, SourceLayoutGap,
 };
 use crate::engine::language::model::Model;
-use crate::engine::language::parser::{join_lexemes_recorded, parse_expanded};
+use crate::engine::language::parser::{join_lexemes_recorded, parse_expanded_controlled};
 use crate::engine::language::span::Span;
 
 #[derive(Debug)]
@@ -31,7 +32,16 @@ pub(crate) fn source(
     gaps: &[SourceLayoutGap],
     line_segments: &[(Span, u32)],
 ) -> Option<SourcePreview> {
-    source_with_evaluations(report, model, gaps, line_segments, &[])
+    source_with_evaluations(
+        report,
+        model,
+        gaps,
+        line_segments,
+        &[],
+        crate::engine::macro_work::MacroWorkLimit::default(),
+    )
+    .ok()
+    .flatten()
 }
 
 pub(crate) fn source_with_evaluations(
@@ -40,24 +50,30 @@ pub(crate) fn source_with_evaluations(
     gaps: &[SourceLayoutGap],
     line_segments: &[(Span, u32)],
     evaluations: &[MacroReplay],
-) -> Option<SourcePreview> {
+    macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
+) -> Result<Option<SourcePreview>, Vec<IncompleteReason>> {
     let original = &report.effective_text;
-    let (tokens, _, _, layout) = expand_macros_with_source_layout_and_evaluations(
+    let (tokens, _, _, layout, reasons) = expand_macros_with_source_layout_and_evaluations(
         &model.source,
         tokenize(&model.source),
         gaps,
         line_segments,
         evaluations,
+        &mut crate::engine::language::macro_expr::MacroBudget::with_limit(macro_work_limit, None),
     );
-    let (copy_model, _) = parse_expanded(&model.source, tokens);
+    if !reasons.is_empty() {
+        return Err(reasons);
+    }
+    let (copy_model, _) = parse_expanded_controlled(&model.source, tokens, None, macro_work_limit);
     let tokens = &copy_model.expanded_tokens;
     let copy = join_lexemes_recorded(&model.source, tokens, |_, _| {});
     if copy != *original {
-        return None;
+        return Ok(None);
     }
     // The display also needs raw-block recovery. A plain lexer comparison
     // would hide valid statements after a comment-shaped verbatim terminator.
-    let (proof_model, _) = parse_expanded(&layout.text, tokenize(&layout.text));
+    let (proof_model, _) =
+        parse_expanded_controlled(&layout.text, tokenize(&layout.text), None, macro_work_limit);
     let proof = &proof_model.expanded_tokens;
     let proven = token_stream_agrees(&layout.text, &model.source, tokens, proof);
     let ranges = if proven {
@@ -66,12 +82,12 @@ pub(crate) fn source_with_evaluations(
         Vec::new()
     };
     let navigation_ok = ranges.len() == report.navigation.len();
-    Some(SourcePreview {
+    Ok(Some(SourcePreview {
         text: layout.text,
         ranges,
         proven: proven && navigation_ok,
         fragments: layout.fragments,
-    })
+    }))
 }
 
 fn token_stream_agrees(display: &str, src: &str, expanded: &[Token], proof: &[Token]) -> bool {
@@ -145,6 +161,40 @@ mod tests {
         source(&report, &model, &[], &[]).expect("source layout")
     }
 
+    #[test]
+    fn source_layout_retains_its_own_actual_work_stop() {
+        // Guards a complete compact model hiding a source-layout resource stop,
+        // and a source worker silently using the default allowance.
+        let text = "var y; model; y=0; end;\n";
+        let report = expand_report(text);
+        let model = parse(text);
+        assert!(report.complete);
+        let reasons = source_with_evaluations(
+            &report,
+            &model,
+            &[],
+            &[],
+            &[],
+            crate::engine::macro_work::MacroWorkLimit::new(1).unwrap(),
+        )
+        .unwrap_err();
+        assert_eq!(reasons[0].limit_name, Some("iteration work"));
+        assert_eq!(reasons[0].limit_ceiling, Some((1, "work units")));
+        assert!(
+            source_with_evaluations(
+                &report,
+                &model,
+                &[],
+                &[],
+                &[],
+                crate::engine::macro_work::MacroWorkLimit::new(10000).unwrap()
+            )
+            .unwrap()
+            .unwrap()
+            .proven
+        );
+    }
+
     fn preview_with_includes(root: &str, root_text: &str, files: &[(&str, &str)]) -> SourcePreview {
         let mut ws = Workspace::default();
         for (path, text) in files {
@@ -156,8 +206,16 @@ mod tests {
         let gaps = ws.source_layout_gaps(root);
         let lines = ws.source_line_segments(root);
         let evaluations = ws.source_evaluations(root);
-        source_with_evaluations(&report, &model, &gaps, &lines, &evaluations)
-            .expect("source layout")
+        source_with_evaluations(
+            &report,
+            &model,
+            &gaps,
+            &lines,
+            &evaluations,
+            crate::engine::macro_work::MacroWorkLimit::default(),
+        )
+        .expect("complete source expansion")
+        .expect("source layout")
     }
 
     #[test]

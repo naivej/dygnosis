@@ -10,6 +10,7 @@ use std::sync::{
 };
 
 use crate::engine::language::macro_expand::{MacroEvalError, MacroVal};
+use crate::engine::macro_work::MacroWorkLimit;
 
 /// Elements in one range or array value.
 const RANGE_CAP: usize = 10_000;
@@ -27,8 +28,11 @@ pub(crate) const VALUE_DEPTH_CAP: usize = 128;
 const SET_WORK_CAP: usize = RANGE_CAP * 8;
 /// One macro string, checked before the allocation.
 pub(crate) const STRING_CAP: usize = 1_048_576;
-/// Operations in one root: nodes, iterations, set pairs, and allocated units.
-pub(crate) const MACRO_WORK_CAP: usize = 1_000_000;
+/// Fixed representation bounds, independent of the configurable work limit.
+const VALUE_NODE_CAP: usize = 1_000_000;
+const REPLAY_ATOM_CAP: usize = 1_000_000;
+#[cfg(test)]
+pub(crate) const MACRO_WORK_CAP: usize = MacroWorkLimit::DEFAULT;
 /// Cumulative emitted text for the execution worker's `spend_output` calls.
 pub(crate) const MACRO_OUTPUT_CAP: usize = 8 * 1024 * 1024;
 /// Nested loop bodies and included files. Checked before the recursive call.
@@ -39,7 +43,6 @@ pub(crate) const EXEC_DEPTH_CAP: usize = 64;
 /// numeric ceiling.
 pub(crate) fn limit_ceiling(name: &str) -> Option<(usize, &'static str)> {
     match name {
-        "iteration work" => Some((MACRO_WORK_CAP, "work units")),
         "output size" => Some((MACRO_OUTPUT_CAP, "bytes")),
         "execution depth" => Some((EXEC_DEPTH_CAP, "nesting depth")),
         "string size" => Some((STRING_CAP, "bytes")),
@@ -48,6 +51,7 @@ pub(crate) fn limit_ceiling(name: &str) -> Option<(usize, &'static str)> {
         // No element count was reached in that case.
         "range size" => None,
         "value depth" => Some((VALUE_DEPTH_CAP, "nesting depth")),
+        "value size" => Some((VALUE_NODE_CAP, "value nodes")),
         _ => None,
     }
 }
@@ -57,6 +61,7 @@ pub(crate) fn limit_ceiling(name: &str) -> Option<(usize, &'static str)> {
 #[derive(Debug)]
 pub(crate) struct MacroBudget {
     work_left: usize,
+    work_limit: MacroWorkLimit,
     output_left: usize,
     cancellation: Option<Arc<AtomicBool>>,
     /// Nested `@#for` bodies and `@#include` files on this root.
@@ -65,18 +70,27 @@ pub(crate) struct MacroBudget {
 
 impl MacroBudget {
     pub(crate) fn new() -> Self {
+        Self::with_limit(MacroWorkLimit::default(), None)
+    }
+
+    pub(crate) fn with_limit(
+        work_limit: MacroWorkLimit,
+        cancellation: Option<Arc<AtomicBool>>,
+    ) -> Self {
         Self {
-            work_left: MACRO_WORK_CAP,
+            work_left: work_limit.get(),
+            work_limit,
             output_left: MACRO_OUTPUT_CAP,
-            cancellation: crate::engine::control::current(),
+            cancellation: cancellation.or_else(crate::engine::control::current),
             exec_depth: 0,
         }
     }
 
-    pub(crate) fn with_cancellation(cancellation: Option<Arc<AtomicBool>>) -> Self {
-        Self {
-            cancellation: cancellation.or_else(crate::engine::control::current),
-            ..Self::new()
+    pub(crate) fn limit_ceiling(&self, name: &str) -> Option<(usize, &'static str)> {
+        if name == "iteration work" {
+            Some((self.work_limit.get(), "work units"))
+        } else {
+            limit_ceiling(name)
         }
     }
 
@@ -87,6 +101,10 @@ impl MacroBudget {
 
     pub(crate) fn cancellation(&self) -> Option<Arc<AtomicBool>> {
         self.cancellation.clone()
+    }
+
+    pub(crate) fn work_limit(&self) -> MacroWorkLimit {
+        self.work_limit
     }
 
     /// Count an operation. `amount` is the work about to be done.
@@ -127,10 +145,39 @@ mod request_cancellation_tests {
     use super::*;
 
     #[test]
+    fn configured_work_ceiling_preserves_independent_string_bound() {
+        // Guards a larger total allowance raising an individual string bound,
+        // and actual work receipts reporting the global default.
+        let mut small = MacroBudget::with_limit(MacroWorkLimit::new(7).unwrap(), None);
+        small.spend_work(7).unwrap();
+        assert!(matches!(
+            small.spend_work(1),
+            Err(MacroEvalError::Limit("iteration work"))
+        ));
+        assert_eq!(
+            small.limit_ceiling("iteration work"),
+            Some((7, "work units"))
+        );
+        let mut large = MacroBudget::with_limit(
+            MacroWorkLimit::new(MacroWorkLimit::MAX as u64).unwrap(),
+            None,
+        );
+        assert!(matches!(
+            large.reserve_string(STRING_CAP + 1),
+            Err(MacroEvalError::Limit("string size"))
+        ));
+        assert_eq!(large.remaining_work(), MacroWorkLimit::MAX);
+    }
+
+    #[test]
     fn cancelled_macro_work_stops_at_the_next_budget_charge() {
-        // Guards cancellation being checked only around a long macro worker.
+        // Guards the largest configured allowance ignoring cancellation or
+        // checking it only around a long macro worker.
         let flag = Arc::new(AtomicBool::new(false));
-        let mut budget = MacroBudget::with_cancellation(Some(Arc::clone(&flag)));
+        let mut budget = MacroBudget::with_limit(
+            MacroWorkLimit::new(MacroWorkLimit::MAX as u64).unwrap(),
+            Some(Arc::clone(&flag)),
+        );
         budget.spend_work(1).unwrap();
         let remaining = budget.remaining_work();
         flag.store(true, Ordering::Relaxed);
@@ -409,8 +456,8 @@ fn measure_val(value: &MacroVal) -> Result<ValCost, MacroEvalError> {
             return Err(MacroEvalError::Limit("value depth"));
         }
         nodes = nodes.saturating_add(1);
-        if nodes > MACRO_WORK_CAP {
-            return Err(MacroEvalError::Limit("iteration work"));
+        if nodes > VALUE_NODE_CAP {
+            return Err(MacroEvalError::Limit("value size"));
         }
         match value {
             MacroVal::Real(_) | MacroVal::Bool(_) | MacroVal::Unresolved => {}
@@ -547,7 +594,7 @@ pub(crate) fn decode_replay_value(
     budget.spend_work(parse_bound)?;
     let atoms: Vec<ReplayAtom> =
         serde_json::from_str(encoded).map_err(|_| MacroEvalError::Limit("source mapping"))?;
-    if atoms.is_empty() || atoms.len() > MACRO_WORK_CAP {
+    if atoms.is_empty() || atoms.len() > REPLAY_ATOM_CAP {
         return Err(MacroEvalError::Limit("source mapping"));
     }
     budget.spend_work(

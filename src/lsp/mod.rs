@@ -41,7 +41,7 @@ use crate::engine::editing::equation_names::{
     equation_name_plan, long_name_plan, metadata_completion,
 };
 use crate::engine::editing::format::{
-    format_outcome, format_range_outcome, FormatOutcome, RangeFormatOutcome,
+    format_outcome_with_limit, format_range_outcome_with_limit, FormatOutcome, RangeFormatOutcome,
 };
 use crate::engine::editing::refs::{
     enclosing_paren_has_ident, ident_at, is_legal_ident, occurrences, option_command_at,
@@ -298,6 +298,8 @@ impl Inner {
         let settings = self.settings.resolve(uri);
         self.workspace
             .set_root_search_paths(uri.as_str(), settings.search_paths.clone());
+        self.workspace
+            .set_root_macro_work_limit(uri.as_str(), settings.macro_work_limit);
         settings
     }
 
@@ -690,6 +692,7 @@ impl Backend {
         if is_model_root(&uri) {
             inner.project.active = Some(uri.clone());
         }
+        inner.prepare_root(&uri);
         inner.workspace.update_document(uri.as_str(), &text);
         inner.docs.insert(
             uri.clone(),
@@ -1534,7 +1537,11 @@ impl Backend {
             )
         })?;
         let settings = inner.settings.resolve(uri);
-        match format_outcome(&doc.text, &settings.format_indent_unit) {
+        match format_outcome_with_limit(
+            &doc.text,
+            &settings.format_indent_unit,
+            settings.macro_work_limit,
+        ) {
             FormatOutcome::Changed(formatted) => {
                 Ok(Some(vec![full_document_edit(&doc.text, formatted)]))
             }
@@ -1557,11 +1564,12 @@ impl Backend {
             end_line -= 1;
         }
         let settings = inner.settings.resolve(uri);
-        let (start_line, end_line, replacement) = match format_range_outcome(
+        let (start_line, end_line, replacement) = match format_range_outcome_with_limit(
             &doc.text,
             range.start.line,
             end_line,
             &settings.format_indent_unit,
+            settings.macro_work_limit,
         ) {
             RangeFormatOutcome::Changed(start, end, replacement) => (start, end, replacement),
             RangeFormatOutcome::Unchanged => return Ok(None),
@@ -1832,11 +1840,19 @@ impl Backend {
         input: &crate::engine::comparison::compare_snapshots::SnapshotInput,
     ) -> crate::engine::comparison::compare_snapshots::SnapshotCapture {
         use crate::engine::comparison::compare_snapshots::{
-            capture_git_snapshot, capture_working_snapshot, SnapshotCapture, SnapshotFailure,
-            SnapshotInput,
+            capture_git_snapshot_with_limit, capture_working_snapshot, SnapshotCapture,
+            SnapshotFailure, SnapshotInput,
         };
         match input {
-            SnapshotInput::Git(input) => capture_git_snapshot(input),
+            SnapshotInput::Git(input) => {
+                let macro_work_limit =
+                    Url::parse(&format!("{}/", input.repository_uri.trim_end_matches('/')))
+                        .ok()
+                        .and_then(|repository| repository.join(&input.root_file).ok())
+                        .map(|root| self.lock_inner().settings.resolve(&root).macro_work_limit)
+                        .unwrap_or_default();
+                capture_git_snapshot_with_limit(input, None, macro_work_limit)
+            }
             SnapshotInput::Working {
                 input_id,
                 root_uri,
@@ -2015,6 +2031,7 @@ impl Backend {
         let source_evaluations = matches!(requested, Some("source"))
             .then(|| inner.workspace.source_evaluations(uri.as_str()))
             .unwrap_or_default();
+        let work_limit = inner.workspace.root_macro_work_limit(uri.as_str());
         let model = matches!(requested, Some("readable") | Some("source"))
             .then(|| inner.workspace.get_effective_model(uri.as_str()))
             .flatten();
@@ -2022,6 +2039,7 @@ impl Backend {
             Readable(crate::engine::preview::preview_layout::PreviewLayout),
             Source(crate::engine::preview::preview_source::SourcePreview),
         }
+        let mut source_reasons = Vec::new();
         let layout = model.and_then(|model| match requested {
             Some("readable") => crate::engine::preview::preview_layout::readable(&report, model)
                 .map(DisplayLayout::Readable),
@@ -2031,8 +2049,13 @@ impl Backend {
                 &source_gaps,
                 &source_lines,
                 &source_evaluations,
+                work_limit,
             )
-            .map(DisplayLayout::Source),
+            .map(|preview| preview.map(DisplayLayout::Source))
+            .unwrap_or_else(|reasons| {
+                source_reasons = reasons;
+                None
+            }),
             _ => None,
         });
         let source_unproven = matches!(
@@ -2135,14 +2158,57 @@ impl Backend {
         }
         if !complete {
             result["status"] = json!("incomplete");
-            let info = self.model_info_reasons(&mut inner, &uri);
+            let mut info = self.model_info_reasons(&mut inner, &uri);
+            if !source_reasons.is_empty() {
+                let mut causes = Vec::new();
+                let mut limits = Vec::new();
+                for reason in &source_reasons {
+                    let origin = inner
+                        .workspace
+                        .mapped_incomplete_origin(uri.as_str(), reason.span);
+                    let mut limit = crate::engine::analysis::model_info::macro_limit_record(
+                        reason,
+                        Some(uri.as_str()),
+                    );
+                    if let Some(limit) = &mut limit {
+                        limit["affected"] = json!("source-layout preview");
+                        limit["omitted"] = json!("source-layout text and navigation");
+                        limits.push(limit.clone());
+                    }
+                    let cause = crate::engine::analysis::model_info::IncompleteCause {
+                        code: reason.code,
+                        message: source_preview_stop_message(reason),
+                        origin,
+                        include_chain: Vec::new(),
+                        limit,
+                    };
+                    let mut value = incomplete_lsp_reason(&mut inner, &uri, &cause);
+                    value["available"] = json!(if report.complete {
+                        "complete compact macro expansion"
+                    } else {
+                        "verified emitted prefix"
+                    });
+                    value["omitted"] = json!("source-layout text and navigation");
+                    causes.push(value);
+                }
+                if report.complete {
+                    info = json!([]);
+                }
+                info.as_array_mut()
+                    .expect("incomplete causes")
+                    .extend(causes);
+                result["limits"] = json!(limits);
+            }
             result["incomplete_reasons"] = info;
-            result["message"] = json!(if source_unproven
-                || requested == Some("source") && layout.is_none()
-            {
-                "Expansion is partial because the requested source layout could not be verified; source navigation is unavailable."
+            result["message"] = json!(if let Some(reason) = source_reasons.first() {
+                format!(
+                    "{} Source-layout text and navigation were withheld.",
+                    source_preview_stop_message(reason)
+                )
+            } else if source_unproven || requested == Some("source") && layout.is_none() {
+                "Expansion is partial because the requested source layout could not be verified; source navigation is unavailable.".to_owned()
             } else {
-                "Expansion is partial; unresolved includes, parsing, or macro expansion prevent complete counts and source navigation."
+                "Expansion is partial; unresolved includes, parsing, or macro expansion prevent complete counts and source navigation.".to_owned()
             });
         }
         if !inner.workspace.input_snapshot_is_current(uri.as_str()) {
@@ -2160,22 +2226,7 @@ impl Backend {
                 root.as_str(),
                 &model,
             ) {
-                let location = cause
-                    .origin
-                    .as_ref()
-                    .map(|site| incomplete_written_location(inner, root, &site.file, site.span))
-                    .unwrap_or(Value::Null);
-                let chain: Vec<_> = cause
-                    .include_chain
-                    .iter()
-                    .map(|site| incomplete_written_location(inner, root, &site.file, site.span))
-                    .collect();
-                let mut reason = cause.outcome_json();
-                reason["location"] = location;
-                if !chain.is_empty() {
-                    reason["include_chain"] = json!(chain);
-                }
-                reasons.push(reason);
+                reasons.push(incomplete_lsp_reason(inner, root, &cause));
             }
         }
         if reasons.is_empty() {
@@ -2580,6 +2631,7 @@ impl LanguageServer for Backend {
                 .map(|(uri, doc)| (uri.clone(), doc.text.clone(), doc.version))
                 .collect();
             for (uri, text, version) in snapshots {
+                inner.prepare_root(&uri);
                 inner.workspace.update_document(uri.as_str(), &text);
                 if let Some(doc) = inner.docs.get_mut(&uri) {
                     doc.version = version;
@@ -3444,6 +3496,37 @@ fn preview_written_location(
     Some(
         json!({"uri":uri,"range":range,"document_version":inner.document(&uri).map(|doc|doc.version)}),
     )
+}
+
+fn source_preview_stop_message(
+    reason: &crate::engine::language::macro_expand::IncompleteReason,
+) -> String {
+    reason
+        .limit_name
+        .map(|name| format!("Source preview stopped at the {name} limit."))
+        .unwrap_or_else(|| reason.message.clone())
+}
+
+fn incomplete_lsp_reason(
+    inner: &mut Inner,
+    root: &Url,
+    cause: &crate::engine::analysis::model_info::IncompleteCause,
+) -> Value {
+    let mut value = cause.outcome_json();
+    value["location"] = cause
+        .origin
+        .as_ref()
+        .map(|site| incomplete_written_location(inner, root, &site.file, site.span))
+        .unwrap_or(Value::Null);
+    let chain: Vec<_> = cause
+        .include_chain
+        .iter()
+        .map(|site| incomplete_written_location(inner, root, &site.file, site.span))
+        .collect();
+    if !chain.is_empty() {
+        value["include_chain"] = json!(chain);
+    }
+    value
 }
 
 fn incomplete_written_location(

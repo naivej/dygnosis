@@ -146,6 +146,7 @@ fn fields(tool: &str) -> Vec<&'static str> {
         "dynare_explain" | "dynare_list_diagnostic_codes" | "dynare_list_options"
     ) {
         fields.extend_from_slice(SOURCE_FIELDS);
+        fields.push("macro_work_limit");
     }
     fields.extend_from_slice(match tool {
         "dynare_diagnose" => &["code", "severity", "file"],
@@ -387,9 +388,10 @@ pub(crate) fn legacy_json(data: &Value) -> Vec<ContentBlock> {
 pub(crate) fn dispatch(
     tool: &str,
     arguments: Value,
-    control: RequestControl,
+    mut control: RequestControl,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let params = decode(tool, &arguments)?;
+    control.macro_work_limit = params.macro_work_limit;
     if matches!(
         tool,
         "dynare_explain" | "dynare_list_diagnostic_codes" | "dynare_list_options"
@@ -1271,7 +1273,7 @@ pub(crate) fn proposal_result(
     Ok((
         data,
         json!({"revision":snapshot.revision,"source_policy":snapshot.inputs["source_policy"],"checked_owners":snapshot.inputs["checked_owners"],
-        "include_dirs":snapshot.inputs["include_dirs"],"inputs":guards,"edits":wire}),
+        "include_dirs":snapshot.inputs["include_dirs"],"macro_work_limit":snapshot.inputs["macro_work_limit"],"inputs":guards,"edits":wire}),
     ))
 }
 

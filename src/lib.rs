@@ -57,6 +57,7 @@ pub use engine::language::macro_expand;
 pub use engine::language::model;
 pub use engine::language::parser;
 pub use engine::language::span;
+pub use engine::macro_work::MacroWorkLimit;
 pub use engine::workspace;
 pub use engine::workspace::check_walk;
 pub use engine::workspace::companion;

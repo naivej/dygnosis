@@ -14,7 +14,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::engine::comparison::compare_snapshots::{
-    capture_git_snapshot_controlled, capture_working_snapshot, compare_captured_snapshots,
+    capture_git_snapshot_with_limit, capture_working_snapshot, compare_captured_snapshots,
     tree_path, CapturedSnapshot, GitSnapshotInput, ManifestEntry, SnapshotCapture,
     SnapshotCoordinates, SnapshotFailure, SourceFact, MAX_SNAPSHOT_FILES,
     MAX_SNAPSHOT_SOURCE_BYTES,
@@ -90,6 +90,7 @@ struct Acquisition<'a> {
     bytes: usize,
     limits: super::source::SourceLimits,
     cancellation: Option<Arc<AtomicBool>>,
+    macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
     checked_keys: BTreeSet<(String, String)>,
 }
 
@@ -301,7 +302,11 @@ impl Acquisition<'_> {
             let mut ready = None;
             for _ in 0..MAX_CAPTURE_ROUNDS {
                 self.check()?;
-                match capture_git_snapshot_controlled(&input, self.cancellation.clone()) {
+                match capture_git_snapshot_with_limit(
+                    &input,
+                    self.cancellation.clone(),
+                    self.macro_work_limit,
+                ) {
                     SnapshotCapture::Ready(value) => {
                         ready = Some(*value);
                         break;
@@ -419,6 +424,7 @@ impl Acquisition<'_> {
                     .map(|path| self.repository.join(path))
                     .collect(),
             );
+            workspace.set_default_macro_work_limit(self.macro_work_limit);
             workspace.set_source_limits(
                 self.limits.max_file_bytes,
                 self.limits.max_source_bytes,
@@ -458,6 +464,7 @@ impl Acquisition<'_> {
         captured.inputs["repository_path"] = json!(self.repository.to_string_lossy());
         captured.inputs["root_file"] = json!(root_file);
         captured.inputs["search_paths"] = json!(search_paths);
+        captured.inputs["macro_work_limit"] = json!(self.macro_work_limit);
         captured.inputs["resolved_search_paths"] = json!(search_paths
             .iter()
             .map(|path| self.repository.join(path).to_string_lossy().into_owned())
@@ -651,6 +658,7 @@ fn compare_repository_control(
         let mut identity = json!({"input_id":side, "root_file":selector.root_file(),
             "repository_path":params.repository_path, "repository_uri":repository_uri_for(Path::new(&params.repository_path)),
             "search_paths":params.search_paths, "resolved_search_paths":params.search_paths.iter().map(|path| Path::new(&params.repository_path).join(path).to_string_lossy().into_owned()).collect::<Vec<_>>(),
+            "macro_work_limit":control.map(|control|control.macro_work_limit).unwrap_or_default(),
             "complete":false, "revision":null});
         match selector {
             RepositorySelector::Git { requested_ref, .. } => {
@@ -710,6 +718,9 @@ fn compare_repository_inner(
             },
         ),
         cancellation: control.map(|control| Arc::clone(&control.cancelled)),
+        macro_work_limit: control
+            .map(|control| control.macro_work_limit)
+            .unwrap_or_default(),
         checked_keys: BTreeSet::new(),
     };
     let resolved_root = match acquisition.git(&["rev-parse", "--show-toplevel"], 32 * 1024) {
@@ -1011,6 +1022,7 @@ mod tests {
             bytes: 0,
             limits: super::super::source::SourceLimits::default(),
             cancellation: None,
+            macro_work_limit: Default::default(),
             checked_keys: BTreeSet::new(),
         };
         let selector = git("old.mod", "baseline");
@@ -1066,6 +1078,7 @@ mod tests {
             bytes: 0,
             limits: super::super::source::SourceLimits::default(),
             cancellation: None,
+            macro_work_limit: Default::default(),
             checked_keys: BTreeSet::new(),
         };
         let before = acquisition

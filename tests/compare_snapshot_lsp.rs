@@ -176,3 +176,35 @@ async fn two_fixed_inputs_survive_live_edits_and_keep_legacy_file_comparison() {
     .await;
     assert_eq!(invalid["code"], "INVALID_ARGUMENTS");
 }
+
+#[tokio::test]
+async fn historical_capture_uses_the_model_roots_current_work_setting() {
+    // Guards Git model capture bypassing the selected root's engine setting.
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    let folder = Url::parse("file:///C:/snapshot-lsp").unwrap();
+    server.initialize(InitializeParams {
+        workspace_folders: Some(vec![WorkspaceFolder { uri: folder.clone(), name: "model".into() }]),
+        initialization_options: Some(json!({"configuration":{"schemaVersion":1,"loose":{},"folders":[{"uri":folder,"settings":{"macroWorkLimit":1000}}]}})),
+        ..Default::default()
+    }).await.unwrap();
+    let text = "@#for i in 1:100\nvar y@{i};\n@#endfor\nmodel;\n@#for i in 1:100\ny@{i}=0;\n@#endfor\nend;\n";
+    let mut before = historical("before", 1, true);
+    before["sources"]["root.mod"]["text"] = json!(text);
+    let request = json!({"schema_version":1,"before":before,"after":historical("after",2,true)});
+    let stopped = command(server, "dynare/compareModelSnapshots", request.clone()).await;
+    assert_eq!(stopped["state"], "failure", "{stopped}");
+    assert_eq!(stopped["side"], "before", "{stopped}");
+    assert_eq!(
+        stopped["coverage"]["before"]["work_limits"][0]["ceiling"], 1000,
+        "{stopped}"
+    );
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: json!({"dynare":{"macroWorkLimit":100000}}),
+        })
+        .await;
+    let completed = command(server, "dynare/compareModelSnapshots", request).await;
+    assert_eq!(completed["state"], "result", "{completed}");
+    assert_eq!(completed["inputs"]["before"]["macro_work_limit"], 100000);
+}

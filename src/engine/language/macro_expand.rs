@@ -41,6 +41,7 @@ pub struct IncompleteReason {
     pub message: String,
     /// Receipt from an actual evaluator limit, independent of the I211 wording.
     pub(crate) limit_name: Option<&'static str>,
+    pub(crate) limit_ceiling: Option<(usize, &'static str)>,
 }
 
 #[derive(Clone, Debug)]
@@ -170,6 +171,7 @@ fn push_i211(
             code: "I211",
             message,
             limit_name,
+            limit_ceiling: limit_name.and_then(|name| state.budget.limit_ceiling(name)),
         });
     }
     state.incomplete.get_or_insert(span);
@@ -822,14 +824,6 @@ impl MacroFileVisitor for MacroFiles<'_> {
 
 /// Visit original files in macro execution order, sharing definitions and the
 /// existing branch/loop evaluator. Dormant directives never call the loader.
-pub(crate) fn walk_macro_files(
-    root: &str,
-    source: &str,
-    load: impl FnMut(MacroFileEvent<'_>) -> Option<MacroFileLoad>,
-) -> MacroFileProof {
-    walk_macro_files_with_budget(root, source, MacroBudget::new(), load)
-}
-
 pub(crate) fn walk_macro_files_with_budget(
     root: &str,
     source: &str,
@@ -1009,15 +1003,16 @@ pub(crate) fn expand_macros_with_source_layout_and_evaluations(
     gaps: &[SourceLayoutGap],
     line_segments: &[(Span, u32)],
     evaluations: &[MacroReplay],
+    budget: &mut MacroBudget,
 ) -> (
     Vec<Token>,
     Vec<MacroTypeError>,
     Option<Span>,
     SourceLayoutBuild,
+    Vec<IncompleteReason>,
 ) {
     let mut recorder = SourceRecorder::new(src, gaps);
-    let mut budget = MacroBudget::new();
-    let (out, type_errors, incomplete, stopped) = {
+    let (out, type_errors, incomplete, stopped, incomplete_reasons) = {
         let mut defines = HashMap::new();
         let mut arena = Vec::new();
         let mut type_errors = Vec::new();
@@ -1044,7 +1039,7 @@ pub(crate) fn expand_macros_with_source_layout_and_evaluations(
             message_bytes: 0,
             next_for_input: None,
             line_segments,
-            budget: &mut budget,
+            budget,
         };
         let scanned = match state.budget.spend_work(src.len().max(1)) {
             Ok(()) => match scan_macro_tokens_and_evaluations(src, evaluations, state.budget) {
@@ -1075,14 +1070,20 @@ pub(crate) fn expand_macros_with_source_layout_and_evaluations(
             }
         };
         let stopped = state.stopped;
-        (out, type_errors, incomplete, stopped)
+        (out, type_errors, incomplete, stopped, incomplete_reasons)
     };
     if !stopped && (recorder.cursor as usize) < src.len() {
         let end = src.len() as u32;
         let start = recorder.cursor;
         recorder.copy_range(start, end, false);
     }
-    (out, type_errors, incomplete, recorder.finish())
+    (
+        out,
+        type_errors,
+        incomplete,
+        recorder.finish(),
+        incomplete_reasons,
+    )
 }
 
 /// The macro parser needs a statement between `for` and `endfor`. A blank
@@ -1112,25 +1113,34 @@ pub(crate) fn for_body_is_empty(source: &str, opener: Span, closer: Span) -> boo
 }
 
 /// Source ranges of `@#if` / `@#ifndef` branches that expansion discarded.
-pub(crate) fn inactive_macro_spans(src: &str) -> Vec<Span> {
+pub(crate) fn inactive_macro_spans(src: &str, budget: &mut MacroBudget) -> Vec<Span> {
     let tokens = crate::engine::language::lexer::tokenize(src);
-    let (_, _, _, _, discarded, _, _, _, _) = expand_macros_traced_full(src, tokens, &[]);
+    let (_, _, _, _, discarded, _, _, _, _) =
+        expand_macros_traced_full_and_evaluations_budget(src, tokens, &[], &[], budget);
     discarded
 }
 
 /// Executed path directives in an already joined source. This uses the same
 /// branch/loop walker as file loading; empty loops never visit their body.
-pub(crate) fn executed_includepaths(src: &str) -> Vec<(Span, String)> {
+pub(crate) fn executed_includepaths(
+    src: &str,
+    work_limit: crate::engine::macro_work::MacroWorkLimit,
+) -> Vec<(Span, String)> {
     let mut paths = Vec::new();
-    walk_macro_files("<joined>", src, |event| {
-        if let MacroFileDirective::IncludePath(path) = event.directive {
-            if event.certain {
-                paths.push((event.span, path.to_string()));
+    walk_macro_files_with_budget(
+        "<joined>",
+        src,
+        MacroBudget::with_limit(work_limit, None),
+        |event| {
+            if let MacroFileDirective::IncludePath(path) = event.directive {
+                if event.certain {
+                    paths.push((event.span, path.to_string()));
+                }
+                return Some(MacroFileLoad::Path);
             }
-            return Some(MacroFileLoad::Path);
-        }
-        None
-    });
+            None
+        },
+    );
     paths
 }
 
@@ -4151,7 +4161,10 @@ mod budget_regressions {
                 crate::engine::language::lexer::tokenize(&source),
                 &[],
                 &[],
-                &mut MacroBudget::new(),
+                &mut MacroBudget::with_limit(
+                    crate::engine::macro_work::MacroWorkLimit::new(1_000_000).unwrap(),
+                    None,
+                ),
             );
         assert!(errors.is_empty(), "{errors:?}");
         assert!(incomplete.is_none(), "{reasons:?}");

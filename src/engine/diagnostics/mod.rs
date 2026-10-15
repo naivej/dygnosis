@@ -37,6 +37,7 @@ pub mod explain;
 pub(crate) mod usage;
 
 use crate::engine::language::model::Model;
+#[cfg(test)]
 use crate::engine::language::parser::parse;
 use crate::engine::language::span::{LineIndex, Span};
 use crate::engine::workspace::Workspace;
@@ -660,7 +661,13 @@ pub fn check_file_with_origins(text: &str, abs_path: &str) -> DiagnosticSet {
 pub(crate) fn check_in_workspace_with_origins(ws: &mut Workspace, abs_path: &str) -> DiagnosticSet {
     try_workspace_check(ws, abs_path).unwrap_or_else(|| {
         let text = ws.get_source(abs_path).unwrap_or("").to_string();
-        let model = parse(&text);
+        let model = crate::engine::language::parser::parse_with_budget(
+            &text,
+            &mut crate::engine::language::macro_expr::MacroBudget::with_limit(
+                ws.root_macro_work_limit(abs_path),
+                ws.cancellation(),
+            ),
+        );
         DiagnosticSet {
             root: root_key(ws, abs_path),
             diagnostics: analyze(&model),
@@ -688,9 +695,10 @@ pub(crate) fn check_in_workspace_with_origins_controlled(
             let text = ws.get_source(abs_path).unwrap_or("").to_string();
             let model = crate::engine::language::parser::parse_with_budget(
                 &text,
-                &mut crate::engine::language::macro_expr::MacroBudget::with_cancellation(Some(
-                    Arc::clone(cancelled),
-                )),
+                &mut crate::engine::language::macro_expr::MacroBudget::with_limit(
+                    ws.root_macro_work_limit(abs_path),
+                    Some(Arc::clone(cancelled)),
+                ),
             );
             DiagnosticSet {
                 root: root_key(ws, abs_path),

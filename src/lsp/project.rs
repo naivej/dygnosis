@@ -556,11 +556,11 @@ async fn run_worker(
                         .iter()
                         .map(|(uri, doc)| (normalize_uri(uri.as_str()), doc.version))
                         .collect();
-                    let workspace = Box::new(
-                        inner
-                            .workspace
-                            .snapshot_for_root(root.as_str(), settings.search_paths),
-                    );
+                    let workspace = Box::new(inner.workspace.snapshot_for_root_with_limit(
+                        root.as_str(),
+                        settings.search_paths,
+                        settings.macro_work_limit,
+                    ));
                     Work::Check {
                         epoch,
                         generation,

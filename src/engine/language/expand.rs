@@ -183,8 +183,14 @@ pub(crate) fn expand_report_from_spliced(
     map: &[SpliceSegment],
     written_navigation: Option<&NavigationSource>,
 ) -> ExpandReport {
-    expand_report_from_spliced_controlled(spliced, map, written_navigation, None)
-        .expect("uncontrolled expansion")
+    expand_report_from_spliced_controlled(
+        spliced,
+        map,
+        written_navigation,
+        None,
+        crate::engine::macro_work::MacroWorkLimit::default(),
+    )
+    .expect("uncontrolled expansion")
 }
 
 pub(crate) fn expand_report_from_spliced_controlled(
@@ -192,9 +198,10 @@ pub(crate) fn expand_report_from_spliced_controlled(
     map: &[SpliceSegment],
     written_navigation: Option<&NavigationSource>,
     cancellation: Option<Arc<AtomicBool>>,
+    work_limit: crate::engine::macro_work::MacroWorkLimit,
 ) -> Result<ExpandReport, crate::engine::control::Cancelled> {
     crate::engine::control::run(cancellation.clone(), || {
-        expand_spliced(spliced, map, written_navigation, cancellation)
+        expand_spliced(spliced, map, written_navigation, cancellation, work_limit)
     })
 }
 
@@ -203,6 +210,7 @@ fn expand_spliced(
     map: &[SpliceSegment],
     written_navigation: Option<&NavigationSource>,
     cancellation: Option<Arc<AtomicBool>>,
+    work_limit: crate::engine::macro_work::MacroWorkLimit,
 ) -> ExpandReport {
     let source = normalize_newlines(spliced);
     let raw = tokenize(&source);
@@ -218,7 +226,8 @@ fn expand_spliced(
             raw,
             &line_segments,
             &evaluations,
-            &mut crate::engine::language::macro_expr::MacroBudget::with_cancellation(
+            &mut crate::engine::language::macro_expr::MacroBudget::with_limit(
+                work_limit,
                 cancellation.clone(),
             ),
         );
@@ -227,7 +236,8 @@ fn expand_spliced(
     }
     let macro_messages = locate_macro_messages(map, messages);
     debug_assert_eq!(tokens.len(), traces.len());
-    let (model, ranges) = parse_expanded_controlled(&source, tokens.clone(), cancellation.clone());
+    let (model, ranges) =
+        parse_expanded_controlled(&source, tokens.clone(), cancellation.clone(), work_limit);
     if crate::engine::control::cancelled() {
         return ExpandReport::default();
     }
@@ -274,7 +284,8 @@ fn expand_spliced(
                 tokenize(&text),
                 &navigation_lines,
                 &navigation_evaluations,
-                &mut crate::engine::language::macro_expr::MacroBudget::with_cancellation(
+                &mut crate::engine::language::macro_expr::MacroBudget::with_limit(
+                    work_limit,
                     cancellation.clone(),
                 ),
             );
@@ -289,7 +300,7 @@ fn expand_spliced(
             // lexer tokens. Compare completed parser streams, then use the
             // independently parsed projection's exact written positions.
             let (actual_model, actual_ranges) =
-                parse_expanded_controlled(&text, actual, cancellation);
+                parse_expanded_controlled(&text, actual, cancellation, work_limit);
             if crate::engine::control::cancelled() {
                 return ExpandReport::default();
             }

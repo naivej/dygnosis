@@ -137,8 +137,13 @@ fn format_request(params: &Params, snapshot: &mut SourceSnapshot) -> Result<Tool
                 "line_range must be ordered, one-based and inside the selected file",
             ));
         }
-        match format::format_range_outcome(text, range.start_line - 1, range.end_line - 1, &indent)
-        {
+        match format::format_range_outcome_with_limit(
+            text,
+            range.start_line - 1,
+            range.end_line - 1,
+            &indent,
+            snapshot.workspace.root_macro_work_limit(&snapshot.root),
+        ) {
             format::RangeFormatOutcome::Changed(start, end, replacement) => {
                 let start = starts[start as usize];
                 let end = starts
@@ -157,7 +162,11 @@ fn format_request(params: &Params, snapshot: &mut SourceSnapshot) -> Result<Tool
             }
         }
     } else {
-        match format::format_outcome(text, &indent) {
+        match format::format_outcome_with_limit(
+            text,
+            &indent,
+            snapshot.workspace.root_macro_work_limit(&snapshot.root),
+        ) {
             format::FormatOutcome::Changed(replacement) => Some(source_edit(
                 snapshot,
                 &file,
@@ -466,12 +475,11 @@ fn fix_request(params: &Params, snapshot: &mut SourceSnapshot) -> Result<ToolRes
         && params.code.is_none()
         && params.diagnostic_id.is_none()
     {
-        let fixed_result = match snapshot.workspace.cancellation() {
-            Some(flag) => auto_fix::auto_fix_outcome_controlled(&snapshot.raw, &flag),
-            None => {
-                auto_fix::auto_fix_outcome(&snapshot.raw).map_err(auto_fix::AutoFixFailure::Refused)
-            }
-        };
+        let fixed_result = auto_fix::auto_fix_outcome_with_limit(
+            &snapshot.raw,
+            snapshot.workspace.root_macro_work_limit(&snapshot.root),
+            snapshot.workspace.cancellation().as_ref(),
+        );
         let fixed = match fixed_result {
             Ok(text) => text,
             Err(auto_fix::AutoFixFailure::Refused(message)) => {

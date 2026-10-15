@@ -36,6 +36,19 @@ test("invalid values fall back and empty presentation lists remain empty", () =>
   assert.equal(booleanSetting("enabled", undefined, true, () => {}), true);
   assert.deepEqual(listSetting("sections", undefined, ["one"], ["one"], () => {}), []);
 });
+test("macro work settings reach each root scope and simultaneous tint changes reach the engine", () => {
+  const { macroTintOnlyChange } = require(compiledModule("settings"));
+  globals.macroWorkLimit = 500000;
+  workspace.macroWorkLimit = 2000000;
+  try {
+    const snapshot = configurationSnapshot(() => {}).dynare.configuration;
+    assert.equal(snapshot.loose.macroWorkLimit, 500000);
+    assert.equal(snapshot.folders[0].settings.macroWorkLimit, 2000000);
+    assert.equal(macroTintOnlyChange({ affectsConfiguration: key => ["dynare.effectiveModel.macroTint", "dynare.macroWorkLimit"].includes(key) }), false);
+    globals.macroWorkLimit = "invalid";
+    assert.equal(configurationSnapshot(() => {}).dynare.configuration.loose.macroWorkLimit, "invalid", "the server validates and explains the fallback");
+  } finally { delete globals.macroWorkLimit; delete workspace.macroWorkLimit; }
+});
 test("project switch uses window precedence while exclusions resolve independently for each folder", () => {
   const originalFolders = vscode.workspace.workspaceFolders;
   vscode.workspace.workspaceFolders = ["file:///a", "file:///b", "remote:/virtual"].map(value => ({ uri: { scheme: value.startsWith("file:") ? "file" : "remote", toString: () => value } }));

@@ -82,12 +82,14 @@ pub(crate) fn parse_with_lines_and_evaluations_budget(
     {
         let span = Span::new(0, 0);
         return Model {
+            macro_work_limit: budget.work_limit(),
             macro_incomplete_span: Some(span),
             incomplete_reasons: vec![crate::engine::language::macro_expand::IncompleteReason {
                 span,
                 code: "I211",
                 message: crate::engine::language::macro_expand::i211_limit_message(limit),
                 limit_name: Some(limit),
+                limit_ceiling: budget.limit_ceiling(limit),
             }],
             ..Model::default()
         };
@@ -106,7 +108,8 @@ pub(crate) fn parse_with_lines_and_evaluations_budget(
             evaluations,
             budget,
         );
-    let (mut model, _ranges) = parse_expanded_controlled(&source, tokens, budget.cancellation());
+    let (mut model, _ranges) =
+        parse_expanded_controlled(&source, tokens, budget.cancellation(), budget.work_limit());
     model.includes = includes;
     model.includepaths = includepaths;
     model.macro_directives = macro_directives;
@@ -126,13 +129,14 @@ pub(crate) struct EquationTokenRanges {
 }
 
 pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationTokenRanges) {
-    parse_expanded_controlled(src, tokens, None)
+    parse_expanded_controlled(src, tokens, None, Default::default())
 }
 
 pub(crate) fn parse_expanded_controlled(
     src: &str,
     tokens: Vec<Token>,
     cancellation: Option<Arc<AtomicBool>>,
+    macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
 ) -> (Model, EquationTokenRanges) {
     let cancellation = cancellation.or_else(crate::engine::control::current);
     let mut p = Parser {
@@ -142,7 +146,10 @@ pub(crate) fn parse_expanded_controlled(
         tokens,
         i: 0,
         intern: Interner::default(),
-        model: Model::default(),
+        model: Model {
+            macro_work_limit,
+            ..Model::default()
+        },
         symbol_roles: HashMap::new(),
         generated_policy_discount: None,
         constructors: ConstructorTree::default(),
@@ -10822,7 +10829,13 @@ impl Parser<'_> {
         family_spans.extend(cmd_spans);
         family_spans.sort_by_key(|span| (span.start, span.end));
         let trailing = trailing_code_line(&self.tokens, src);
-        let inactive = crate::engine::language::macro_expand::inactive_macro_spans(src);
+        let inactive = crate::engine::language::macro_expand::inactive_macro_spans(
+            src,
+            &mut crate::engine::language::macro_expr::MacroBudget::with_limit(
+                self.model.macro_work_limit,
+                self.cancellation.clone(),
+            ),
+        );
         let lines: Vec<&str> = src.split('\n').collect();
         for (i, line) in lines.iter().enumerate() {
             if self.cancelled() {
@@ -13406,7 +13419,12 @@ mod ordinary_request_cancellation_tests {
         let text = format!("var y;model;\n{}end;", "y=1;\n".repeat(2000));
         let flag = Arc::new(AtomicBool::new(false));
         crate::engine::control::cancel_after(&flag, 1000);
-        let (stopped, _) = parse_expanded_controlled(&text, tokenize(&text), Some(flag.clone()));
+        let (stopped, _) = parse_expanded_controlled(
+            &text,
+            tokenize(&text),
+            Some(flag.clone()),
+            Default::default(),
+        );
         assert!(flag.load(Ordering::Relaxed));
         assert!(
             !stopped.equations.is_empty(),

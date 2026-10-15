@@ -243,12 +243,24 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
             .unwrap()
     };
     let mut arguments = json!({"repository_path":directory.to_str().unwrap(),
+        "macro_work_limit":100000,
         "before":{"kind":"git", "root_file":"main.mod", "ref":before},
         "after":{"kind":"git", "root_file":"main.mod", "ref":after}});
     let historical = decode(wire.call("dynare_compare_models", arguments.clone()));
     assert_eq!(historical["state"], "result", "{historical}");
     assert_eq!(historical["inputs"]["before"]["commit"], before);
     assert_eq!(historical["inputs"]["after"]["commit"], after);
+    assert_eq!(historical["inputs"]["before"]["macro_work_limit"], 100000);
+    assert_eq!(historical["inputs"]["after"]["macro_work_limit"], 100000);
+    let mut changed_allowance = arguments.clone();
+    changed_allowance["macro_work_limit"] = json!(200000);
+    changed_allowance["expected_revision_a"] = historical["inputs"]["before"]["revision"].clone();
+    changed_allowance["expected_revision_b"] = historical["inputs"]["after"]["revision"].clone();
+    let stale_allowance = decode(wire.call("dynare_compare_models", changed_allowance));
+    assert_eq!(
+        stale_allowance["outcome"]["reasons"][0]["code"],
+        "INPUT_CHANGED"
+    );
     assert_eq!(historical["changed_equations"].as_array().unwrap().len(), 1);
     assert_eq!(
         historical["sources"]["before"]["eq.inc"],
@@ -264,6 +276,7 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
     let saved = decode(wire.call("dynare_compare_models", arguments.clone()));
     assert_eq!(saved["state"], "result", "{saved}");
     assert_eq!(saved["inputs"]["after"]["source_policy"], "saved_files");
+    assert_eq!(saved["inputs"]["after"]["macro_work_limit"], 100000);
     assert_eq!(saved["inputs"]["after"]["search_paths"], json!([]));
     assert!(saved.to_string().contains("y = 3"));
     let changed_source = &saved["source_changes"]["files"][0];
@@ -599,5 +612,258 @@ fn slice21_checks_use_unsaved_root_and_include_text_on_the_wire() {
             .iter()
             .any(|d| matches!(d["code"].as_str(), Some("E001" | "E021" | "W022" | "W042"))),
         "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn macro_work_configuration_is_isolated_and_revision_bound_over_stdio() {
+    // Guards lost request settings, fabricated default ceilings, and stale
+    // selections after changing only the macro work allowance.
+    let source = "@#for i in 1:100\nvar y@{i};\n@#endfor\nmodel;\n@#for i in 1:100\ny@{i}=0;\n@#endfor\nend;\n";
+    let canonical = |reply: Value| -> Value {
+        assert!(reply.get("error").is_none(), "{reply}");
+        serde_json::from_str(
+            reply["result"]["content"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()["text"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let mut wire = McpWire::new();
+    let small = canonical(wire.call(
+        "dynare_model_info",
+        json!({"source":{"kind":"text","text":source},"macro_work_limit":1000,"detail":"compact"}),
+    ));
+    assert_eq!(small["coverage"][0]["complete"], false, "{small}");
+    assert!(
+        small["limits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["limit"] == "iteration work" && row["ceiling"] == 1000),
+        "{small}"
+    );
+    let large = canonical(wire.call(
+        "dynare_model_info",
+        json!({"file_content":source,"macro_work_limit":100000,"detail":"compact"}),
+    ));
+    assert_eq!(large["coverage"][0]["complete"], true, "{large}");
+    assert_eq!(large["data"]["n_equations"], 100, "{large}");
+    assert_ne!(
+        large["inputs"][0]["revision"],
+        small["inputs"][0]["revision"]
+    );
+    let stale = canonical(wire.call("dynare_model_info", json!({"file_content":source,"macro_work_limit":1000,"expected_revision":large["inputs"][0]["revision"],"detail":"compact"})));
+    assert_eq!(stale["outcome"]["reasons"][0]["code"], "INPUT_CHANGED");
+    let ordinary = canonical(wire.call(
+        "dynare_model_info",
+        json!({"file_content":source,"detail":"compact"}),
+    ));
+    assert_eq!(ordinary["coverage"][0]["complete"], true);
+    assert_eq!(
+        ordinary["inputs"][0]["macro_work_limit"],
+        dygnosis::MacroWorkLimit::DEFAULT
+    );
+    for invalid in [
+        json!(0),
+        json!(-1),
+        json!(1.5),
+        json!(null),
+        json!("1000"),
+        json!(100000001),
+    ] {
+        let reply = wire.call(
+            "dynare_model_info",
+            json!({"file_content":source,"macro_work_limit":invalid}),
+        );
+        assert_eq!(reply["error"]["code"], -32602, "{reply}");
+    }
+}
+
+#[test]
+fn batch_and_comparison_apply_work_per_root_and_per_side_over_stdio() {
+    // Guards spending one allowance across roots/sides and transport routes
+    // silently retaining the default or accepting invalid work values.
+    let source = "@#for i in 1:100\nvar y@{i};\n@#endfor\nmodel;\n@#for i in 1:100\ny@{i}=0;\n@#endfor\nend;\n";
+    let canonical = |reply: Value| -> Value {
+        assert!(reply.get("error").is_none(), "{reply}");
+        serde_json::from_str(
+            reply["result"]["content"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()["text"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let mut wire = McpWire::new();
+    let batch_args = json!({"files":{"a.mod":source,"b.mod":source},"roots":["a.mod","b.mod"],"macro_work_limit":50000,"detail":"compact"});
+    let large = canonical(wire.call("dynare_workspace_diagnose", batch_args.clone()));
+    assert_eq!(large["data"]["summary"]["checked"], 2, "{large}");
+    assert!(large["inputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|input| input["macro_work_limit"] == 50000));
+    let mut small_args = batch_args.clone();
+    small_args["macro_work_limit"] = json!(1000);
+    let small = canonical(wire.call("dynare_workspace_diagnose", small_args.clone()));
+    assert!(
+        small["limits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["limit"] == "iteration work" && row["ceiling"] == 1000),
+        "{small}"
+    );
+    small_args["expected_revisions"] = large["data"]["root_revisions"].clone();
+    let stale = canonical(wire.call("dynare_workspace_diagnose", small_args));
+    assert!(
+        stale["data"]["roots"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["code"] == "INPUT_CHANGED"),
+        "{stale}"
+    );
+    let compare_args = json!({"file_content_a":source,"file_content_b":source,"macro_work_limit":50000,"detail":"compact"});
+    let large = canonical(wire.call("dynare_compare_models", compare_args.clone()));
+    assert_eq!(large["coverage"]["inputs"]["before"]["complete"], true);
+    assert_eq!(large["coverage"]["inputs"]["after"]["complete"], true);
+    assert!(!large["limits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|limit| limit["code"] == "MACRO_LIMIT"));
+    assert!(large["inputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|input| input["macro_work_limit"] == 50000));
+    let mut small_args = compare_args.clone();
+    small_args["macro_work_limit"] = json!(1000);
+    let small = canonical(wire.call("dynare_compare_models", small_args.clone()));
+    assert_eq!(small["outcome"]["status"], "refused");
+    assert_eq!(small["coverage"]["inputs"]["before"]["complete"], false);
+    assert_eq!(small["coverage"]["inputs"]["after"]["complete"], false);
+    for side in ["before", "after"] {
+        assert!(
+            small["limits"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["side"] == side
+                    && row["limit"] == "iteration work"
+                    && row["ceiling"] == 1000),
+            "{small}"
+        );
+    }
+    small_args["expected_revision_a"] = large["inputs"][0]["revision"].clone();
+    small_args["expected_revision_b"] = large["inputs"][1]["revision"].clone();
+    let stale = canonical(wire.call("dynare_compare_models", small_args));
+    assert_eq!(
+        stale["outcome"]["reasons"][0]["code"], "INPUT_CHANGED",
+        "{stale}"
+    );
+    for (tool, mut args) in [
+        ("dynare_workspace_diagnose", batch_args),
+        ("dynare_compare_models", compare_args),
+    ] {
+        args["macro_work_limit"] = json!(0);
+        let reply = wire.call(tool, args);
+        assert_eq!(reply["error"]["code"], -32602, "{reply}");
+    }
+}
+
+#[test]
+fn configured_work_reaches_auxiliary_checks_and_edit_reparses_over_stdio() {
+    // Guards a complete configured model gaining a false E001 from a default
+    // replay, losing a late E304, or withholding an Auto Fix after default reparsing.
+    let prefix = format!(
+        "@#define big=\"{}\"\n@#for i in 1:400\n@#define scratch=big\n@#endfor\n",
+        "a".repeat(5_000)
+    );
+    let canonical = |reply: &Value| -> Value {
+        assert!(reply.get("error").is_none(), "{reply}");
+        serde_json::from_str(
+            reply["result"]["content"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()["text"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let mut wire = McpWire::new();
+    let source = format!("{prefix}@#if 0\nvar é;\n@#endif\nvar y; model; y=0; end;\n");
+    let reply = wire.call(
+        "dynare_diagnose",
+        json!({
+            "files":{"main.mod":source},"active_file":"main.mod","macro_work_limit":10000000
+        }),
+    );
+    let diagnostics: Vec<Value> =
+        serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert!(
+        !diagnostics.iter().any(|row| row["code"] == "E001"),
+        "{reply}"
+    );
+    let result = canonical(&reply);
+    assert_eq!(result["coverage"][0]["complete"], true, "{result}");
+    assert!(result["limits"].as_array().unwrap().is_empty(), "{result}");
+
+    let source = format!("{prefix}@#includepath \"missing-directory\"\nvar y; model; y=0; end;\n");
+    let result = canonical(&wire.call(
+        "dynare_diagnose",
+        json!({
+            "files":{"main.mod":source},"active_file":"main.mod","macro_work_limit":10000000
+        }),
+    ));
+    assert!(
+        result["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["code"] == "E304"),
+        "{result}"
+    );
+    assert!(result["limits"].as_array().unwrap().is_empty(), "{result}");
+
+    let source =
+        format!("{prefix}@#if 0\nmodel;\n    y=2;\nend;\n@#endif\nvar y;\nmodel;\ny=0;\nend;\n");
+    let formatted = canonical(&wire.call(
+        "dynare_format",
+        json!({
+            "file_content":source,"macro_work_limit":10000000
+        }),
+    ));
+    assert!(
+        formatted["data"]["formatted_text"]
+            .as_str()
+            .unwrap()
+            .contains("model;\n    y=2;\nend;"),
+        "{formatted}"
+    );
+
+    let source = format!("{prefix}var y; parameters p;\np=.5\nmodel; y=p; end;\n");
+    let fixed = canonical(&wire.call(
+        "dynare_auto_fix",
+        json!({
+            "file_content":source,"macro_work_limit":10000000
+        }),
+    ));
+    assert!(!fixed["proposal"].is_null(), "{}", fixed["outcome"]);
+    assert!(
+        fixed["data"]["text"].as_str().unwrap().contains("p=.5;\n"),
+        "{}",
+        fixed["outcome"]
     );
 }

@@ -349,15 +349,26 @@ pub(crate) fn macro_work_limits(model: &Model, root: Option<&str>) -> Vec<Value>
             if name == "request cancelled" || !seen.insert(name) {
                 return None;
             }
-            let ceiling = crate::engine::language::macro_expr::limit_ceiling(name);
-            Some(
-                json!({"code":"MACRO_LIMIT","limit":name,"ceiling":ceiling.map(|bound|bound.0),
-            "unit":ceiling.map(|bound|bound.1),"root":root,
-            "affected":"macro expansion and dependent model analysis",
-            "omitted":"authoritative model counts and complete navigation"}),
-            )
+            macro_limit_record(reason, root)
         })
         .collect()
+}
+
+pub(crate) fn macro_limit_record(
+    reason: &crate::engine::language::macro_expand::IncompleteReason,
+    root: Option<&str>,
+) -> Option<Value> {
+    let name = reason.limit_name?;
+    if name == "request cancelled" {
+        return None;
+    }
+    let ceiling = reason.limit_ceiling;
+    Some(
+        json!({"code":"MACRO_LIMIT","limit":name,"ceiling":ceiling.map(|bound|bound.0),
+        "unit":ceiling.map(|bound|bound.1),"root":root,
+        "affected":"macro expansion and dependent model analysis",
+        "omitted":"authoritative model counts and complete navigation"}),
+    )
 }
 
 /// Optional `incomplete_reasons` retain shared causes and diagnostic sentences.

@@ -18,6 +18,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 static INPUT_GENERATION: AtomicU64 = AtomicU64::new(1);
+/// Input provenance keeps this fixed byte bound when macro work is increased.
+const INPUT_FILE_BYTE_CAP: usize = 1_000_000;
 
 use self::companion::{CompanionKind, CompanionRecord};
 use crate::engine::language::expand::{
@@ -26,8 +28,8 @@ use crate::engine::language::expand::{
 use crate::engine::language::macro_expand::{IncompleteReason, MacroEvalError};
 use crate::engine::language::macro_expr::MacroBudget;
 use crate::engine::language::model::Model;
-use crate::engine::language::parser::parse;
 use crate::engine::language::span::Span;
+use crate::engine::macro_work::MacroWorkLimit;
 use crate::engine::workspace::include_resolver::{
     is_virtual_uri, normalize_separators, normalize_uri, path_key, resolve_companion_path,
     resolve_include_path, resolve_scoped_include_path, uri_to_path,
@@ -72,6 +74,7 @@ pub struct IncludeRecords {
 struct Doc {
     source: Arc<String>,
     model: OnceLock<Arc<Model>>,
+    work_limit: MacroWorkLimit,
     overlay: bool,
     input_generation: u64,
 }
@@ -80,7 +83,7 @@ impl Doc {
     /// An acquired include needs only its source for execution in its parent.
     /// Parse it independently only when a standalone document query needs it.
     fn model(&self, cancellation: Option<Arc<AtomicBool>>) -> Option<&Arc<Model>> {
-        let mut budget = MacroBudget::with_cancellation(cancellation);
+        let mut budget = MacroBudget::with_limit(self.work_limit, cancellation);
         let flag = budget.cancellation();
         if crate::engine::control::flag_cancelled(flag.as_deref()) {
             return None;
@@ -96,6 +99,16 @@ impl Doc {
         }
         let _ = self.model.set(Arc::new(model));
         self.model.get()
+    }
+
+    fn with_work_limit(&self, work_limit: MacroWorkLimit) -> Self {
+        Self {
+            source: Arc::clone(&self.source),
+            model: OnceLock::new(),
+            work_limit,
+            overlay: self.overlay,
+            input_generation: self.input_generation,
+        }
     }
 }
 
@@ -218,7 +231,24 @@ pub(crate) struct InputGuard {
 }
 
 /// Compact provenance retained by project reports after parsed caches expire.
-pub(crate) type InputStamps = BTreeMap<String, u64>;
+#[derive(Clone, Default)]
+pub(crate) struct InputStamps {
+    files: BTreeMap<String, u64>,
+    root: String,
+    work_limit: MacroWorkLimit,
+}
+
+impl InputStamps {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &String> {
+        self.files.keys()
+    }
+    pub(crate) fn into_keys(self) -> impl Iterator<Item = String> {
+        self.files.into_keys()
+    }
+}
 
 /// URI/path-keyed document index plus include graph walks.
 #[derive(Default)]
@@ -226,6 +256,8 @@ pub struct Workspace {
     docs: HashMap<String, Arc<Doc>>,
     search_paths: Vec<PathBuf>,
     root_search_paths: HashMap<String, Vec<PathBuf>>,
+    default_macro_work_limit: MacroWorkLimit,
+    root_macro_work_limits: HashMap<String, MacroWorkLimit>,
     virtual_roots: HashSet<String>,
     unnamed_roots: HashSet<String>,
     // Retain input provenance when model/source caches are cleared.
@@ -261,14 +293,26 @@ impl Workspace {
     /// Owned editor snapshot. Parsed overlays and joined source are immutable
     /// and shared; disk IO and root analysis happen on the receiving worker.
     pub(crate) fn snapshot_for_root(&self, uri: &str, search_paths: Vec<PathBuf>) -> Self {
+        self.snapshot_for_root_with_limit(uri, search_paths, self.root_macro_work_limit(uri))
+    }
+
+    pub(crate) fn snapshot_for_root_with_limit(
+        &self,
+        uri: &str,
+        search_paths: Vec<PathBuf>,
+        work_limit: MacroWorkLimit,
+    ) -> Self {
         let key = if self.overlay_only {
             uri.to_owned()
         } else {
             normalize_uri(uri)
         };
-        let reuse_joined = self.root_paths(&key) == search_paths.as_slice();
+        let reuse_joined = self.root_paths(&key) == search_paths.as_slice()
+            && self.root_macro_work_limit(uri) == work_limit;
         let candidates = self.input_snapshots.get(&key);
         let mut snapshot = Self::with_search_paths(search_paths);
+        snapshot.default_macro_work_limit = self.default_macro_work_limit;
+        snapshot.root_macro_work_limits = self.root_macro_work_limits.clone();
         snapshot.overlay_only = self.overlay_only;
         snapshot.virtual_roots = self.virtual_roots.clone();
         snapshot.unnamed_roots = self.unnamed_roots.clone();
@@ -299,6 +343,7 @@ impl Workspace {
                 .insert(key.clone(), candidates.clone());
         }
         snapshot.set_root_search_paths(uri, snapshot.search_paths.clone());
+        snapshot.set_root_macro_work_limit(uri, work_limit);
         // set_root_search_paths invalidates the cache when the scope is first
         // registered; restore the immutable joined source after that operation.
         if let Some(source) = self.spliced.get(&key).filter(|_| reuse_joined) {
@@ -337,6 +382,9 @@ impl Workspace {
         // model and full-byte snapshots are evicted.
         self.root_search_paths
             .retain(|root, _| roots.contains(root));
+        self.root_macro_work_limits.retain(|root, _| {
+            roots.contains(root) || self.docs.get(root).is_some_and(|doc| doc.overlay)
+        });
     }
 
     pub fn new() -> Self {
@@ -396,9 +444,18 @@ impl Workspace {
         files: &BTreeMap<String, String>,
         cancellation: Option<Arc<AtomicBool>>,
     ) -> Self {
+        Self::overlay_documents_with_work_limit(files, cancellation, MacroWorkLimit::default())
+    }
+
+    pub(crate) fn overlay_documents_with_work_limit(
+        files: &BTreeMap<String, String>,
+        cancellation: Option<Arc<AtomicBool>>,
+        work_limit: MacroWorkLimit,
+    ) -> Self {
         let mut ws = Self {
             overlay_only: true,
             cancellation,
+            default_macro_work_limit: work_limit,
             ..Self::default()
         };
         for (name, content) in files {
@@ -411,11 +468,13 @@ impl Workspace {
     }
 
     /// Fixed tree lookup. Neither include candidates nor text use disk fallback.
-    pub(crate) fn snapshot_documents(
+    pub(crate) fn snapshot_documents_with_limit(
         input: &crate::engine::comparison::compare_snapshots::GitSnapshotInput,
+        work_limit: MacroWorkLimit,
     ) -> Self {
         let mut workspace = Self {
             overlay_only: true,
+            default_macro_work_limit: work_limit,
             search_paths: input.search_paths.iter().map(PathBuf::from).collect(),
             snapshot_lookup: Some(
                 crate::engine::comparison::compare_snapshots::SnapshotLookup {
@@ -500,13 +559,14 @@ impl Workspace {
         let input_generation = self.overlay_generation(key, &source);
         let model = crate::engine::language::parser::parse_with_budget(
             &source,
-            &mut MacroBudget::with_cancellation(self.cancellation.clone()),
+            &mut self.macro_budget(key),
         );
         self.docs.insert(
             key.to_string(),
             Arc::new(Doc {
                 source: Arc::new(source),
                 model: OnceLock::from(Arc::new(model)),
+                work_limit: self.root_macro_work_limit(key),
                 overlay: true,
                 input_generation,
             }),
@@ -534,12 +594,16 @@ impl Workspace {
         };
         let source = source.into();
         let input_generation = self.overlay_generation(&key, &source);
-        let model = parse(&source);
+        let model = crate::engine::language::parser::parse_with_budget(
+            &source,
+            &mut self.macro_budget(&key),
+        );
         self.docs.insert(
             key.clone(),
             Arc::new(Doc {
                 source: Arc::new(source),
                 model: OnceLock::from(Arc::new(model)),
+                work_limit: self.root_macro_work_limit(&key),
                 overlay: true,
                 input_generation,
             }),
@@ -617,13 +681,14 @@ impl Workspace {
         }
         let model = crate::engine::language::parser::parse_with_budget(
             &source,
-            &mut MacroBudget::with_cancellation(self.cancellation.clone()),
+            &mut self.macro_budget(&key),
         );
         self.docs.insert(
             key.clone(),
             Arc::new(Doc {
                 source: Arc::new(source),
                 model: OnceLock::from(Arc::new(model)),
+                work_limit: self.root_macro_work_limit(&key),
                 overlay: false,
                 input_generation: 0,
             }),
@@ -696,6 +761,64 @@ impl Workspace {
             .get(key)
             .map(Vec::as_slice)
             .unwrap_or(&self.search_paths)
+    }
+
+    /// Configure a request workspace before any source is parsed.
+    pub fn set_default_macro_work_limit(&mut self, work_limit: MacroWorkLimit) {
+        if self.default_macro_work_limit == work_limit {
+            return;
+        }
+        self.default_macro_work_limit = work_limit;
+        let changed: Vec<_> = self
+            .docs
+            .iter()
+            .filter_map(|(key, doc)| {
+                let selected = self.root_macro_work_limit(key);
+                (doc.work_limit != selected)
+                    .then(|| (key.clone(), Arc::new(doc.with_work_limit(selected))))
+            })
+            .collect();
+        self.docs.extend(changed);
+        self.effective.clear();
+        self.spliced.clear();
+        self.expand.clear();
+        self.records.clear();
+        self.companions.clear();
+    }
+
+    pub fn root_macro_work_limit(&self, uri: &str) -> MacroWorkLimit {
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
+        self.root_macro_work_limits
+            .get(&key)
+            .copied()
+            .unwrap_or(self.default_macro_work_limit)
+    }
+
+    /// Changing one root's allowance cannot reuse its old standalone parse.
+    pub fn set_root_macro_work_limit(&mut self, uri: &str, work_limit: MacroWorkLimit) {
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
+        let previous = self.root_macro_work_limit(uri);
+        self.root_macro_work_limits.insert(key.clone(), work_limit);
+        if previous == work_limit {
+            return;
+        }
+        if let Some(doc) = self.docs.get(&key) {
+            self.docs
+                .insert(key.clone(), Arc::new(doc.with_work_limit(work_limit)));
+        }
+        self.invalidate_root(&key);
+    }
+
+    fn macro_budget(&self, root: &str) -> MacroBudget {
+        MacroBudget::with_limit(self.root_macro_work_limit(root), self.cancellation.clone())
     }
 
     /// Observe disk changes without replacing editor overlays. Missing search
@@ -829,6 +952,7 @@ impl Workspace {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         key.hash(&mut hash);
         self.root_paths(&key).hash(&mut hash);
+        self.root_macro_work_limit(&key).hash(&mut hash);
         // Revisions describe analysis inputs, not whether identical text came
         // from disk or an editor overlay. Keep that mode in snapshot equality
         // so cache invalidation and source ownership still observe transitions.
@@ -894,8 +1018,14 @@ impl Workspace {
     }
 
     pub(crate) fn input_stamps(&self, uri: &str) -> InputStamps {
-        self.input_snapshots
-            .get(&normalize_uri(uri))
+        let root = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
+        let files = self
+            .input_snapshots
+            .get(&root)
             .into_iter()
             .flat_map(|snapshot| snapshot.iter())
             .map(|(path, state)| {
@@ -903,13 +1033,19 @@ impl Workspace {
                 state.hash(&mut hash);
                 (path.clone(), hash.finish())
             })
-            .collect()
+            .collect();
+        InputStamps {
+            files,
+            work_limit: self.root_macro_work_limit(&root),
+            root,
+        }
     }
 
     /// This validation reads disk and must run on the background worker.
     pub(crate) fn inputs_match(&self, stamps: &InputStamps) -> bool {
-        !stamps.is_empty()
-            && stamps.iter().all(|(path, expected)| {
+        !stamps.files.is_empty()
+            && self.root_macro_work_limit(&stamps.root) == stamps.work_limit
+            && stamps.files.iter().all(|(path, expected)| {
                 let mut hash = std::collections::hash_map::DefaultHasher::new();
                 self.input_file(path).hash(&mut hash);
                 hash.finish() == *expected
@@ -928,15 +1064,14 @@ impl Workspace {
         if let Some(doc) = self.docs.get(key).filter(|doc| doc.overlay) {
             InputFile {
                 overlay: true,
-                bytes: (doc.source.len() <= crate::engine::language::macro_expr::MACRO_WORK_CAP)
+                bytes: (doc.source.len() <= INPUT_FILE_BYTE_CAP)
                     .then(|| doc.source.as_bytes().to_vec()),
                 exists: true,
                 directory: false,
                 identity,
                 length: Some(doc.source.len() as u64),
                 modified: None,
-                overlay_generation: (doc.source.len()
-                    > crate::engine::language::macro_expr::MACRO_WORK_CAP)
+                overlay_generation: (doc.source.len() > INPUT_FILE_BYTE_CAP)
                     .then_some(doc.input_generation),
             }
         } else {
@@ -964,9 +1099,10 @@ impl Workspace {
                 overlay: false,
                 bytes: if self.overlay_only
                     || is_virtual_uri(key)
-                    || metadata.as_ref().is_some_and(|value| {
-                        value.len() > crate::engine::language::macro_expr::MACRO_WORK_CAP as u64
-                    }) {
+                    || metadata
+                        .as_ref()
+                        .is_some_and(|value| value.len() > INPUT_FILE_BYTE_CAP as u64)
+                {
                     None
                 } else {
                     read_input_bytes(Path::new(key))
@@ -977,9 +1113,7 @@ impl Workspace {
                 length: metadata.as_ref().map(std::fs::Metadata::len),
                 modified: metadata
                     .as_ref()
-                    .filter(|value| {
-                        value.len() > crate::engine::language::macro_expr::MACRO_WORK_CAP as u64
-                    })
+                    .filter(|value| value.len() > INPUT_FILE_BYTE_CAP as u64)
                     .and_then(|value| value.modified().ok()),
                 overlay_generation: None,
             }
@@ -1005,7 +1139,7 @@ impl Workspace {
                 return true;
             };
             let Some(bytes) = state.bytes.as_ref() else {
-                return document.source.len() > crate::engine::language::macro_expr::MACRO_WORK_CAP
+                return document.source.len() > INPUT_FILE_BYTE_CAP
                     && state.length == Some(document.source.len() as u64);
             };
             let decoded = String::from_utf8(bytes.clone())
@@ -1188,7 +1322,7 @@ impl Workspace {
                     &spliced.text,
                     &lines,
                     &evaluations,
-                    &mut MacroBudget::with_cancellation(self.cancellation.clone()),
+                    &mut self.macro_budget(&key),
                 )
             };
             if let Some(span) = fatal {
@@ -1306,6 +1440,7 @@ impl Workspace {
                 &spliced.segments,
                 Some(&spliced.navigation),
                 self.cancellation.clone(),
+                self.root_macro_work_limit(&key),
             )
             .ok()?;
             if spliced.limit.is_some() || spliced.refusal.is_some() {
@@ -1505,6 +1640,7 @@ impl Workspace {
             Arc::new(Doc {
                 source,
                 model: OnceLock::new(),
+                work_limit: self.root_macro_work_limit(key),
                 overlay: false,
                 input_generation: 0,
             }),
@@ -1729,7 +1865,10 @@ impl Workspace {
         let cut = self.records.get(root_key).and_then(fatal_include_cut);
         let (source, model) = if let Some(cut) = cut {
             let text = root[..(cut as usize).min(root.len())].to_string();
-            let model = Arc::new(parse(&text));
+            let model = Arc::new(crate::engine::language::parser::parse_with_budget(
+                &text,
+                &mut self.macro_budget(root_key),
+            ));
             (text, model)
         } else {
             let Some(doc) = self.docs.get(root_key) else {
@@ -1776,7 +1915,7 @@ impl Workspace {
         let mut proof = crate::engine::language::macro_expand::walk_macro_files_with_budget(
             root_key,
             &source,
-            MacroBudget::with_cancellation(self.cancellation.clone()),
+            self.macro_budget(root_key),
             |event| {
                 if !event.certain {
                     if matches!(
@@ -2040,6 +2179,7 @@ impl Workspace {
                 code: "I211",
                 message: crate::engine::language::macro_expand::i211_limit_message(limit),
                 limit_name: Some(limit),
+                limit_ceiling: proof.budget.limit_ceiling(limit),
             }
         });
         let targets_complete = targets
@@ -2129,8 +2269,17 @@ impl Workspace {
         {
             return (Some(miss.site.clone()), miss.chain.clone());
         }
-        let origin = self
-            .map_effective_origin(root, span)
+        (self.mapped_incomplete_origin(root, span), Vec::new())
+    }
+
+    pub(crate) fn mapped_incomplete_origin(
+        &mut self,
+        root: &str,
+        span: Span,
+    ) -> Option<IncludeSite> {
+        let key = self.ensure_loaded(root)?;
+        let source = self.spliced_source(&key);
+        self.map_effective_origin(root, span)
             .map(|(file, mut written)| {
                 // A span that crosses splice pieces has no continuous written end,
                 // even when its first byte maps to a valid root-file position.
@@ -2161,8 +2310,7 @@ impl Workspace {
                     file,
                     span: written,
                 }
-            });
-        (origin, Vec::new())
+            })
     }
 
     pub(crate) fn macro_file_limit(
@@ -3246,14 +3394,14 @@ fn read_include_text(
     }
 }
 
-/// Inputs above the macro work bound retain metadata, without a full byte copy.
+/// Inputs above the fixed provenance byte bound keep metadata without a byte copy.
 fn read_input_bytes(path: &Path) -> Option<Vec<u8>> {
     let file = std::fs::File::open(path).ok()?;
     let mut bytes = Vec::new();
-    file.take(crate::engine::language::macro_expr::MACRO_WORK_CAP as u64 + 1)
+    file.take(INPUT_FILE_BYTE_CAP as u64 + 1)
         .read_to_end(&mut bytes)
         .ok()?;
-    (bytes.len() <= crate::engine::language::macro_expr::MACRO_WORK_CAP).then_some(bytes)
+    (bytes.len() <= INPUT_FILE_BYTE_CAP).then_some(bytes)
 }
 
 fn read_text(path: &Path) -> Option<String> {
@@ -3267,6 +3415,57 @@ fn read_text(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod include_load_budget_tests {
     use super::*;
+
+    #[test]
+    fn root_work_changes_replace_cached_facts_without_changing_another_root() {
+        // Guards standalone parse and joined-cache reuse after a setting change,
+        // worker snapshots using old allowances, and cross-root configuration leaks.
+        let source = "@#for i in 1:100\nvar y@{i};\n@#endfor\nmodel;\n@#for i in 1:100\ny@{i}=0;\n@#endfor\nend;\n";
+        let mut workspace = Workspace::new();
+        let a = "/budget/a.mod";
+        let b = "/budget/b.mod";
+        let small = MacroWorkLimit::new(1000).unwrap();
+        let large = MacroWorkLimit::new(100000).unwrap();
+        for root in [a, b] {
+            workspace.set_root_macro_work_limit(root, large);
+            workspace.update_document(root, source);
+            assert_eq!(
+                workspace.get_effective_model(root).unwrap().equations.len(),
+                100
+            );
+            assert!(workspace.expand_report(root).unwrap().complete);
+        }
+        let a_before = workspace.input_revision(a).unwrap();
+        let b_before = workspace.input_revision(b).unwrap();
+        let stamps = workspace.input_stamps(a);
+        let mut stopped = workspace.snapshot_for_root_with_limit(a, Vec::new(), small);
+        assert!(!stopped.inputs_match(&stamps));
+        let model = stopped.get_effective_model(a).unwrap();
+        assert!(model.macro_incomplete());
+        assert!(
+            crate::engine::analysis::model_info::macro_work_limits(model, Some(a))
+                .iter()
+                .any(|limit| limit["limit"] == "iteration work" && limit["ceiling"] == 1000)
+        );
+        assert!(!stopped.expand_report(a).unwrap().complete);
+        assert_eq!(workspace.input_revision(a).unwrap(), a_before);
+        workspace.set_root_macro_work_limit(a, small);
+        assert_ne!(workspace.input_revision(a).unwrap(), a_before);
+        assert!(workspace.get_model(a).unwrap().macro_incomplete());
+        assert!(workspace.get_effective_model(a).unwrap().macro_incomplete());
+        assert_eq!(workspace.input_revision(b).unwrap(), b_before);
+        assert_eq!(
+            workspace.get_effective_model(b).unwrap().equations.len(),
+            100
+        );
+        workspace.set_root_macro_work_limit(a, large);
+        assert_eq!(
+            workspace.get_effective_model(a).unwrap().equations.len(),
+            100
+        );
+        assert!(workspace.expand_report(a).unwrap().complete);
+        assert_eq!(workspace.input_revision(a).unwrap(), a_before);
+    }
 
     #[test]
     fn cached_child_reuses_source_without_a_byte_copy() {
@@ -3347,6 +3546,7 @@ mod include_load_budget_tests {
         std::fs::write(&root, source).unwrap();
         let root = path_key(&root);
         let mut workspace = Workspace::new();
+        workspace.set_root_macro_work_limit(&root, MacroWorkLimit::new(1_000_000).unwrap());
         let model = workspace.get_effective_model(&root).unwrap();
         assert!(!model.macro_incomplete(), "{:?}", model.incomplete_reasons);
         assert!(model.macro_type_errors.is_empty());
@@ -3473,7 +3673,9 @@ mod include_load_budget_tests {
     #[test]
     fn oversized_overlay_edits_change_revision_without_copying_contents() {
         let mut workspace = Workspace::new();
-        let source = " ".repeat(crate::engine::language::macro_expr::MACRO_WORK_CAP + 1);
+        workspace
+            .set_default_macro_work_limit(MacroWorkLimit::new(MacroWorkLimit::MAX as u64).unwrap());
+        let source = " ".repeat(INPUT_FILE_BYTE_CAP + 1);
         workspace.update_document("/budget/root.mod", source.clone());
         let first = workspace.input_revision("/budget/root.mod").unwrap();
         workspace.update_document("/budget/root.mod", source.clone());

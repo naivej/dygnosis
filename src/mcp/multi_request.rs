@@ -12,6 +12,9 @@ use super::source::{self, RequestControl, SourceInput, SourceSnapshot};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct BatchParams {
+    /// Finite macro work units applied separately to each checked root, from 1 to 100000000. Omission uses the default; source and batch limits are independent.
+    #[serde(default)]
+    macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
     /// Nonempty exact supplied file-key to UTF-8 text map, exclusive with paths.
     files: Option<BTreeMap<String, String>>,
     /// Nonempty exact root keys in files. Checked roots keep their input spelling.
@@ -39,6 +42,9 @@ struct BatchParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct CompareParams {
+    /// Finite macro work units applied separately to Before and After, from 1 to 100000000. Omission uses the default; source and comparison limits are independent.
+    #[serde(default)]
+    macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
     #[serde(flatten)]
     base: super::CompareModelsParams,
     /// Expected Before source revision returned by the preceding comparison.
@@ -111,9 +117,10 @@ fn source_error(error: source::SourceError) -> rmcp::ErrorData {
     }
 }
 
-fn batch(arguments: Value, control: RequestControl) -> Result<CallToolResult, rmcp::ErrorData> {
+fn batch(arguments: Value, mut control: RequestControl) -> Result<CallToolResult, rmcp::ErrorData> {
     let params: BatchParams =
         serde_json::from_value(arguments.clone()).map_err(|error| invalid(error.to_string()))?;
+    control.macro_work_limit = params.macro_work_limit;
     if params.output.continuation.is_some() && params.expected_revisions.is_empty() {
         return Err(invalid(
             "A batch continuation requires expected_revisions for its checked roots",
@@ -524,10 +531,11 @@ fn discover_paths(
 
 fn comparison(
     arguments: Value,
-    control: RequestControl,
+    mut control: RequestControl,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let params: CompareParams =
         serde_json::from_value(arguments.clone()).map_err(|error| invalid(error.to_string()))?;
+    control.macro_work_limit = params.macro_work_limit;
     params.base.validate().map_err(invalid)?;
     if params.output.continuation.is_some()
         && (params.expected_revision_a.is_none() || params.expected_revision_b.is_none())

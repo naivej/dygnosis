@@ -533,8 +533,12 @@ pub(super) fn decision(
     }
     if name != replacement {
         check_cancelled()?;
-        let (renamed, _) =
-            crate::engine::language::parser::parse_expanded(&model.source, renamed_tokens);
+        let (renamed, _) = crate::engine::language::parser::parse_expanded_controlled(
+            &model.source,
+            renamed_tokens,
+            None,
+            model.macro_work_limit,
+        );
         check_cancelled()?;
         if !crate::engine::workspace::model_map::parser_complete(&renamed)
             || model.statements.len() != renamed.statements.len()

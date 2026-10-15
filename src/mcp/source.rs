@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 
 use crate::engine::language::span::{LineIndex, Span};
 use crate::engine::language::{expand::ExpandReport, model::Model};
+use crate::engine::macro_work::MacroWorkLimit;
 use crate::engine::workspace::include_resolver::{normalize_uri, supplied_path_key};
 use crate::engine::workspace::{InputGuard, Workspace};
 
@@ -49,6 +50,9 @@ pub enum SourceInput {
 /// Shared single-model parameters, flattened by tool parameter structs.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 pub struct SourceArgs {
+    /// Finite macro work units per checked root, from 1 to 100000000. Omission uses the default. Source, output, value-size and depth bounds remain separate.
+    #[serde(default)]
+    pub macro_work_limit: MacroWorkLimit,
     /// Explicit text, supplied-map or saved server-host disk input. Exclusive with file_content, active_file and files.
     pub source: Option<SourceInput>,
     /// Legacy unnamed text, or an optional overlay of the exact existing map root. An empty string is an overlay.
@@ -137,6 +141,7 @@ pub struct RequestControl {
     pub cancelled: Arc<AtomicBool>,
     pub limits: SourceLimits,
     pub progress: Arc<ProgressState>,
+    pub macro_work_limit: MacroWorkLimit,
 }
 
 pub struct ProgressState {
@@ -264,9 +269,10 @@ pub fn resolve_source(
                 &BTreeMap::from([(TEXT_ROOT.into(), text.clone())]),
                 &control.limits,
             )?;
-            let mut workspace = Workspace::overlay_documents_with_control(
+            let mut workspace = Workspace::overlay_documents_with_work_limit(
                 &BTreeMap::from([(TEXT_ROOT.into(), text)]),
                 Some(Arc::clone(&control.cancelled)),
+                control.macro_work_limit,
             );
             workspace.set_root_search_paths(TEXT_ROOT, Vec::new());
             workspace.set_unnamed_root(TEXT_ROOT);
@@ -309,9 +315,10 @@ pub fn resolve_source(
             }
             check_files(&files, &control.limits)?;
             validate_paths(&include_dirs)?;
-            let mut workspace = Workspace::overlay_documents_with_control(
+            let mut workspace = Workspace::overlay_documents_with_work_limit(
                 &files,
                 Some(Arc::clone(&control.cancelled)),
+                control.macro_work_limit,
             );
             let paths: Vec<_> = include_dirs
                 .iter()
@@ -354,6 +361,7 @@ pub fn resolve_source(
             let root = normalize_uri(&root);
             let mut workspace =
                 Workspace::with_search_paths(include_dirs.iter().map(PathBuf::from).collect());
+            workspace.set_default_macro_work_limit(control.macro_work_limit);
             for owner in &owners {
                 workspace
                     .set_root_search_paths(owner, include_dirs.iter().map(PathBuf::from).collect());
@@ -494,7 +502,7 @@ pub fn resolve_source(
         }
     }
     let guards: Vec<_> = guards.into_values().collect();
-    let identity = json!({"source_policy":kind,"root":root_file,"owner_roots":owner_roots,"include_dirs":include_dirs,"guards":guards});
+    let identity = json!({"source_policy":kind,"root":root_file,"owner_roots":owner_roots,"include_dirs":include_dirs,"macro_work_limit":control.macro_work_limit,"guards":guards});
     let revision = sha256(serde_json::to_vec(&identity).expect("source identity is serializable"));
     if expected_revision.is_some_and(|expected| expected != revision) {
         return Err(SourceError::failure(
@@ -511,7 +519,7 @@ pub fn resolve_source(
         .get(&root)
         .cloned()
         .ok_or_else(|| acquisition_error(&workspace, &root))?;
-    let mut inputs = json!({"source_policy":kind,"root":root_file,"synthetic_root":kind=="text","checked_owners":if kind=="text" { Vec::new() } else { owner_roots.clone() },"include_dirs":include_dirs,"revision":revision,"guards":guards});
+    let mut inputs = json!({"source_policy":kind,"root":root_file,"synthetic_root":kind=="text","checked_owners":if kind=="text" { Vec::new() } else { owner_roots.clone() },"include_dirs":include_dirs,"macro_work_limit":control.macro_work_limit,"revision":revision,"guards":guards});
     if kind == "text"
         && let Some(rows) = inputs["guards"].as_array_mut()
     {

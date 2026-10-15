@@ -3,7 +3,7 @@
 use crate::engine::diagnostics::check_parse::check_parse;
 use crate::engine::diagnostics::{analyze, Diagnostic, TextEdit};
 use crate::engine::language::lexer::{tokenize, TokenKind};
-use crate::engine::language::parser::parse;
+use crate::engine::macro_work::MacroWorkLimit;
 use std::sync::{atomic::AtomicBool, Arc};
 
 const PASS2_CODES: &[&str] = &["E020", "E030", "W013", "W054", "W055", "W056", "W057"];
@@ -68,9 +68,11 @@ pub fn auto_fix(text: &str) -> String {
 }
 
 pub(crate) fn auto_fix_outcome(text: &str) -> Result<String, &'static str> {
-    auto_fix_worker(text, None).map_err(|failure| match failure {
-        AutoFixFailure::Refused(message) => message,
-        AutoFixFailure::Cancelled => "The request was cancelled",
+    auto_fix_outcome_with_limit(text, MacroWorkLimit::default(), None).map_err(|failure| {
+        match failure {
+            AutoFixFailure::Refused(message) => message,
+            AutoFixFailure::Cancelled => "The request was cancelled",
+        }
     })
 }
 
@@ -80,31 +82,33 @@ pub(crate) enum AutoFixFailure {
     Refused(&'static str),
 }
 
-pub(crate) fn auto_fix_outcome_controlled(
+pub(crate) fn auto_fix_outcome_with_limit(
     text: &str,
-    cancelled: &Arc<AtomicBool>,
+    work_limit: MacroWorkLimit,
+    cancelled: Option<&Arc<AtomicBool>>,
 ) -> Result<String, AutoFixFailure> {
-    crate::engine::control::run(Some(Arc::clone(cancelled)), || {
-        auto_fix_worker(text, Some(cancelled))
+    crate::engine::control::run(cancelled.cloned(), || {
+        auto_fix_worker(text, work_limit, cancelled)
     })
     .map_err(|_| AutoFixFailure::Cancelled)?
 }
 
 fn auto_fix_worker(
     text: &str,
+    work_limit: MacroWorkLimit,
     cancelled: Option<&Arc<AtomicBool>>,
 ) -> Result<String, AutoFixFailure> {
     if refuse_macro_rewrite(text) {
         return Err(AutoFixFailure::Refused("Automatic fixes were withheld because macro definitions or loops with identifier interpolation can change the written edit targets."));
     }
-    let parsed = |text: &str| match cancelled {
-        Some(flag) => crate::engine::language::parser::parse_with_budget(
+    let parsed = |text: &str| {
+        crate::engine::language::parser::parse_with_budget(
             text,
-            &mut crate::engine::language::macro_expr::MacroBudget::with_cancellation(Some(
-                Arc::clone(flag),
-            )),
-        ),
-        None => parse(text),
+            &mut crate::engine::language::macro_expr::MacroBudget::with_limit(
+                work_limit,
+                cancelled.cloned(),
+            ),
+        )
     };
     let mut text = text.to_string();
     for _ in 0..3 {
@@ -112,7 +116,7 @@ fn auto_fix_worker(
             return Err(AutoFixFailure::Cancelled);
         }
         let diags = check_parse(&parsed(&text));
-        let fixes = repairing_fixes(&text, &diags, true, cancelled);
+        let fixes = repairing_fixes(&text, &diags, true, work_limit, cancelled);
         if fixes.is_empty() {
             break;
         }
@@ -127,7 +131,7 @@ fn auto_fix_worker(
             .map_err(|_| AutoFixFailure::Cancelled)?,
         None => analyze(&model),
     };
-    let fixes = repairing_fixes(&text, &diags, false, cancelled);
+    let fixes = repairing_fixes(&text, &diags, false, work_limit, cancelled);
     if !fixes.is_empty() {
         text = apply_fix(&text, &fixes);
     }
@@ -138,6 +142,7 @@ fn repairing_fixes(
     text: &str,
     diags: &[Diagnostic],
     parse_pass: bool,
+    work_limit: MacroWorkLimit,
     cancelled: Option<&Arc<AtomicBool>>,
 ) -> Vec<TextEdit> {
     diags
@@ -151,7 +156,9 @@ fn repairing_fixes(
         })
         .filter(|diagnostic| diagnostic.fix.is_some())
         .take_while(|_| !crate::engine::control::cancelled())
-        .filter(|diagnostic| edit_repairs_owner(text, diags, diagnostic, parse_pass, cancelled))
+        .filter(|diagnostic| {
+            edit_repairs_owner(text, diags, diagnostic, parse_pass, work_limit, cancelled)
+        })
         .filter_map(|diagnostic| diagnostic.fix.clone())
         .collect()
 }
@@ -168,6 +175,7 @@ fn edit_repairs_owner(
     before_diags: &[Diagnostic],
     owner: &Diagnostic,
     parse_pass: bool,
+    work_limit: MacroWorkLimit,
     cancelled: Option<&Arc<AtomicBool>>,
 ) -> bool {
     if crate::engine::control::cancelled() {
@@ -181,15 +189,13 @@ fn edit_repairs_owner(
         return false;
     }
     let candidate = apply_fix(text, &[fix]);
-    let model = match cancelled {
-        Some(flag) => crate::engine::language::parser::parse_with_budget(
-            &candidate,
-            &mut crate::engine::language::macro_expr::MacroBudget::with_cancellation(Some(
-                Arc::clone(flag),
-            )),
+    let model = crate::engine::language::parser::parse_with_budget(
+        &candidate,
+        &mut crate::engine::language::macro_expr::MacroBudget::with_limit(
+            work_limit,
+            cancelled.cloned(),
         ),
-        None => parse(&candidate),
-    };
+    );
     let after = if parse_pass {
         check_parse(&model)
     } else {
@@ -283,6 +289,7 @@ fn skip_chars(s: &str, n: usize) -> &str {
 #[cfg(test)]
 mod request_cancellation_tests {
     use super::*;
+    use crate::engine::language::parser::parse;
     use std::sync::atomic::Ordering;
 
     #[test]
@@ -295,12 +302,18 @@ mod request_cancellation_tests {
         let flag = Arc::new(AtomicBool::new(false));
         crate::engine::control::cancel_after(&flag, 4);
         let outcome = crate::engine::control::run(Some(flag.clone()), || {
-            repairing_fixes(text, &diagnostics, true, Some(&flag))
+            repairing_fixes(
+                text,
+                &diagnostics,
+                true,
+                MacroWorkLimit::default(),
+                Some(&flag),
+            )
         });
         assert_eq!(outcome, Err(crate::engine::control::Cancelled));
         assert!(flag.load(Ordering::Relaxed));
         assert_eq!(
-            auto_fix_outcome_controlled(text, &flag),
+            auto_fix_outcome_with_limit(text, MacroWorkLimit::default(), Some(&flag)),
             Err(AutoFixFailure::Cancelled)
         );
         assert_eq!(auto_fix_outcome(text).unwrap(), "var y;model;\ny=1;\nend;");

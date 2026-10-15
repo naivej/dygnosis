@@ -525,6 +525,139 @@ fn first_checking(statuses: &[Value]) -> Option<&str> {
 }
 
 #[tokio::test]
+async fn configured_work_reaches_inactive_checks_and_formatting_over_stdio() {
+    // Guards editor diagnostics and both format workers replaying macros with
+    // the default after the selected setting already completed the model.
+    let files = Files::new();
+    let text = format!(
+        "@#define big=\"{}\"\n@#for i in 1:400\n@#define scratch=big\n@#endfor\n@#if 0\nmodel;\n    y=2;\nend;\nvar é;\n@#endif\nvar y;\nmodel;\ny=0;\nend;\n",
+        "a".repeat(5_000)
+    );
+    let uri = files.uri("root.mod");
+    let mut wire = Wire::new();
+    wire.start(vec![], json!({"macroWorkLimit":10000000}), vec![], false)
+        .await;
+    wire.open(&uri, &text, 1);
+    let diagnostics = wire.pull(&uri).await;
+    assert!(
+        !has_code(&diagnostics, "E001") && !has_code(&diagnostics, "I211"),
+        "{diagnostics:?}"
+    );
+    let formatted = wire
+        .request(
+            "textDocument/formatting",
+            json!({
+                "textDocument":{"uri":uri},"options":{"tabSize":4,"insertSpaces":false}
+            }),
+        )
+        .await;
+    assert!(formatted[0]["newText"]
+        .as_str()
+        .unwrap()
+        .contains("model;\n    y=2;\nend;"));
+    let range = wire
+        .request(
+            "textDocument/rangeFormatting",
+            json!({
+                "textDocument":{"uri":uri},"options":{"tabSize":4,"insertSpaces":false},
+                "range":{"start":{"line":5,"character":0},"end":{"line":9,"character":0}}
+            }),
+        )
+        .await;
+    assert!(
+        range.is_null(),
+        "inactive source must stay unchanged: {range}"
+    );
+}
+
+#[tokio::test]
+async fn scoped_macro_work_limits_recheck_open_and_saved_models_over_stdio() {
+    // Guards project workers using a default or another root's setting, cached
+    // facts surviving a work-limit change, and invalid editor values going quiet.
+    let files = Files::new();
+    let text = "@#for i in 1:100\nvar y@{i};\n@#endfor\nmodel;\n@#for i in 1:100\ny@{i}=0;\n@#endfor\nend;\n";
+    files.write("a/root.mod", text);
+    files.write("b/root.mod", text);
+    let a = files.uri("a/root.mod");
+    let b = files.uri("b/root.mod");
+    let scoped = |a_limit: Value, b_limit: Value| {
+        vec![
+            json!({"uri":files.uri("a"),"settings":{"macroWorkLimit":a_limit}}),
+            json!({"uri":files.uri("b"),"settings":{"macroWorkLimit":b_limit}}),
+        ]
+    };
+    let mut wire = Wire::new();
+    wire.start(
+        vec![files.folder("a"), files.folder("b")],
+        json!({}),
+        scoped(json!(1000), json!(100000)),
+        true,
+    )
+    .await;
+    let status = wire.complete().await;
+    assert_eq!(root(&status, &a)["state"], "incomplete", "{status}");
+    assert_eq!(root(&status, &b)["state"], "checked", "{status}");
+    wire.open(&a, text, 1);
+    assert!(has_code(&wire.pull(&a).await, "I211"));
+    let info_args =
+        |uri: &str| json!({"command":"dynare/modelInfo","arguments":[{"root_uri":uri}]});
+    let before = wire
+        .request("workspace/executeCommand", info_args(&a))
+        .await;
+    assert_eq!(before["complete"], false, "{before}");
+    let source_args = json!({"command":"dynare/showEffectiveModel","arguments":[{"root_uri":a,"layout":"source"}]});
+    let source_stopped = wire
+        .request("workspace/executeCommand", source_args.clone())
+        .await;
+    assert_eq!(source_stopped["complete"], false);
+    assert!(
+        source_stopped["incomplete_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason["limit"]["limit"] == "iteration work"
+                && reason["limit"]["ceiling"] == 1000),
+        "{source_stopped}"
+    );
+    let snapshot = |folders: Vec<Value>| json!({"settings":{"dynare":{"configuration":{"schemaVersion":1,"loose":{},"folders":folders}}}});
+    wire.notify(
+        "workspace/didChangeConfiguration",
+        snapshot(scoped(json!(100000), json!(1000))),
+    );
+    let after = wire
+        .request("workspace/executeCommand", info_args(&a))
+        .await;
+    assert_eq!(after["complete"], true, "{after}");
+    assert_eq!(after["n_equations"], 100, "{after}");
+    let source_complete = wire.request("workspace/executeCommand", source_args).await;
+    assert_eq!(source_complete["complete"], true, "{source_complete}");
+    assert_ne!(before["revision"], after["revision"]);
+    assert!(!has_code(&wire.pull(&a).await, "I211"));
+    let status = wire.complete().await;
+    assert_eq!(root(&status, &a)["state"], "checked", "{status}");
+    assert_eq!(root(&status, &b)["state"], "incomplete", "{status}");
+    wire.notify(
+        "workspace/didChangeConfiguration",
+        snapshot(scoped(json!(0), json!(100000))),
+    );
+    let fallback = wire
+        .request("workspace/executeCommand", info_args(&a))
+        .await;
+    assert_eq!(fallback["complete"], true, "{fallback}");
+    wire.complete().await;
+    assert!(
+        wire.seen
+            .iter()
+            .any(|message| message["method"] == "window/logMessage"
+                && message["params"]["message"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("Invalid dynare.macroWorkLimit")
+                        && text.contains("default"))),
+        "invalid setting must explain its fallback"
+    );
+}
+
+#[tokio::test]
 async fn folder_only_cli_discovery_checked_errors_and_identical_push_pull() {
     let files = Files::new();
     files.write("good.mod", MODEL);

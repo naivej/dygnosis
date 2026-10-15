@@ -380,6 +380,14 @@
             "scope": "resource",
             "description": "Additional include directories, resolved against the model's workspace folder or loose-file directory. Used for the model root; a displayed include keeps its chosen owner. Untitled documents have no disk base."
           },
+          "dynare.macroWorkLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000000,
+            "default": 1000000,
+            "scope": "resource",
+            "description": "Maximum macro work units for each checked model root. Increase this finite limit for large macro programs. Zero does not disable it. Output size, source size, value size and nesting limits remain separate. An included file uses its selected model root's value."
+          },
           "dynare.formatIndent": {
             "oneOf": [
               {

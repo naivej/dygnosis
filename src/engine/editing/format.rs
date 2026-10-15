@@ -41,10 +41,18 @@ pub(crate) enum RangeFormatOutcome {
 
 /// Same decision as [`format_text`], with unchanged and unsupported kept apart.
 pub fn format_outcome(text: &str, indent_unit: &str) -> FormatOutcome {
+    format_outcome_with_limit(text, indent_unit, Default::default())
+}
+
+pub(crate) fn format_outcome_with_limit(
+    text: &str,
+    indent_unit: &str,
+    work_limit: crate::engine::macro_work::MacroWorkLimit,
+) -> FormatOutcome {
     if text.trim().is_empty() {
         return FormatOutcome::Unchanged;
     }
-    let Some(formatted) = reformat(text, indent_unit) else {
+    let Some(formatted) = reformat(text, indent_unit, work_limit) else {
         return FormatOutcome::Unsupported("formatter cannot reformat this file");
     };
     if formatted == text {
@@ -113,6 +121,16 @@ pub(crate) fn format_range_outcome(
     end_line: u32,
     indent_unit: &str,
 ) -> RangeFormatOutcome {
+    format_range_outcome_with_limit(text, start_line, end_line, indent_unit, Default::default())
+}
+
+pub(crate) fn format_range_outcome_with_limit(
+    text: &str,
+    start_line: u32,
+    end_line: u32,
+    indent_unit: &str,
+    work_limit: crate::engine::macro_work::MacroWorkLimit,
+) -> RangeFormatOutcome {
     if text.trim().is_empty() {
         return RangeFormatOutcome::Unchanged;
     }
@@ -134,7 +152,7 @@ pub(crate) fn format_range_outcome(
             "The formatting range is outside the document or reversed.",
         );
     }
-    let preserved = native_command_lines(text);
+    let preserved = native_command_lines(text, work_limit);
     let depth = depth_before(&stripped_lines, &preserved, start);
     let Some(formatted) = format_lines(
         &orig_lines[start..=end],
@@ -163,7 +181,11 @@ pub(crate) fn format_range_outcome(
     RangeFormatOutcome::Changed(start as u32, end as u32, replacement)
 }
 
-fn reformat(text: &str, indent_unit: &str) -> Option<String> {
+fn reformat(
+    text: &str,
+    indent_unit: &str,
+    work_limit: crate::engine::macro_work::MacroWorkLimit,
+) -> Option<String> {
     let eol = line_ending(text);
     let orig_lines = split_line_breaks(text);
     let normalised = normalise_line_breaks(text);
@@ -174,7 +196,7 @@ fn reformat(text: &str, indent_unit: &str) -> Option<String> {
     }
     let orig_owned: Vec<String> = orig_lines.iter().map(|s| s.to_string()).collect();
     let stripped_owned: Vec<String> = stripped_lines.iter().map(|s| s.to_string()).collect();
-    let preserved = native_command_lines(&normalised);
+    let preserved = native_command_lines(&normalised, work_limit);
     let mut out = format_lines(&orig_owned, &stripped_owned, &preserved, indent_unit, 0)?;
     while out.last().is_some_and(|s| s.is_empty()) {
         out.pop();
@@ -250,10 +272,16 @@ fn structural_line(text: &str) -> &str {
 /// Spaces separate arguments in MATLAB command syntax. The shared parser owns
 /// native line boundaries, including continuations and macro execution. Preserve
 /// whole physical lines when any part is native, verbatim, or opaque recovery.
-fn native_command_lines(text: &str) -> Vec<bool> {
+fn native_command_lines(
+    text: &str,
+    work_limit: crate::engine::macro_work::MacroWorkLimit,
+) -> Vec<bool> {
     let mut starts = vec![0];
     starts.extend(text.match_indices('\n').map(|(at, _)| at + 1));
-    let model = crate::engine::language::parser::parse(text);
+    let model = crate::engine::language::parser::parse_with_budget(
+        text,
+        &mut crate::engine::language::macro_expr::MacroBudget::with_limit(work_limit, None),
+    );
     // Difference marks avoid rescanning long spans repeated by macro execution.
     let mut marks = vec![0i64; starts.len() + 1];
     let mut spans: Vec<_> = model
@@ -275,6 +303,7 @@ fn native_command_lines(text: &str) -> Vec<bool> {
         )
         .chain(crate::engine::language::macro_expand::inactive_macro_spans(
             text,
+            &mut crate::engine::language::macro_expr::MacroBudget::with_limit(work_limit, None),
         ))
         .collect();
     if model.macro_incomplete() {

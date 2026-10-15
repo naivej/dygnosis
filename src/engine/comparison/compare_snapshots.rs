@@ -317,6 +317,18 @@ pub(crate) fn capture_git_snapshot_controlled(
     input: &GitSnapshotInput,
     cancellation: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> SnapshotCapture {
+    capture_git_snapshot_with_limit(
+        input,
+        cancellation,
+        crate::engine::macro_work::MacroWorkLimit::default(),
+    )
+}
+
+pub(crate) fn capture_git_snapshot_with_limit(
+    input: &GitSnapshotInput,
+    cancellation: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
+) -> SnapshotCapture {
     let stopped = || {
         cancellation
             .as_ref()
@@ -412,7 +424,7 @@ pub(crate) fn capture_git_snapshot_controlled(
         }
         _ => {}
     }
-    let mut workspace = Workspace::snapshot_documents(input);
+    let mut workspace = Workspace::snapshot_documents_with_limit(input, macro_work_limit);
     if let Some(flag) = &cancellation {
         workspace.set_cancellation(std::sync::Arc::clone(flag));
     }
@@ -442,6 +454,7 @@ pub(crate) fn capture_git_snapshot_controlled(
     input.commit.hash(&mut hash);
     input.root_file.hash(&mut hash);
     input.search_paths.hash(&mut hash);
+    macro_work_limit.hash(&mut hash);
     sources.hash(&mut hash);
     for key in sources.keys() {
         input.manifest.get(key).hash(&mut hash);
@@ -449,7 +462,7 @@ pub(crate) fn capture_git_snapshot_controlled(
     let revision = format!("{:016x}", hash.finish());
     let inputs = json!({"kind":"git", "input_id":input.input_id, "root_file":input.root_file,
         "repository_uri":input.repository_uri, "commit":input.commit, "requested_ref":input.requested_ref,
-        "revision":revision, "search_paths":input.search_paths, "complete":true,
+        "revision":revision, "search_paths":input.search_paths, "macro_work_limit":macro_work_limit, "complete":true,
         "source_policy":"git_tree", "file_keys":sources.keys().collect::<Vec<_>>(), "dependency_candidates":[]});
     SnapshotCapture::Ready(Box::new(CapturedSnapshot {
         workspace,
@@ -503,7 +516,7 @@ pub fn capture_working_snapshot(
     let sources = workspace.snapshot_sources(root_uri);
     let inputs = json!({"kind":"working", "input_id":input_id, "root_uri":root_uri,
         "root_file":crate::engine::workspace::include_resolver::normalize_uri(root_uri), "revision":revision,
-        "search_paths":workspace.snapshot_search_paths(root_uri), "complete":true, "source_policy":source_policy,
+        "search_paths":workspace.snapshot_search_paths(root_uri), "macro_work_limit":workspace.root_macro_work_limit(root_uri), "complete":true, "source_policy":source_policy,
         "file_keys":sources.keys().collect::<Vec<_>>(),
         "dependency_candidates":workspace.input_candidate_paths(root_uri).iter().filter_map(|path| tower_lsp::lsp_types::Url::from_file_path(path).ok()).collect::<Vec<_>>()});
     SnapshotCapture::Ready(Box::new(CapturedSnapshot {

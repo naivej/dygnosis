@@ -5,7 +5,7 @@ export type Log = (message: string) => void;
 /** Macro tint changes no server input; simultaneous engine-setting changes still do. */
 export function macroTintOnlyChange(event: vscode.ConfigurationChangeEvent, resource?: vscode.Uri): boolean {
   return event.affectsConfiguration("dynare.effectiveModel.macroTint", resource) &&
-    !["serverPath", "searchPaths", "formatIndent", "projectDiagnostics", "projectExcludePaths", "nameDetails", "outline", "parameterValueHints"]
+    !["serverPath", "searchPaths", "macroWorkLimit", "formatIndent", "projectDiagnostics", "projectExcludePaths", "nameDetails", "outline", "parameterValueHints"]
       .some(key => event.affectsConfiguration(`dynare.${key}`, resource));
 }
 function valueSetting(key: string, resource: vscode.Uri | undefined, fallback: unknown): unknown {
@@ -45,7 +45,7 @@ export function engineSettings(resource: vscode.Uri | undefined, log: Log) {
   const formatIndent = rawIndent === "tab" || (typeof rawIndent === "number" && Number.isInteger(rawIndent) && rawIndent >= 1 && rawIndent <= 8) ? rawIndent : "tab";
   if (formatIndent !== rawIndent) log("Invalid dynare.formatIndent; using a tab.");
   return {
-    searchPaths, formatIndent, projectExcludePaths: stringListSetting("projectExcludePaths", resource, log),
+    searchPaths, macroWorkLimit: valueSetting("macroWorkLimit", resource, 1_000_000), formatIndent, projectExcludePaths: stringListSetting("projectExcludePaths", resource, log),
     nameDetails: {
       longName: booleanSetting("nameDetails.longName", resource, true, log),
       tex: booleanSetting("nameDetails.tex", resource, true, log),
