@@ -10116,6 +10116,15 @@ impl Parser<'_> {
         let saw_eq = self.at(TokenKind::Eq);
         let (rhs_expr, rhs_ok, rhs_refused) = if saw_eq {
             self.bump();
+            if self.at(TokenKind::Semi)
+                || self.at(TokenKind::Eof)
+                || self.at(TokenKind::Perpendicular)
+                || self.at_block_stop()
+            {
+                self.hetero_bison_refuse(self.i, None);
+                self.eat(TokenKind::Semi);
+                return None;
+            }
             self.parse_expr_side(ExprStop::Semi)
         } else {
             (None, true, false)

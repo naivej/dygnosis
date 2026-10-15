@@ -1157,6 +1157,72 @@ fn empty_aggregate_model_refuses_on_end_without_transform_or_writing_notes() {
 }
 
 #[test]
+fn explicit_equation_requires_a_rhs_and_does_not_retain_a_refused_row() {
+    // Guards treating an explicit empty RHS as a valid residual equation.
+    for (source, token, message) in [
+        (
+            "var y; model; y=; y=1; end;",
+            ";",
+            "syntax error, unexpected ';'",
+        ),
+        (
+            "var y; model; [name='bad'] y= end;",
+            "end",
+            "syntax error, unexpected END",
+        ),
+    ] {
+        let model = parse(source);
+        let errors = rust_e001(source);
+        assert_eq!(errors.len(), 1, "{source}: {errors:?}");
+        assert_eq!(errors[0].message, message);
+        let offset = source.find("y=").unwrap() + 2;
+        let tail = &source[offset..];
+        let expected = offset + tail.find(token).unwrap();
+        let position = LineIndex::new(source).position(source, expected as u32);
+        assert_eq!(
+            (errors[0].start_line, errors[0].start_char),
+            (position.line, position.character)
+        );
+        assert!(errors[0].fix.is_none());
+        assert_eq!(model.equations.len(), usize::from(source.contains("y=1;")));
+    }
+    let recovered = parse("var y; model; y=; y=1; end;");
+    assert_eq!(recovered.equations.len(), 1);
+    assert!(recovered.equations[0].rhs_expr.is_some());
+    for source in ["var y; model; y; end;", "var y; model; y=0; end;"] {
+        assert!(rust_e001(source).is_empty(), "{source}");
+        assert_eq!(parse(source).equations.len(), 1);
+    }
+}
+
+#[test]
+fn explicit_empty_equation_rhs_agrees_with_pinned_parse_refusal() {
+    let pp = PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
+    if !pp.is_file() {
+        eprintln!("skipping honesty: Dynare 7.2 is absent");
+        return;
+    }
+    for source in [
+        "var y; model; y=; end;",
+        "var y; model; [name='bad'] y= end;",
+    ] {
+        let official = dygnosis::run_preprocessor(
+            source,
+            &pp,
+            None,
+            std::time::Duration::from_secs(30),
+            dygnosis::JsonStage::Check,
+        );
+        let output = format!("{}{}", official.raw_stdout, official.raw_stderr);
+        assert!(!official.success, "{source}: {output}");
+        assert!(
+            output.contains(&rust_e001(source)[0].message),
+            "{source}: {output}"
+        );
+    }
+}
+
+#[test]
 fn empty_aggregate_model_agrees_with_pinned_parse_refusal() {
     let pp = PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
     if !pp.is_file() {
