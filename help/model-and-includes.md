@@ -4,17 +4,7 @@
 
 A **model root** is the main `.mod` or `.dyn` file. A helper file can use macro
 values and declarations supplied by a model that includes it. That model root
-is the helper's **model owner**. This applies even when the helper's filename
-ends in `.mod` or `.dyn`.
-
-```text
-main.mod          defines the number of regions, then includes variables.mod
-  variables.mod   uses that number to declare each region's variables
-```
-
-Open `main.mod` to make its include context available. Dygnosis must have
-checked the include relationship; files in the same folder are not necessarily
-part of the same model.
+is the helper's **model owner**.
 
 The editor uses these rules:
 
@@ -45,11 +35,6 @@ uses the rules above.
 Project-wide checking remains separate. It checks each selected saved model
 root and reports counts for that root. Choosing a helper's editor owner does
 not remove the helper from the project's saved-model list.
-
-These selection commands are available in VS Code with the bundled engine.
-Other LSP clients also use a single known owner automatically. With several
-owners, clients without owner selection can show combined diagnostics and
-withhold navigation when the models disagree.
 
 Related files include recognized include, parameter, data and external-function
 files. Hover over an include filename or a recognized file reference in the
