@@ -62,20 +62,21 @@
   "var_mod": {
     "command": "var_mod",
     "known": false,
-    "message": "'var_mod' is not in the bundled Dynare 7.2 command catalog. Did you mean: var_model, pac_model?",
+    "message": "'var_mod' is not in the bundled Dynare 7.2 command catalog. Did you mean: var_model, var_remove, pac_model?",
     "suggestions": [
       "var_model",
+      "var_remove",
       "pac_model"
     ]
   },
   "bvar": {
     "command": "bvar",
     "known": false,
-    "message": "'bvar' is not in the bundled Dynare 7.2 command catalog. Did you mean: sbvar, svar, bvar_irf?",
+    "message": "'bvar' is not in the bundled Dynare 7.2 command catalog. Did you mean: sbvar, var, svar?",
     "suggestions": [
       "sbvar",
-      "svar",
-      "bvar_irf"
+      "var",
+      "svar"
     ]
   },
   "steadyy": {

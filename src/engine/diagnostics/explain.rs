@@ -330,6 +330,11 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "A ``steady_state_model`` output name has an incompatible type. Scalar and multiple-output assignments allow an ordinary endogenous, a parameter, or a temporary mod-file local. An unknown output name becomes a temporary after parsing the right-hand side. A function registered by that right-hand side is already known when its output names are checked. Dynare refuses: `e has incorrect type`.\n\nThis check uses the symbol type at that assignment, after the right-hand side and before the output is registered. A later ``change_type`` does not change that earlier decision. Heterogeneous variables and parameters are incompatible targets until a prior successful type change makes them ordinary.\n\n**Warrant**\n\nThe message keeps Dynare's sentence. The editor range points at the incompatible written output name instead of the parser's range for the assignment.\n\n**Fix**\n\nAssign an ordinary endogenous, parameter, or temporary name. Use a different output name from the function being called.",
         kind: ExplainKind::Shared,
     }),
+    ("E482", ExplainEntry {
+        title: "Date in conditional forecast periods",
+        body: "A `conditional_forecast_paths` period is written as a date. Dynare refuses: `conditional_forecast_paths: dates are not allowed in the 'periods' keyword`.\n\n**Fix**\n\nUse an integer period or integer range counted from the start of the conditional forecast.",
+        kind: ExplainKind::Shared,
+    }),
     ("E170", ExplainEntry {
         title: "Multiple occbin_constraints blocks",
         body: "The file has more than one ``occbin_constraints`` block. Dynare refuses: `Multiple 'occbin_constraints' blocks are not allowed`.\n\n**Fix**\n\nKeep a single ``occbin_constraints`` block.\n\n**Range warrant**\n\nThe range selects the later `occbin_constraints` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",

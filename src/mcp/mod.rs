@@ -3,6 +3,7 @@
 //! Tests call these functions directly. Stdio is a thin wrap around the same
 //! handlers.
 
+mod canonical;
 mod edits;
 mod multi_request;
 pub(crate) mod repository_compare;
@@ -129,13 +130,13 @@ pub struct McpWorkspaceReference {
 
 /// Registered tool names in registration order.
 pub fn registered_tool_names() -> Vec<&'static str> {
-    TOOL_NAMES.to_vec()
+    canonical::TOOL_NAMES.to_vec()
 }
 
 /// JSON for tools/list assertions (names + descriptions). No live client.
 pub fn tools_list_json() -> Value {
-    let tools = advertised_tools(true);
-    json!({"tools": TOOL_NAMES.iter().map(|name| {
+    let tools = canonical::advertised_tools(true);
+    json!({"tools": canonical::TOOL_NAMES.iter().map(|name| {
         let tool = tools.iter().find(|tool| tool.name == *name).expect("registered tool");
         json!({"name": tool.name, "description": tool.description})
     }).collect::<Vec<_>>()})
@@ -1199,8 +1200,13 @@ fn related_file_path(resolved: &Path, files: &HashMap<String, String>) -> String
 
 /// MCP stdio entry. Wired from `dygnosis mcp`.
 pub async fn run_stdio() {
+    run_stdio_with_profile(McpProfile::Canonical).await;
+}
+
+/// Explicit tool-contract selection; independent of the MCP protocol edition.
+pub async fn run_stdio_with_profile(profile: McpProfile) {
     use rmcp::transport::stdio;
-    let service = match DygnosisMcp.serve(stdio()).await {
+    let service = match (DygnosisMcp { profile }).serve(stdio()).await {
         Ok(s) => s,
         Err(err) => {
             tracing::error!("MCP stdio failed: {err}");
@@ -1715,8 +1721,25 @@ struct IncludeMapParams {
     files: Option<HashMap<String, String>>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum McpProfile {
+    #[default]
+    Canonical,
+    /// Temporary version-2 tool contract; removed in 0.11.28.
+    LegacyV2,
+}
+
 #[derive(Clone)]
-struct DygnosisMcp;
+struct DygnosisMcp {
+    profile: McpProfile,
+}
+
+// Existing adapter tests exercise the temporary version-2 contract explicitly.
+#[cfg(test)]
+#[allow(non_upper_case_globals)]
+const DygnosisMcp: DygnosisMcp = DygnosisMcp {
+    profile: McpProfile::LegacyV2,
+};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[cfg(test)]
@@ -2438,9 +2461,15 @@ impl ServerHandler for DygnosisMcp {
             .protocol_version()
             .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2025_06_18);
         let name = request.name.to_string();
-        if !TOOL_NAMES.contains(&name.as_str()) {
+        let profile = self.profile;
+        let names = if profile == McpProfile::Canonical {
+            canonical::TOOL_NAMES
+        } else {
+            TOOL_NAMES
+        };
+        if !names.contains(&name.as_str()) {
             return Err(rmcp::ErrorData::invalid_params(
-                format!("Unknown tool: {name}"),
+                format!("Tool {name} is not available in the {profile:?} profile. Read tools/list for this profile's tool contract."),
                 None,
             ));
         }
@@ -2453,7 +2482,9 @@ impl ServerHandler for DygnosisMcp {
         let progress_token = context.meta.get_progress_token();
         let mut worker = tokio::task::spawn_blocking(move || {
             crate::engine::control::run(Some(Arc::clone(&control.cancelled)), || {
-                if matches!(
+                if profile == McpProfile::Canonical {
+                    canonical::dispatch(&name, arguments, control)
+                } else if matches!(
                     name.as_str(),
                     "dynare_compare_models" | "dynare_workspace_diagnose"
                 ) {
@@ -2502,14 +2533,22 @@ impl ServerHandler for DygnosisMcp {
             .protocol_version()
             .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2025_06_18);
         Ok(rmcp::model::ListToolsResult::with_all_items(
-            advertised_tools(structured),
+            if self.profile == McpProfile::Canonical {
+                canonical::advertised_tools(structured)
+            } else {
+                advertised_tools(structured)
+            },
         ))
     }
 
     fn get_tool(&self, name: &str) -> Option<rmcp::model::Tool> {
-        advertised_tools(true)
-            .into_iter()
-            .find(|tool| tool.name == name)
+        (if self.profile == McpProfile::Canonical {
+            canonical::advertised_tools(true)
+        } else {
+            advertised_tools(true)
+        })
+        .into_iter()
+        .find(|tool| tool.name == name)
     }
 }
 
@@ -2833,11 +2872,12 @@ end;
     }
 
     #[test]
-    fn rmcp_stdio_registers_rust_tools() {
+    fn legacy_registration_preserves_version_two_tools() {
         let listed = advertised_tools(true);
         let mut got: Vec<String> = listed.iter().map(|t| t.name.to_string()).collect();
         got.sort_unstable();
-        let mut want: Vec<String> = registered_tool_names()
+        let mut want: Vec<String> = TOOL_NAMES
+            .to_vec()
             .into_iter()
             .map(str::to_string)
             .collect();

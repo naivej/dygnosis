@@ -113,7 +113,7 @@ need the tools. Do not reinstall or rewrite the configuration to get around the 
 After you connect or reconnect:
 
 1. List the tools whose names start with `dynare_`.
-2. Call `dynare_diagnose` with this text as `file_content`:
+2. Call `dynare_diagnose` with `source: {"kind":"text","text":"..."}`, using this text:
 
    ```text
    var y;
@@ -125,8 +125,8 @@ After you connect or reconnect:
    end;
    ```
 
-   Expect an Error E020 for the undeclared identifier `zz`, and some Information notes (I050, I208,
-   I209).
+   Expect Error E020 for undeclared `zz` in `data.roots[0].diagnostics`, and Information notes
+   (I050, I208, I209). Read `schema_version: 3`, outcome and coverage beside the data.
 3. Record the host, the executable path and the version (`<path> --version`).
 
 A configuration file or a successful `--version` alone does not prove MCP access. After you replace the
@@ -142,7 +142,7 @@ If the tools stay unavailable:
   MATLAB is connected ([MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit)).
 - Label the evidence: "Dygnosis checks were not run". Editor diagnostics from the VS Code extension are
   Dygnosis results; name them as editor diagnostics.
-- No command-line program replaces the MCP tools. `dynare_workspace_diagnose` also needs MCP.
+- No command-line program replaces the MCP tools. Batch `dynare_diagnose` also needs MCP.
 
 ## 7. Install this skill
 

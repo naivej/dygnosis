@@ -78,7 +78,7 @@ fn observables_roles_and_duplicate_history_stay_separate() {
 }
 
 #[test]
-fn observation_trends_keep_target_and_expression_gap() {
+fn observation_trends_own_target_and_expression_changes() {
     appended(
         SemanticFamily::Observables,
         "target",
@@ -89,18 +89,23 @@ fn observation_trends_keep_target_and_expression_gap() {
         &format!("{BASE}observation_trends; y(a); end;"),
         &format!("{BASE}observation_trends; y(b); end;"),
     );
-    assert!(diff
+    assert!(!diff
         .coverage
         .families
         .iter()
         .filter(|family| family.family == SemanticFamily::Observables)
         .flat_map(|family| &family.limits)
         .any(|limit| limit.code == "observation_trend_expression_not_retained"));
-    assert!(diff
+    assert!(!diff
         .semantic
         .rows
         .iter()
         .any(|row| row.family == SemanticFamily::Commands));
+    assert!(diff
+        .semantic
+        .rows
+        .iter()
+        .any(|row| row.family == SemanticFamily::Observables));
 }
 
 #[test]

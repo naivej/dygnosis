@@ -14,21 +14,18 @@ apply.
 
 | Tool | Available result |
 |---|---|
-| [dynare_model_info](tool:dynare_model_info) | Names, counts, timing, dimensions, model locals and selected declaration, assignment and source sections. |
+| [dynare_model_info](tool:dynare_model_info) | Model overview, with selected timing, declaration, assignment, local definition and source relationships. |
 | [dynare_equations](tool:dynare_equations) | Equations, tags, identifiers, timing and source locations. |
-| [dynare_related_files](tool:dynare_related_files) | Includes and companion files. |
 | [dynare_expand](tool:dynare_expand) | Expanded model text, selected ranges and verified written source locations. |
-| [dynare_symbol_info](tool:dynare_symbol_info) | Declaration, definition, labels, timing and assignments for a selected name in the model. |
-| [dynare_find_references](tool:dynare_find_references) | Uses of that name across the selected model. |
+| [dynare_symbol_info](tool:dynare_symbol_info) | One name's declaration, definition, labels, timing, selected assignments and accepted uses. |
 
 ## Write and revise
 
 | Tool | Available result |
 |---|---|
-| [dynare_list_options](tool:dynare_list_options) | Recognized commands and their options. |
+| [dynare_syntax](tool:dynare_syntax) | Dynare commands, blocks, instructions, options, functions, operators and macros, with contexts and signatures. |
 | [dynare_rename](tool:dynare_rename) | Proposed edits to rename a symbol across the selected model, with checks that its source has not changed. |
-| [dynare_code_actions](tool:dynare_code_actions) | Available source edits for a selected diagnostic or source range. |
-| [dynare_auto_fix](tool:dynare_auto_fix) | Selected or bulk diagnostic fixes, including supplied files. |
+| [dynare_actions](tool:dynare_actions) | Available source action summaries, selected complete proposals or compatible proven diagnostic fixes. |
 | [dynare_format](tool:dynare_format) | Formatted model text or selected whole lines. |
 | [dynare_extract](tool:dynare_extract) | Selected equations with required declarations and model locals, as a fragment. |
 
@@ -36,11 +33,9 @@ apply.
 
 | Tool | Available result |
 |---|---|
-| [dynare_diagnose](tool:dynare_diagnose) | Problems found in model text, files supplied by the agent or a saved main model file. |
-| [dynare_explain](tool:dynare_explain) | Explanation of a diagnostic code. |
-| [dynare_list_diagnostic_codes](tool:dynare_list_diagnostic_codes) | Check codes with the Shared, Added and Skipped labels explained in the [Reference](reference.md). |
+| [dynare_diagnose](tool:dynare_diagnose) | Problems in one model or a batch of explicit roots or saved paths, with each root's status. |
+| [dynare_diagnostic_info](tool:dynare_diagnostic_info) | Diagnostic search and correction guidance, with Shared, Added and Skipped classifications. |
 | [dynare_compare_models](tool:dynare_compare_models) | Model and source changes between supplied models or Git and saved Working inputs. |
-| [dynare_workspace_diagnose](tool:dynare_workspace_diagnose) | Checks for several model roots, from supplied files or saved paths. |
 
 ## Connect MCP
 

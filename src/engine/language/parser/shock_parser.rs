@@ -497,6 +497,8 @@ impl Parser<'_> {
     /// The exogenous path list requires commas. Controlled path lists use
     /// period_list, which also permits adjacent ranges separated by whitespace.
     fn read_path_periods(&mut self, allow_end: bool) -> Vec<PeriodRange> {
+        let issues_before = self.model.parse_issues.len();
+        let actions_before = self.model.path_parse_errors.len();
         let mut out = Vec::new();
         let first_expected = if allow_end {
             "END or DATE or INT_NUMBER"
@@ -595,7 +597,13 @@ impl Parser<'_> {
             });
             break;
         }
-        if self.path_context.as_ref().unwrap().failed {
+        if self
+            .path_context
+            .as_ref()
+            .is_some_and(|context| context.failed)
+            || self.model.parse_issues.len() != issues_before
+            || self.model.path_parse_errors.len() != actions_before
+        {
             while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) && !self.at_ident_ci("end")
             {
                 self.bump();
@@ -605,8 +613,18 @@ impl Parser<'_> {
         out
     }
 
+    /// The ordinary `period_list` shares the controlled path grammar. It has
+    /// no path-expression namespace context and does not permit an END bound.
+    pub(super) fn read_ordinary_periods_until_semi(&mut self) -> Vec<PeriodRange> {
+        self.read_path_periods(false)
+    }
+
     fn refuse_path_period_syntax(&mut self, expected: &str) {
-        if self.path_context.as_ref().unwrap().failed {
+        if self
+            .path_context
+            .as_ref()
+            .is_some_and(|context| context.failed)
+        {
             return;
         }
         let (span, unexpected) = if self.date_at(self.i).is_some() {
@@ -631,18 +649,26 @@ impl Parser<'_> {
             span,
             format!("syntax error, unexpected {unexpected}, expecting {expected}"),
         );
-        self.path_context.as_mut().unwrap().failed = true;
+        if let Some(context) = &mut self.path_context {
+            context.failed = true;
+        }
     }
 
     fn refuse_path_period_colon(&mut self, span: Span, expected: &str) {
-        if self.path_context.as_ref().unwrap().failed {
+        if self
+            .path_context
+            .as_ref()
+            .is_some_and(|context| context.failed)
+        {
             return;
         }
         self.push_bison(
             span,
             format!("syntax error, unexpected ':', expecting {expected}"),
         );
-        self.path_context.as_mut().unwrap().failed = true;
+        if let Some(context) = &mut self.path_context {
+            context.failed = true;
+        }
     }
 
     /// Colons are omitted by the byte lexer. Read the emitted gap so spaces,
@@ -732,6 +758,106 @@ impl Parser<'_> {
             }
         }
         out
+    }
+
+    /// The ordinary `value_list` grammar permits signed numbers and
+    /// parenthesized expressions, with optional commas between complete values.
+    pub(super) fn read_ordinary_values(&mut self, from: usize, to: usize) -> Vec<WrittenValue> {
+        let saved = self.i;
+        self.i = from;
+        let uses_before = self.model.outside_expression_uses.len();
+        let issues_before = self.model.parse_issues.len();
+        let mut out = Vec::new();
+        let mut need_value = true;
+        while self.i < to {
+            let start = self.i;
+            let expr = if self.at(TokenKind::LParen) {
+                self.bump();
+                let expr = self.parse_expr();
+                if expr.is_none_or(|id| self.pac_expr_has_error(id)) {
+                    self.ordinary_value_syntax("an expression");
+                }
+                if !self.at(TokenKind::RParen) {
+                    self.ordinary_value_syntax("')'");
+                }
+                self.eat(TokenKind::RParen);
+                expr
+            } else if self.at(TokenKind::Number)
+                || matches!(self.tokens[self.i].kind, TokenKind::Plus | TokenKind::Minus)
+                    && self.peek_kind(1) == Some(TokenKind::Number)
+            {
+                // `signed_number` is exactly an optional sign and one numeric
+                // token. Pratt prefix parsing would also consume a power RHS.
+                let sign = matches!(self.tokens[self.i].kind, TokenKind::Plus | TokenKind::Minus)
+                    .then(|| self.bump());
+                let number = self.bump();
+                let id = self.alloc(ExprKind::Number, number.span);
+                let text = number.text(self.src).to_owned();
+                if let Ok(value) = text.parse::<f64>() {
+                    self.model.numeric_literals.insert(id, value);
+                }
+                self.model.numeric_literal_texts.insert(id, text);
+                Some(if let Some(sign) = sign {
+                    self.alloc(
+                        ExprKind::Unary {
+                            op: if sign.kind == TokenKind::Minus {
+                                UnOp::Neg
+                            } else {
+                                UnOp::Pos
+                            },
+                            arg: id,
+                        },
+                        Span {
+                            start: sign.span.start,
+                            end: number.span.end,
+                        },
+                    )
+                } else {
+                    id
+                })
+            } else {
+                self.ordinary_value_syntax("a number or '('");
+                None
+            };
+            if self.model.parse_issues.len() != issues_before
+                || expr.is_none_or(|id| self.pac_expr_has_error(id))
+                || self.i > to
+            {
+                break;
+            }
+            let span = Span {
+                start: self.tokens[start].span.start,
+                end: self.tokens[self.i - 1].span.end,
+            };
+            out.push(WrittenValue {
+                text: self.src[span.start as usize..span.end as usize].into(),
+                span,
+                expr,
+                completed: true,
+                path_refs: Vec::new(),
+            });
+            need_value = self.at(TokenKind::Comma);
+            self.eat(TokenKind::Comma);
+        }
+        if need_value && self.model.parse_issues.len() == issues_before {
+            self.ordinary_value_syntax("a number or '('");
+        }
+        if self.model.parse_issues.len() != issues_before {
+            self.model.outside_expression_uses.truncate(uses_before);
+            for value in &mut out {
+                value.completed = false;
+            }
+        }
+        self.i = saved;
+        out
+    }
+
+    fn ordinary_value_syntax(&mut self, expected: &str) {
+        let (span, unexpected) = self.ss_unexpected_token(self.i);
+        self.push_bison(
+            span,
+            format!("syntax error, unexpected {unexpected}, expecting {expected}"),
+        );
     }
 
     /// References come from the written tree, before constructor simplification.
@@ -1445,13 +1571,12 @@ impl Parser<'_> {
                     .with_parse_order(self.token_origins[body_end_i].start),
             );
         }
-        let completed = companion
-            || closed
-                && self.model.parse_issues.len() == parse_issues_before
-                && self.model.shape_refuses.len() == shape_refuses_before
-                && !stanzas.is_empty()
-                && !self.path_context.as_ref().unwrap().failed
-                && stanzas.iter().all(|stanza| stanza.callback_completed);
+        let completed = closed
+            && self.model.parse_issues.len() == parse_issues_before
+            && self.model.shape_refuses.len() == shape_refuses_before
+            && !stanzas.is_empty()
+            && (companion || !self.path_context.as_ref().unwrap().failed)
+            && stanzas.iter().all(|stanza| stanza.callback_completed);
         self.path_context = previous_path_context;
         let block = PathBlock {
             options,
@@ -1470,7 +1595,7 @@ impl Parser<'_> {
     }
 
     fn refuse_path_stanza_syntax(&mut self, companion: bool, expected: Option<&str>) {
-        if companion || self.path_context.as_ref().unwrap().failed {
+        if !companion && self.path_context.as_ref().unwrap().failed {
             return;
         }
         let (span, unexpected) = self.ss_unexpected_token(self.i);
@@ -1479,7 +1604,9 @@ impl Parser<'_> {
             message.push_str(&format!(", expecting {expected}"));
         }
         self.push_bison(span, message);
-        self.path_context.as_mut().unwrap().failed = true;
+        if !companion {
+            self.path_context.as_mut().unwrap().failed = true;
+        }
     }
 
     fn read_path_stanza(
@@ -1489,6 +1616,9 @@ impl Parser<'_> {
         companion: bool,
     ) -> Option<PathStanza> {
         let row_i = self.i;
+        let parse_issues_before = self.model.parse_issues.len();
+        let shape_refuses_before = self.model.shape_refuses.len();
+        let path_errors_before = self.model.path_parse_errors.len();
         let start = self.bump().span.start;
         let target_tok = self.tokens.get(self.i)?.clone();
         if target_tok.kind != TokenKind::Ident {
@@ -1508,7 +1638,17 @@ impl Parser<'_> {
         }
         self.bump();
         let issues_before = self.model.shape_refuses.len();
-        let periods = self.read_periods_until_semi(!controlled);
+        let periods = if companion {
+            self.read_ordinary_periods_until_semi()
+        } else {
+            self.read_periods_until_semi(!controlled)
+        };
+        if companion
+            && (self.model.parse_issues.len() != parse_issues_before
+                || self.model.path_parse_errors.len() != path_errors_before)
+        {
+            return None;
+        }
         if !companion && self.model.shape_refuses.len() != issues_before {
             self.path_context.as_mut().unwrap().failed = true;
         }
@@ -1523,12 +1663,16 @@ impl Parser<'_> {
         }
         let value_end = self.i;
         let values = if companion {
-            self.written_values(value_start, value_end)
+            self.read_ordinary_values(value_start, value_end)
         } else {
             self.path_context.as_mut().unwrap().controlled = controlled;
             self.read_path_values(value_start, value_end)
         };
-        self.eat(TokenKind::Semi);
+        if !self.at(TokenKind::Semi) {
+            self.refuse_path_stanza_syntax(companion, Some("';'"));
+            return None;
+        }
+        self.bump();
         let target = if controlled {
             if !self.at_ident_ci("endogenize") {
                 self.refuse_path_stanza_syntax(companion, Some("ENDOGENIZE"));
@@ -1542,7 +1686,7 @@ impl Parser<'_> {
             }
             self.bump();
             let endogenize = self.intern.intern(endo_tok.text(self.src));
-            if !self.at(TokenKind::Semi) && !companion {
+            if !self.at(TokenKind::Semi) {
                 self.refuse_path_stanza_syntax(companion, Some("';'"));
                 return None;
             }
@@ -1560,12 +1704,16 @@ impl Parser<'_> {
             }
         };
         let end = self.tokens[self.i.saturating_sub(1)].span.end;
+        let callback_completed = companion
+            && values.iter().all(|value| value.completed)
+            && self.model.parse_issues.len() == parse_issues_before
+            && self.model.shape_refuses.len() == shape_refuses_before;
         let mut stanza = PathStanza {
             symbol_type_context: self.model.symbol_context(),
             target,
             periods,
             values,
-            callback_completed: companion,
+            callback_completed,
             span: Span { start, end },
         };
         if !companion

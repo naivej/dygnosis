@@ -597,6 +597,9 @@ fn check_paths(model: &Model, out: &mut Vec<Diagnostic>) {
             if crate::engine::control::cancelled() {
                 return Default::default();
             }
+            if !stanza.callback_completed {
+                continue;
+            }
             match &stanza.target {
                 PathTarget::Exogenous { name, span } => {
                     exogenous(

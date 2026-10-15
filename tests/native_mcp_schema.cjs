@@ -1,5 +1,5 @@
 // Replay MCP discovery through the JSON validator bundled with a VS Code host.
-// Usage: node tests/native_mcp_schema.cjs <dygnosis binary> <VS Code resources/app> [expected host version]
+// Usage: node tests/native_mcp_schema.cjs <binary> <VS Code resources/app> [expected host version] [canonical|legacy-v2]
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -7,8 +7,8 @@ const path = require('node:path');
 const { createRequire } = require('node:module');
 const vm = require('node:vm');
 
-async function listTools(binary) {
-  const child = spawn(binary, ['mcp'], { stdio: ['pipe', 'pipe', 'pipe'] });
+async function listTools(binary, profile) {
+  const child = spawn(binary, ['mcp', '--profile', profile], { stdio: ['pipe', 'pipe', 'pipe'] });
   child.stdout.setEncoding('utf8');
   let buffer = '';
   const pending = new Map();
@@ -94,11 +94,11 @@ async function bundledValidator(appPath, expectedVersion) {
 }
 
 async function main() {
-  const [binary, appPath, expectedVersion = '1.102.0'] = process.argv.slice(2);
+  const [binary, appPath, expectedVersion = '1.102.0', profile = 'canonical'] = process.argv.slice(2);
   assert.ok(binary && appPath, 'Supply the dygnosis binary and VS Code resources/app directory');
-  const tools = await listTools(binary);
+  const tools = await listTools(binary, profile);
   assert.ok(Array.isArray(tools) && tools.length > 0, 'public tools are discoverable over stdio');
-  for (const name of ['dynare_symbol_info', 'dynare_code_actions']) {
+  for (const name of ['dynare_symbol_info', profile === 'legacy-v2' ? 'dynare_code_actions' : 'dynare_actions']) {
     const tool = tools.find(candidate => candidate.name === name);
     assert.ok(tool, `${name} metadata is discoverable`);
     assert.equal(tool.inputSchema.type, 'object', `${name} exposes an object input schema`);
@@ -115,7 +115,7 @@ async function main() {
     const errors = await validate(tool.inputSchema);
     if (errors.length) omitted.push({ name: tool.name, errors: errors.map(error => ({ code: error.code, message: error.message })) });
   }
-  console.log(JSON.stringify({ hostVersion, discovered: tools.length, omitted }, null, 2));
+  console.log(JSON.stringify({ hostVersion, profile, discovered: tools.length, omitted }, null, 2));
   assert.equal(omitted.length, 0, 'native VS Code must register every discovered MCP tool');
   assert.deepEqual(requestedUris, [], 'fixed input schemas need no external metadata');
 }

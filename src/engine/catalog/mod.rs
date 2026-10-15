@@ -1,7 +1,8 @@
-//! Dynare command/option catalog (completion and hover data).
+//! Shared pinned Dynare syntax and contextual option help.
 //!
-//! Tables are a mechanical port of `python_dynare_lsp/dynare_catalog.py`.
-//! `list_options` JSON matches `dynare_list_options` in the Python MCP server.
+//! The generated grammar routes own accepted opener spellings. Curated manual
+//! descriptions retain command-specific meanings, including the legacy option
+//! reference adapter's historical block-instruction projection.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -9,6 +10,8 @@ use std::sync::OnceLock;
 use serde::Serialize;
 
 mod catalog_data;
+mod option_names;
+pub mod syntax;
 
 pub(crate) use catalog_data::{
     FAMILY_COMMAND_HELP, FAMILY_OPERATOR_HELP, HETEROGENEITY_OPTION, HET_SHOCKS_OVERWRITE,
@@ -51,10 +54,48 @@ pub enum ListOptions {
     },
 }
 
-fn command_map() -> &'static HashMap<&'static str, &'static [(&'static str, &'static str)]> {
-    static MAP: OnceLock<HashMap<&'static str, &'static [(&'static str, &'static str)]>> =
+fn command_map() -> &'static HashMap<&'static str, Vec<(&'static str, &'static str)>> {
+    static MAP: OnceLock<HashMap<&'static str, Vec<(&'static str, &'static str)>>> =
         OnceLock::new();
-    MAP.get_or_init(|| catalog_data::COMMAND_OPTIONS.iter().copied().collect())
+    MAP.get_or_init(|| {
+        let mut map: HashMap<_, Vec<_>> = catalog_data::COMMAND_OPTIONS
+            .iter()
+            .map(|(head, entries)| (*head, entries.to_vec()))
+            .collect();
+        for &(head, names) in option_names::COMMAND_OPTION_NAMES {
+            let old = map.remove(head).unwrap_or_default();
+            let options = names
+                .iter()
+                .filter(|name| {
+                    !matches!(
+                        (head, **name),
+                        ("var" | "varexo" | "varexo_det" | "parameters", "name")
+                    )
+                })
+                .map(|&name| {
+                    let doc = old
+                        .iter()
+                        .find(|(old_name, _)| old_name.eq_ignore_ascii_case(name))
+                        .map(|(_, doc)| *doc)
+                        .unwrap_or_else(|| option_doc(name));
+                    (name, doc)
+                })
+                .collect();
+            map.insert(head, options);
+        }
+        // Fixed heads with no opener options still have a known empty catalog.
+        for &head in option_names::COMMAND_HEADS {
+            map.entry(head).or_default();
+        }
+        map
+    })
+}
+
+/// Parser whitelist from the same generated grammar routes as reference data.
+pub(crate) fn pinned_option_names(command: &str) -> Option<&'static [&'static str]> {
+    option_names::COMMAND_OPTION_NAMES
+        .iter()
+        .find_map(|(head, names)| head.eq_ignore_ascii_case(command).then_some(*names))
 }
 
 fn option_doc_map() -> &'static HashMap<&'static str, &'static str> {
@@ -65,10 +106,7 @@ fn option_doc_map() -> &'static HashMap<&'static str, &'static str> {
 fn sorted_commands() -> &'static [&'static str] {
     static KEYS: OnceLock<Vec<&'static str>> = OnceLock::new();
     KEYS.get_or_init(|| {
-        let mut keys: Vec<&'static str> = catalog_data::COMMAND_OPTIONS
-            .iter()
-            .map(|(name, _)| *name)
-            .collect();
+        let mut keys: Vec<&'static str> = command_map().keys().copied().collect();
         keys.sort_unstable();
         keys
     })
@@ -80,7 +118,7 @@ fn sorted_commands() -> &'static [&'static str] {
 pub fn command_options(command: &str) -> &'static [(&'static str, &'static str)] {
     command_map()
         .get(command.to_lowercase().as_str())
-        .copied()
+        .map(Vec::as_slice)
         .unwrap_or(&[])
 }
 
@@ -109,7 +147,7 @@ pub fn list_options(command: Option<&str>) -> ListOptions {
         }
         Some(command) => {
             let key = command.to_lowercase();
-            if let Some(options) = command_map().get(key.as_str()).copied() {
+            if let Some(options) = command_map().get(key.as_str()) {
                 let options: Vec<NamedOption> = options
                     .iter()
                     .map(|&(name, description)| NamedOption { name, description })
@@ -121,12 +159,8 @@ pub fn list_options(command: Option<&str>) -> ListOptions {
                     options,
                 }
             } else {
-                let suggestions = difflib::get_close_matches(
-                    &key,
-                    catalog_data::COMMAND_OPTIONS.iter().map(|(name, _)| *name),
-                    3,
-                    0.6,
-                );
+                let suggestions =
+                    difflib::get_close_matches(&key, sorted_commands().iter().copied(), 3, 0.6);
                 let mut message =
                     format!("'{key}' is not in the bundled Dynare 7.2 command catalog.");
                 if !suggestions.is_empty() {

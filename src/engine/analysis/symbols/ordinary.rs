@@ -161,6 +161,32 @@ pub(super) fn binding_sites(model: &Model, name: &str) -> HashSet<Span> {
         }
         add(*symbol, *span);
     }
+    for block in &model.deterministic_trends {
+        for row in &block.rows {
+            add(row.name, row.name_span);
+        }
+    }
+    for block in &model.conditional_forecast_paths {
+        for row in &block.rows {
+            if row.parse_order.is_some()
+                && row.value_expressions.iter().all(|value| value.completed)
+            {
+                add(row.name, row.name_span);
+            }
+        }
+    }
+    for block in &model.moment_calibration {
+        for row in &block.rows {
+            add(row.first, row.first_span);
+            add(row.second, row.second_span);
+        }
+    }
+    for block in &model.irf_calibration {
+        for row in &block.rows {
+            add(row.endogenous, row.endogenous_span);
+            add(row.exogenous, row.exogenous_span);
+        }
+    }
     for row in &model.optim_weights {
         if crate::engine::control::cancelled() {
             break;
@@ -270,10 +296,9 @@ pub(super) fn binding_sites(model: &Model, name: &str) -> HashSet<Span> {
                     if crate::engine::control::cancelled() {
                         break;
                     }
-                    if reference
-                        .namespace
-                        .as_deref()
-                        .is_none_or(|namespace| namespace == "self")
+                    if model
+                        .symbol_kind_in_context(reference.name, reference.symbol_type_context)
+                        .is_some_and(|kind| kind != "database_variable")
                     {
                         add(reference.name, reference.ident_span);
                     }

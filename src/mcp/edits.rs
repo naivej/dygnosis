@@ -270,6 +270,15 @@ fn select_diagnostics<'a>(
             "diagnostic_id does not belong to this input revision",
         ));
     }
+    if params
+        .diagnostic_ids
+        .iter()
+        .any(|id| !rows.iter().any(|row| &row.id == id))
+    {
+        return Err(invalid(
+            "A selected diagnostic identity does not belong to this input revision",
+        ));
+    }
     Ok(rows
         .iter()
         .filter(|row| {
@@ -278,6 +287,7 @@ fn select_diagnostics<'a>(
                 .as_ref()
                 .is_none_or(|code| row.diagnostic.code == *code)
                 && params.diagnostic_id.as_ref().is_none_or(|id| row.id == *id)
+                && (params.diagnostic_ids.is_empty() || params.diagnostic_ids.contains(&row.id))
                 && target.as_ref().is_none_or(|(file, byte)| {
                     row.file == *file && row.span.start <= *byte && *byte <= row.span.end
                 })
@@ -470,10 +480,12 @@ fn remaining_json(snapshot: &SourceSnapshot, set: &DiagnosticSet, edits: &[Edit]
 }
 
 fn fix_request(params: &Params, snapshot: &mut SourceSnapshot) -> Result<ToolResult, ErrorData> {
-    if snapshot.root_file.is_none()
+    if !params.canonical
+        && snapshot.root_file.is_none()
         && params.target.is_none()
         && params.code.is_none()
         && params.diagnostic_id.is_none()
+        && params.diagnostic_ids.is_empty()
     {
         let fixed_result = auto_fix::auto_fix_outcome_with_limit(
             &snapshot.raw,
@@ -513,7 +525,11 @@ fn fix_request(params: &Params, snapshot: &mut SourceSnapshot) -> Result<ToolRes
         }
         return Ok(result);
     }
-    if params.target.is_none() && params.code.is_none() && params.diagnostic_id.is_none() {
+    if params.target.is_none()
+        && params.code.is_none()
+        && params.diagnostic_id.is_none()
+        && params.diagnostic_ids.is_empty()
+    {
         return mapped_bulk_fix(snapshot);
     }
     fix_selected(params, snapshot, false)
@@ -968,7 +984,22 @@ fn actions_request(
         return Ok(result);
     }
     let mut wire = Vec::new();
+    let alternative_kinds: Vec<_> = actions
+        .iter()
+        .filter(|action| {
+            actions.iter().any(|other| {
+                other.id != action.id
+                    && other.kind == action.kind
+                    && other.diagnostic_id == action.diagnostic_id
+            })
+        })
+        .map(|action| action.kind)
+        .collect();
     for action in actions {
+        if params.canonical {
+            wire.push(json!({"action_id":action.id,"kind":action.kind,"title":action.title,"diagnostic_id":action.diagnostic_id,"changed_items":action.edits.len(),"skipped_items":action.skipped,"skipped":action.skipped_rows,"has_alternatives":alternative_kinds.contains(&action.kind)}));
+            continue;
+        }
         let (data, proposal) = proposal_result(snapshot, &action.edits)?;
         let row = json!({"action_id":action.id,"kind":action.kind,"title":action.title,"diagnostic_id":action.diagnostic_id,"changed_items":action.edits.len(),"skipped_items":action.skipped,"skipped":action.skipped_rows,"data":data,"proposal":proposal});
         if serde_json::to_vec(&row).expect("action JSON").len() > OUTPUT_BYTES {

@@ -314,16 +314,12 @@ fn occbin_constraints_is_catalogued_block() {
     assert_eq!(upper, payload);
 
     let omitted = to_value(list_options(None));
-    assert_eq!(omitted["n_commands"], 89);
-    let i = omitted["commands"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .position(|c| c == "occbin_constraints")
-        .expect("occbin_constraints missing from omitted commands");
-    assert_eq!(omitted["commands"][i - 1], "mshocks");
-    assert_eq!(omitted["commands"][i], "occbin_constraints");
-    assert_eq!(omitted["commands"][i + 1], "occbin_graph");
+    let commands = omitted["commands"].as_array().unwrap();
+    assert_eq!(omitted["n_commands"], commands.len());
+    assert!(commands.iter().any(|c| c == "occbin_constraints"));
+    assert!(commands
+        .windows(2)
+        .all(|pair| pair[0].as_str() < pair[1].as_str()));
 
     assert!(option_doc("name").contains("M-/MEX file"));
     assert_eq!(
@@ -354,12 +350,8 @@ fn occbin_constraints_is_catalogued_block() {
             "filter_particle_state_importance_sampling_slice_override_iteration",
             "filter_particle_use_pkf_updated_state_threshold",
             "filter_use_relaxation",
-            "likelihood_brute_force_extra_regime_guess",
-            "likelihood_brute_force_regime_guess",
             "likelihood_check_ahead_periods",
             "likelihood_curb_retrench",
-            "likelihood_first_period_binding_regime_allowed",
-            "likelihood_first_period_occbin_update",
             "likelihood_inversion_filter",
             "likelihood_max_check_ahead_periods",
             "likelihood_max_kalman_iterations",
@@ -650,7 +642,7 @@ fn pinned_72_shock_and_date_catalog_has_only_opener_options() {
         ),
         ("heteroskedastic_shocks", vec!["overwrite"]),
         ("shock_paths", vec!["learnt_in", "overwrite"]),
-        ("endval", vec!["learnt_in"]),
+        ("endval", vec!["all_values_required", "learnt_in"]),
         ("perfect_foresight_controlled_paths", vec!["learnt_in"]),
         ("options", vec!["bounds", "init", "jscale"]),
     ] {

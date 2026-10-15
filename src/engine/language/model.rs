@@ -352,6 +352,14 @@ pub struct DeterministicTrendRow {
     pub span: Span,
 }
 
+#[derive(Clone, Debug)]
+pub struct ObservationTrendRow {
+    pub name: Name,
+    pub name_span: Span,
+    pub expression: WrittenExpression,
+    pub span: Span,
+}
+
 /// One `model_remove` / `model_replace` statement and what it matched.
 #[derive(Clone, Debug)]
 pub struct EquationSurgery {
@@ -1264,6 +1272,8 @@ pub struct Model {
     pub estimated_params_span: Option<Span>,
     /// First occurrence of each leading name within each `observation_trends` block.
     pub observation_trends: Vec<(Name, Span)>,
+    /// Complete accepted rows, including their written expressions.
+    pub observation_trend_rows: Vec<ObservationTrendRow>,
     pub observation_trends_span: Option<Span>,
     /// `ramsey_model` / `ramsey_policy` / `discretionary_policy` / `osr` in file order.
     pub policy_commands: Vec<PolicyCommand>,
@@ -1944,6 +1954,8 @@ pub struct SvarEquation {
 /// One parsed `conditional_forecast_paths;` … `end;` block.
 #[derive(Clone, Debug)]
 pub struct ConditionalForecastPaths {
+    /// Parser execution order of the completed block callback.
+    pub(crate) parse_order: Option<usize>,
     /// Opener through `end;`.
     pub span: Span,
     pub rows: Vec<ConditionalForecastPath>,
@@ -1962,9 +1974,13 @@ pub struct ConditionalForecastPath {
     pub name_span: Span,
     /// One entry per `periods` element; `1:4` counts as one entry.
     pub periods: Vec<Span>,
+    /// DATE periods parse as list entries, but the block callback refuses them.
+    pub(crate) has_date_period: bool,
     pub periods_span: Span,
     /// One entry per `values` element.
     pub values: Vec<Span>,
+    /// Accepted value expressions, before constructor simplification.
+    pub value_expressions: Vec<WrittenValue>,
     pub values_span: Span,
     /// The `var` row span.
     pub span: Span,

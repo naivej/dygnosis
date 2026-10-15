@@ -14,6 +14,7 @@ impl McpWire {
     fn new() -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_dygnosis"))
             .arg("mcp")
+            .args(["--profile", "legacy-v2"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

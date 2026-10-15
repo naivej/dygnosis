@@ -27,7 +27,7 @@ async function probeNativeMcp(vscode, extensionId) {
         .map(item => ({ type: "text", text: item.value }));
       results[name] = canonicalMcpResult({ content });
     }
-    const model = results.dynare_model_info.data;
+    const model = results.dynare_model_info.data.structure;
     assert.equal(model.n_equations, 1); assert.equal(model.n_endogenous, 1);
     const invokeSemantic = async (name, input) => {
       const tool = tools.find(item => item.name.endsWith(`_dynare_${name}`));
@@ -36,27 +36,29 @@ async function probeNativeMcp(vscode, extensionId) {
         .filter(item => item instanceof vscode.LanguageModelTextPart)
         .map(item => ({ type: "text", text: item.value })) });
     };
-    const symbol = await invokeSemantic("symbol_info", { source: textSource, symbol: "y" });
+    const symbol = await invokeSemantic("symbol_info", { source: textSource, symbol: { kind: "name", name: "y" } });
     assert.equal(symbol.outcome.status, "ok");
-    assert.equal(symbol.data.name, "y");
-    assert.ok(symbol.data.binding_id, "symbol info must return a reusable binding identity");
+    assert.equal(symbol.data.binding.name, "y");
+    assert.ok(symbol.data.binding.binding_id, "symbol info must return a reusable binding identity");
     const revision = symbol.inputs?.[0]?.revision;
     assert.ok(revision, "symbol info must return its source revision");
-    const reference = await invokeSemantic("find_references", {
-      source: textSource, binding_id: symbol.data.binding_id, expected_revision: revision,
+    const reference = await invokeSemantic("symbol_info", {
+      source: textSource, symbol: { kind: "binding", binding_id: symbol.data.binding.binding_id },
+      sections: ["references"], expected_revision: revision,
     });
     assert.equal(reference.outcome.status, "ok");
     assert.ok(reference.data.references.some(item => item.role === "use"),
       "semantic References must include the selected binding's use");
     const rename = await invokeSemantic("rename", {
-      source: textSource, binding_id: symbol.data.binding_id, expected_revision: revision, new_name: "z",
+      source: textSource, symbol: { kind: "binding", binding_id: symbol.data.binding.binding_id },
+      expected_revision: revision, new_name: "z",
     });
     assert.equal(rename.outcome.status, "changed");
     assert.ok(rename.proposal?.edits?.length, "Rename must return its complete guarded proposal");
     assert.equal(rename.proposal.revision, revision, "Rename proposal must retain the selected input revision");
-    assert.match(rename.data.text, /var z; model; z=0; end;/);
+    assert.ok(rename.proposal.edits.every(edit => edit.new_text === "z"), "Rename edits must replace the selected binding");
     return { server_id: serverId, tools: tools.map(item => item.name), tool: tools.find(item => item.name.endsWith("_dynare_model_info")).name, invoked_tools: Object.keys(results),
-      n_equations: model.n_equations, semantic_symbol: symbol.data.name, semantic_reference_count: reference.data.references.length,
+      n_equations: model.n_equations, semantic_symbol: symbol.data.binding.name, semantic_reference_count: reference.data.references.length,
       guarded_rename_edits: rename.proposal.edits.length, workspace_trusted: vscode.workspace.isTrusted, passed: true };
   } finally {
     cancellation.cancel(); cancellation.dispose();

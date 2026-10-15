@@ -6,6 +6,13 @@ use crate::engine::language::span::Span;
 /// Dynare's statement semicolon; their arithmetic proof is a separate concern.
 pub fn parser_complete(model: &crate::engine::language::model::Model) -> bool {
     model.parse_issues.is_empty()
+        && model.mom_syntax.is_empty()
+        && model.shape_refuses.is_empty()
+        && model.conditional_forecast_paths.iter().all(|block| {
+            block.parse_order.is_some()
+                && block.shape_refuses.is_empty()
+                && !block.rows.iter().any(|row| row.has_date_period)
+        })
         && model
             .statements
             .iter()

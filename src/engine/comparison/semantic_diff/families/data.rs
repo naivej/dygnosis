@@ -38,8 +38,8 @@ pub(super) fn collect(
             facts.push(value);
         }
     }
-    for (index, (name, _)) in model.observation_trends.iter().enumerate() {
-        let name = model.name(*name);
+    for (index, row) in model.observation_trend_rows.iter().enumerate() {
+        let name = model.name(row.name);
         let mut value = fact(
             model,
             SemanticFamily::Observables,
@@ -50,13 +50,14 @@ pub(super) fn collect(
             index,
         );
         text(&mut value, "target", name, ChangeFacet::Target);
-        field(
+        let trend = expression(
+            model,
             &mut value,
             "trend_expression",
-            FieldState::unknown(),
-            ChangeFacet::Expression,
+            row.expression.expr,
+            work,
         );
-        gap(&mut value, "observation_trend_expression_not_retained", "Only the first leading name per name and block is retained. Trend expressions and later duplicate rows are available in accepted statement context and Source.", "parser_observation_trends_retention");
+        expr(&mut value, "trend_expression", trend);
         facts.push(value);
     }
     for (index, row) in model.databases.iter().enumerate() {

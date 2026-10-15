@@ -104,34 +104,34 @@ function rpc(executable, args, framed) {
   };
 }
 const model = "var y; parameters p; p=1/2; model; y=p; end;\n";
+const modelSource = { kind: "text", text: model };
 const mcpProbeCases = {
-  dynare_auto_fix: { file_content: model },
-  dynare_compare_models: { file_content_a: model, file_content_b: model.replace("1/2", "1/3") },
-  dynare_diagnose: { files: { "/main.mod": "var y; model;\n@#include \"body.inc\"\nend;", "/body.inc": "y=0;" }, active_file: "/main.mod" },
-  dynare_equations: { file_content: model },
-  dynare_expand: { file_content: model },
-  dynare_explain: { code: "E001" },
-  dynare_extract: { file_content: model, names: ["y"] },
-  dynare_find_references: { file_content: model, symbol: "y" },
-  dynare_format: { file_content: model, formatIndent: 4 },
-  dynare_list_diagnostic_codes: {},
-  dynare_list_options: { command: "stoch_simul" },
-  dynare_model_info: { file_content: model },
-  dynare_related_files: { files: { "/main.mod": "var y; model;\n@#include \"body.inc\"\nend;", "/body.inc": "y=0;" }, active_file: "/main.mod" },
-  dynare_rename: { file_content: model, old_name: "y", new_name: "output" },
-  dynare_symbol_info: { source: { kind: "text", text: model }, symbol: "y" },
-  dynare_code_actions: { source: { kind: "text", text: model }, target: { line: 1, column: 5 } },
-  dynare_workspace_diagnose: { files: { "/main.mod": model }, roots: ["/main.mod"] },
+  dynare_syntax: { name: "stoch_simul", kind: "command", context: "top_level" },
+  dynare_diagnostic_info: { code: "E001" },
+  dynare_diagnose: { source: { kind: "map", root: "/main.mod", files: { "/main.mod": "var y; model;\n@#include \"body.inc\"\nend;", "/body.inc": "y=0;" } } },
+  dynare_model_info: { source: modelSource, sections: ["structure"] },
+  dynare_symbol_info: { source: modelSource, symbol: { kind: "name", name: "y" } },
+  dynare_equations: { source: modelSource },
+  dynare_expand: { source: modelSource },
+  dynare_actions: { source: modelSource },
+  dynare_rename: { source: modelSource, symbol: { kind: "name", name: "y" }, new_name: "output" },
+  dynare_format: { source: modelSource, formatIndent: 4 },
+  dynare_extract: { source: modelSource, equation: { kind: "index", scope: "aggregate", index: 0 } },
+  dynare_compare_models: { comparison: { kind: "sources", before: modelSource, after: { kind: "text", text: model.replace("1/2", "1/3") } } },
 };
 function canonicalMcpResult(result) {
+  if (result?.structuredContent) {
+    assert.equal(result.structuredContent.schema_version, 3, "Expected canonical MCP tool contract 3");
+    return result.structuredContent;
+  }
   for (const item of [...(result?.content ?? [])].reverse()) {
     if (item.type !== "text" || typeof item.text !== "string") continue;
     try {
       const parsed = JSON.parse(item.text);
-      if (parsed?.schema_version === 2) return parsed;
+      if (parsed?.schema_version === 3) return parsed;
     } catch { /* Leading legacy content may not be JSON. */ }
   }
-  throw new Error("MCP tool result has no canonical schema_version 2 object");
+  throw new Error("MCP tool result has no canonical schema_version 3 object");
 }
 async function probeMcp(executable, version) {
   const session = rpc(executable, ["mcp"], false);
@@ -149,7 +149,7 @@ async function probeMcp(executable, version) {
       assert.ok(!response.isError, `${name} returned an error`);
       results[name] = canonicalMcpResult(response);
     }
-    const info = results.dynare_model_info.data;
+    const info = results.dynare_model_info.data.structure;
     assert.equal(info.n_endogenous, 1); assert.equal(info.n_equations, 1);
     // Guards a packaged engine using a different default from Native Settings.
     const manifest = JSON.parse(await fs.readFile(path.join(extensionRoot, "package.json"), "utf8"));
@@ -157,7 +157,7 @@ async function probeMcp(executable, version) {
     assert.equal(results.dynare_model_info.inputs[0].macro_work_limit, workDefault);
     const reference = JSON.parse(await fs.readFile(path.join(productRoot, "help/reference.json"), "utf8"));
     assert.deepEqual(list.tools, reference.tools, "Packaged MCP metadata differs from Help");
-    assert.match(JSON.stringify(results.dynare_explain.data), /E001/);
+    assert.match(results.dynare_diagnostic_info.data.diagnostics[0].explanation, /E001/);
     assert.ok(results.dynare_rename.proposal);
     return { initialize: true, discovery: true, tool: "dynare_model_info", tools: Object.keys(results), metadata_matches_help: true, n_equations: info.n_equations };
   } finally { session.close(); }

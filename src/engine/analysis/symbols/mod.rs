@@ -390,9 +390,18 @@ impl SemanticModel {
             if crate::engine::control::cancelled() {
                 break;
             }
-            if let crate::engine::language::expr::ExprKind::Call { callee, .. } = expr.kind {
-                let name = self.model.name(callee);
-                if self.model.final_symbol_kind(callee).is_none() && names.insert(name.into()) {
+            let name = match expr.kind {
+                crate::engine::language::expr::ExprKind::Call { callee, .. }
+                    if self.model.final_symbol_kind(callee).is_none() =>
+                {
+                    Some(self.model.name(callee))
+                }
+                crate::engine::language::expr::ExprKind::Expectation { .. } => Some("EXPECTATION"),
+                crate::engine::language::expr::ExprKind::SteadyState { .. } => Some("STEADY_STATE"),
+                _ => None,
+            };
+            if let Some(name) = name {
+                if names.insert(name.into()) {
                     result.push(Binding {
                         id: format!("{}:{}:builtin:{name}", self.revision, self.root),
                         name: name.into(),
@@ -431,13 +440,18 @@ impl SemanticModel {
             .bindings()
             .into_iter()
             .filter(|binding| match &selector {
-                Selector::Name(name) => binding.name == *name,
+                Selector::Name(name) => {
+                    binding.name == *name
+                        || binding.identity == Identity::Builtin
+                            && binding.name.eq_ignore_ascii_case(name)
+                }
                 Selector::Id(id) => binding.id == *id,
                 Selector::Target { file, byte } => {
-                    if target_name
-                        .as_ref()
-                        .is_some_and(|name| name != &binding.name)
-                    {
+                    if target_name.as_ref().is_some_and(|name| {
+                        name != &binding.name
+                            && !(binding.identity == Identity::Builtin
+                                && binding.name.eq_ignore_ascii_case(name))
+                    }) {
                         return false;
                     }
                     self.references(binding, true).iter().any(|site| {
@@ -529,9 +543,21 @@ impl SemanticModel {
     }
 
     fn call_sites(&self, binding: &Binding) -> Vec<Reference> {
-        let starts: HashSet<_> = self.model.exprs.iter().filter_map(|(_, expr)| {
-            matches!(&expr.kind, crate::engine::language::expr::ExprKind::Call { callee, .. } if self.model.name(*callee) == binding.name).then_some(expr.span.start)
-        }).collect();
+        let starts: HashSet<_> = self
+            .model
+            .exprs
+            .iter()
+            .filter_map(|(_, expr)| {
+                use crate::engine::language::expr::ExprKind;
+                let matches = match &expr.kind {
+                    ExprKind::Call { callee, .. } => self.model.name(*callee) == binding.name,
+                    ExprKind::Expectation { .. } => binding.name == "EXPECTATION",
+                    ExprKind::SteadyState { .. } => binding.name == "STEADY_STATE",
+                    _ => false,
+                };
+                matches.then_some(expr.span.start)
+            })
+            .collect();
         let native = ordinary::native_orders(&self.model);
         self.model
             .expanded_tokens
@@ -540,7 +566,11 @@ impl SemanticModel {
             .enumerate()
             .filter(|(order, token)| {
                 token.kind == TokenKind::Ident
-                    && token.text(&self.model.source) == binding.name
+                    && (token.text(&self.model.source) == binding.name
+                        || binding.identity == Identity::Builtin
+                            && token
+                                .text(&self.model.source)
+                                .eq_ignore_ascii_case(&binding.name))
                     && starts.contains(&token.span.start)
                     && !native.contains(order)
             })

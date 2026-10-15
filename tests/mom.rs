@@ -404,13 +404,14 @@ fn matched_moment_unknown_names_use_model_expression_scope() {
         .any(|row| row.severity == Severity::Error));
 }
 
-/// `priors` and the other still-skipped openers keep their old path.
+/// `priors` executes prior rows without entering either moment-block reader.
 #[test]
-fn priors_is_still_skipped() {
+fn priors_alias_keeps_prior_rows_separate_from_moments() {
     let head = "var y c; varexo e; parameters alpha; alpha = 0.5;\n\
                 model; y = alpha*y(-1) + e; c = y; end;\n";
     let model = parse(&format!("{head}priors;\nalpha;\nend;\n"));
     assert!(model.matched_moments.is_empty());
     assert!(model.moment_calibration.is_empty());
+    assert_eq!(model.estimated_params.len(), 1);
     assert!(check_parse(&model).is_empty());
 }

@@ -99,8 +99,8 @@ unverified first pass). Then search the web for the paper. Check that a file exi
 
 Use this path when the user has a `.mod` file and wants a change, an extension, a review or a fix.
 
-1. **Baseline.** Read the file. Find its includes and companion files with `dynare_related_files`, and
-   pass them in the `files` map. Run `dynare_diagnose` and `dynare_model_info`. Record the timing
+1. **Baseline.** Read the file. Inspect includes and companions with `dynare_model_info`, selecting
+   `sources` and `structure`; use a named map or disk source. Run `dynare_diagnose`. Record the timing
    convention, the counts and the diagnostics that exist before your change.
 2. **Locate.** Find the equations with `dynare_equations` (prefer the `name` filter) or, for
    macro-generated text, `dynare_expand`. Edit the written source at the returned location.
@@ -111,7 +111,8 @@ Use this path when the user has a `.mod` file and wants a change, an extension, 
      The full derivation note is not necessary.
    - A new experiment (estimation, Ramsey, OccBin, …): read the matching reference and add the commands
      to the existing model.
-4. **Edit in small steps.** Rename symbols with `dynare_find_references` and `dynare_rename`. After each
+4. **Edit in small steps.** Inspect uses with `dynare_symbol_info` when needed; rename a known binding
+   directly with `dynare_rename`. After each
    change, run `dynare_diagnose` again. Use `dynare_compare_models` to review the structural effect.
 5. **Steady state.** If the change affects the steady state (a new utility function, new variables),
    update it with `references/steady-state.md` and run `steady; resid; check;` in Dynare. The pass is
@@ -175,7 +176,7 @@ next one.
 - **R2 Timing.** The timing of a variable reflects when it is decided. Default "stock at the end of the
   period" convention: `y = k(-1)^alppha*…;` and `k = invest + (1-delta)*k(-1);`. Alternative:
   `predetermined_variables k;` with `y = k^alppha*…;` and `k(+1) = invest + (1-delta)*k;`. Use one
-  convention per file. Check the result with `dynare_model_info` (`predetermined`, `forward_looking`) and
+  convention per file. Check `dynare_model_info`'s `structure` section (`predetermined`, `forward_looking`) and
   the `idents` of `dynare_equations`. How to read `timing` and `dynare_timing`:
   `references/dygnosis-workflow.md`. Longer notes: "R2 details" in `references/workflow-detail.md`.
 - **R3 Exogenous processes.** For stochastic commands (`stoch_simul`, `estimation`, …), declare the
@@ -203,7 +204,7 @@ next one.
   per line. Assign each parameter before it is used. The preprocessor passes an unrecognized top-level
   line to MATLAB unchanged, so a typo can become MATLAB code. Dygnosis reports parse errors (E001),
   unassigned parameters (W010), assignments to undeclared names (W012) and use before assignment in
-  `steady_state_model` (E130). `dynare_auto_fix` applies the stored fixes.
+  `steady_state_model` (E130). `dynare_actions` with `fixes: true` proposes proven stored fixes.
 - **R8 Nonlinear by default.** Write the original nonlinear equations (first-order conditions,
   constraints, exogenous processes) and let Dynare approximate them. Do not linearize by hand. Use
   `model(linear);` only when the user asks for a linear model or the source gives only a linearized

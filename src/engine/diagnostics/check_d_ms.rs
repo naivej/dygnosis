@@ -1205,6 +1205,21 @@ fn conditional_forecast_path_refusal(
             ), order));
         }
     }
+    if let Some(order) = block.parse_order
+        && block.shape_refuses.is_empty()
+        && block.rows.iter().all(|row| row.parse_order.is_some())
+        && block.rows.iter().any(|row| row.has_date_period)
+    {
+        return Some((
+            Diagnostic::new(
+                block.span,
+                Severity::Error,
+                "E482",
+                "conditional_forecast_paths: dates are not allowed in the 'periods' keyword",
+            ),
+            order,
+        ));
+    }
     None
 }
 

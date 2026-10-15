@@ -916,9 +916,8 @@ fn the_trailing_lists_fire_e239_and_e240() {
     }
 }
 
-/// Every shape the grammar cannot spell fires **E001** with our wording, naming
-/// the command or the option. One row per swept fixture; each is a file 7.1
-/// refuses with `syntax error, unexpected …`, probed at `json=check`.
+/// Every refused shape fires E001 at its retained command, option or reader
+/// token. Ordinary path lists now use their exact syntax context.
 #[test]
 fn the_shape_sweep_fires_e001() {
     let rows = [
@@ -1010,7 +1009,10 @@ fn the_shape_sweep_fires_e001() {
         ("d_ms/e001_cfp_empty.mod", "conditional_forecast_paths"),
         ("d_ms/e001_cfp_exogenize.mod", "conditional_forecast_paths"),
         ("d_ms/e001_cfp_endogenize.mod", "conditional_forecast_paths"),
-        ("d_ms/e001_cfp_periods_empty.mod", "periods"),
+        (
+            "d_ms/e001_cfp_periods_empty.mod",
+            "expecting DATE or INT_NUMBER",
+        ),
         ("d_ms/e001_cfp_values_empty.mod", "values"),
         ("d_ms/e001_dsample_list.mod", "dsample"),
         ("d_ms/e001_rplot_option_list.mod", "rplot"),

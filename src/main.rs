@@ -20,7 +20,11 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Start MCP over stdio
-    Mcp,
+    Mcp {
+        /// Tool contract. legacy-v2 is available for 0.11.27 and removed in 0.11.28.
+        #[arg(long, value_enum, default_value_t = dygnosis::mcp::McpProfile::Canonical)]
+        profile: dygnosis::mcp::McpProfile,
+    },
 }
 
 #[tokio::main]
@@ -35,7 +39,7 @@ async fn main() {
 
     let cli = Cli::parse();
     match cli.command {
-        Some(Commands::Mcp) => dygnosis::mcp::run_stdio().await,
+        Some(Commands::Mcp { profile }) => dygnosis::mcp::run_stdio_with_profile(profile).await,
         None if cli.tcp => dygnosis::server::run_tcp(&cli.host, cli.port).await,
         None => dygnosis::server::run_stdio().await,
     }
@@ -58,10 +62,24 @@ mod tests {
     fn mcp_subcommand_parses() {
         let cli = Cli::parse_from(["dygnosis", "mcp"]);
         match cli.command {
-            Some(Commands::Mcp) => {}
+            Some(Commands::Mcp { profile }) => {
+                assert_eq!(profile, dygnosis::mcp::McpProfile::Canonical)
+            }
             other => panic!("expected mcp, got {other:?}"),
         }
         assert!(!cli.tcp);
+    }
+
+    #[test]
+    fn mcp_legacy_profile_is_explicit_and_unknown_profiles_are_rejected() {
+        let cli = Cli::parse_from(["dygnosis", "mcp", "--profile", "legacy-v2"]);
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Mcp {
+                profile: dygnosis::mcp::McpProfile::LegacyV2
+            })
+        ));
+        assert!(Cli::try_parse_from(["dygnosis", "mcp", "--profile", "legacy-v1"]).is_err());
     }
 
     #[test]

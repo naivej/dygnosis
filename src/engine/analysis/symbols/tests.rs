@@ -20,6 +20,152 @@ fn choose(view: &SemanticModel, name: &str) -> Binding {
     view.select(Selector::Name(name)).unwrap().unwrap()
 }
 
+// Every accepted row slot and value must participate in the shared binding;
+// otherwise navigation loses uses and complete Rename is refused.
+#[test]
+fn syntax_rows_retain_all_ordinary_binding_sites() {
+    for tail in [
+        "priors;a,0.5,,,beta_pdf,0.5,0.1;end;",
+        "conditional_forecast_paths;var y;periods 1;values (a);end;",
+        "moment_calibration;y,y,[-1,1];end;",
+        "irf_calibration;y,e,[0,1];end;",
+        "varobs y;observation_trends;y(a);end;",
+        "deterministic_trends;y(a);end;",
+    ] {
+        let text = format!("var y;varexo e;parameters a;a=0.5;model;y=a*y(-1)+e;end;{tail}");
+        let view = model(&text);
+        for name in ["a", "y", "e"] {
+            let binding = choose(&view, name);
+            for site in view.references(&binding, true) {
+                if let Some((file, span)) = site.written {
+                    assert_eq!(
+                        view.select(Selector::Target {
+                            file: &file,
+                            byte: span.start
+                        })
+                        .unwrap()
+                        .unwrap()
+                        .id,
+                        binding.id
+                    );
+                }
+            }
+            assert!(
+                rename(
+                    std::slice::from_ref(&view),
+                    0,
+                    &binding,
+                    &format!("renamed_{name}")
+                )
+                .is_ok(),
+                "{tail}: {name}"
+            );
+        }
+    }
+}
+
+// Special operators keep their exact keyword range and do not become an
+// ordinary symbol, while their argument retains its own binding.
+#[test]
+fn special_operators_have_queryable_calls_and_no_editable_declaration() {
+    let text = "var y;model;y=EXPECTATION(-1)(y)+steady_state(y);end;";
+    let view = model(text);
+    for (name, spelling) in [
+        ("expectation", "EXPECTATION"),
+        ("STEADY_STATE", "steady_state"),
+    ] {
+        let binding = choose(&view, name);
+        assert_eq!(binding.kind, "builtin_function");
+        assert!(binding.declaration.is_none());
+        let sites = view.references(&binding, true);
+        assert_eq!(sites.len(), 1);
+        let (_, span) = sites[0].written.as_ref().unwrap();
+        assert_eq!(&text[span.start as usize..span.end as usize], spelling);
+        assert_eq!(
+            view.select(Selector::Target {
+                file: "root.mod",
+                byte: span.start
+            })
+            .unwrap()
+            .unwrap()
+            .id,
+            binding.id
+        );
+        assert_eq!(
+            rename(std::slice::from_ref(&view), 0, &binding, "other")
+                .unwrap_err()
+                .code,
+            "BUILTIN_SYMBOL"
+        );
+    }
+}
+
+// A recovered controlled block must not claim the complete source needed for
+// Rename, even if all ordinary declarations and equations remain available.
+#[test]
+fn refused_controlled_path_withholds_complete_source_claim() {
+    let view = model("var y;varexo e;model;y=e;end;perfect_foresight_controlled_paths;exogenize y;endogenize e;periods 1;values 2;end;");
+    assert!(!view.model.controlled_paths[0].completed);
+    assert!(!view.complete);
+    assert_eq!(
+        rename(std::slice::from_ref(&view), 0, &choose(&view, "y"), "z").unwrap_err(),
+        INCOMPLETE
+    );
+}
+
+// Family-owned E001 syntax records must withhold the same complete source
+// claim as parser-owned errors. Separator recovery cannot make Rename safe.
+#[test]
+fn refused_family_syntax_withholds_complete_source_claim() {
+    for tail in [
+        "moment_calibration;y,y,-1,1;end;",
+        "observation_trends;y(a+);end;",
+    ] {
+        let view = model(&format!("var y;parameters a;model;y=a;end;{tail}"));
+        assert!(!view.complete, "{tail}");
+        assert_eq!(
+            rename(std::slice::from_ref(&view), 0, &choose(&view, "y"), "z").unwrap_err(),
+            INCOMPLETE
+        );
+    }
+}
+
+// These ordinary list readers are shared by conditional and controlled paths.
+// A completed separator cannot hide refused tokens or run stanza callbacks.
+#[test]
+fn refused_ordinary_path_lists_withhold_completion_and_callbacks() {
+    for (periods, values) in [
+        ("1", "-2^2"),
+        ("1,", "2"),
+        ("1 garbage", "2"),
+        (":1", "2"),
+        ("1:", "2"),
+    ] {
+        for tail in [
+            format!("perfect_foresight_controlled_paths;exogenize y;periods {periods};values {values};endogenize e;end;"),
+            format!("conditional_forecast_paths;var y;periods {periods};values {values};end;"),
+        ] {
+            let view = model(&format!("var y;varexo e;model;y=e;end;{tail}"));
+            assert!(!view.complete, "{tail}");
+            assert!(view.model.controlled_paths.iter().all(|block| !block.completed && block.stanzas.iter().all(|row| !row.callback_completed)), "{tail}");
+            assert_eq!(rename(std::slice::from_ref(&view), 0, &choose(&view, "y"), "z").unwrap_err(), INCOMPLETE);
+        }
+    }
+}
+
+// DATE is grammatical in a period list, but the conditional block callback
+// refuses it and therefore cannot support a complete source edit proposal.
+#[test]
+fn conditional_date_callback_withholds_complete_source_claim() {
+    let view =
+        model("var y;model;y=0;end;conditional_forecast_paths;var y;periods 2000Q1;values 2;end;");
+    assert!(!view.complete);
+    assert_eq!(
+        rename(std::slice::from_ref(&view), 0, &choose(&view, "y"), "z").unwrap_err(),
+        INCOMPLETE
+    );
+}
+
 // A worker stop during semantic occurrence or Rename verification must discard
 // its unfinished result; pure calls outside that worker scope still complete.
 #[test]

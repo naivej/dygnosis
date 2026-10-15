@@ -707,9 +707,10 @@ mod tests {
             assert!(reason["message"].as_str().unwrap().contains(name));
             assert_eq!(reason["source"]["file"], Value::Null);
             assert_eq!(reason["source"]["range"]["line"], 2);
-            assert!(!crate::engine::diagnostics::analyze(&text_snapshot.model)
+            assert_eq!(crate::engine::diagnostics::analyze(&text_snapshot.model)
                 .iter()
-                .any(|row| row.code == "E001"));
+                .any(|row| row.code == "E001"),tail == "priors;",
+                "The priors alias uses the estimated-parameter reader and reports its incomplete body.");
             let map_snapshot = resolve_source(
                 mapped(
                     "pkg/root.mod",

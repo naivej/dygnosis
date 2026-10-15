@@ -250,7 +250,6 @@ const SBVAR_OPTIONS: &[(&str, &[Shape])] = &[
     ("initial_subperiod", &[Shape::Uint]),
     ("final_year", &[Shape::Uint]),
     ("final_subperiod", &[Shape::Uint]),
-    ("data", &[Shape::Filename]),
     ("vlist", &[Shape::Uint]),
     ("vlistlog", &[Shape::ParenNames]),
     ("vlistper", &[Shape::Uint]),

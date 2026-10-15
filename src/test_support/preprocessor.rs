@@ -24,6 +24,8 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[doc(hidden)]
 pub enum JsonStage {
+    /// `json=parse`: macro expansion and complete grammar/reader actions only.
+    Parse,
     /// `json=check` (parse + check). Honesty for 0.5 emit uses this.
     Check,
     /// `json=transform`. Written-clash honesty (05 D-clash).
@@ -37,6 +39,7 @@ pub enum JsonStage {
 impl JsonStage {
     fn as_arg(self) -> Option<&'static str> {
         match self {
+            Self::Parse => Some("json=parse"),
             Self::Check => Some("json=check"),
             Self::Transform => Some("json=transform"),
             Self::Write => None,

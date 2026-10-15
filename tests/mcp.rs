@@ -14,23 +14,18 @@ use dygnosis::{
 use serde_json::{json, Value};
 
 const RUST_TOOLS: &[&str] = &[
+    "dynare_syntax",
+    "dynare_diagnostic_info",
     "dynare_diagnose",
     "dynare_model_info",
-    "dynare_compare_models",
-    "dynare_find_references",
-    "dynare_rename",
-    "dynare_auto_fix",
-    "dynare_explain",
-    "dynare_list_diagnostic_codes",
-    "dynare_list_options",
+    "dynare_symbol_info",
     "dynare_equations",
-    "dynare_related_files",
     "dynare_expand",
+    "dynare_actions",
+    "dynare_rename",
     "dynare_format",
     "dynare_extract",
-    "dynare_workspace_diagnose",
-    "dynare_symbol_info",
-    "dynare_code_actions",
+    "dynare_compare_models",
 ];
 
 const DROPPED_TOOLS: &[&str] = &[
@@ -505,14 +500,6 @@ fn registered_tools_include_format() {
     let names = registered_tool_names();
     assert_eq!(names, RUST_TOOLS);
     assert_eq!(names.len(), RUST_TOOLS.len());
-    assert_eq!(names[9], "dynare_equations");
-    assert_eq!(names[10], "dynare_related_files");
-    assert_eq!(names[11], "dynare_expand");
-    assert_eq!(names[12], "dynare_format");
-    assert_eq!(names[13], "dynare_extract");
-    assert_eq!(names[14], "dynare_workspace_diagnose");
-    assert_eq!(names[15], "dynare_symbol_info");
-    assert_eq!(names[16], "dynare_code_actions");
 
     let list = tools_list_json();
     let tools = list["tools"].as_array().expect("tools array");

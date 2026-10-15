@@ -32,20 +32,20 @@ pub(crate) enum Detail {
     Compact,
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub(crate) struct Reason {
     pub code: String,
     pub message: String,
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub(crate) struct Outcome {
     pub status: String,
     pub reasons: Vec<Reason>,
 }
 
 /// The root object is identical in JSON text and supported structuredContent.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub(crate) struct ToolResult {
     pub schema_version: u32,
     pub outcome: Outcome,
@@ -253,6 +253,7 @@ pub(crate) struct Pages {
     collections: serde_json::Map<String, Value>,
     more: bool,
     filters: Value,
+    remaining: Option<usize>,
 }
 
 impl Pages {
@@ -279,6 +280,7 @@ impl Pages {
                 "file_content",
                 "files",
                 "source",
+                "sources",
                 "active_file",
                 "file_content_a",
                 "file_content_b",
@@ -319,7 +321,13 @@ impl Pages {
             collections: Default::default(),
             more: false,
             filters,
+            remaining: None,
         })
+    }
+
+    /// Canonical collections share one row allowance across the response.
+    pub fn share_budget(&mut self) {
+        self.remaining = self.size;
     }
 
     #[cfg(test)]
@@ -336,9 +344,13 @@ impl Pages {
             .copied()
             .unwrap_or(0)
             .min(total);
-        let end = offset.saturating_add(self.size.unwrap_or(total)).min(total);
+        let allowance = self.remaining.or(self.size).unwrap_or(total);
+        let end = offset.saturating_add(allowance).min(total);
         let selected = rows.drain(offset..end).collect();
         *rows = selected;
+        if let Some(remaining) = &mut self.remaining {
+            *remaining = remaining.saturating_sub(rows.len());
+        }
         self.cursor.offsets.insert(name.into(), end);
         self.more |= end < total;
         self.collections.insert(name.into(), json!({"total_matches":complete.then_some(total),"available_matches":total,"returned_count":rows.len(),"offset":offset}));

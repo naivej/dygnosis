@@ -1,335 +1,210 @@
 # Dygnosis workflow
 
-Read this when you use the Dygnosis MCP tools on a Dynare model: which tool fits a need, how to pass the
-model, how to read the result, and how to apply proposed edits. If the tools are not connected, read
-`dygnosis-setup.md` first.
+Read this for MCP tool choice, source inputs, result coverage and proposed edits.
+If the tools are unavailable, use `dygnosis-setup.md` first. Runtime tool schemas
+own exact arguments. The default server uses tool contract 3.
 
-Read the runtime tool schemas for exact arguments. This page gives the rules that the schemas do not.
+## Choose the task
 
-## What Dygnosis does
-
-Dygnosis checks `.mod` source against the Dynare 7.2 language: the problems that Dynare reports before
-MATLAB runs, plus its own warnings and notes. It does not run Dynare, MATLAB or Octave.
-
-- **Error:** Dynare would refuse the file before MATLAB runs.
-- **Warning:** Dynare would accept the file, but something looks wrong. This includes Dynare's own
-  warnings.
-- **Information:** nothing is wrong; confirm that it is intended. I208 (equation without a `name` tag)
-  and I209 (declaration without `long_name`) are writing preferences, not refusals.
-
-`dynare_explain` gives the meaning and the fix of a code. `dynare_list_diagnostic_codes` lists all codes
-with a `kind`: `shared` (Dynare reports the same problem), `added` (only Dygnosis reports it), or
-`skipped` (a Dynare refusal that Dygnosis does not report).
-
-An empty diagnostic list is static evidence only. It does not show a steady state, the Blanchard-Kahn
-conditions, determinacy, correct economics or a successful experiment. Those need a Dynare run
-(`debugging.md`, "Run-and-fix loop").
-
-## Choose a tool
-
-| Need | Tool and use |
+| Need | Tool |
 |---|---|
-| Check the current model | `dynare_diagnose`. Run it before a change (baseline) and after each edit to a declaration, an equation, or a command. |
-| Check several saved models or a folder | `dynare_workspace_diagnose`. Report each failed root separately. |
-| Symbols, timing classes, blocks, counts | `dynare_model_info`: `endogenous`, `predetermined`, `forward_looking`, `static`, `mixed`, counts, block flags. |
-| Inspect one symbol's meaning | `dynare_symbol_info`: select one binding by name, target or returned `binding_id`; ambiguous names return scoped candidates. |
-| Find accepted uses of a symbol | `dynare_find_references`: select a semantic binding; comments, unrelated strings, native MATLAB and inactive source are excluded. |
-| Inspect `#` helper expressions or explicit model-local metadata | `dynare_model_info`: `model_locals.declarations` and `model_locals.definitions`. |
-| Find an equation and its source location; check the equation count | `dynare_equations`: rows with tags, `idents` (written `timing`, `dynare_timing`, timing class), `origin`, and `count_gap`. |
-| See text produced by `@#include` and macros | `dynare_expand`: `effective_text`, `complete`, navigation back to the written source. |
-| Find includes and companion files (steady-state file, helper files) | `dynare_related_files`, then read those files. A listed companion is not proof that its MATLAB code is correct. |
-| Understand a diagnostic | `dynare_explain`; `dynare_list_diagnostic_codes` to find a code. |
-| Check the options of a command | `dynare_list_options`, then `references/dynare-manual.md` for meaning. An unknown command returns `known: false`. Do not invent options. |
-| Rename a model symbol | `dynare_rename`: select exactly one `old_name`, target or `binding_id`. Ambiguous bindings and incomplete or incompatible owners withhold the complete proposal. |
-| Apply a known fix, source action, or format | `dynare_auto_fix`, `dynare_code_actions`, `dynare_format` (`formatIndent`: `"tab"` or 1–8). Each returns proposed edits and never writes files. |
-| Review the structural effect of an edit | `dynare_compare_models` with supplied text and includes, or with explicit repository inputs. It is not a numerical equivalence test. |
-| Isolate a mechanism or make a small reproducer | `dynare_extract` by equation `names` or `tags` (all tags must match), optionally in one heterogeneity `dimension`. |
+| Check one model, several roots or saved folders | `dynare_diagnose` |
+| Understand a model, includes and companion files | `dynare_model_info` |
+| Inspect one name and its accepted uses | `dynare_symbol_info` |
+| Find equations, timing and source locations | `dynare_equations` |
+| Read expanded text and written origins | `dynare_expand` |
+| Look up commands, blocks, options, functions, operators or macros | `dynare_syntax` |
+| Find a diagnostic code or read its correction guidance | `dynare_diagnostic_info` |
+| Discover source actions or propose proven diagnostic fixes | `dynare_actions` |
+| Rename one binding | `dynare_rename` |
+| Format source | `dynare_format` |
+| Produce an equation fragment with required context | `dynare_extract` |
+| Compare model versions and captured source | `dynare_compare_models` |
 
-Call the tools that help the task. Do not call every tool on every task.
+A known unique name selects Symbol Info, Equations or Rename directly. Use
+Symbol Info first when the task needs its definition or uses. Ambiguous names
+return binding candidates; use their typed selector and original revision.
 
-## Pass the model
+For syntax, context and parent have distinct meanings:
 
-Single-model tools accept one explicit `source` object:
-
-- **Text:** `{"kind":"text","text":"..."}`. This is unnamed text; it cannot read includes or companions from disk.
-- **Map:** `{"kind":"map","root":"main.mod","files":{"main.mod":"...","parts.inc":"..."}}`. Supply the exact root and all required include text. `root_text` can overlay the existing root, including with an empty string. `include_dirs` adds virtual folders; `owner_roots` selects additional roots to check.
-- **Disk:** `{"kind":"disk","root":"C:/models/main.mod"}`. The MCP server reads saved host files. The root, `owner_roots` and `include_dirs` must be absolute host paths; editor buffers are not read.
-
-The `source` object is exclusive with legacy `file_content`, `active_file` and `files`. Legacy single-file calls use `file_content`. Legacy map calls require `active_file` to match an exact existing key in nonempty `files`; an explicit `file_content` overlays that root even when empty. `dynare_related_files` needs map or disk identity.
-
-Map keys preserve their spelling. Include lookup normalizes slash direction and dot segments lexically, rejects colliding keys, and never reads an unsupplied host file or falls back to a matching filename. It searches the including file's folder, then explicit and executed macro include folders in engine order. Use an exact key or explicit search folder for non-sibling includes. The checked owner set is the selected root plus explicit `owner_roots`; unrelated `.mod` keys are not inferred as owners.
-
-Use `dynare_related_files` to inspect include and companion relationships for a named map or disk root. For an incomplete result, supply missing executed source before treating facts or edit proposals as complete.
-
-**Saved files on disk.** `dynare_workspace_diagnose` has two modes. Do not combine them.
-
-- Map mode: a `files` map and a `roots` list of keys. A root that is not in the map is reported as
-  failed.
-- Path mode: `paths`, a list of files or folders on the machine that runs the server. It reads the
-  saved files, walks folders, and skips the generated `+<model>` folders. It does not see unsaved edits.
-
-When one include belongs to several root files, choose the roots explicitly (Dygnosis W061 reports an
-ambiguous parent).
-
-**Two versions.** `dynare_compare_models` has two modes. Do not combine them.
-
-- Supplied text: pass `file_content_a` and `file_content_b`. For includes, give
-  `active_file_a`/`files_a` and `active_file_b`/`files_b`, or one shared `files` map.
-- Repository: pass an absolute `repository_path` on the server host, and explicit `before` and
-  `after` inputs. Each input has `kind` (`git` or `working`) and a repository-relative `root_file`.
-  Every Git input also requires `ref`. Working reads saved files; it does not see editor buffers.
-
-For example, this compares HEAD with the saved model:
-
-```json
-{
-  "repository_path": "C:/models/project",
-  "before": { "kind": "git", "root_file": "main.mod", "ref": "HEAD" },
-  "after": { "kind": "working", "root_file": "main.mod" },
-  "search_paths": ["common"]
-}
+```jsonl
+{"name":"pac_model"}
+{"name":"diff","context":"model_expression"}
+{"name":"irf","kind":"option","parent":"stoch_simul"}
 ```
 
-Before is the baseline; After is the model under review. Git refs resolve once before source reads.
-Use the returned commit ids when reporting a result or repeating a fixed comparison. A renamed root
-needs its exact path on each side. Relative `search_paths` resolve against `repository_path`.
-Historical roots and executed includes use only their selected commit trees. Git never fetches missing
-objects. A required source outside that repository, a symlink, or a gitlink fails explicitly.
+Diagnostic Info accepts an exact `code` for its explanation or search filters
+for summaries. Its `shared`, `added` and `skipped` classifications describe
+relation to official Dynare, not problems fired on a model.
 
-## Read the result
+## Supply the model
 
-Every MCP result includes a canonical object with `schema_version: 2`.
-Structured clients read tool facts from `structuredContent.data`; `outcome`,
-`inputs`, `coverage`, `selection`, `proposal` and `limits` sit beside `data`.
-Text clients can parse the final JSON content item. Existing tools keep their
-default leading content items in order. `detail: "compact"` omits those legacy
-mirrors. Editions from 2025-06-18 advertise `outputSchema` and
-`structuredContent`; older editions receive the canonical JSON text only.
+Single-model requests use one explicit `source`:
 
-**Large saved models.** Use an explicit disk source so the client sends a path,
-not the model text. Select only the needed sections, request compact detail,
-and set `page_size`: compact detail omits mirrors and optional prose, but does
-not limit collection rows. For example, request the summary and declarations
-in pages of 10. In this example, `client` is an already-connected MCP SDK
-client. Replace the root with the actual saved path on the MCP server host.
+- Text: `{"kind":"text","text":"..."}`. Unnamed text has no file identity.
+- Map: `{"kind":"map","root":"main.mod","files":{"main.mod":"...","parts.inc":"..."}}`.
+  The root and optional `owner_roots` must be exact supplied keys. `root_text`
+  overlays the existing root, including with empty text. `include_dirs` adds
+  virtual search folders.
+- Disk: `{"kind":"disk","root":"C:/models/main.mod"}`. The root, owners and
+  include folders are absolute paths on the MCP server host. It reads saved
+  files and required dependencies; editor buffers are not inputs.
 
-```js
-const source = {
-  kind: "disk",
-  root: "C:/models/US_FRB08mx_rep.mod", // Replace with the actual server-host path.
-};
-const query = {
-  source,
-  sections: ["summary", "declarations"],
-  detail: "compact",
-  page_size: 10,
-};
+Maps read only supplied keys. Lookup normalizes slash direction and dot
+segments, rejects colliding keys, then searches the including file's folder
+and explicit or executed macro include folders in engine order. Supply all
+required executed source. Unrelated `.mod` keys are not inferred as owners.
 
-async function callCanonical(name, args) {
-  const result = await client.callTool({ name, arguments: args });
-  if (result.structuredContent?.schema_version === 2) {
-    return result.structuredContent;
-  }
-  for (const item of [...(result.content ?? [])].reverse()) {
-    if (typeof item.text !== "string") continue;
-    try {
-      const value = JSON.parse(item.text);
-      if (value?.schema_version === 2) return value;
-    } catch {
-      // Legacy text may precede the canonical JSON item.
-    }
-  }
-  throw new Error(`${name} returned no canonical schema-version 2 result`);
-}
+Model Info defaults to scalar counts and model kind. Select `sources` for
+includes and companions, `structure` for timing lists and block flags, or
+`declarations`, `assignments`, `model_locals`, `statements`, `blocks`, `includes`
+or `scope` for detail. Relationships need map or disk identity. A listed MATLAB
+companion is a location, not evidence that its code is correct.
 
-const first = await callCanonical("dynare_model_info", query);
-if (first.outcome.status !== "ok") {
-  throw new Error("Model Info is incomplete; inspect coverage before using its facts");
-}
-const declarations = first.selection.collections.declarations;
-const declarationsRemain =
-  declarations.returned_count < declarations.available_matches;
-let next = null;
-if (declarationsRemain && first.selection.continuation) {
-  next = await callCanonical("dynare_model_info", {
-    ...query,
-    continuation: first.selection.continuation,
-    expected_revision: first.inputs[0].revision,
-  });
-}
+For several roots, Diagnose takes `batch` instead of `source`:
+
+```jsonl
+{"batch":{"kind":"map","files":{"main.mod":"..."},"roots":["main.mod"]}}
+{"batch":{"kind":"paths","paths":["C:/models/project"],"exclude_paths":["C:/models/project/archive"]}}
+{"batch":{"kind":"sources","sources":[{"kind":"text","text":"..."},{"kind":"disk","root":"C:/models/other.mod"}]}}
 ```
 
-For each entry in `selection.collections`, `returned_count` is the number in
-this page, `available_matches` is the number available to this query, and
-`total_matches` is that collection's total when known (otherwise `null`). The
-opaque `selection.continuation` is `null` when no collection has another page.
-Fetch another page only when its collection has more rows and a continuation
-is present. Keep the original source, sections, filters, detail and page size;
-send the continuation and the revision from `inputs[0].revision`. Single-model
-tools call this argument `expected_revision`; workspace batches use
-`expected_revisions` keyed by root; model comparison uses
-`expected_revision_a` and `expected_revision_b`.
+Map roots are exact keys; a missing root remains a failed report. Saved path
+discovery skips generated `+<model>` folders. Single and batch Diagnose share
+`data.summary`, `data.roots`, `data.revision` and `data.root_revisions`. Read each
+root's `ok`, `partial`, `failed` or `unfinished` status. Unnamed text has the
+input identity `input:1`; it does not acquire an invented file path.
 
-Use the returned binding identity to focus later queries. This example finds
-`xgap2` and its equations, then expands one returned equation without parsing
-source locations or inventing an identity:
+## Select names and equations
 
-```js
-const symbol = await callCanonical("dynare_symbol_info", {
-  source,
-  symbol: "xgap2",
-  detail: "compact",
-});
-if (symbol.outcome.status !== "ok") throw new Error("xgap2 was not resolved");
-const binding_id = symbol.data.binding_id;
-const expected_revision = symbol.inputs[0].revision;
+Symbol Info, Equations and Rename share one typed `symbol` selector:
 
-const references = await callCanonical("dynare_find_references", {
-  source,
-  binding_id,
-  expected_revision,
-  detail: "compact",
-  page_size: 10,
-});
-const equations = await callCanonical("dynare_equations", {
-  source,
-  binding_id,
-  expected_revision,
-  detail: "compact",
-  page_size: 5,
-});
-const equation_id = equations.data.equations[0]?.equation_id;
-if (equation_id) {
-  const expanded = await callCanonical("dynare_expand", {
-    source,
-    equation_id,
-    expected_revision,
-    detail: "compact",
-  });
-}
+```jsonl
+{"symbol":{"kind":"name","name":"rho"}}
+{"symbol":{"kind":"target","file":"parts.inc","line":12,"column":3}}
+{"symbol":{"kind":"binding","binding_id":"<returned identity>"},"expected_revision":"<original revision>"}
 ```
 
-Use each result's `selection.collections` to decide whether References or
-equations need another page. Their `selection.continuation` and the same
-`expected_revision` apply to that tool's next page.
+Default Symbol Info includes `data.binding` and bounded `data.references`.
+Select `definition`, `metadata`, `assignments` or `references`; references-only
+works directly. `include_declaration` defaults to true; `occurrences` adds
+expanded uses. Comments, unrelated strings, native MATLAB and inactive source
+are excluded.
 
-`outcome.status` is `ok`, `changed`, `unchanged`, `partial` or `refused`.
-Read its causes and per-owner `coverage` before relying on facts. A page of
-complete analysis remains `ok`; `selection` describes the page independently.
-`changed` means an edit proposal changes text, not that a file was saved.
+Equation name, tags, scope/dimension and symbol filters combine with AND.
+Extraction combines names with OR and tags with AND. A typed `equation`
+selects a returned identity or zero-based scoped row:
 
-**Completeness.** An unresolved include or an unsupported macro construct makes the result partial.
+```jsonl
+{"equation":{"kind":"id","equation_id":"<returned identity>"},"expected_revision":"<original revision>"}
+{"equation":{"kind":"index","scope":"aggregate","index":0}}
+{"equation":{"kind":"index","scope":"dimension","dimension":"households","index":0}}
+```
 
-| Tool | Sign of a partial result |
-|---|---|
-| `dynare_diagnose` | `outcome.status: "partial"`; diagnostic rows remain in `data`. |
-| `dynare_model_info` | `outcome.status: "partial"`; inspect its data and owner coverage for withheld facts. |
-| `dynare_equations` | `outcome.status: "partial"`; incomplete models withhold authoritative rows and count gaps. |
-| `dynare_expand` | `outcome.status: "partial"`; inspect `data.complete` and source coverage. |
-| `dynare_related_files` | `outcome.status: "partial"`; inspect relationship rows and coverage. |
-| `dynare_find_references`, `dynare_symbol_info` | `outcome.status: "partial"` when accepted occurrences lack verified written targets. |
-| `dynare_rename`, `dynare_code_actions`, `dynare_auto_fix`, `dynare_format` | Refused or partial outcomes explain why a complete proposal is unavailable. |
-| `dynare_compare_models` | Existing comparison status and source coverage; incomplete comparisons make no removed/added claims. |
-| `dynare_workspace_diagnose` | Per-root status distinguishes complete, partial, failed and unfinished work. |
+Expansion selects an equation identity or text range. Inclusive `line_range`
+and exclusive-end `expanded_range` refer to expanded text. Returned navigation
+points to verified written source. Edit that written source with its actual
+file and macro context.
 
-A partial result cannot support a claim that the model is clean. Fix the inputs, or report what was not
-covered.
+## Read and continue results
 
-**Equation count.** `dynare_equations` returns `count_gap` (`n_equations`, `n_endogenous`, `delta`,
-`unreferenced_endogenous`) only for a complete model. An unresolved include, incomplete parse, or
-incomplete macro expansion returns `status: "incomplete"` with `count_gap: null`. The counts describe
-the written model before Dynare transforms it; Dynare's `AUX_*` auxiliary variables are not in them.
-With `ramsey_model` or `discretionary_policy` and `instruments` listing N names, the expected `delta`
-is −N.
+Each result has `schema_version: 3`, `outcome`, `inputs`, `coverage`,
+`selection`, `data`, `proposal` and `limits`. Structured clients read
+`structuredContent`; text clients parse the single JSON item. MCP editions
+before 2025-06-18 use the same contract through JSON text only.
 
-**Timing lists.** `predetermined`, `forward_looking`, `static`, `mixed` and the counts
-(`n_jumpers`, `n_state_variables`) in `dynare_model_info`, and `timing_class` in `dynare_equations`,
-use Dynare timing after the `predetermined_variables` convention conversion. Per-use `timing` remains
-the written offset; `dynare_timing` is the converted offset. Use the returned class and counts for
-classification. Older engines omit `dynare_timing`; do not invent it.
+Read outcome causes and coverage before relying on facts. `changed` means
+proposed source differs; no file has been saved. Partial and refused results
+state available and omitted work. A complete page remains `ok`; paging and
+incomplete analysis have different meanings.
 
-**Model-local variables.** `model_locals.declarations` lists explicit
-`model_local_variable` declarations and optional TeX labels.
-`model_locals.definitions` lists completed accepted `#` definitions, each with
-its `name`, `dimension`, parsed `text`, right-side `expression`, and `idents`.
-`dimension: null` is the aggregate model; a name selects that heterogeneity
-dimension. Several blocks of the same model share their definitions. Both
-arrays follow execution order, so macro copies can have the same written
-origin and different rows. A declaration alone gives no expression or value.
-Incomplete model info withholds this inventory; older engines can omit it.
+Collections default to 25 rows shared across the response. `page_size` can be
+1–1000. `selection.collections` gives returned, available and total matches,
+with `total_matches: null` when complete totals are unavailable. Continue only
+when the task needs more rows and `selection.continuation` is non-null. Keep
+source, selectors, sections, filters and page size, with the original guard:
 
-An identifier with `class: "model_local"` is a recognized local use. Its
-`timing` remains the written offset, including shifted helper uses; it has no
-endogenous timing class. Follow verified `origin` and `origin_frames` when
-editing a definition produced by macros. Read an absent origin as an
-unavailable source target. The inventory does not substitute helpers or
-evaluate them. `#` rows stay outside counted equations.
+- Single-model requests: `expected_revision` from `inputs[0].revision`.
+- Single-source Diagnose: `expected_revision` from its `data.root_revisions`.
+- Batch Diagnose: `expected_revisions` keyed by returned root identity.
+- Compare: `expected_revision_a` and `expected_revision_b` from its two inputs.
 
-**Equation numbers.** The `index` of a `dynare_equations` row starts at **zero**, and the `index` filter
-uses the same numbering. Prefer the `name` filter when tags are available. An equation number in
-Dygnosis output is not an equation number in Dynare's transformed model or in MATLAB output.
+`INPUT_CHANGED` requires a new selection from current source. Pages,
+identities and proposals belong to their original snapshot. Proposals are
+returned completely and are never paged.
 
-**Macro-generated tags.** Quoted `@{…}` values expand: `[name='eq@{j}']` in an `@#for` loop becomes
-`eq1`, `eq2`, …, and the `name` filter finds those tags. Use `origin_frames` or `dynare_expand`
-navigation when you need the loop copy that produced a row.
+Dygnosis checks static `.mod` source against Dynare 7.2. An empty diagnostic
+list does not establish a steady state, determinacy, the economics or a
+successful experiment. Run official Dynare under MATLAB for those claims
+(`debugging.md`, “Run-and-fix loop”).
 
-**Locations.** Lines and columns are one-based; columns count Unicode scalar values. A location belongs
-to the file named in the row (`file`, `origin_uri`), or to the root when no file is named. After an
-edit, query again; do not reuse old locations. Edit the written source at the returned location, not
-the expanded text.
+Counts describe written source before transformations and are authoritative
+only with complete coverage. Model locals stay outside equation counts and
+retain execution and dimension scope. Per-use `timing` is the written offset;
+`dynare_timing` and timing classes apply the `predetermined_variables`
+convention. Static replacement rows do not contribute dynamic timing.
 
-Input targets use `file`, `line` and `column`; a null or omitted file selects
-the root. Output ranges use `line`, `column`, `end_line` and `end_column`; the
-end is exclusive. Sections and filters use the runtime schema. Independent
-equation filters combine with AND, while extraction names combine with OR and
-tags combine with AND. Set `page_size` from 1 to 1000 for a bounded collection;
-continue with the returned token, the same query and its `expected_revision`.
-Do not page complete edit proposals. Source limits are 1,000,000 UTF-8 bytes
-per file, 8 MiB total source text, 256 files or lookup candidates and 64 checked
-roots. Macro expansion and serialized output each retain separate 8 MiB limits.
+MCP positions are one-based Unicode-scalar columns with exclusive ends.
+Missing origins are unavailable targets. Obtain current locations after edits.
+Source limits are 1,000,000 UTF-8 bytes per file, 8 MiB combined source, 256
+files or lookup candidates and 64 checked roots. Expansion and output have
+separate 8 MiB limits; `macro_work_limit` selects finite analysis work.
 
-Repository comparison adds `inputs` with `schema_version: 1`. Read each side's root, resolved commit,
-source policy, search paths, and completeness before making a change claim. Its navigation has
-`schema_version: 2`; each written target carries `input_id`, `file_key`, and the commit for a historical
-source. Read that file at that commit when following a historical target. Supplied-text calls retain
-navigation schema 1 and their original file keys.
+## Propose and apply changes
 
-## Apply edits
+Actions has two selections:
 
-`dynare_rename`, `dynare_code_actions`, `dynare_auto_fix` and `dynare_format`
-return proposals; they do not write files. Each proposal contains complete
-non-overlapping source edits. `proposal.revision`, `proposal.source_policy`,
-`proposal.checked_owners` and `proposal.include_dirs` describe the checked
-input. `proposal.inputs` contains one guard per checked file and missing lookup
-candidate. A guard has `file`, `exists`, `directory`, `identity`,
-`text_sha256`, `byte_sha256` and `length`; a missing candidate has
-`exists: false` and null hashes. Each item in `proposal.edits` has its original
-source range, `expected_text` and `new_text`. Do not apply part of a proposal.
+- Omit `fixes` for bounded action summaries. Select an `action_id` with its
+  original `expected_revision` for that alternative's complete proposal.
+- Set `fixes: true` for compatible proven diagnostic fixes, optionally by
+  `code`, written `target` or returned `diagnostic_ids`. A known code or target
+  works directly. Reused diagnostic identities require `expected_revision`.
 
-| Tool | Returns |
-|---|---|
-| `dynare_rename` | A semantic Rename proposal selected by one name, written target or binding identity. |
-| `dynare_code_actions` | Available source actions at a target; select one `action_id` and repeat with its `expected_revision` for its complete proposal. |
-| `dynare_auto_fix` | A proposed source revision with applied/skipped fixes and remaining diagnostics. |
-| `dynare_format` | A proposed whole-file or selected-line revision. |
-| `dynare_extract` | `fragment` with the declarations it needs, and `omitted_context` (for example `calibration`). `status: "empty"` when nothing matched. |
+Alternatives remain separate. Bulk fixes preserve verification, staged repair
+and conflicts, and report skipped and remaining work. Rename and Format have
+their own direct tools. Unsafe Rename inputs withhold its complete proposal.
 
-For disk inputs, repeat the proposal request with the original
-`expected_revision`. If it returns `INPUT_CHANGED`, obtain a new proposal from
-the current inputs. Then verify every guard and each edit's `expected_text`,
-apply the complete proposal with your file tools, refresh the inputs and run
-`dynare_diagnose` again. The revision check does not reserve files against
-later changes.
+Before applying, verify the proposal revision, source policy, checked owners,
+include folders, macro work limit, every input guard and every edit's
+`expected_text`. Guards cover unchanged dependencies and missing candidates,
+with identity, hashes and length. For saved disk input, repeat the proposal
+request with its original `expected_revision` first. Apply the complete edit
+set with external file tools, refresh source and run Diagnose. A revision
+check does not reserve files against later changes.
 
-An extracted fragment is not a runnable model. Complete setup the result marks
-as omitted before presenting it as a runnable experiment.
+Extraction returns a fragment. Supply setup in its omitted context before
+presenting it as a runnable experiment.
 
-Extraction retains needed nested local definitions and explicit metadata from
-the selected model, including definitions in its earlier blocks. A definition
-with the same name in another heterogeneity dimension is a different dependency.
+## Compare versions
+
+Compare takes one typed `comparison`:
+
+```jsonl
+{"comparison":{"kind":"sources","before":{"kind":"text","text":"..."},"after":{"kind":"text","text":"..."}}}
+{"comparison":{"kind":"repository","repository_path":"C:/models/project","before":{"kind":"git","root_file":"main.mod","ref":"HEAD"},"after":{"kind":"working","root_file":"main.mod"},"search_paths":["common"]}}
+```
+
+Each explicit source retains its text/map/disk policy and include folders.
+Before is the baseline. Git refs resolve once before source reads; report the
+returned commits. Roots are exact repository-relative paths. Working reads
+saved host files. Relative search folders resolve against the repository.
+Historical dependencies come only from the selected commit; outside sources,
+symlinks and gitlinks fail explicitly. No Git fetch occurs.
+
+Follow navigation with its side, input identity, captured source and commit.
+Comparison reports retained source/fact changes, not algebraic or numerical
+equivalence. Coverage can remain partial for retained-history limits even when
+both source captures are complete.
 
 ## Report
 
-Name the tools you ran, the root and the includes you passed, the codes returned, and the completeness
-of the result. Report static findings apart from numerical results. If the tools were not available,
-say that the Dygnosis checks were not run.
+Name the tools used, roots and includes, codes, coverage and omitted work.
+Keep static findings separate from numerical results. If tools were
+unavailable, say that the Dygnosis checks were not run.
+
+## Existing clients
+
+For 0.11.27 only, `dygnosis mcp --profile legacy-v2` preserves the previous 17
+tools, arguments, default mirrors and result schema 2. It is removed in
+0.11.28. New connections use `dygnosis mcp` and the canonical tools above.
+The MCP protocol edition does not choose the tool contract.

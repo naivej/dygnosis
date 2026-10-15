@@ -16,8 +16,9 @@ use crate::engine::language::model::{
     FamilyValueKind, Init2ShocksBlock, Init2ShocksRow, IrfCalibrationBlock, IrfCalibrationRow,
     MatchedIrfsBlock, MatchedIrfsRow, MatchedIrfsWeight, MatchedIrfsWeightsBlock, MatchedMoment,
     Model, MomStatement, MomSyntax, MomentCalibrationBlock, MomentCalibrationRow, MsStatement,
-    OptimWeight, ParseIssue, ParseIssueKind, ShapeRefuse, ShockGroup, ShockGroupBlock,
-    SvarEquation, SvarIdentification, SvarIdentificationElement,
+    ObservationTrendRow, OptimWeight, ParseIssue, ParseIssueKind, ShapeRefuse, ShockGroup,
+    ShockGroupBlock, SvarEquation, SvarIdentification, SvarIdentificationElement,
+    WrittenExpression,
 };
 use crate::engine::language::model::{
     ChangeTypeKind, ChangeTypeStmt, CommandSymbol, Complementarity, ComplementarityTriple,
@@ -1272,7 +1273,7 @@ impl Parser<'_> {
                 self.parse_estimated_params_bounds_block();
             } else if self.at_ident_ci("estimated_params_remove") {
                 self.parse_estimated_params_remove_block();
-            } else if self.at_ident_ci("estimated_params") {
+            } else if self.at_ident_ci("estimated_params") || self.at_ident_ci("priors") {
                 self.parse_estimated_params_block();
             } else if self.at_ident_ci("observation_trends") {
                 self.parse_observation_trends_block();
@@ -4638,8 +4639,11 @@ impl Parser<'_> {
                 self.bump();
                 continue;
             }
+            let uses_before = self.model.outside_expression_uses.len();
             if let Some(row) = self.read_moment_calibration_row(body_end_i) {
                 rows.push(row);
+            } else {
+                self.model.outside_expression_uses.truncate(uses_before);
             }
             if self.i <= before {
                 self.skip_until_semi();
@@ -4678,8 +4682,17 @@ impl Parser<'_> {
         } else {
             (None, None)
         };
-        self.eat(TokenKind::Comma);
+        if !self.at(TokenKind::Comma) {
+            self.record_syntax_at(self.i, Some("COMMA"));
+            return None;
+        }
+        self.bump();
         let range = self.read_calibration_range()?;
+        if !self.at(TokenKind::Semi) {
+            self.record_syntax_at(self.i, Some("';'"));
+            self.finish_row(end_i);
+            return None;
+        }
         let end = self.finish_row(end_i);
         Some(MomentCalibrationRow {
             active_tokens: row_i..self.i,
@@ -4708,8 +4721,11 @@ impl Parser<'_> {
                 self.bump();
                 continue;
             }
+            let uses_before = self.model.outside_expression_uses.len();
             if let Some(row) = self.read_irf_calibration_row(body_end_i) {
                 rows.push(row);
+            } else {
+                self.model.outside_expression_uses.truncate(uses_before);
             }
             if self.i <= before {
                 self.skip_until_semi();
@@ -4749,8 +4765,17 @@ impl Parser<'_> {
         }
         self.eat(TokenKind::Comma);
         let (exogenous, exogenous_span) = self.read_symbol()?;
-        self.eat(TokenKind::Comma);
+        if !self.at(TokenKind::Comma) {
+            self.record_syntax_at(self.i, Some("COMMA"));
+            return None;
+        }
+        self.bump();
         let range = self.read_calibration_range()?;
+        if !self.at(TokenKind::Semi) {
+            self.record_syntax_at(self.i, Some("';'"));
+            self.finish_row(end_i);
+            return None;
+        }
         let end = self.finish_row(end_i);
         Some(IrfCalibrationRow {
             active_tokens: row_i..self.i,
@@ -4767,16 +4792,28 @@ impl Parser<'_> {
 
     /// `[expr, expr]` / `+` / `-`: a calibration row's third column.
     fn read_calibration_range(&mut self) -> Option<CalibrationRange> {
+        let issues_before = self.model.parse_issues.len();
+        let syntax_before = self.model.mom_syntax.len();
         if self.at(TokenKind::LBrack) {
             let start = self.bump().span.start;
             let lower = self.read_range_side();
-            self.eat(TokenKind::Comma);
+            if !self.at(TokenKind::Comma) {
+                self.record_syntax_at(self.i, Some("COMMA"));
+                return None;
+            }
+            self.bump();
             let upper = self.read_range_side();
             let end = if self.at(TokenKind::RBrack) {
                 self.bump().span.end
             } else {
-                self.current_start()
+                self.record_syntax_at(self.i, Some("']'"));
+                return None;
             };
+            if self.model.parse_issues.len() != issues_before
+                || self.model.mom_syntax.len() != syntax_before
+            {
+                return None;
+            }
             return Some(CalibrationRange::Bracket {
                 lower,
                 upper,
@@ -4793,19 +4830,18 @@ impl Parser<'_> {
                 span: self.bump().span,
             });
         }
+        self.record_syntax_at(self.i, Some("'[' or PLUS or MINUS"));
         None
     }
 
     /// One side of a `[…]` range, as written.
     fn read_range_side(&mut self) -> String {
         let from = self.i;
-        while !self.at(TokenKind::Eof) && !self.at(TokenKind::Comma) && !self.at(TokenKind::RBrack)
+        if self
+            .parse_expr()
+            .is_none_or(|id| self.pac_expr_has_error(id))
         {
-            let before = self.i;
-            self.parse_expr();
-            if self.i <= before {
-                self.bump();
-            }
+            self.record_syntax_at(self.i, Some("an expression"));
         }
         join_lexemes(self.src, &self.tokens[from..self.i.min(self.tokens.len())])
     }
@@ -7470,6 +7506,10 @@ impl Parser<'_> {
         self.model
             .conditional_forecast_paths
             .push(ConditionalForecastPaths {
+                parse_order: self
+                    .completed_block_separator
+                    .filter(|(end, after)| body_i <= *end && *end < *after && *after == saved)
+                    .map(|_| self.token_origins[saved.saturating_sub(1)].start),
                 span: Span {
                     start: opener_span.start,
                     end,
@@ -7486,6 +7526,8 @@ impl Parser<'_> {
         }
         let start = self.current_start();
         let shape_parse_order = self.token_origins[self.i].start;
+        let parse_issues_before = self.model.parse_issues.len();
+        let path_errors_before = self.model.path_parse_errors.len();
         self.bump();
         let Some(name_tok) = self
             .tokens
@@ -7509,6 +7551,7 @@ impl Parser<'_> {
             end: name_tok.span.end,
         };
         let mut has_periods = false;
+        let mut has_date_period = false;
         if self.at_ident_ci("periods") {
             has_periods = true;
             let from = self.i + 1;
@@ -7524,12 +7567,26 @@ impl Parser<'_> {
                     end: self.tokens[from].span.end,
                 };
             }
-            self.bump_until_semi();
-            periods = self.list_entries(from, self.i);
-            if !periods.is_empty() {
-                periods_span = self.entry_list_span(from, self.i);
+            self.bump();
+            let ranges = self.read_ordinary_periods_until_semi();
+            has_date_period = ranges.iter().any(|range| {
+                matches!(
+                    range.first,
+                    crate::engine::language::model::PeriodPoint::Date(_)
+                )
+            });
+            periods = ranges.into_iter().map(|range| range.span).collect();
+            if self.model.parse_issues.len() != parse_issues_before
+                || self.model.path_parse_errors.len() != path_errors_before
+            {
+                return None;
             }
-            self.eat(TokenKind::Semi);
+            if !periods.is_empty() {
+                periods_span = Span {
+                    start: periods[0].start,
+                    end: periods.last().unwrap().end,
+                };
+            }
         }
         if self.eat_refused_collected_row_end() {
             return None;
@@ -7541,6 +7598,7 @@ impl Parser<'_> {
         };
         let mut has_values = false;
         let mut parse_order = None;
+        let mut value_expressions = Vec::new();
         if self.at_ident_ci("values") {
             has_values = true;
             let from = self.i + 1;
@@ -7555,13 +7613,15 @@ impl Parser<'_> {
                 };
             }
             self.bump_until_semi();
-            values = self.list_entries(from, self.i);
+            value_expressions = self.read_ordinary_values(from, self.i);
+            values = value_expressions.iter().map(|value| value.span).collect();
             if !values.is_empty() {
                 values_span = self.entry_list_span(from, self.i);
             }
-            parse_order = self
-                .at(TokenKind::Semi)
-                .then(|| self.token_origins[self.i].start);
+            parse_order = (self.at(TokenKind::Semi)
+                && self.model.parse_issues.len() == parse_issues_before
+                && value_expressions.iter().all(|value| value.completed))
+            .then(|| self.token_origins[self.i].start);
             self.eat(TokenKind::Semi);
         }
         Some(ConditionalForecastPath {
@@ -7570,8 +7630,10 @@ impl Parser<'_> {
             name,
             name_span: name_tok.span,
             periods,
+            has_date_period,
             periods_span,
             values,
+            value_expressions,
             values_span,
             span: Span {
                 start,
@@ -7580,40 +7642,6 @@ impl Parser<'_> {
             has_periods,
             has_values,
         })
-    }
-
-    /// List entries between two token offsets: a run of tokens with no whitespace
-    /// or comma between them is one entry, so `1:4` counts as one and `1 2 3` as three.
-    fn list_entries(&self, from: usize, to: usize) -> Vec<Span> {
-        let mut out: Vec<Span> = Vec::new();
-        let end = to.min(self.tokens.len());
-        let mut k = from;
-        while k < end {
-            if self.tokens[k].kind == TokenKind::Comma {
-                k += 1;
-                continue;
-            }
-            let start = self.tokens[k].span.start;
-            let mut stop = k;
-            while stop + 1 < end {
-                let prev = &self.tokens[stop];
-                let next = &self.tokens[stop + 1];
-                if next.kind == TokenKind::Comma {
-                    break;
-                }
-                let between = &self.src[prev.span.end as usize..next.span.start as usize];
-                if between.chars().any(char::is_whitespace) {
-                    break;
-                }
-                stop += 1;
-            }
-            out.push(Span {
-                start,
-                end: self.tokens[stop].span.end,
-            });
-            k = stop + 1;
-        }
-        out
     }
 
     fn entry_list_span(&self, from: usize, to: usize) -> Span {
@@ -9216,42 +9244,68 @@ impl Parser<'_> {
     }
 
     fn collect_observation_trends(&mut self, start_i: usize, end_i: usize) {
-        // Dynare clears trend_elements at the end of each block.
+        let saved = self.i;
+        self.i = start_i;
         let mut seen = std::collections::HashSet::new();
-        let mut i = start_i;
-        while i < end_i {
-            let stmt_start = i;
-            while i < end_i && self.tokens[i].kind != TokenKind::Semi {
-                i += 1;
+        if start_i == end_i {
+            self.record_syntax_at(self.i, Some("a trend row"));
+        }
+        while self.i < end_i {
+            let row_i = self.i;
+            let issues_before = self.model.parse_issues.len();
+            let syntax_before = self.model.mom_syntax.len();
+            let uses_before = self.model.outside_expression_uses.len();
+            let name = self.read_symbol();
+            if !self.at(TokenKind::LParen) {
+                self.record_syntax_at(self.i, Some("'('"));
             }
-            let mut j = stmt_start;
-            while j < i {
-                if self.tokens[j].kind == TokenKind::Ident {
-                    let next = self.tokens.get(j + 1).filter(|_| j + 1 < i);
-                    if next.is_some_and(|t| t.kind == TokenKind::LParen || t.kind == TokenKind::Eq)
-                    {
-                        let name = self.tokens[j].text(self.src).to_string();
-                        let span = self.tokens[j].span;
-                        let id = self.intern.intern(&name);
-                        if seen.insert(id) {
-                            self.model.observation_trends.push((id, span));
-                            self.retain_fact_receipt(
-                                "observation_trends",
-                                j,
-                                std::iter::once(j..j + 1).collect(),
-                            );
-                        } else {
-                            self.model.observation_trends_dups.push((id, span));
-                        }
-                        break;
-                    }
+            self.eat(TokenKind::LParen);
+            let (text, span, expr) = self.read_expression_text();
+            if expr.is_none_or(|id| self.pac_expr_has_error(id)) {
+                self.record_syntax_at(self.i, Some("an expression"));
+            }
+            if !self.at(TokenKind::RParen) {
+                self.record_syntax_at(self.i, Some("')'"));
+            }
+            self.eat(TokenKind::RParen);
+            if !self.at(TokenKind::Semi) {
+                self.record_syntax_at(self.i, Some("';'"));
+            }
+            let end = self.finish_row(end_i);
+            if let Some((name, name_span)) = name
+                && expr.is_some()
+                && self.model.parse_issues.len() == issues_before
+                && self.model.mom_syntax.len() == syntax_before
+            {
+                if seen.insert(name) {
+                    self.model.observation_trends.push((name, name_span));
+                } else {
+                    self.model.observation_trends_dups.push((name, name_span));
                 }
-                j += 1;
-            }
-            if i < end_i && self.tokens[i].kind == TokenKind::Semi {
-                i += 1;
+                self.model.observation_trend_rows.push(ObservationTrendRow {
+                    name,
+                    name_span,
+                    expression: WrittenExpression {
+                        symbol_type_context: self.model.symbol_context(),
+                        text,
+                        span,
+                        expr,
+                    },
+                    span: Span {
+                        start: name_span.start,
+                        end,
+                    },
+                });
+                self.retain_fact_receipt(
+                    "observation_trends",
+                    row_i,
+                    std::iter::once(row_i..self.i).collect(),
+                );
+            } else {
+                self.model.outside_expression_uses.truncate(uses_before);
             }
         }
+        self.i = saved;
     }
 
     fn bump_plain_opener(&mut self) -> Span {

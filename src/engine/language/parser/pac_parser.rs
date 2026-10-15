@@ -347,7 +347,7 @@ impl Parser<'_> {
         })
     }
 
-    fn pac_expr_has_error(&self, id: ExprId) -> bool {
+    pub(super) fn pac_expr_has_error(&self, id: ExprId) -> bool {
         match &self.model.exprs.get(id).kind {
             ExprKind::Error => true,
             ExprKind::Unary { arg, .. }

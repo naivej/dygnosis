@@ -58,6 +58,9 @@ pub(crate) struct ScopedEquation {
 /// tool accepts only its own projection; validation checks cross-field rules.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub(crate) struct Params {
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub canonical: bool,
     #[serde(flatten)]
     pub source_args: SourceArgs,
     #[serde(flatten)]
@@ -117,6 +120,8 @@ pub(crate) struct Params {
     pub format_indent: Option<Value>,
     /// Snapshot-bound selected diagnostic identity.
     pub diagnostic_id: Option<String>,
+    #[serde(default)]
+    pub diagnostic_ids: Vec<String>,
     /// Snapshot-bound selected action identity. Its complete proposal is returned atomically.
     pub action_id: Option<String>,
     /// diagnostic_fix, equation_tags, long_names or shock_template.
@@ -388,9 +393,41 @@ pub(crate) fn legacy_json(data: &Value) -> Vec<ContentBlock> {
 pub(crate) fn dispatch(
     tool: &str,
     arguments: Value,
-    mut control: RequestControl,
+    control: RequestControl,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
-    let params = decode(tool, &arguments)?;
+    dispatch_mode(tool, arguments, control, false)
+}
+
+pub(crate) fn dispatch_mode(
+    tool: &str,
+    arguments: Value,
+    mut control: RequestControl,
+    canonical: bool,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    let mut decoded_arguments = arguments.clone();
+    let diagnostic_ids = if canonical {
+        decoded_arguments
+            .as_object_mut()
+            .and_then(|object| object.remove("diagnostic_ids"))
+    } else {
+        None
+    };
+    let decoder = if canonical && tool == "dynare_symbol_info" {
+        "dynare_find_references"
+    } else {
+        tool
+    };
+    let mut params = decode(decoder, &decoded_arguments)?;
+    if let Some(ids) = diagnostic_ids {
+        params.diagnostic_ids =
+            serde_json::from_value(ids).map_err(|error| invalid(error.to_string()))?;
+    }
+    params.canonical = canonical;
+    if !params.diagnostic_ids.is_empty() && params.expected_revision.is_none() {
+        return Err(invalid(
+            "Reusing diagnostic identities requires expected_revision from the original input",
+        ));
+    }
     control.macro_work_limit = params.macro_work_limit;
     if matches!(
         tool,
@@ -516,7 +553,23 @@ pub(crate) fn dispatch(
     {
         return Ok(ToolResult::refused("INPUT_CHANGED","Source inputs changed before the result was returned. No stale facts or edits were returned.").wire(Vec::new(),params.output.detail));
     }
-    let legacy = legacy_result(tool, &result, &snapshot, &params);
+    if canonical {
+        result.schema_version = 3;
+        if matches!(
+            tool,
+            "dynare_rename" | "dynare_format" | "dynare_auto_fix" | "dynare_code_actions"
+        ) && let Some(object) = result.data.as_object_mut()
+        {
+            object.remove("text");
+            object.remove("files");
+            object.remove("formatted_text");
+        }
+    }
+    let legacy = if canonical {
+        Vec::new()
+    } else {
+        legacy_result(tool, &result, &snapshot, &params)
+    };
     control.complete_phase("Return model result");
     Ok(result.wire(legacy, params.output.detail))
 }
@@ -586,14 +639,33 @@ fn model_info(snapshot: &mut SourceSnapshot, params: &Params) -> Result<Value, r
         "blocks",
         "includes",
         "scope",
+        "sources",
+        "structure",
     ];
     validate_sections(&params.output.sections, &valid)?;
-    let mut data = if snapshot.coverage["complete"] == true {
+    let mut data = if params.canonical {
+        json!({})
+    } else if snapshot.coverage["complete"] == true {
         super::model_info_with_unit(&unit(snapshot))
     } else {
         json!({"status":"incomplete","incomplete_reasons":snapshot.coverage["reasons"]})
     };
     let want = |name: &str| params.output.sections.iter().any(|section| section == name);
+    if params.canonical && want("structure") && snapshot.coverage["complete"] == true {
+        data["structure"] = super::model_info_with_unit(&unit(snapshot));
+    }
+    if params.canonical && want("summary") {
+        data["summary"] = json!({"complete":snapshot.coverage["complete"],
+            "model_kind":if snapshot.model.heterogeneity_dimensions.is_empty(){"aggregate"}else{"heterogeneous"},
+            "declaration_count":snapshot.model.written_declarations.len(),
+            "statement_count":snapshot.model.statements.len(),
+            "equation_count":if snapshot.coverage["complete"]==true{Some(snapshot.report.model_map.equations.iter().filter(|equation|equation.active && !equation.local && !equation.static_only).count())}else{None},
+            "dimension_count":snapshot.model.heterogeneity_dimensions.len(),
+            "assignment_count":snapshot.model.param_assignments.len()+snapshot.model.helper_assignments.len()});
+    }
+    if params.canonical && want("model_locals") && snapshot.coverage["complete"] == true {
+        data["model_locals"] = super::model_info_with_unit(&unit(snapshot))["model_locals"].clone();
+    }
     if want("declarations") {
         data["declarations"] = json!(snapshot
             .model
@@ -654,6 +726,36 @@ fn model_info(snapshot: &mut SourceSnapshot, params: &Params) -> Result<Value, r
                 .written_file(Some(&path.to_string_lossy()))
                 .unwrap_or_default()
         });
+    }
+    if want("sources") {
+        if snapshot.root_file.is_none() {
+            data["sources"] = json!({"available":false,"cause":"Unnamed text has no file identity. Supply a map or saved disk root to discover includes and companions."});
+        } else {
+            let includes = snapshot
+                .workspace
+                .include_records(&snapshot.root)
+                .cloned()
+                .unwrap_or_default();
+            let companions = snapshot
+                .workspace
+                .companion_records(&snapshot.root)
+                .map(|rows| rows.to_vec())
+                .unwrap_or_default();
+            data["sources"] = super::related_files_json(&includes, &companions, |path| {
+                snapshot
+                    .written_file(Some(&path.to_string_lossy()))
+                    .unwrap_or_default()
+            });
+            for row in data["sources"].as_array_mut().into_iter().flatten() {
+                if row["resolved"] == false {
+                    row["cause"] = json!(if snapshot.inputs["source_policy"] == "map" {
+                        "No supplied file resolves this relationship under the selected source lookup rules."
+                    } else {
+                        "No available file resolves this relationship under the selected source lookup rules."
+                    });
+                }
+            }
+        }
     }
     if want("scope") {
         data["scope"] = json!({"root":snapshot.root_file,"checked_owners":snapshot.inputs["checked_owners"],"dimensions":snapshot.model.heterogeneity_dimensions.iter().map(|d|snapshot.model.name(d.name)).collect::<Vec<_>>()});
@@ -1085,7 +1187,15 @@ fn symbols(
             return Ok(result);
         }
     };
-    if tool == "dynare_symbol_info" {
+    let mut metadata = None;
+    if tool == "dynare_symbol_info"
+        && (!params.canonical
+            || !params
+                .output
+                .sections
+                .iter()
+                .all(|section| section == "references"))
+    {
         let mut data = binding_json(snapshot, &binding);
         let declaration = model
             .model
@@ -1118,7 +1228,17 @@ fn symbols(
         };
         // Assignment traces keep their execution positions. A trace value is
         // not a claim that later native code retained that final value.
-        let values = crate::engine::analysis::assignment_values::assignment_values(&model.model);
+        let values = if !params.canonical
+            || params
+                .output
+                .sections
+                .iter()
+                .any(|section| section == "assignments")
+        {
+            crate::engine::analysis::assignment_values::assignment_values(&model.model)
+        } else {
+            Vec::new()
+        };
         data["assignment_values"] = json!(values.iter().filter_map(|value| {
             let statement = &model.model.statements[value.statement_id];
             let assignment = match statement.assignment? {
@@ -1131,7 +1251,10 @@ fn symbols(
         if binding.is_local() {
             data["expression"] = json!(model.local_expression(&binding));
         }
-        return Ok(ToolResult::new(data));
+        if !params.canonical {
+            return Ok(ToolResult::new(data));
+        }
+        metadata = Some(data);
     }
     if rename {
         let replacement = params.new_name.as_deref().expect("validated replacement");
@@ -1202,6 +1325,33 @@ fn symbols(
     let mut result = ToolResult::new(
         json!({"binding":binding_json(snapshot,&binding),"references":locations.into_values().collect::<Vec<_>>() }),
     );
+    if let Some(mut data) = metadata {
+        let sections = &params.output.sections;
+        if !sections.iter().any(|section| section == "assignments") {
+            data.as_object_mut().unwrap().remove("assignment_values");
+        }
+        if !sections.iter().any(|section| section == "metadata") {
+            for key in [
+                "long_name",
+                "tex_name",
+                "written_kind",
+                "timing",
+                "expression",
+            ] {
+                data.as_object_mut().unwrap().remove(key);
+            }
+        }
+        result.data["binding"] = data;
+    }
+    if params.canonical
+        && !params
+            .output
+            .sections
+            .iter()
+            .any(|section| section == "references")
+    {
+        result.data.as_object_mut().unwrap().remove("references");
+    }
     if params.occurrences.unwrap_or(false) {
         result.data["occurrences"] = json!(expanded);
     }
@@ -1385,7 +1535,17 @@ fn project_and_page(
     if result.proposal.is_some() {
         return Ok(());
     }
-    let mut pages = match Pages::new(tool, revision, arguments, &params.output) {
+    let canonical_tool = format!("v3:{tool}");
+    let mut pages = match Pages::new(
+        if params.canonical {
+            &canonical_tool
+        } else {
+            tool
+        },
+        revision,
+        arguments,
+        &params.output,
+    ) {
         Ok(pages) => pages,
         Err(message) if message.starts_with("INPUT_CHANGED") => {
             *result = ToolResult::refused("INPUT_CHANGED", message);
@@ -1393,12 +1553,17 @@ fn project_and_page(
         }
         Err(message) => return Err(invalid(message)),
     };
+    if params.canonical {
+        pages.share_budget();
+    }
     let complete = result.coverage.as_ref().is_none_or(|coverage| {
         coverage
             .as_array()
             .is_none_or(|roots| roots.iter().all(|root| root["complete"] == true))
     });
-    if let Some(rows) = result.data.as_array_mut() {
+    if params.canonical {
+        super::canonical::page_collections("", &mut result.data, &mut pages, complete);
+    } else if let Some(rows) = result.data.as_array_mut() {
         pages.collection_with_coverage("rows", rows, complete);
     } else if let Some(object) = result.data.as_object_mut() {
         for (name, rows) in object

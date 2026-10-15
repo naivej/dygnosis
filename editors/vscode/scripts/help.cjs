@@ -30,33 +30,98 @@ async function copyHelpAssets(topics, sourceRoot, targetRoot) {
   }
 }
 
-async function engineFingerprint() {
+async function engineFingerprint(root = productRoot) {
   const files = ['src/engine/diagnostics/explain.rs', 'src/mcp/mod.rs', 'Cargo.toml', 'Cargo.lock'];
-  // Options live in the command catalog. Include all Rust inputs so a changed
-  // fact cannot leave an apparently current snapshot behind.
+  // The catalog consumes generated JSON as well as Rust. Include both so a
+  // changed syntax fact cannot leave an apparently current snapshot behind.
   async function walk(dir) {
     for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
       const file = path.join(dir, entry.name);
       if (entry.isDirectory()) await walk(file);
-      else if (entry.name.endsWith('.rs')) files.push(path.relative(productRoot, file).replaceAll('\\', '/'));
+      else if (/\.(rs|json)$/.test(entry.name)) files.push(path.relative(root, file).replaceAll('\\', '/'));
     }
   }
-  await walk(path.join(productRoot, 'src'));
+  await walk(path.join(root, 'src'));
   const hash = createHash('sha256');
-  for (const file of [...new Set(files)].sort()) hash.update(file).update((await fs.readFile(path.join(productRoot, file), 'utf8')).replaceAll('\r\n', '\n'));
+  for (const file of [...new Set(files)].sort()) hash.update(file).update((await fs.readFile(path.join(root, file), 'utf8')).replaceAll('\r\n', '\n'));
   return hash.digest('hex');
 }
 
-function resultData(result) {
-  if (result?.structuredContent?.schema_version === 2) return result.structuredContent.data;
+function resultEnvelope(result) {
+  if (result?.structuredContent) {
+    assert.equal(result.structuredContent.schema_version, 3, 'Help requires canonical MCP tool contract 3');
+    return result.structuredContent;
+  }
   for (const item of [...(result?.content ?? [])].reverse()) {
     if (typeof item.text !== 'string') continue;
     try {
       const value = JSON.parse(item.text);
-      if (value?.schema_version === 2) return value.data;
+      if (value?.schema_version === 3) return value;
     } catch { /* Leading legacy text items are not necessarily JSON. */ }
   }
-  throw new Error('MCP tool result has no canonical schema_version 2 object');
+  throw new Error('MCP tool result has no canonical schema_version 3 object');
+}
+
+function resultData(result) { return resultEnvelope(result).data; }
+
+async function collectPages(call, name, args = {}) {
+  const query = { page_size: 1000, ...args };
+  const pages = [], seen = new Set();
+  let continuation;
+  do {
+    const result = resultEnvelope(await call(name, { ...query, ...(continuation ? { continuation } : {}) }));
+    assert.equal(result.outcome?.status, 'ok', `${name}: ${JSON.stringify(result.outcome)}`);
+    pages.push(result.data);
+    continuation = result.selection?.continuation;
+    if (continuation != null) {
+      assert.equal(typeof continuation, 'string', `${name} returned an invalid continuation`);
+      assert.ok(continuation && !seen.has(continuation), `${name} repeated a continuation without completing its catalog`);
+      assert.ok(Object.values(result.selection.collections ?? {}).some(collection => collection.returned_count > 0), `${name} returned a continuation without a catalog page`);
+      seen.add(continuation);
+    }
+  } while (continuation != null);
+  return pages;
+}
+
+/** Keep the Help reader's code/options projection while using canonical tools. */
+async function referenceData(call, pageSize = 1000) {
+  const query = args => ({ page_size: pageSize, ...args });
+  const codes = (await collectPages(call, 'dynare_diagnostic_info', query({}))).flatMap(data => data.diagnostics);
+  for (const code of codes) {
+    const details = (await collectPages(call, 'dynare_diagnostic_info', query({ code: code.code }))).flatMap(data => data.diagnostics);
+    assert.equal(details.length, 1, `Missing diagnostic detail for ${code.code}`);
+    assert.equal(typeof details[0].explanation, 'string', `Missing explanation for ${code.code}`);
+    code.markdown = details[0].explanation;
+  }
+  const options = [];
+  const byCommand = new Map();
+  for (const kind of ['command', 'block', 'declaration', 'statement_form']) {
+    const heads = (await collectPages(call, 'dynare_syntax', query({ kind, context: 'top_level' }))).flatMap(data => data.forms);
+    for (const head of heads) {
+      // Query options as records so each page is independent of the containing
+      // form's option collection. Open partition keys are not finite options.
+      const forms = (await collectPages(call, 'dynare_syntax', query({ kind: 'option', parent: head.name }))).flatMap(data => data.forms);
+      const entries = forms.map(form => ({ name: form.name, description: form.summary || form.value_rules?.join('; ') || form.signatures.join('; ') }));
+      for (const command of [head.name, ...head.aliases]) {
+        const page = { command, known: true, n_options: entries.length, options: entries };
+        if (byCommand.has(command)) assert.deepEqual(byCommand.get(command), page, `Conflicting Help options for ${command}`);
+        else { byCommand.set(command, page); options.push(page); }
+      }
+    }
+  }
+  // Qualified prior/options instructions have option parents without a fixed
+  // top-level head. They retain their own Help pages as well.
+  const optionForms = (await collectPages(call, 'dynare_syntax', query({ kind: 'option' }))).flatMap(data => data.forms);
+  for (const parent of new Set(optionForms.map(form => form.parent).filter(Boolean))) {
+    if (byCommand.has(parent)) continue;
+    const forms = (await collectPages(call, 'dynare_syntax', query({ kind: 'option', parent }))).flatMap(data => data.forms);
+    const entries = forms.map(form => ({ name: form.name, description: form.summary || form.value_rules?.join('; ') || form.signatures.join('; ') }));
+    const page = { command: parent, known: true, n_options: entries.length, options: entries };
+    byCommand.set(parent, page); options.push(page);
+  }
+  options.sort((a, b) => a.command < b.command ? -1 : a.command > b.command ? 1 : 0);
+  assert.equal(new Set(options.map(entry => entry.command)).size, options.length, 'Syntax heads produced duplicate Help option pages');
+  return { codes, options };
 }
 
 async function generate(executable) {
@@ -74,11 +139,7 @@ async function generate(executable) {
       assert.ok(!result.isError, `${name} failed`);
       return result;
     }
-    const codes = resultData(await call('dynare_list_diagnostic_codes'));
-    for (const code of codes) code.markdown = resultData(await call('dynare_explain', { code: code.code })).explanation;
-    const commands = resultData(await call('dynare_list_options')).commands;
-    const options = [];
-    for (const command of commands) options.push(resultData(await call('dynare_list_options', { command })));
+    const { codes, options } = await referenceData(call);
     await fs.writeFile(path.join(source, 'reference.json'), JSON.stringify({ version: init.serverInfo.version, fingerprint: await engineFingerprint(), tools, codes, options }, null, 2) + '\n');
   } finally { session.close(); }
 }
@@ -131,4 +192,4 @@ if (require.main === module) (async () => {
   if (process.argv[2] === '--generate') await generate(path.resolve(process.argv[3] ?? path.join(extensionRoot, 'bin', process.platform === 'win32' ? 'dygnosis.exe' : 'dygnosis')));
   await build();
 })().catch(error => { console.error(error); process.exitCode = 1; });
-module.exports = { build, generate, engineFingerprint, copyHelpAssets, resultData };
+module.exports = { build, generate, engineFingerprint, copyHelpAssets, resultData, collectPages, referenceData };

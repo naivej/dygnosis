@@ -42,6 +42,9 @@ struct BatchParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct CompareParams {
+    #[serde(skip)]
+    #[schemars(skip)]
+    canonical: bool,
     /// Finite macro work units applied separately to Before and After, from 1 to 100000000. Omission uses the default; source and comparison limits are independent.
     #[serde(default)]
     macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
@@ -117,7 +120,35 @@ fn source_error(error: source::SourceError) -> rmcp::ErrorData {
     }
 }
 
-fn batch(arguments: Value, mut control: RequestControl) -> Result<CallToolResult, rmcp::ErrorData> {
+fn batch(arguments: Value, control: RequestControl) -> Result<CallToolResult, rmcp::ErrorData> {
+    dispatch_batch(arguments, control, false)
+}
+
+pub(super) fn dispatch_batch(
+    arguments: Value,
+    mut control: RequestControl,
+    canonical: bool,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    let explicit: Option<Vec<SourceInput>> = arguments
+        .get("sources")
+        .map(|value| serde_json::from_value(value.clone()))
+        .transpose()
+        .map_err(|error| invalid(error.to_string()))?;
+    if explicit.as_ref().is_some_and(Vec::is_empty) {
+        return Err(invalid("sources must be nonempty"));
+    }
+    let mut explicit_inputs = BTreeMap::new();
+    if let Some(sources) = explicit {
+        for (index, input) in sources.into_iter().enumerate() {
+            let identity = match &input {
+                SourceInput::Text { .. } => format!("input:{}", index + 1),
+                SourceInput::Map { root, .. } | SourceInput::Disk { root, .. } => root.clone(),
+            };
+            if explicit_inputs.insert(identity, input).is_some() {
+                return Err(invalid("Batch sources must have distinct root identities"));
+            }
+        }
+    }
     let params: BatchParams =
         serde_json::from_value(arguments.clone()).map_err(|error| invalid(error.to_string()))?;
     control.macro_work_limit = params.macro_work_limit;
@@ -133,7 +164,7 @@ fn batch(arguments: Value, mut control: RequestControl) -> Result<CallToolResult
             "Choose files with roots or paths; do not combine them",
         ));
     }
-    if !map_mode && params.paths.as_ref().is_none_or(Vec::is_empty) {
+    if !map_mode && explicit_inputs.is_empty() && params.paths.as_ref().is_none_or(Vec::is_empty) {
         return Err(invalid(
             "Supply nonempty files with roots, or nonempty paths",
         ));
@@ -149,7 +180,9 @@ fn batch(arguments: Value, mut control: RequestControl) -> Result<CallToolResult
             }
         })
         .collect();
-    let (mut roots, discovery_complete, discovery_limits) = if map_mode {
+    let (mut roots, discovery_complete, discovery_limits) = if !explicit_inputs.is_empty() {
+        (explicit_inputs.keys().cloned().collect(), true, Vec::new())
+    } else if map_mode {
         let files = params
             .files
             .as_ref()
@@ -208,7 +241,9 @@ fn batch(arguments: Value, mut control: RequestControl) -> Result<CallToolResult
             coverages.push(json!({"root":root,"complete":false,"reasons":[{"code":"WORK_LIMIT","message":"This root was not checked"}]}));
             continue;
         }
-        let input = if let Some(files) = &params.files {
+        let input = if let Some(input) = explicit_inputs.get(root) {
+            input.clone()
+        } else if let Some(files) = &params.files {
             if !files.contains_key(root) {
                 reports.push(json!({"root":root,"status":"failed","diagnostics":[],"failure":"The exact root key is absent from the supplied file map","code":"ROOT_NOT_FOUND"}));
                 coverages.push(json!({"root":root,"complete":false,"reasons":[{"code":"ROOT_NOT_FOUND","message":"The exact root key is absent from the supplied file map"}]}));
@@ -287,7 +322,11 @@ fn batch(arguments: Value, mut control: RequestControl) -> Result<CallToolResult
                             )
                         })?;
                     control.check().map_err(source_error)?;
-                    let diagnostics = batch_diagnostics(&snapshot, &set);
+                    let diagnostics = if canonical {
+                        canonical_diagnostics(&snapshot, &set)
+                    } else {
+                        batch_diagnostics(&snapshot, &set)
+                    };
                     if snapshot.coverage["complete"] == true {
                         reports.push(json!({"root":root,"status":"ok","diagnostics":diagnostics,"failure":null}));
                     } else {
@@ -376,7 +415,11 @@ fn batch(arguments: Value, mut control: RequestControl) -> Result<CallToolResult
     }
     let revision = source::sha256(serde_json::to_vec(&json!({"inputs":result.inputs,"roots":roots,"discovery_complete":discovery_complete,"revisions":revisions,"limits":control.limits})).expect("batch identity"));
     let mut pages = match Pages::new(
-        "dynare_workspace_diagnose",
+        if canonical {
+            "v3:dynare_diagnose"
+        } else {
+            "dynare_workspace_diagnose"
+        },
         &revision,
         &arguments,
         &params.output,
@@ -388,6 +431,9 @@ fn batch(arguments: Value, mut control: RequestControl) -> Result<CallToolResult
         }
         Err(message) => return Err(invalid(message)),
     };
+    if canonical {
+        pages.share_budget();
+    }
     for root in &mut reports {
         let collection = format!("diagnostics:{}", root["root"].as_str().unwrap_or(""));
         let complete = root["status"] == "ok";
@@ -399,11 +445,50 @@ fn batch(arguments: Value, mut control: RequestControl) -> Result<CallToolResult
     result.coverage = Some(json!({"roots":coverages,"discovery_complete":discovery_complete}));
     result.data =
         json!({"summary":summary,"roots":reports,"revision":revision,"root_revisions":revisions});
-    let legacy = vec![ContentBlock::text(
-        json!({"summary":summary,"roots":result.data["roots"]}).to_string(),
-    )];
+    let legacy = if canonical {
+        Vec::new()
+    } else {
+        vec![ContentBlock::text(
+            json!({"summary":summary,"roots":result.data["roots"]}).to_string(),
+        )]
+    };
+    if canonical {
+        result.schema_version = 3;
+    }
     control.check().map_err(source_error)?;
     Ok(result.wire(legacy, params.output.detail))
+}
+
+fn canonical_diagnostics(
+    snapshot: &SourceSnapshot,
+    set: &crate::engine::diagnostics::DiagnosticSet,
+) -> Vec<Value> {
+    let map = snapshot
+        .sources
+        .iter()
+        .map(|(key, text)| (key.clone(), text.clone()))
+        .collect();
+    super::diagnostics_to_json_with_origins(&snapshot.raw, set, &map)
+        .into_iter()
+        .zip(
+            set.diagnostics
+                .iter()
+                .filter(|diagnostic| !super::is_dropped_code(&diagnostic.code)),
+        )
+        .map(|(row, diagnostic)| {
+            let mut row = serde_json::to_value(row).unwrap();
+            row["diagnostic_id"] = json!(format!(
+                "{}:diagnostic:{}",
+                snapshot.revision,
+                source::sha256(row.to_string())
+            ));
+            row["stored_fix_count"] = json!(usize::from(diagnostic.fix.is_some()));
+            if diagnostic.fix.is_some() {
+                row["fix_selector"]=json!({"fixes":true,"diagnostic_ids":[row["diagnostic_id"]],"expected_revision":snapshot.revision});
+            }
+            row
+        })
+        .collect()
 }
 
 fn batch_diagnostics(
@@ -531,10 +616,40 @@ fn discover_paths(
 
 fn comparison(
     arguments: Value,
-    mut control: RequestControl,
+    control: RequestControl,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
-    let params: CompareParams =
+    comparison_mode(arguments, control, None, false)
+}
+
+pub(super) fn comparison_canonical(
+    arguments: Value,
+    control: RequestControl,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    comparison_mode(arguments, control, None, true)
+}
+
+pub(super) fn comparison_sources(
+    mut arguments: Value,
+    control: RequestControl,
+    before: SourceInput,
+    after: SourceInput,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    // The common comparison parameter reader still validates the retained
+    // repository/text adapter. Source acquisition below owns these inputs.
+    arguments["file_content_a"] = json!("");
+    arguments["file_content_b"] = json!("");
+    comparison_mode(arguments, control, Some((before, after)), true)
+}
+
+fn comparison_mode(
+    arguments: Value,
+    mut control: RequestControl,
+    sources: Option<(SourceInput, SourceInput)>,
+    canonical: bool,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    let mut params: CompareParams =
         serde_json::from_value(arguments.clone()).map_err(|error| invalid(error.to_string()))?;
+    params.canonical = canonical;
     control.macro_work_limit = params.macro_work_limit;
     params.base.validate().map_err(invalid)?;
     if params.output.continuation.is_some()
@@ -575,12 +690,18 @@ fn comparison(
         let coverage = data.get("coverage").cloned().unwrap_or_else(|| json!({"before":{"complete":inputs[0]["complete"]},"after":{"complete":inputs[1]["complete"]}}));
         (data, inputs, coverage)
     } else {
-        let mut before = match comparison_source(
-            &params.base,
-            true,
-            params.expected_revision_a.as_deref(),
-            &control,
-        ) {
+        let acquire = |before: bool, expected: Option<&str>| {
+            if let Some((a, b)) = &sources {
+                source::resolve_source(
+                    if before { a.clone() } else { b.clone() },
+                    expected,
+                    &control,
+                )
+            } else {
+                comparison_source(&params.base, before, expected, &control)
+            }
+        };
+        let mut before = match acquire(true, params.expected_revision_a.as_deref()) {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 return failed_comparison_source(
@@ -591,12 +712,7 @@ fn comparison(
                 )
             }
         };
-        let mut after = match comparison_source(
-            &params.base,
-            false,
-            params.expected_revision_b.as_deref(),
-            &control,
-        ) {
+        let mut after = match acquire(false, params.expected_revision_b.as_deref()) {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 return failed_comparison_source(
@@ -900,7 +1016,19 @@ fn project_comparison(
                 .any(|selected| selected == section)
         }
     };
-    let mut pages = Pages::new("dynare_compare_models", revision, arguments, &params.output)?;
+    let mut pages = Pages::new(
+        if params.canonical {
+            "v3:dynare_compare_models"
+        } else {
+            "dynare_compare_models"
+        },
+        revision,
+        arguments,
+        &params.output,
+    )?;
+    if params.canonical {
+        pages.share_budget();
+    }
     let semantic_complete = data["semantic"]["availability"] == "complete";
     let source_complete = data["source_changes"]["availability"] == "complete";
     let mut pointer_map = BTreeMap::new();
