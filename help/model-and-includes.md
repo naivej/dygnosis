@@ -38,8 +38,9 @@ The choice controls editor diagnostics, definitions, references, Outline,
 model counts, equation navigation and the macro preview. Rename also checks
 the other known models that use files it would change. Unsaved edits update
 the chosen model's analysis. If an edit removes the include relationship, the
-editor resolves the context again. Closing the file, restarting the server or
-changing workspace folders clears the choice; reopening uses the rules above.
+editor resolves the context again. Closing the file's last editor tab in VS Code,
+restarting the server or changing workspace folders clears the choice; reopening
+uses the rules above.
 
 Project-wide checking remains separate. It checks each selected saved model
 root and reports counts for that root. Choosing a helper's editor owner does

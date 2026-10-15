@@ -36,8 +36,9 @@ function matches(pattern, value) {
 const flush = () => new Promise(resolve => setImmediate(resolve));
 let host;
 class TabInputText { constructor(uri) { this.uri = uri; } }
+class TabInputTextDiff { constructor(original, modified) { this.original = original; this.modified = modified; } }
 const vscode = {
-  Disposable, EventEmitter: Emitter, Uri, TabInputText, ViewColumn: { Beside: 2, One: 1 },
+  Disposable, EventEmitter: Emitter, Uri, TabInputText, TabInputTextDiff, ViewColumn: { Beside: 2, One: 1 },
   DocumentLink: class { constructor(range, target) { this.range = range; this.target = target; } },
   Range: class { constructor(...coordinates) { this.coordinates = coordinates; } },
   RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } }, CancellationTokenSource,
@@ -45,7 +46,7 @@ const vscode = {
     showInformationMessage: message => { host.notifications.push(message); return Promise.resolve(); },
     get activeTextEditor() { return host.editor; },
     get visibleTextEditors() { return host.visibleEditors ?? (host.editor ? [host.editor] : []); },
-    tabGroups: { get all() { return host.tabGroups ?? []; } },
+    tabGroups: { get all() { return host.tabGroups ?? []; }, onDidChangeTabs: listener => host.tabsChanged.event(listener) },
     createOutputChannel: () => ({ appendLine() {}, append() {}, show() {}, dispose() {} }),
     showErrorMessage: () => Promise.resolve(undefined), showQuickPick: items => { host.picks.push(items); return Promise.resolve(host.pick ? host.pick(items) : items[0]); },
     showTextDocument: (document, options) => { host.opened.push(document.uri.toString()); host.reveals.push({ document, options }); return Promise.resolve({ document }); },
@@ -78,7 +79,7 @@ Module._load = originalLoad;
 function reset() {
   host = { documents: [], folders: [{ uri: Uri.parse("file:///project"), name: "project" }], settings: {}, commands: new Map(), opened: [], reveals: [], managed: [], watchers: [], notifications: [], picks: [], symbols: 0,
     visibleEditors: undefined, tabGroups: [] };
-  for (const name of ["created", "disk", "deleted", "open", "edit", "close", "folder", "config"]) host[name] = new Emitter();
+  for (const name of ["created", "disk", "deleted", "open", "edit", "close", "folder", "config", "tabsChanged"]) host[name] = new Emitter();
 }
 function model(root = "file:///project/root.mod", related = []) {
   return { schema_version: 1, root_uri: root, document_uri: root, document_version: 1, revision: "one", complete: false,
@@ -260,6 +261,76 @@ test("older engines keep the useful model choice and explain the unsynchronized 
     assert.match(messages[0], /model information and macro preview/);
     assert.match(messages[0], /diagnostics.*automatic context.*selected engine cannot accept owner choices/);
     assert.match(messages[0], /bundled binary.*dynare.serverPath/);
+  } finally { await client.shutdown(); }
+});
+test("closing the last text tab resets a retained document's native and server context", async () => {
+  reset(); const client = service({ documentContext: true }); await client.ensureStarted();
+  const root = Uri.parse("file:///project/root.mod"), helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 1 };
+  host.documents.push(helper); const mutations = [];
+  host.managed[0].client.sendRequest = (_method, params) => {
+    const arg = params.arguments[0];
+    if (params.command === "dynare/setDocumentContext") { mutations.push(arg); return Promise.resolve({ schema_version: 1 }); }
+    return Promise.resolve({ ...model(arg.root_uri, [{ kind: "include", filename: "helper.mod", resolved: true, path: helper.uri.fsPath }]), document_uri: arg.document_uri });
+  };
+  try {
+    await client.applyOwner(helper, root);
+    const tab = { input: new TabInputText(helper.uri) }; host.tabGroups = [];
+    host.tabsChanged.fire({ closed: [tab], opened: [], changed: [] }); await flush();
+    assert.equal(helper.isClosed, undefined, "VS Code can retain the TextDocument after its last tab closes");
+    assert.equal(client.chosenRootForDocument(helper), undefined);
+    assert.deepEqual(mutations.at(-1), { document_uri: helper.uri.toString(), document_version: 1, root_uri: null });
+  } finally { await client.shutdown(); }
+});
+test("another text or diff view retains context until the last matching tab closes", async () => {
+  reset(); const client = service({ documentContext: true }); await client.ensureStarted();
+  const root = Uri.parse("file:///project/root.mod"), helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 1 };
+  host.documents.push(helper); const mutations = [];
+  host.managed[0].client.sendRequest = (_method, params) => {
+    const arg = params.arguments[0];
+    if (params.command === "dynare/setDocumentContext") { mutations.push(arg.root_uri); return Promise.resolve({ schema_version: 1 }); }
+    return Promise.resolve({ ...model(arg.root_uri, [{ kind: "include", filename: "helper.mod", resolved: true, path: helper.uri.fsPath }]), document_uri: arg.document_uri });
+  };
+  try {
+    await client.applyOwner(helper, root);
+    const textTab = { input: new TabInputText(helper.uri) }, diffTab = { input: new TabInputTextDiff(Uri.parse("file:///project/before.mod"), helper.uri) };
+    host.tabGroups = [{ tabs: [diffTab] }]; host.tabsChanged.fire({ closed: [textTab], opened: [], changed: [] }); await flush();
+    assert.equal(client.chosenRootForDocument(helper).toString(), root.toString()); assert.deepEqual(mutations, [root.toString()]);
+    host.tabGroups = []; host.tabsChanged.fire({ closed: [diffTab], opened: [], changed: [] }); await flush();
+    assert.equal(client.chosenRootForDocument(helper), undefined); assert.deepEqual(mutations, [root.toString(), null]);
+  } finally { await client.shutdown(); }
+});
+test("last-tab closure clears an accepted owner and prevents its delayed acknowledgment from restoring it", async () => {
+  reset(); const client = service({ documentContext: true }); await client.ensureStarted();
+  const root = Uri.parse("file:///project/root.mod"), helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 1 };
+  host.documents.push(helper); const acknowledgment = deferred(); let serverOwner;
+  host.managed[0].client.sendRequest = (_method, params) => {
+    const arg = params.arguments[0];
+    if (params.command === "dynare/setDocumentContext") { serverOwner = arg.root_uri; return arg.root_uri === null ? Promise.resolve({ schema_version: 1 }) : acknowledgment.promise; }
+    return Promise.resolve({ ...model(arg.root_uri, [{ kind: "include", filename: "helper.mod", resolved: true, path: helper.uri.fsPath }]), document_uri: arg.document_uri });
+  };
+  try {
+    const pending = client.applyOwner(helper, root); await flush(); assert.equal(serverOwner, root.toString());
+    host.tabGroups = []; host.tabsChanged.fire({ closed: [{ input: new TabInputText(helper.uri) }], opened: [], changed: [] }); await flush();
+    acknowledgment.resolve({ schema_version: 1 }); await assert.rejects(pending, /replaced this choice/);
+    assert.equal(serverOwner, null); assert.equal(client.chosenRootForDocument(helper), undefined);
+  } finally { await client.shutdown(); }
+});
+test("a background tab-reset refusal logs the cleared choice and actual cause without a popup", async () => {
+  reset(); const client = service({ documentContext: true }); await client.ensureStarted();
+  const root = Uri.parse("file:///project/root.mod"), helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 1 };
+  host.documents.push(helper); const logs = []; client.log = message => logs.push(message);
+  host.managed[0].client.sendRequest = (_method, params) => {
+    const arg = params.arguments[0];
+    if (params.command === "dynare/setDocumentContext") return Promise.resolve(arg.root_uri === null ? { error: "The displayed document version changed." } : { schema_version: 1 });
+    return Promise.resolve({ ...model(arg.root_uri, [{ kind: "include", filename: "helper.mod", resolved: true, path: helper.uri.fsPath }]), document_uri: arg.document_uri });
+  };
+  try {
+    await client.applyOwner(helper, root);
+    const before = host.notifications.filter(value => typeof value === "string").length;
+    host.tabsChanged.fire({ closed: [{ input: new TabInputText(helper.uri) }], opened: [], changed: [] }); await flush();
+    assert.equal(client.chosenRootForDocument(helper), undefined);
+    assert.ok(logs.some(message => /choice was cleared.*diagnostics could not return to automatic context.*displayed document version changed/.test(message)));
+    assert.equal(host.notifications.filter(value => typeof value === "string").length, before);
   } finally { await client.shutdown(); }
 });
 test("a delayed accepted context keeps client and server aligned when the source-jump guard expires", async () => {

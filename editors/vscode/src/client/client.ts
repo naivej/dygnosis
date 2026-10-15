@@ -188,12 +188,43 @@ export class DygnosisClient implements vscode.Disposable {
         else void this.sendSettings().catch(error => this.log(String(error)));
       }),
     );
+    const tabChanges = vscode.window.tabGroups.onDidChangeTabs?.(event => this.closeEditorTabs(event.closed));
+    if (tabChanges) this.disposables.push(tabChanges);
   }
   get client(): LanguageClient | undefined { return this.lifecycle.client?.client; }
   get currentInstance(): number { return this.instance; }
   get supportsModelInfo(): boolean { return this.modelInfoSupported; }
   private pruneSourceLinks(source: vscode.Uri, version?: number): void {
     for (const [key, link] of this.includeLinks) if (sameUri(link.source, source) && link.version !== version) this.includeLinks.delete(key);
+  }
+  private closeEditorTabs(closed: readonly vscode.Tab[]): void {
+    const remaining = vscode.window.tabGroups.all.flatMap(group => group.tabs.flatMap(tab => textTabUris(tab.input)));
+    const documents = new Map<string, vscode.TextDocument>();
+    for (const uri of closed.flatMap(tab => textTabUris(tab.input))) {
+      if (remaining.some(open => sameUri(open, uri))) continue;
+      const document = vscode.workspace.textDocuments.find(candidate => isAnalysisDocument(candidate) && sameUri(candidate.uri, uri));
+      if (document) documents.set(document.uri.toString(), document);
+    }
+    for (const [key, document] of documents) {
+      const hasChoice = this.selectedOwners.has(key) || this.standaloneDocuments.has(key) || this.contextGenerations.has(key);
+      if (!hasChoice) continue;
+      this.clearDocumentContext(key);
+      this.changed.fire(); this.scheduleSymbolRefresh();
+      // VS Code can retain its TextDocument after the final editor tab closes.
+      // Clear the server choice now; a later didClose also clears it normally.
+      void this.resetRetainedDocumentContext(document, this.contextLifecycles.get(key)!);
+    }
+  }
+  private async resetRetainedDocumentContext(document: vscode.TextDocument, lifecycle: number): Promise<void> {
+    const client = this.client, key = document.uri.toString();
+    if (!client || !this.documentContextSupported || this.closed || document.isClosed || this.contextLifecycles.get(key) !== lifecycle) return;
+    try {
+      const result: unknown = await client.sendRequest(ExecuteCommandRequest.type, { command: "dynare/setDocumentContext", arguments: [{ document_uri: key, document_version: document.version, root_uri: null }] });
+      if (record(result) && typeof result.error === "string") throw new Error(result.error);
+      if (record(result) && result.success === false && typeof result.message === "string") throw new Error(result.message);
+    } catch (error) {
+      this.log(`The editor model choice was cleared, but diagnostics could not return to automatic context: ${String(error)}`);
+    }
   }
   log = (message: string): void => this.output.appendLine(message);
   private watch(watcher: vscode.FileSystemWatcher, target?: vscode.Uri): vscode.Disposable {
@@ -668,6 +699,11 @@ export class DygnosisClient implements vscode.Disposable {
     return this.shutdownPromise;
   }
   dispose(): void { void this.shutdown(); }
+}
+function textTabUris(input: vscode.Tab["input"]): vscode.Uri[] {
+  if (input instanceof vscode.TabInputText) return [input.uri];
+  if (input instanceof vscode.TabInputTextDiff) return [input.original, input.modified];
+  return [];
 }
 /** Prefer a visible or hidden text tab after async validation; otherwise open beside. */
 function reuseOpenViewColumn(uri: vscode.Uri): vscode.ViewColumn {

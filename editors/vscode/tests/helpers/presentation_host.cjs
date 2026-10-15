@@ -158,8 +158,11 @@ async function checkOwnerContexts(service, workspaceRoot, evidence, { waitFor, c
   await currentSnapshot(service, second, () => service.modelInfo(second.uri), "second parent snapshot");
   await vscode.window.showTextDocument(helper);
   await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+  await waitFor(() => !vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === helper.uri.toString())) &&
+    service.chosenRootForDocument(helper) === undefined, "last helper editor tab closes and clears its explicit context");
   const reopened = await vscode.workspace.openTextDocument(helperPath);
   await vscode.window.showTextDocument(reopened);
+  assert.equal(service.chosenRootForDocument(reopened), undefined, "reopening a retained document must not restore the old explicit owner");
   await waitFor(async () => {
     await service.ownerChoices(reopened);
     return service.knownOwners(reopened.uri).length === 2 && await service.rootForDocument(reopened) === undefined;
