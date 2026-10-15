@@ -1218,11 +1218,13 @@ mod tests {
         let mut owner_entry = RootEntry::pending();
         owner_entry.due = None;
         owner_entry.state = "checked";
+        owner_entry.revision = Some("checked-owner".into());
         owner_entry.identity = normalize_uri(owner.as_str());
         owner_entry.owner_files.insert(key.clone());
         let mut self_entry = RootEntry::pending();
         self_entry.due = None;
         self_entry.state = "checked";
+        self_entry.revision = Some("checked-include".into());
         self_entry.identity = key;
         self_entry
             .owner_files
