@@ -1152,7 +1152,7 @@ fn quoted_consumer_reach_audit_keeps_shipped_fire_and_quiet_cases() {
 
 #[test]
 fn quoted_tags_long_names_and_partition_values_expand_in_execution_order() {
-    let source = "@#for j in 1:2\nvar y@{j}(long_name='Output @{j}😀',sector='s@{j}');\n@#endfor\nmodel;\n@#for j in 1:2\n[name='eq@{j}',mcp='y@{j} >= 0'] y@{j}=y@{j}(-1);\n@#endfor\nend;";
+    let source = "@#for j in 1:2\nvar y@{j}(long_name='Output @{j}😀',sector='s@{j}');\n@#endfor\nmodel;\n@#for j in 1:2\n[name='eq@{j}',mcp='y@{j} > 0'] y@{j}=y@{j}(-1);\n@#endfor\nend;";
     let model = parse(source);
     assert!(!model.macro_incomplete());
     assert_eq!(
@@ -1171,7 +1171,7 @@ fn quoted_tags_long_names_and_partition_values_expand_in_execution_order() {
             .collect::<Vec<_>>(),
         ["eq1", "eq2"]
     );
-    assert_eq!(model.equations[0].tag_map["mcp"], "y1 >= 0");
+    assert_eq!(model.equations[0].tag_map["mcp"], "y1 > 0");
     let report = expand_report(source);
     assert!(report.complete && report.navigation_complete);
     assert!(report.effective_text.contains("sector = 's2'"));

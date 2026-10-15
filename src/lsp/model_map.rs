@@ -650,6 +650,29 @@ impl<'a> WrittenView<'a> {
             }
         }
         append_expression_run(&mut output, &mut expressions);
+        if enabled("declarations") {
+            for (name, target, span, function) in
+                crate::lsp::syntax_intel::macro_definitions(self.text)
+            {
+                if let (Some(range), Some(selection)) = (
+                    written_range(self.text, span),
+                    written_range(self.text, target),
+                ) {
+                    output.push(symbol(
+                        name,
+                        Some("macro definition".into()),
+                        if function {
+                            SymbolKind::FUNCTION
+                        } else {
+                            SymbolKind::CONSTANT
+                        },
+                        range,
+                        selection,
+                        Vec::new(),
+                    ));
+                }
+            }
+        }
         output.sort_by_key(|row| range_key(row.range));
         output
     }
@@ -701,4 +724,91 @@ pub(crate) fn common_leaves(views: Vec<Vec<DocumentSymbol>>) -> Vec<DocumentSymb
     common.sort_by_key(|row| range_key(row.range));
     common.dedup();
     common
+}
+
+/// Named declaration children share the engine's accepted binding/source proof.
+/// Repeated executions at one literal source target create one Outline leaf.
+pub(crate) fn add_binding_symbols(
+    rows: &mut Vec<DocumentSymbol>,
+    model: &crate::engine::analysis::symbols::SemanticModel,
+    uri: &Url,
+    text: &str,
+    preferences: &PresentationSettings,
+) {
+    fn present(rows: &[DocumentSymbol], name: &str, target: Range) -> bool {
+        rows.iter().any(|row| {
+            (row.name == name && row.selection_range == target)
+                || row
+                    .children
+                    .as_ref()
+                    .is_some_and(|children| present(children, name, target))
+        })
+    }
+    fn insert(rows: &mut [DocumentSymbol], leaf: &DocumentSymbol) -> bool {
+        let owner = rows
+            .iter_mut()
+            .filter(|row| contains(row.range, leaf.range))
+            .min_by_key(|row| {
+                (
+                    row.range.end.line - row.range.start.line,
+                    row.range
+                        .end
+                        .character
+                        .saturating_sub(row.range.start.character),
+                )
+            });
+        let Some(owner) = owner else {
+            return false;
+        };
+        let children = owner.children.get_or_insert_with(Vec::new);
+        if !insert(children, leaf) {
+            children.push(leaf.clone());
+            children.sort_by_key(|row| range_key(row.range));
+        }
+        true
+    }
+    let file = normalize_uri(uri.as_str());
+    for binding in model.bindings() {
+        let (section, icon) = match binding.kind.as_str() {
+            "heterogeneity_dimension" => ("dimensions", SymbolKind::NAMESPACE),
+            "database" => ("declarations", SymbolKind::NAMESPACE),
+            "var_model" | "trend_component_model" | "var_expectation_model" | "pac_model" => {
+                ("commands", SymbolKind::OBJECT)
+            }
+            "named_subsample" => ("commands", SymbolKind::CONSTANT),
+            "trend_var" | "log_trend_var" => ("declarations", SymbolKind::VARIABLE),
+            "external_function" => ("declarations", SymbolKind::FUNCTION),
+            _ => continue,
+        };
+        if !preferences
+            .outline
+            .sections
+            .iter()
+            .any(|value| value == section)
+        {
+            continue;
+        }
+        let Some((target_file, span)) = &binding.declaration else {
+            continue;
+        };
+        if target_file != &file {
+            continue;
+        }
+        let Some(range) = written_range(text, *span) else {
+            continue;
+        };
+        if present(rows, &binding.name, range) {
+            continue;
+        }
+        let detail = binding
+            .namespace
+            .as_ref()
+            .map(|namespace| format!("{} · {namespace}", binding.kind.replace('_', " ")))
+            .unwrap_or_else(|| binding.kind.replace('_', " "));
+        let leaf = symbol(binding.name, Some(detail), icon, range, range, Vec::new());
+        if !insert(rows, &leaf) {
+            rows.push(leaf);
+        }
+    }
+    rows.sort_by_key(|row| range_key(row.range));
 }

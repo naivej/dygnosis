@@ -11,22 +11,52 @@ use crate::engine::diagnostics::{Diagnostic, Severity};
 use crate::engine::language::expr::{BinOp, ExprId, ExprKind};
 use crate::engine::language::intern::Name;
 use crate::engine::language::model::{
-    Decl, Equation, HeterogeneousModelBlock, Model, PolicyCommand, ShockBlock, ShockBlockKind,
-    ShockKind,
+    Equation, HeterogeneousModelBlock, Model, PolicyCommand, ShockBlock, ShockBlockKind, ShockKind,
 };
 use crate::engine::language::span::{LineIndex, Span};
 
 const W207: &str = "Dynare 7.2 cannot load or compute a heterogeneous steady state with more than one heterogeneity dimension.";
 
 pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
+    parse_rows(model)
+        .into_iter()
+        .map(|(diagnostic, _)| diagnostic)
+        .collect()
+}
+
+/// Parse receipts retain the callback order, separately from the display span.
+pub(crate) fn parse_refusals(model: &Model) -> Vec<(Diagnostic, usize)> {
     let mut out = Vec::new();
-    unknown_and_repeated_dimensions(model, &mut out);
-    forbidden_symbols(model, &mut out);
-    sum_operators(model, &mut out);
+    unknown_and_repeated_dimensions(model, &mut out, true);
+    forbidden_symbols(model, &mut out, true);
+    sum_operators(model, &mut out, true);
+    for block in &model.shock_blocks {
+        if block.kind == ShockBlockKind::Heterogeneous
+            && let Some(row) = heterogeneous_shock_row_refusal(model, block)
+        {
+            out.push(row);
+        }
+    }
+    out.extend(mcp_refusals(model));
+    out
+}
+
+fn parse_rows(model: &Model) -> Vec<(Diagnostic, usize)> {
+    let mut out = Vec::new();
+    unknown_and_repeated_dimensions(model, &mut out, false);
+    forbidden_symbols(model, &mut out, false);
+    sum_operators(model, &mut out, false);
     out
 }
 
 pub fn check_mcp(model: &Model) -> Vec<Diagnostic> {
+    mcp_refusals(model)
+        .into_iter()
+        .map(|(diagnostic, _)| diagnostic)
+        .collect()
+}
+
+fn mcp_refusals(model: &Model) -> Vec<(Diagnostic, usize)> {
     let mut out = Vec::new();
     for block in &model.heterogeneous_models {
         if crate::engine::control::cancelled() {
@@ -50,10 +80,13 @@ pub fn check_mcp(model: &Model) -> Vec<Diagnostic> {
             if lhs.is_empty() || !symbol_declared(model, lhs) {
                 continue;
             }
-            out.push(error(
-                eq.span,
-                "E479",
-                "'mcp' tags are not allowed in heterogeneous model blocks",
+            out.push((
+                error(
+                    eq.span,
+                    "E479",
+                    "'mcp' tags are not allowed in heterogeneous model blocks",
+                ),
+                eq.active_tokens.end,
             ));
             return out;
         }
@@ -208,88 +241,81 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
     out
 }
 
-fn unknown_and_repeated_dimensions(model: &Model, out: &mut Vec<Diagnostic>) {
+fn unknown_and_repeated_dimensions(model: &Model, out: &mut Vec<(Diagnostic, usize)>, all: bool) {
     let mut seen = HashSet::new();
     for dim in &model.heterogeneity_dimensions {
         if crate::engine::control::cancelled() {
-            return Default::default();
+            return;
         }
         if !seen.insert(dim.name) {
-            out.push(error(
-                dim.name_span,
-                "E460",
-                format!(
-                    "Heterogeneity dimension '{}' already declared",
-                    model.name(dim.name)
+            out.push((
+                error(
+                    dim.name_span,
+                    "E460",
+                    format!(
+                        "Heterogeneity dimension '{}' already declared",
+                        model.name(dim.name)
+                    ),
                 ),
+                dim.parse_order,
             ));
-            return;
+            if !all {
+                return;
+            }
         }
     }
-    let known: HashSet<Name> = model
-        .heterogeneity_dimensions
+    let mut slots: Vec<_> = model
+        .named_slots
         .iter()
-        .map(|dim| dim.name)
+        .filter(|slot| {
+            matches!(
+                slot.owner,
+                crate::engine::language::model::NamedSlotOwner::DimensionLookup
+                    | crate::engine::language::model::NamedSlotOwner::HeterogeneousShock(_)
+            )
+        })
         .collect();
-    for decl in model
-        .endogenous
-        .iter()
-        .chain(&model.exogenous)
-        .chain(&model.parameters)
-    {
-        if let Some((name, span)) = decl.heterogeneity
-            && !known.contains(&name)
+    slots.sort_by_key(|slot| slot.callback_order);
+    let duplicates = crate::engine::diagnostics::check_w110::completed_parse_duplicates(model);
+    for slot in slots {
+        if let crate::engine::language::model::NamedSlotOwner::HeterogeneousShock(index) =
+            slot.owner
+            && let Some(block) = model.shock_blocks.get(index)
+            && (heterogeneous_shock_row_unknown(model, block)
+                || block.stochastic.iter().any(|row| {
+                    duplicates
+                        .iter()
+                        .any(|(_, order)| *order == row.parse_order)
+                }))
         {
-            out.push(error(
-                span,
-                "E459",
-                format!("Unknown heterogeneity dimension: {}", model.name(name)),
-            ));
-            return;
+            continue;
         }
-    }
-    for block in &model.heterogeneous_models {
-        if crate::engine::control::cancelled() {
-            return Default::default();
-        }
-        if !known.contains(&block.dimension) {
-            out.push(error(
-                block.dimension_span,
-                "E459",
-                format!(
-                    "Unknown heterogeneity dimension: {}",
-                    model.name(block.dimension)
+        if !model.heterogeneity_dimensions.iter().any(|dimension| {
+            dimension.name == slot.name && dimension.parse_order < slot.callback_order
+        }) {
+            out.push((
+                error(
+                    slot.span,
+                    "E459",
+                    format!("Unknown heterogeneity dimension: {}", model.name(slot.name)),
                 ),
+                slot.callback_order,
             ));
-            return;
-        }
-    }
-    for shock in &model.shock_blocks {
-        if crate::engine::control::cancelled() {
-            return Default::default();
-        }
-        if shock.kind != ShockBlockKind::Heterogeneous {
-            continue;
-        }
-        if heterogeneous_shock_row_unknown(model, shock) {
-            // The binary reports `Unknown symbol` and exits before the
-            // dimension sentence when the row name is also unknown.
-            continue;
-        }
-        if let Some((name, span)) = shock.options.heterogeneity
-            && !known.contains(&name)
-        {
-            out.push(error(
-                span,
-                "E459",
-                format!("Unknown heterogeneity dimension: {}", model.name(name)),
-            ));
-            return;
+            if !all {
+                return;
+            }
         }
     }
 }
 
-fn heterogeneous_shock_row_unknown(model: &Model, block: &ShockBlock) -> bool {
+pub(crate) fn heterogeneous_shock_row_unknown(model: &Model, block: &ShockBlock) -> bool {
+    heterogeneous_shock_row_refusal(model, block).is_some()
+}
+
+fn heterogeneous_shock_row_refusal(
+    model: &Model,
+    block: &ShockBlock,
+) -> Option<(Diagnostic, usize)> {
     for stmt in &block.stochastic {
         if crate::engine::control::cancelled() {
             return Default::default();
@@ -304,36 +330,50 @@ fn heterogeneous_shock_row_unknown(model: &Model, block: &ShockBlock) -> bool {
                 return Default::default();
             }
             let declared = model
-                .endogenous
-                .iter()
-                .chain(&model.exogenous)
-                .chain(&model.deterministic_exogenous)
-                .chain(&model.parameters)
-                .any(|decl| decl.name == name && decl.span.start < stmt.span.start);
+                .symbol_kind_in_context(name, stmt.symbol_type_context)
+                .is_some();
             if !declared {
-                return true;
+                let order = model.expanded_token_origins.iter().position(|origin| {
+                    origin.start <= stmt.parse_order && stmt.parse_order < origin.end
+                })?;
+                let callback = model
+                    .fact_receipts
+                    .get("shock_instruction")
+                    .and_then(|rows| rows.iter().find(|row| row.parse_order == order))
+                    .and_then(|row| row.claims.iter().map(|claim| claim.end).max())
+                    .unwrap_or(order);
+                return Some((
+                    error(
+                        stmt.span,
+                        "E058",
+                        format!("Unknown symbol: {}.", model.name(name)),
+                    ),
+                    callback,
+                ));
             }
         }
     }
-    false
+    None
 }
 
-fn forbidden_symbols(model: &Model, out: &mut Vec<Diagnostic>) {
+fn forbidden_symbols(model: &Model, out: &mut Vec<(Diagnostic, usize)>, all: bool) {
     if let Some(expr) = model.planner_objective_expr
-        && let Some((span, name)) = first_het_ident(model, expr)
+        && let Some((span, name, order)) = first_het_ident(model, expr)
     {
-        out.push(error(
+        out.push((error(
                 span,
                 "E461",
                 format!(
                     "Symbol '{name}' cannot be used in 'planner_objective', because it is heterogeneous."
                 ),
-            ));
-        return;
+            ), order));
+        if !all {
+            return;
+        }
     }
     for constraint in &model.occbin_constraints {
         if crate::engine::control::cancelled() {
-            return Default::default();
+            return;
         }
         for piece in [
             constraint.bind.as_ref(),
@@ -345,55 +385,61 @@ fn forbidden_symbols(model: &Model, out: &mut Vec<Diagnostic>) {
         .flatten()
         {
             if let Some(expr) = piece.expr
-                && let Some((span, name)) = first_het_ident(model, expr)
+                && let Some((span, name, order)) = first_het_ident(model, expr)
             {
-                out.push(error(
+                out.push((error(
                         span,
                         "E462",
                         format!(
                             "Symbol '{name}' cannot be used in 'occbin_constraints', because it is heterogeneous."
                         ),
-                    ));
-                return;
+                    ), order));
+                if !all {
+                    return;
+                }
             }
         }
     }
     for assignment in &model.epilogue {
         if crate::engine::control::cancelled() {
-            return Default::default();
+            return;
         }
         if let Some(expr) = assignment.expr
-            && let Some((span, name)) = first_het_ident(model, expr)
+            && let Some((span, name, order)) = first_het_ident(model, expr)
         {
-            out.push(error(
+            out.push((error(
                     span,
                     "E464",
                     format!(
                         "Symbol '{name}' cannot be used in epilogue block, because it is heterogeneous."
                     ),
-                ));
-            return;
+                ), order));
+            if !all {
+                return;
+            }
         }
     }
     let outside = outside_exprs(model);
-    for expr in outside {
+    for (expr, _) in outside {
         if crate::engine::control::cancelled() {
-            return Default::default();
+            return;
         }
-        if let Some((span, name)) = first_het_ident(model, expr) {
-            out.push(error(
+        if let Some((span, name, order)) = first_het_ident(model, expr) {
+            out.push((error(
                 span,
                 "E463",
                 format!(
                     "Symbol '{name}' cannot be used outside model declaration, because it is heterogeneous."
                 ),
-            ));
-            return;
+            ), order));
+            if !all {
+                return;
+            }
         }
     }
 }
 
-fn outside_exprs(model: &Model) -> Vec<ExprId> {
+fn outside_exprs(model: &Model) -> Vec<(ExprId, std::ops::Range<usize>)> {
     let mut out = Vec::new();
     for assignment in model
         .param_assignments
@@ -403,7 +449,7 @@ fn outside_exprs(model: &Model) -> Vec<ExprId> {
         .chain(&model.endval)
     {
         if let Some(expr) = assignment.expr {
-            out.push(expr);
+            out.push((expr, assignment.active_tokens.clone()));
         }
     }
     for eq in &model.steady_state_equations {
@@ -413,38 +459,90 @@ fn outside_exprs(model: &Model) -> Vec<ExprId> {
         // Output names are checked by the steady-state target action, not by
         // the ordinary-expression heterogeneous-variable rule.
         if let Some(expr) = eq.rhs_expr {
-            out.push(expr);
+            out.push((expr, eq.active_tokens.clone()));
         }
     }
     out
 }
 
-fn sum_operators(model: &Model, out: &mut Vec<Diagnostic>) {
+fn sum_operators(model: &Model, out: &mut Vec<(Diagnostic, usize)>, all: bool) {
+    if all {
+        use crate::engine::language::constructor::DataTreeScope;
+        for (id, expr) in model.exprs.iter() {
+            if crate::engine::control::cancelled() {
+                return;
+            }
+            let ExprKind::Call { callee, .. } = &expr.kind else {
+                continue;
+            };
+            if !model.name(*callee).eq_ignore_ascii_case("sum") {
+                continue;
+            }
+            let diagnostic = match model.constructor_scopes.get(&id) {
+                Some(DataTreeScope::Heterogeneous(_)) => Some(error(
+                    expr.span,
+                    "E475",
+                    "The SUM() operator cannot be used inside a model(heterogeneity=...) block",
+                )),
+                Some(DataTreeScope::Dynamic) => aggregate_sum_call(model, id),
+                _ => None,
+            };
+            if let Some(diagnostic) = diagnostic {
+                out.push((
+                    diagnostic,
+                    model.constructor_orders.get(&id).copied().unwrap_or(0),
+                ));
+            }
+        }
+        return;
+    }
     for block in &model.heterogeneous_models {
         if crate::engine::control::cancelled() {
-            return Default::default();
+            return;
         }
         for eq in &block.equations {
             if crate::engine::control::cancelled() {
-                return Default::default();
+                return;
             }
             if let Some(span) = first_sum_call(model, eq) {
-                out.push(error(
-                    span,
-                    "E475",
-                    "The SUM() operator cannot be used inside a model(heterogeneity=...) block",
+                out.push((
+                    error(
+                        span,
+                        "E475",
+                        "The SUM() operator cannot be used inside a model(heterogeneity=...) block",
+                    ),
+                    crate::engine::diagnostics::parse_preflight::within(
+                        model,
+                        eq.active_tokens.clone(),
+                        span,
+                        true,
+                    )
+                    .unwrap_or(eq.parse_order),
                 ));
-                return;
+                if !all {
+                    return;
+                }
             }
         }
     }
     for eq in &model.equations {
         if crate::engine::control::cancelled() {
-            return Default::default();
+            return;
         }
         if let Some(diag) = aggregate_sum(model, eq) {
-            out.push(diag);
-            return;
+            out.push((
+                diag.clone(),
+                crate::engine::diagnostics::parse_preflight::within(
+                    model,
+                    eq.active_tokens.clone(),
+                    diag.span,
+                    true,
+                )
+                .unwrap_or(eq.parse_order),
+            ));
+            if !all {
+                return;
+            }
         }
     }
 }
@@ -468,7 +566,7 @@ fn walk_sum_span(model: &Model, id: ExprId, found: &mut Option<Span>) {
     }
     let expr = model.exprs.get(id);
     match &expr.kind {
-        ExprKind::Call { callee, args } if model.name(*callee).eq_ignore_ascii_case("sum") => {
+        ExprKind::Call { callee, .. } if model.name(*callee).eq_ignore_ascii_case("sum") => {
             *found = Some(expr.span);
         }
         ExprKind::Unary { arg, .. }
@@ -509,40 +607,49 @@ fn aggregate_sum(model: &Model, eq: &Equation) -> Option<Diagnostic> {
     found
 }
 
+fn aggregate_sum_call(model: &Model, id: ExprId) -> Option<Diagnostic> {
+    let expr = model.exprs.get(id);
+    let ExprKind::Call { args, .. } = &expr.kind else {
+        return None;
+    };
+    let argument = model.sum_arguments.get(&id).copied().unwrap_or_else(|| {
+        args.first()
+            .and_then(|arg| match model.exprs.get(*arg).kind {
+                ExprKind::Ident { name, timing, .. } if args.len() == 1 => {
+                    Some((name, timing, is_het_endo(model, *arg)))
+                }
+                _ => None,
+            })
+    });
+    let (code, message) = if argument.is_none() {
+        (
+            "E476",
+            "The argument to the SUM() operator must be a single variable",
+        )
+    } else if argument.is_some_and(|(_, timing, _)| timing != 0) {
+        (
+            "E477",
+            "The argument to the SUM() operator must not have a lead or lag",
+        )
+    } else if !argument.is_some_and(|(_, _, role)| role) {
+        (
+            "E478",
+            "The argument to the SUM() operator must be a heterogeneous endogenous variable",
+        )
+    } else {
+        return None;
+    };
+    Some(error(expr.span, code, message))
+}
+
 fn walk_aggregate_sum(model: &Model, id: ExprId, found: &mut Option<Diagnostic>) {
     if found.is_some() {
         return;
     }
     let expr = model.exprs.get(id);
     match &expr.kind {
-        ExprKind::Call { callee, args } if model.name(*callee).eq_ignore_ascii_case("sum") => {
-            let diag = if args.len() != 1 || !is_plain_ident(model, args[0]) {
-                error(
-                    expr.span,
-                    "E476",
-                    "The argument to the SUM() operator must be a single variable",
-                )
-            } else if ident_timing(model, args[0]) != 0 {
-                error(
-                    expr.span,
-                    "E477",
-                    "The argument to the SUM() operator must not have a lead or lag",
-                )
-            } else if !model
-                .sum_argument_roles
-                .get(&id)
-                .copied()
-                .unwrap_or_else(|| is_het_endo(model, args[0]))
-            {
-                error(
-                    expr.span,
-                    "E478",
-                    "The argument to the SUM() operator must be a heterogeneous endogenous variable",
-                )
-            } else {
-                return;
-            };
-            *found = Some(diag);
+        ExprKind::Call { callee, .. } if model.name(*callee).eq_ignore_ascii_case("sum") => {
+            *found = aggregate_sum_call(model, id);
         }
         ExprKind::Unary { arg, .. }
         | ExprKind::SteadyState { arg }
@@ -909,16 +1016,37 @@ fn showpos(timing: i32) -> String {
     }
 }
 
-fn first_het_ident(model: &Model, id: ExprId) -> Option<(Span, String)> {
-    let mut idents = Vec::new();
-    collect_idents(model, id, &mut idents);
-    idents.into_iter().find_map(|(name, _, span)| {
-        if is_het_symbol(model, name) {
-            Some((span, model.name(name).to_string()))
-        } else {
-            None
+fn first_het_ident(model: &Model, id: ExprId) -> Option<(Span, String, usize)> {
+    let expression = model.exprs.get(id);
+    match &expression.kind {
+        ExprKind::Ident {
+            name,
+            ident_span,
+            timing_span,
+            ..
+        } => model
+            .constructor_contexts
+            .get(&id)
+            .is_some_and(|context| model.heterogeneous_in_context(*name, *context))
+            .then(|| {
+                (
+                    Span {
+                        start: ident_span.start,
+                        end: timing_span.map_or(ident_span.end, |span| span.end),
+                    },
+                    model.name(*name).into(),
+                    model.constructor_orders.get(&id).copied().unwrap_or(0),
+                )
+            }),
+        ExprKind::Unary { arg, .. }
+        | ExprKind::SteadyState { arg }
+        | ExprKind::Expectation { arg, .. } => first_het_ident(model, *arg),
+        ExprKind::Binary { lhs, rhs, .. } => {
+            first_het_ident(model, *lhs).or_else(|| first_het_ident(model, *rhs))
         }
-    })
+        ExprKind::Call { args, .. } => args.iter().find_map(|arg| first_het_ident(model, *arg)),
+        _ => None,
+    }
 }
 
 fn collect_idents(model: &Model, id: ExprId, out: &mut Vec<(Name, i32, Span)>) {
@@ -1131,26 +1259,11 @@ fn json_text(model: &Model, id: ExprId) -> String {
     }
 }
 
-fn is_plain_ident(model: &Model, id: ExprId) -> bool {
-    matches!(model.exprs.get(id).kind, ExprKind::Ident { .. })
-}
-
-fn ident_timing(model: &Model, id: ExprId) -> i32 {
-    match &model.exprs.get(id).kind {
-        ExprKind::Ident { timing, .. } => *timing,
-        _ => 0,
-    }
-}
-
 fn is_het_endo(model: &Model, id: ExprId) -> bool {
     match &model.exprs.get(id).kind {
         ExprKind::Ident { name, .. } => model.is_heterogeneous_endogenous(*name),
         _ => false,
     }
-}
-
-fn is_het_symbol(model: &Model, name: Name) -> bool {
-    decl_with_het(model, name).is_some()
 }
 
 fn is_het_exo_name(model: &Model, name: Name) -> bool {
@@ -1174,15 +1287,6 @@ fn het_exo_in(model: &Model, name: Name, dim: Name) -> bool {
         .any(|decl| decl.name == name && model.final_heterogeneity(decl) == Some(dim))
 }
 
-fn decl_with_het(model: &Model, name: Name) -> Option<&Decl> {
-    model
-        .endogenous
-        .iter()
-        .chain(&model.exogenous)
-        .chain(&model.parameters)
-        .find(|decl| decl.name == name && model.final_heterogeneity(decl).is_some())
-}
-
 fn symbol_declared(model: &Model, name: &str) -> bool {
     model
         .endogenous
@@ -1196,4 +1300,36 @@ fn symbol_declared(model: &Model, name: &str) -> bool {
 
 fn error(span: Span, code: &str, message: impl Into<String>) -> Diagnostic {
     Diagnostic::new(span, Severity::Error, code, message)
+}
+
+#[cfg(test)]
+mod parse_receipt_tests {
+    use super::*;
+    use crate::engine::language::parser::parse;
+
+    // A later dimension declaration must not validate the earlier lookup;
+    // SUM's refusal belongs to its closing call, while Check-only failures
+    // must not stop an otherwise accepted Parse prefix.
+    #[test]
+    fn parse_receipts_keep_callback_order_and_exclude_check_failures() {
+        let model = parse("var(heterogeneity=later) x;heterogeneity_dimension later;");
+        let rows = parse_refusals(&model);
+        let (_, order) = rows.iter().find(|(row, _)| row.code == "E459").unwrap();
+        assert!(*order < model.heterogeneity_dimensions[0].parse_order);
+
+        let model = parse(include_str!(
+            "../../../tests/fixtures/d_hank/e475_sum_het.mod"
+        ));
+        let (_, order) = parse_refusals(&model)
+            .into_iter()
+            .find(|(row, _)| row.code == "E475")
+            .unwrap();
+        assert_eq!(model.expanded_tokens[order - 1].text(&model.source), ")");
+
+        let model = parse(include_str!(
+            "../../../tests/fixtures/d_hank/e474_stoch.mod"
+        ));
+        assert!(check_check(&model).iter().any(|row| row.code == "E474"));
+        assert!(parse_refusals(&model).is_empty());
+    }
 }

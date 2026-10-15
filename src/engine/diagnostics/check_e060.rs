@@ -210,49 +210,22 @@ pub fn check_e064(model: &Model) -> Vec<Diagnostic> {
 }
 
 pub fn check_e065(model: &Model) -> Vec<Diagnostic> {
-    let exo: HashSet<Name> = model.exogenous.iter().map(|d| d.name).collect();
-    if exo.is_empty() {
-        return Vec::new();
-    }
-    let mut diagnostics = Vec::new();
-    for eq in &model.equations {
-        if crate::engine::control::cancelled() {
-            return Default::default();
-        }
-        let mut operands = Vec::new();
-        if let Some(id) = eq.lhs_expr {
-            collect_steady_state_operands(&model.exprs, id, &mut operands);
-        }
-        if let Some(id) = eq.rhs_expr {
-            collect_steady_state_operands(&model.exprs, id, &mut operands);
-        }
-        for arg in operands {
-            if crate::engine::control::cancelled() {
-                return Default::default();
-            }
-            let mut names: Vec<String> = model
-                .exprs
-                .walk_idents(arg)
-                .filter(|r| exo.contains(&r.name))
-                .map(|r| model.name(r.name).to_string())
-                .collect();
-            names.sort();
-            names.dedup();
-            if names.is_empty() {
-                continue;
-            }
-            let joined = names.join(", ");
-            diagnostics.push(Diagnostic::new(
-                eq.span,
-                Severity::Error,
-                "E065",
-                format!(
-                    "Exogenous variables are not allowed in the context of the STEADY_STATE() operator: {joined}."
-                ),
-            ));
-        }
-    }
-    diagnostics
+    parse_refusals(model)
+        .into_iter()
+        .map(|(diagnostic, _)| diagnostic)
+        .collect()
+}
+
+/// E065 is a constructor-time Parse refusal. E381 belongs to Write and is
+/// deliberately absent from the accepted Parse frontier.
+pub(crate) fn parse_refusals(model: &Model) -> Vec<(Diagnostic, usize)> {
+    model.steady_state_actions.iter().filter(|action| !action.exogenous.is_empty())
+        .map(|action| {
+            let span = model.written_equations.iter().find(|row| row.equation.active_tokens.contains(&action.order.saturating_sub(1)))
+                .map_or(action.span, |row| row.equation.span);
+            let names = action.exogenous.iter().map(|name| model.name(*name)).collect::<Vec<_>>().join(", ");
+            (Diagnostic::new(span, Severity::Error, "E065", format!("Exogenous variables are not allowed in the context of the STEADY_STATE() operator: {names}.")), action.order)
+        }).collect()
 }
 
 pub fn check_w061(ws: &mut Workspace, uri: &str) -> Vec<Diagnostic> {

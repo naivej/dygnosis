@@ -98,7 +98,12 @@ async fn missing_symbol_source_uses_corresponding_declaration() {
         ("varobs", "observables"),
         ("varexobs", "observables"),
     ] {
-        let plain = format!("// source\n\n  {keyword} existing;\n");
+        let declarations = match keyword {
+            "varobs" => "var existing extra;",
+            "varexobs" => "varexo existing extra;",
+            _ => "",
+        };
+        let plain = format!("// source\n{declarations}\n  {keyword} existing;\n");
         let changed = plain.replace("existing;", "existing extra;");
         for (before, after, missing) in [
             (plain.as_str(), changed.as_str(), "before"),
@@ -797,8 +802,8 @@ async fn retained_families_and_prior_shapes_agree_across_current_and_snapshot_co
         ),
         (
             "occbin",
-            "occbin_constraints; name 'ELB'; bind y<0; relax y>1; end;",
-            "occbin_constraints; name 'ELB'; bind y<.1; relax y>1; end;",
+            "model; [name='policy',bind='ELB'] y=0; [name='policy',relax='ELB'] y=y(-1); end; occbin_constraints; name 'ELB'; bind y<0; relax y>1; end;",
+            "model; [name='policy',bind='ELB'] y=0; [name='policy',relax='ELB'] y=y(-1); end; occbin_constraints; name 'ELB'; bind y<.1; relax y>1; end;",
         ),
         ("policy", "planner_objective y^2;", "planner_objective y^3;"),
         (
@@ -828,8 +833,8 @@ async fn retained_families_and_prior_shapes_agree_across_current_and_snapshot_co
         ),
         (
             "ms_sbvar",
-            "sbvar(coefficient_prior_hyperparameters=[1,2,3]);",
-            "sbvar(coefficient_prior_hyperparameters=[1,3,2]);",
+            "sbvar(coefficients_prior_hyperparameters=[1,2,3]);",
+            "sbvar(coefficients_prior_hyperparameters=[1,3,2]);",
         ),
         (
             "identification",
@@ -858,8 +863,8 @@ async fn retained_families_and_prior_shapes_agree_across_current_and_snapshot_co
         ),
         (
             "filter",
-            "filter_initial_state; y(-1)=1; end;",
-            "filter_initial_state; y(-1)=2; end;",
+            "filter_initial_state; y(0)=1; end;",
+            "filter_initial_state; y(0)=2; end;",
         ),
         (
             "homotopy",
@@ -1076,7 +1081,12 @@ fn retained_block_cards_keep_written_syntax_and_omit_unchanged_siblings() {
             "priors",
         ),
     ] {
-        let before = format!("{BASE}{block};\n{changed}\n{unchanged}\nend;");
+        let base = if block == "filter_initial_state" {
+            BASE.replace("y=a*y(-1)+e;", "y=a*y(-1)+b*y(-2)+e;")
+        } else {
+            BASE.to_owned()
+        };
+        let before = format!("{base}{block};\n{changed}\n{unchanged}\nend;");
         let after = before.replace("0.1", "0.2");
         let result = dynare_compare_models(&before, &after, None, None, None, None, None);
         let rows: Vec<_> = result["semantic"]["rows"]
@@ -1130,14 +1140,19 @@ fn written_block_boundaries_follow_parent_presence() {
             "ms_sbvar",
         ),
     ] {
+        let base = if block == "filter_initial_state" {
+            BASE.replace("c=y;", "c=y+c(-1);")
+        } else {
+            BASE.to_owned()
+        };
         for parent_exists in [false, true] {
             let old = if parent_exists {
-                format!("{BASE}{block};\n{existing}\nend;")
+                format!("{base}{block};\n{existing}\nend;")
             } else {
-                BASE.to_owned()
+                base.clone()
             };
             let new = format!(
-                "{BASE}{block};\n{added}\n{}end;",
+                "{base}{block};\n{added}\n{}end;",
                 if parent_exists {
                     format!("{existing}\n")
                 } else {

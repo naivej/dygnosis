@@ -239,7 +239,10 @@ fn heterogeneous_timing_never_applies_an_aggregate_mark() {
         classify_variable_timing(&model)["h"].class,
         TimingClass::ForwardLooking
     );
-    let result = dynare_equations(source, None, None, None, None);
+    // The raw timing reader also handles recovery, but a complete transport query
+    // requires a valid neighbor: Dynare refuses a heterogeneous predetermined mark.
+    let accepted = source.replace("predetermined_variables h; ", "");
+    let result = dynare_equations(&accepted, None, None, None, None);
     let idents = result["heterogeneous_equations"][0]["equations"][0]["idents"]
         .as_array()
         .unwrap();
@@ -326,7 +329,7 @@ fn reader_skips_local_and_static_indexes() {
                 Some(TimingClass::ForwardLooking)
             ),
             ident("tau", 0, IdentClass::VarexoDet, None),
-            ident("foo", 0, IdentClass::Undeclared, None),
+            ident("foo", 0, IdentClass::Parameter, None),
         ]
     );
 }

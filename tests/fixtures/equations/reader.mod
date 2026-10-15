@@ -2,7 +2,7 @@
 var y c z;
 varexo e;
 varexo_det tau;
-parameters rho;
+parameters rho foo;
 rho = 0.5;
 
 model;

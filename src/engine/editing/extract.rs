@@ -17,6 +17,10 @@ use crate::engine::language::parser::parse;
 use crate::engine::language::span::Span;
 use crate::engine::workspace::Workspace;
 
+mod named;
+#[cfg(test)]
+mod named_tests;
+
 /// Caller inputs. `dimension` searches one heterogeneity dimension. Omit it to
 /// search aggregate and heterogeneous scopes. `files` is the companion map.
 #[derive(Clone, Debug, Default)]
@@ -197,16 +201,28 @@ pub(crate) fn extract_prepared(
         });
     }
 
-    let kept = kept_equations(model, report, &hits);
-    let kept_places: Vec<EqRef> = kept.iter().map(|row| row.place).collect();
-    if let Some(detail) = required_partner_problem(model, &kept_places) {
-        return Ok(unsupported(UnsupportedKind::CompilationUnit, detail));
-    }
-    let constraints = match required_constraints(model, &kept_places) {
-        Ok(constraints) => constraints,
-        Err(detail) => return Ok(unsupported(UnsupportedKind::CompilationUnit, detail)),
+    let mut kept = kept_equations(model, report, &hits);
+    let mut named = named::NamedContext::default();
+    let (kept_places, constraints, closure) = loop {
+        let kept_places: Vec<EqRef> = kept.iter().map(|row| row.place).collect();
+        if let Some(detail) = required_partner_problem(model, &kept_places) {
+            return Ok(unsupported(UnsupportedKind::CompilationUnit, detail));
+        }
+        let constraints = match required_constraints(model, &kept_places) {
+            Ok(constraints) => constraints,
+            Err(detail) => return Ok(unsupported(UnsupportedKind::CompilationUnit, detail)),
+        };
+        let closure = close(model, &kept_places, &constraints, &named);
+        let retained = retained_places(model, &kept_places, &closure);
+        let grew = match named.grow(model, &retained) {
+            Ok(grew) => grew,
+            Err(detail) => return Ok(unsupported(UnsupportedKind::Pac, detail)),
+        };
+        let added_equations = add_dependency_equations(model, report, &mut kept, &named.equations);
+        if !grew && !added_equations {
+            break (kept_places, constraints, closure);
+        }
     };
-    let closure = close(model, &kept_places, &constraints);
     if let Some(reason) = refuse(model, &kept_places, &closure, missing_include) {
         return Ok(unsupported(reason.0, reason.1));
     }
@@ -232,17 +248,31 @@ pub(crate) fn extract_prepared(
             )
         })
         .collect();
-    let omitted_context = omitted(model);
+    let mut omitted_context = omitted(model);
+    omitted_context.extend(named.notes(model));
+    let named_pieces = match named.pieces(model) {
+        Ok(pieces) => pieces,
+        Err(detail) => return Ok(unsupported(UnsupportedKind::Pac, detail)),
+    };
+    let fragment = if named.is_empty() {
+        render(model, report, &kept_places, &closure, occbin.as_ref())
+    } else {
+        match render_named(
+            model,
+            &retained,
+            &closure,
+            occbin.as_ref(),
+            named_pieces,
+            &mut named,
+        ) {
+            Ok(fragment) => fragment,
+            Err(detail) => return Ok(unsupported(UnsupportedKind::Pac, detail)),
+        }
+    };
 
     Ok(ExtractResult {
         status: ExtractStatus::Ok,
-        fragment: Some(render(
-            model,
-            report,
-            &kept_places,
-            &closure,
-            occbin.as_ref(),
-        )),
+        fragment: Some(fragment),
         selected_equations,
         origins,
         omitted_context,
@@ -430,10 +460,11 @@ fn close(
     model: &Model,
     selected: &[EqRef],
     constraints: &[&crate::engine::language::model::OccbinConstraint],
+    named: &named::NamedContext,
 ) -> Closure {
     let facts = crate::engine::analysis::model_locals::ModelLocals::collect(model);
     let mut closure = Closure {
-        symbols: BTreeSet::new(),
+        symbols: named.symbols.clone(),
         locals: BTreeSet::new(),
         local_places: BTreeSet::new(),
         externals: BTreeSet::new(),
@@ -458,10 +489,35 @@ fn close(
             }
         }
     }
+    for &(id, order) in &named.expressions {
+        push_expr_symbols_at(model, id, &facts, &mut closure, order);
+    }
+    for &(name, order) in &named.symbol_reads {
+        if let Some(binding) = facts
+            .available(None, order)
+            .into_iter()
+            .find(|binding| binding.name == name)
+        {
+            let name = model.name(name).to_string();
+            closure.symbols.remove(&name);
+            closure.locals.insert((None, name));
+            if let Some(definition) = binding.definition
+                && let Some(place) = local_place_for_definition(model, &facts, definition)
+            {
+                closure.local_places.insert(place);
+            }
+        }
+    }
     loop {
-        let locals_before = closure.locals.len();
         grow_declaration_context(model, &facts, &mut closure);
-        if pending.is_empty() && closure.locals.len() == locals_before {
+        pending.extend(
+            closure
+                .local_places
+                .iter()
+                .filter(|place| !seen.contains(place))
+                .copied(),
+        );
+        if pending.is_empty() {
             break;
         }
         while let Some(place) = pending.pop() {
@@ -534,9 +590,7 @@ fn absorb(
     }
     for name in calls {
         let text = model.name(name).to_string();
-        if is_pac_name(&text) {
-            closure.symbols.insert(text);
-        } else if is_external(model, &text) {
+        if is_external(model, &text) {
             closure.externals.insert(text);
         }
     }
@@ -607,13 +661,23 @@ fn push_expr_symbols(
     facts: &crate::engine::analysis::model_locals::ModelLocals,
     closure: &mut Closure,
 ) {
+    push_expr_symbols_at(model, id, facts, closure, usize::MAX);
+}
+
+fn push_expr_symbols_at(
+    model: &Model,
+    id: ExprId,
+    facts: &crate::engine::analysis::model_locals::ModelLocals,
+    closure: &mut Closure,
+    order: usize,
+) {
     let mut idents = Vec::new();
     let mut calls = Vec::new();
     walk(model, id, &mut idents, &mut calls);
     for reference in idents {
         let text = model.name(reference.name).to_string();
         if let Some(binding) = facts
-            .available(None, usize::MAX)
+            .available(None, order)
             .into_iter()
             .find(|binding| model.name(binding.name) == text)
         {
@@ -766,9 +830,6 @@ fn refuse(
     if let Some(detail) = include_block(model, closure, missing_include) {
         return Some((UnsupportedKind::Include, detail));
     }
-    if let Some(detail) = pac_block(model, selected, closure) {
-        return Some((UnsupportedKind::Pac, detail));
-    }
     None
 }
 
@@ -815,9 +876,15 @@ fn contains_macro(text: &str) -> bool {
 }
 
 fn for_bodies(model: &Model) -> Vec<Span> {
+    for_bodies_with_work(model, &mut || Ok(()))
+        .expect("unlimited macro-body scan cannot exhaust work")
+}
+
+fn for_bodies_with_work(model: &Model, work: &mut RenderWork<'_>) -> Result<Vec<Span>, String> {
     let mut stack = Vec::new();
     let mut bodies = Vec::new();
     for directive in &model.macro_directives {
+        work()?;
         if directive.kind == "for" {
             stack.push(directive.span.end);
         } else if directive.kind == "endfor"
@@ -829,7 +896,7 @@ fn for_bodies(model: &Model) -> Vec<Span> {
             });
         }
     }
-    bodies
+    Ok(bodies)
 }
 
 fn declaration_has_macro(model: &Model, closure: &Closure) -> bool {
@@ -926,38 +993,31 @@ fn decl_has(decls: &[Decl], model: &Model, name: &str) -> bool {
     decls.iter().any(|decl| model.name(decl.name) == name)
 }
 
-fn pac_block(model: &Model, selected: &[EqRef], closure: &Closure) -> Option<String> {
-    let retained = retained_places(model, selected, closure);
-    for operator in &model.named_model_operators {
-        if retained
-            .iter()
-            .any(|place| overlaps(operator.span, eq_at(model, *place).span))
-        {
-            return Some("a retained equation uses a PAC or VAR expectation operator".to_string());
-        }
-    }
-    for place in &retained {
-        let eq = eq_at(model, *place);
-        if expr_has_pac(model, eq.lhs_expr) || expr_has_pac(model, eq.rhs_expr) {
-            return Some("a retained equation uses a PAC or VAR expectation operator".to_string());
-        }
-    }
-    None
-}
-
-fn expr_has_pac(model: &Model, id: Option<ExprId>) -> bool {
-    let Some(id) = id else {
-        return false;
-    };
-    let mut calls = Vec::new();
-    let mut idents = Vec::new();
-    walk(model, id, &mut idents, &mut calls);
-    calls.iter().any(|name| is_pac_name(model.name(*name)))
-}
-
 struct KeptEquation {
     place: EqRef,
     role: EquationRole,
+}
+
+fn add_dependency_equations(
+    model: &Model,
+    report: &ExpandReport,
+    kept: &mut Vec<KeptEquation>,
+    dependencies: &BTreeSet<EqRef>,
+) -> bool {
+    let before = kept.len();
+    let mut places: HashSet<_> = kept.iter().map(|row| row.place).collect();
+    for &place in dependencies {
+        for candidate in std::iter::once(place).chain(related_equations(model, place)) {
+            if places.insert(candidate) {
+                kept.push(KeptEquation {
+                    place: candidate,
+                    role: EquationRole::Companion,
+                });
+            }
+        }
+    }
+    kept.sort_by_key(|row| row_order(report, row.place));
+    kept.len() != before
 }
 
 /// Selector hits, plus the static/dynamic partners and OccBin same-name
@@ -1324,6 +1384,99 @@ fn render(
     text
 }
 
+/// Required named commands can read model locals and source-order symbol types.
+/// Keep declaration, model-block and command events in their accepted order.
+fn render_named(
+    model: &Model,
+    retained: &[EqRef],
+    closure: &Closure,
+    occbin: Option<&OccbinPiece>,
+    named_pieces: Vec<(usize, String)>,
+    named: &mut named::NamedContext,
+) -> Result<String, String> {
+    named.charge()?;
+    named.text_work(&model.source)?;
+    let mut events =
+        declaration_chunks_with_work(model, closure, retained, &mut || named.charge())?;
+    let for_bodies = for_bodies_with_work(model, &mut || named.charge())?;
+    events.extend(named_pieces);
+    let mut blocks: BTreeMap<usize, Vec<EqRef>> = BTreeMap::new();
+    for &place in retained {
+        named.charge()?;
+        let equation = eq_at(model, place);
+        let statement =
+            named.accepted_parent(model, equation.parse_order, &equation.active_tokens)?;
+        if !matches!(statement.name.as_str(), "model" | "model_replace") {
+            return Err(
+                "a retained named-model equation has no accepted model-block parent".into(),
+            );
+        }
+        blocks.entry(statement.id).or_default().push(place);
+    }
+    for (id, mut places) in blocks {
+        named.charge()?;
+        let statement = &model.statements[id];
+        places.sort_by_key(|place| eq_at(model, *place).parse_order);
+        let opener = if statement.name == "model_replace" {
+            "model;".to_string()
+        } else {
+            let tokens = model
+                .expanded_tokens
+                .get(statement.opener_range.clone())
+                .ok_or_else(|| {
+                    "a retained model block has no expanded opener receipt".to_string()
+                })?;
+            for _ in tokens {
+                named.charge()?;
+            }
+            crate::engine::language::parser::join_lexemes(&model.source, tokens)
+        };
+        if contains_macro(&opener) {
+            return Err("a retained model opener still contains unexpanded macro text".into());
+        }
+        let mut lines = vec![opener];
+        for place in places {
+            named.charge()?;
+            let equation = eq_at(model, place);
+            let raw = slice_through_semi(&model.source, equation.span);
+            named.text_work(&raw)?;
+            let mut in_loop = false;
+            for body in &for_bodies {
+                named.charge()?;
+                in_loop |= overlaps(equation.span, *body);
+            }
+            for _ in &equation.tag_map {
+                named.charge()?;
+            }
+            lines.push(if contains_macro(&raw) || in_loop {
+                expanded_equation(equation)
+            } else {
+                raw
+            });
+        }
+        lines.push("end;".into());
+        events.push((statement.token_range.start, lines.join("\n")));
+    }
+    events.sort_by_key(|(order, _)| *order);
+    let mut sections = Vec::new();
+    if let Some(piece) = occbin.filter(|piece| piece.before_model) {
+        named.rendered(&piece.text)?;
+        sections.push(piece.text.clone());
+    }
+    for (_, text) in events {
+        named.charge()?;
+        named.rendered(&text)?;
+        sections.push(text);
+    }
+    if let Some(piece) = occbin.filter(|piece| !piece.before_model) {
+        named.rendered(&piece.text)?;
+        sections.push(piece.text.clone());
+    }
+    let fragment = sections.join("\n\n") + "\n";
+    named.charge()?;
+    Ok(fragment)
+}
+
 fn model_sections(model: &Model, report: &ExpandReport, retained: &[EqRef]) -> Vec<String> {
     let mut sections = Vec::new();
     if retained.iter().any(|place| place.block.is_none()) {
@@ -1383,59 +1536,67 @@ fn push_section(lines: &mut Vec<String>, section: &str) {
 }
 
 fn declaration_lines(model: &Model, closure: &Closure, retained: &[EqRef]) -> Vec<String> {
-    let statements = declaration_statement_spans(&model.source);
+    declaration_chunks(model, closure, retained)
+        .into_iter()
+        .map(|(_, line)| line)
+        .collect()
+}
+
+type RenderWork<'a> = dyn FnMut() -> Result<(), String> + 'a;
+
+fn declaration_chunks(
+    model: &Model,
+    closure: &Closure,
+    retained: &[EqRef],
+) -> Vec<(usize, String)> {
+    declaration_chunks_with_work(model, closure, retained, &mut || Ok(()))
+        .expect("unlimited declaration rendering cannot exhaust work")
+}
+
+fn declaration_chunks_with_work(
+    model: &Model,
+    closure: &Closure,
+    retained: &[EqRef],
+    work: &mut RenderWork<'_>,
+) -> Result<Vec<(usize, String)>, String> {
+    work()?;
+    let statements = declaration_statement_spans_with_work(&model.source, work)?;
     let mut chunks: Vec<(u32, String)> = Vec::new();
-    push_dimension_lines(&mut chunks, model, closure, retained);
-    push_decl_lines(
-        &mut chunks,
-        model,
-        &statements,
+    push_dimension_lines(&mut chunks, model, closure, retained, work)?;
+    for decls in [
         &model.endogenous,
-        &closure.symbols,
-    );
-    push_decl_lines(
-        &mut chunks,
-        model,
-        &statements,
         &model.deterministic_exogenous,
-        &closure.symbols,
-    );
-    push_decl_lines(
-        &mut chunks,
-        model,
-        &statements,
         &model.exogenous,
-        &closure.symbols,
-    );
-    push_decl_lines(
-        &mut chunks,
-        model,
-        &statements,
         &model.parameters,
-        &closure.symbols,
-    );
+        &model.predetermined,
+    ] {
+        push_decl_lines(
+            &mut chunks,
+            model,
+            &statements,
+            decls,
+            &closure.symbols,
+            work,
+        )?;
+    }
     push_local_decl_lines(
         &mut chunks,
         model,
         &statements,
         &model.model_local_variables,
         closure,
-    );
-    push_decl_lines(
-        &mut chunks,
-        model,
-        &statements,
-        &model.predetermined,
-        &closure.symbols,
-    );
+        work,
+    )?;
     push_trend_lines(
         &mut chunks,
         model,
         &statements,
         &model.trend_vars,
         &closure.symbols,
-    );
+        work,
+    )?;
     for stmt in &model.external_functions {
+        work()?;
         let Some((name, _)) = stmt.name else {
             continue;
         };
@@ -1447,30 +1608,34 @@ fn declaration_lines(model: &Model, closure: &Closure, retained: &[EqRef]) -> Ve
         }
     }
     let mut seen = HashSet::new();
-    let mut ordered: Vec<_> = chunks
-        .into_iter()
-        .filter(|(start, line)| seen.insert((*start, line.clone())))
-        .map(|(start, line)| {
-            (
-                declaration_order(model, &statements, start, &line),
+    let mut ordered = Vec::new();
+    for (start, line) in chunks {
+        work()?;
+        if seen.insert((start, line.clone())) {
+            ordered.push((
+                declaration_order(model, &statements, start, &line, work)?,
                 start,
                 line,
-            )
-        })
-        .collect();
-    // Declarations retain their written metadata. Replay successful type changes
-    // among required declarations, in parser order rather than macro span order.
+            ));
+        }
+    }
+    // Replay successful type changes in parser order rather than macro span order.
     for change in &model.change_type_statements {
-        let names: Vec<&str> = change
-            .names
-            .iter()
-            .filter(|(name, _)| {
-                closure.symbols.contains(model.name(*name))
-                    && change.known_names.contains(name)
-                    && !change.used_names.contains(name)
-            })
-            .map(|(name, _)| model.name(*name))
-            .collect();
+        work()?;
+        let mut names = Vec::new();
+        for (name, _) in &change.names {
+            work()?;
+            // These histories are retained vectors, so charge their lookups too.
+            for _ in change.known_names.iter().chain(&change.used_names) {
+                work()?;
+            }
+            if closure.symbols.contains(model.name(*name))
+                && change.known_names.contains(name)
+                && !change.used_names.contains(name)
+            {
+                names.push(model.name(*name));
+            }
+        }
         if names.is_empty() {
             continue;
         }
@@ -1487,7 +1652,10 @@ fn declaration_lines(model: &Model, closure: &Closure, retained: &[EqRef]) -> Ve
         ));
     }
     ordered.sort_by_key(|(order, _, _)| *order);
-    ordered.into_iter().map(|(_, _, line)| line).collect()
+    Ok(ordered
+        .into_iter()
+        .map(|(order, _, line)| (order.0, line))
+        .collect())
 }
 
 fn declaration_order(
@@ -1495,7 +1663,9 @@ fn declaration_order(
     statements: &[Span],
     start: u32,
     line: &str,
-) -> (usize, u8, u32) {
+    work: &mut RenderWork<'_>,
+) -> Result<(usize, u8, u32), String> {
+    work()?;
     let mut rest = skip_noise(line.trim().trim_end_matches(';'));
     let keyword = take_ident(&mut rest).unwrap_or_default();
     rest = skip_noise(rest);
@@ -1506,37 +1676,37 @@ fn declaration_order(
         .into_iter()
         .filter_map(first_decl_name)
         .collect();
+    let mut order = None;
     if keyword == "heterogeneity_dimension" {
-        return model
-            .heterogeneity_dimensions
-            .iter()
-            .filter(|row| row.span.start == start && names.contains(model.name(row.name)))
-            .map(|row| (row.parse_order, 0, start))
-            .min()
-            .unwrap_or((usize::MAX, 0, start));
+        for row in &model.heterogeneity_dimensions {
+            work()?;
+            if row.span.start == start && names.contains(model.name(row.name)) {
+                order = Some(order.map_or(row.parse_order, |old: usize| old.min(row.parse_order)));
+            }
+        }
+        return Ok((order.unwrap_or(usize::MAX), 0, start));
     }
     if keyword == "external_function" {
-        return model
-            .external_functions
-            .iter()
-            .find(|row| row.span.start == start)
-            .map(|row| (row.parse_order, 0, start))
-            .unwrap_or((usize::MAX, 0, start));
+        for row in &model.external_functions {
+            work()?;
+            if row.span.start == start {
+                return Ok((row.parse_order, 0, start));
+            }
+        }
+        return Ok((usize::MAX, 0, start));
     }
     if matches!(keyword.as_str(), "trend_var" | "log_trend_var") {
-        return model
-            .trend_vars
-            .iter()
-            .filter(|row| {
-                names.contains(model.name(row.name))
-                    && (row.span.start == start
-                        || statement_in(statements, row.span).start == start)
-            })
-            .map(|row| (row.parse_order, 1, start))
-            .min()
-            .unwrap_or((usize::MAX, 1, start));
+        for row in &model.trend_vars {
+            work()?;
+            if names.contains(model.name(row.name))
+                && (row.span.start == start || statement_in(statements, row.span).start == start)
+            {
+                order = Some(order.map_or(row.parse_order, |old: usize| old.min(row.parse_order)));
+            }
+        }
+        return Ok((order.unwrap_or(usize::MAX), 1, start));
     }
-    model
+    for decl in model
         .endogenous
         .iter()
         .chain(&model.exogenous)
@@ -1544,13 +1714,19 @@ fn declaration_order(
         .chain(&model.parameters)
         .chain(&model.predetermined)
         .chain(&model.model_local_variables)
-        .filter(|decl| {
-            names.contains(model.name(decl.name))
-                && (decl.span.start == start || statement_in(statements, decl.span).start == start)
-        })
-        .map(|decl| (decl.parse_order, 0, start))
-        .min()
-        .unwrap_or((usize::MAX, 1, start))
+    {
+        work()?;
+        if names.contains(model.name(decl.name))
+            && (decl.span.start == start || statement_in(statements, decl.span).start == start)
+        {
+            order = Some(order.map_or(decl.parse_order, |old: usize| old.min(decl.parse_order)));
+        }
+    }
+    Ok((
+        order.unwrap_or(usize::MAX),
+        if order.is_some() { 0 } else { 1 },
+        start,
+    ))
 }
 
 fn equation_line(model: &Model, place: EqRef) -> String {
@@ -1677,9 +1853,11 @@ fn push_dimension_lines(
     model: &Model,
     closure: &Closure,
     retained: &[EqRef],
-) {
+    work: &mut RenderWork<'_>,
+) -> Result<(), String> {
     let mut needed = BTreeSet::new();
     for place in retained {
+        work()?;
         if let Some(block) = place.block {
             needed.insert(
                 model
@@ -1695,6 +1873,7 @@ fn push_dimension_lines(
         &model.parameters,
     ] {
         for decl in decls {
+            work()?;
             if !closure.symbols.contains(model.name(decl.name)) {
                 continue;
             }
@@ -1706,12 +1885,14 @@ fn push_dimension_lines(
     let mut groups: BTreeMap<u32, Vec<&crate::engine::language::model::HeterogeneityDimension>> =
         BTreeMap::new();
     for dimension in &model.heterogeneity_dimensions {
+        work()?;
         groups
             .entry(dimension.span.start)
             .or_default()
             .push(dimension);
     }
     for (start, dims) in groups {
+        work()?;
         let keep: Vec<_> = dims
             .iter()
             .filter(|dimension| needed.contains(model.name(dimension.name)))
@@ -1731,6 +1912,7 @@ fn push_dimension_lines(
         };
         out.push((start, line));
     }
+    Ok(())
 }
 
 fn push_local_decl_lines(
@@ -1739,9 +1921,11 @@ fn push_local_decl_lines(
     statements: &[Span],
     decls: &[Decl],
     closure: &Closure,
-) {
+    work: &mut RenderWork<'_>,
+) -> Result<(), String> {
     let mut seen = HashSet::new();
     for decl in decls {
+        work()?;
         if !decl_matches_local(model, closure, decl) {
             continue;
         }
@@ -1761,6 +1945,7 @@ fn push_local_decl_lines(
             out.push((stmt.start, line));
         }
     }
+    Ok(())
 }
 
 fn push_decl_lines(
@@ -1769,9 +1954,11 @@ fn push_decl_lines(
     statements: &[Span],
     decls: &[Decl],
     needed: &BTreeSet<String>,
-) {
+    work: &mut RenderWork<'_>,
+) -> Result<(), String> {
     let mut seen = HashSet::new();
     for decl in decls {
+        work()?;
         if !needed.contains(model.name(decl.name)) {
             continue;
         }
@@ -1790,6 +1977,7 @@ fn push_decl_lines(
             out.push((stmt.start, line));
         }
     }
+    Ok(())
 }
 
 fn push_trend_lines(
@@ -1798,9 +1986,11 @@ fn push_trend_lines(
     statements: &[Span],
     rows: &[TrendVar],
     needed: &BTreeSet<String>,
-) {
+    work: &mut RenderWork<'_>,
+) -> Result<(), String> {
     let mut seen = HashSet::new();
     for row in rows {
+        work()?;
         if !needed.contains(model.name(row.name)) {
             continue;
         }
@@ -1815,6 +2005,7 @@ fn push_trend_lines(
             out.push((stmt.start, line));
         }
     }
+    Ok(())
 }
 
 const DECL_KEYWORDS: &[&str] = &[
@@ -1829,11 +2020,20 @@ const DECL_KEYWORDS: &[&str] = &[
 ];
 
 fn declaration_statement_spans(source: &str) -> Vec<Span> {
-    use crate::engine::language::lexer::{tokenize, TokenKind};
+    declaration_statement_spans_with_work(source, &mut || Ok(()))
+        .expect("unlimited declaration scan cannot exhaust work")
+}
+
+fn declaration_statement_spans_with_work(
+    source: &str,
+    work: &mut RenderWork<'_>,
+) -> Result<Vec<Span>, String> {
+    use crate::engine::language::lexer::TokenKind;
     let mut spans = Vec::new();
     let mut start = None;
     let mut depth = 0usize;
-    for token in tokenize(source) {
+    for token in crate::engine::language::lexer::tokenize_from(source, 0, None) {
+        work()?;
         if token.kind == TokenKind::Semi || token.kind == TokenKind::Eof {
             if let Some(start) = start.take() {
                 spans.push(Span {
@@ -1857,7 +2057,7 @@ fn declaration_statement_spans(source: &str) -> Vec<Span> {
             _ => {}
         }
     }
-    spans
+    Ok(spans)
 }
 
 fn statement_in(spans: &[Span], name: Span) -> Span {
@@ -2535,7 +2735,7 @@ end;
     }
 
     #[test]
-    fn heterogeneous_pac_has_no_fragment() {
+    fn missing_named_model_in_heterogeneous_equation_has_no_fragment() {
         let src = "\
 heterogeneity_dimension h;
 var(heterogeneity=h) c;
@@ -2559,7 +2759,7 @@ end;
     }
 
     #[test]
-    fn pac_operator_is_unsupported_and_an_ordinary_neighbour_is_not() {
+    fn missing_pac_definition_is_unsupported_and_an_ordinary_neighbour_is_not() {
         let src = "\
 var y, z;
 varexo e, e2;
@@ -2576,6 +2776,7 @@ end;
         assert_eq!(pac.status, ExtractStatus::UnsupportedContext);
         assert!(pac.fragment.is_none());
         assert_eq!(pac.unsupported.unwrap().kind, UnsupportedKind::Pac);
+        assert!(pac.explanation.contains("`nope` has no definition"));
 
         let plain = extract(&req(src, &["Z"], &[])).unwrap();
         assert_eq!(plain.status, ExtractStatus::Ok);
@@ -3606,6 +3807,5 @@ end;
     fn tools_list_includes_dynare_extract() {
         let names = registered_tool_names();
         assert!(names.contains(&"dynare_extract"));
-        assert!(names.contains(&"dynare_workspace_diagnose"));
     }
 }

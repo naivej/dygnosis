@@ -1217,7 +1217,11 @@ mod tests {
         assert!(roots.iter().any(|root| root["root"] == "missing.mod"
             && root["status"] == "failed"
             && root["code"] == "ROOT_NOT_FOUND"));
-        assert_eq!(result["data"]["summary"]["checked"], 2);
+        assert_eq!(result["data"]["summary"]["checked"], 1);
+        assert_eq!(result["data"]["summary"]["partial"], 1);
+        assert!(roots.iter().any(|root| root["root"] == "Models\\Other.mod"
+            && root["status"] == "partial"
+            && root["code"] == "INCOMPLETE_INPUT"));
         assert_eq!(result["data"]["summary"]["failed"], 1);
         assert!(
             roots

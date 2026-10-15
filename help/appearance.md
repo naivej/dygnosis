@@ -41,6 +41,11 @@ Name colors can distinguish endogenous variables, exogenous variables and
 parameters. They depend on your theme and VS Code's
 `editor.semanticHighlighting.enabled` setting.
 
+Accepted PAC and VAR syntax, macro directives, model operators, and declared
+dimensions, trends, external functions and named models also receive syntax or
+name highlighting. Native MATLAB and `verbatim` text keep their own language
+context.
+
 To change a name color, run **Dygnosis: Edit in settings.json** and put a rule
 under `editor.semanticTokenColorCustomizations`. For example:
 

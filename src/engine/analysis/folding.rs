@@ -17,9 +17,9 @@ struct MacroFrame<'a> {
     branches: Vec<&'a MacroDirective>,
 }
 
-/// The parser supplies statement boundaries; its temporary facts are discarded.
-/// Inert macro text keeps every branch and every byte/line in the written file.
-pub(crate) fn source_folds(text: &str, directives: &[MacroDirective]) -> Vec<SourceFold> {
+/// Mask macro execution while preserving every written byte and line boundary.
+/// Temporary parser facts over this text are only for source presentation.
+pub(crate) fn inert_source(text: &str) -> String {
     let mut inert = text.as_bytes().to_vec();
     for token in scan_macro_tokens(text) {
         let replacement = match token.kind {
@@ -33,7 +33,13 @@ pub(crate) fn source_folds(text: &str, directives: &[MacroDirective]) -> Vec<Sou
             }
         }
     }
-    let inert = String::from_utf8(inert).expect("macro masks preserve UTF-8");
+    String::from_utf8(inert).expect("macro masks preserve UTF-8")
+}
+
+/// The parser supplies statement boundaries; its temporary facts are discarded.
+/// Inert macro text keeps every branch and every byte/line in the written file.
+pub(crate) fn source_folds(text: &str, directives: &[MacroDirective]) -> Vec<SourceFold> {
+    let inert = inert_source(text);
     let (model, _) = parse_expanded(&inert, tokenize(&inert));
     let mut statement_spans: Vec<_> = complete_statements(&model).collect();
     // An unfinished block can consume later command rows as its body. Recover

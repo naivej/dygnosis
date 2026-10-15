@@ -34,6 +34,16 @@ struct HonestyRow {
 
 const HONESTY_FIRE: &[HonestyRow] = &[
     HonestyRow {
+        code: "E482",
+        fixture: "syntax_reach/e482_conditional_date.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "conditional_forecast_paths: dates are not allowed in the 'periods' keyword",
+        our_needle: "conditional_forecast_paths: dates are not allowed in the 'periods' keyword",
+        stage: JsonStage::Parse,
+    },
+    HonestyRow {
         code: "E001",
         fixture: "e001/non_ascii_trailing.mod",
         kind: HonestyKind::Error {
@@ -1647,7 +1657,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "used in the epilogue block but was not declared",
         our_needle: "used in the epilogue block but was not declared",
-        stage: JsonStage::Check,
+        stage: JsonStage::Parse,
     },
     HonestyRow {
         code: "E289",
@@ -1657,7 +1667,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "because it is an exogenous variable.",
         our_needle: "because it is an exogenous variable.",
-        stage: JsonStage::Check,
+        stage: JsonStage::Parse,
     },
     HonestyRow {
         code: "E290",
@@ -1667,7 +1677,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "exogenous deterministic variable.",
         our_needle: "exogenous deterministic variable.",
-        stage: JsonStage::Check,
+        stage: JsonStage::Parse,
     },
     HonestyRow {
         code: "E291",
@@ -1677,7 +1687,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "expectation' operator is forbidden in 'epilogue'",
         our_needle: "expectation' operator is forbidden in 'epilogue'",
-        stage: JsonStage::Check,
+        stage: JsonStage::Parse,
     },
     HonestyRow {
         code: "E292",
@@ -1687,7 +1697,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "STEADY_STATE() operator is forbidden in epilogue",
         our_needle: "STEADY_STATE() operator is forbidden in epilogue",
-        stage: JsonStage::Check,
+        stage: JsonStage::Parse,
     },
     HonestyRow {
         code: "E293",
@@ -1697,7 +1707,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "SUM() operator is forbidden in epilogue",
         our_needle: "SUM() operator is forbidden in epilogue",
-        stage: JsonStage::Check,
+        stage: JsonStage::Parse,
     },
     HonestyRow {
         code: "E294",
@@ -1707,7 +1717,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "cannot be used outside the epilogue block",
         our_needle: "cannot be used outside the epilogue block",
-        stage: JsonStage::Check,
+        stage: JsonStage::Parse,
     },
     HonestyRow {
         code: "E295",
@@ -3570,7 +3580,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
             workspace_only: false,
         },
         their_needle: "unexpected ';', expecting DATE or INT_NUMBER",
-        our_needle: "periods",
+        our_needle: "unexpected ';', expecting DATE or INT_NUMBER",
         stage: JsonStage::Check,
     },
     HonestyRow {

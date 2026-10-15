@@ -74,8 +74,9 @@ impl Parser<'_> {
                 "heterogeneity" if self.tokens.get(i).map(|t| t.kind) == Some(TokenKind::Eq) => {
                     i += 1;
                     if let Some(tok) = self.tokens.get(i).filter(|t| t.kind == TokenKind::Ident) {
-                        options.heterogeneity =
-                            Some((self.intern.intern(tok.text(self.src)), tok.span));
+                        let name = self.intern.intern(tok.text(self.src));
+                        let span = tok.span;
+                        options.heterogeneity = Some((name, span));
                         i += 1;
                     }
                 }
@@ -182,6 +183,11 @@ impl Parser<'_> {
                 vec![opener_i..body_i, body_end_i..saved],
             );
         }
+        self.retain_fact_receipt(
+            "shock_block_callback",
+            saved,
+            std::iter::once(opener_i..saved).collect(),
+        );
         self.model.shock_blocks.push(ShockBlock {
             kind,
             options,
@@ -271,7 +277,7 @@ impl Parser<'_> {
         }
         let values_end = self.i;
         if values_start < values_end && self.tokens[values_start].kind == TokenKind::Ident {
-            self.model.shape_refuses.push(
+            self.record_shape_refusal(
                 ShapeRefuse::official(
                     self.tokens[values_start].span,
                     "values",
@@ -458,7 +464,7 @@ impl Parser<'_> {
                     last = Some(point);
                     self.i = after;
                 } else if !allow_end && self.word_at(self.i, "end") {
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(
                             self.tokens[self.i].span,
                             "periods",
@@ -484,7 +490,7 @@ impl Parser<'_> {
                 } else {
                     "syntax error, unexpected INT_NUMBER, expecting COMMA or ';'"
                 };
-                self.model.shape_refuses.push(
+                self.record_shape_refusal(
                     ShapeRefuse::official(self.tokens[self.i].span, "shock_paths", message)
                         .with_parse_order(self.token_origins[self.i].start),
                 );
@@ -793,7 +799,7 @@ impl Parser<'_> {
                 let number = self.bump();
                 let id = self.alloc(ExprKind::Number, number.span);
                 let text = number.text(self.src).to_owned();
-                if let Ok(value) = text.parse::<f64>() {
+                if let Some(value) = crate::engine::language::lexer::parse_numeric_literal(&text) {
                     self.model.numeric_literals.insert(id, value);
                 }
                 self.model.numeric_literal_texts.insert(id, text);
@@ -916,6 +922,7 @@ impl Parser<'_> {
         self.model
             .path_parse_errors
             .push((span, code, message.into()));
+        self.retain_fact_receipt("path_error_callback", self.i, Vec::new());
         if let Some(context) = &mut self.path_context {
             context.failed = true;
         }
@@ -1021,6 +1028,7 @@ impl Parser<'_> {
             return self.parse_call(
                 callee,
                 Token::with_lexeme(TokenKind::Ident, reference_span, written),
+                token_i,
             );
         }
         if namespace.is_none() {
@@ -1155,6 +1163,22 @@ impl Parser<'_> {
         }
         if !self.path_context.as_ref().unwrap().failed {
             self.path_namespace_action(&reference, lag);
+        }
+        if !self.path_context.as_ref().unwrap().failed
+            && !matches!(
+                namespace.as_str(),
+                "init" | "initval" | "self" | "prev" | "learnt_in"
+            )
+        {
+            let name = self.intern.intern(&namespace);
+            self.record_named_slot(
+                NamedSlotKind::Database,
+                name,
+                token.span,
+                token_i,
+                false,
+                NamedSlotOwner::DatabaseReference,
+            );
         }
         let failed = self.path_context.as_ref().unwrap().failed;
         if failed {
@@ -1482,7 +1506,7 @@ impl Parser<'_> {
         if !companion {
             for i in opener_i + 1..body_i {
                 if self.tokens[i].kind == TokenKind::Comma {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
+                    self.record_shape_refusal(ShapeRefuse::official(
                         self.tokens[i].span,
                         keyword,
                         "syntax error, unexpected COMMA, expecting OVERWRITE or LEARNT_IN or ')'",
@@ -1566,7 +1590,7 @@ impl Parser<'_> {
             } else {
                 "syntax error, unexpected END, expecting VAR or EXOGENIZE"
             };
-            self.model.shape_refuses.push(
+            self.record_shape_refusal(
                 ShapeRefuse::official(self.tokens[body_end_i].span, keyword, message)
                     .with_parse_order(self.token_origins[body_end_i].start),
             );
@@ -1588,8 +1612,18 @@ impl Parser<'_> {
             },
         };
         if companion {
+            self.retain_fact_receipt(
+                "controlled_path_callback",
+                saved,
+                std::iter::once(opener_i..saved).collect(),
+            );
             self.model.controlled_paths.push(block);
         } else {
+            self.retain_fact_receipt(
+                "shock_path_callback",
+                saved,
+                std::iter::once(opener_i..saved).collect(),
+            );
             self.model.shock_paths.push(block);
         }
     }
@@ -1801,6 +1835,11 @@ impl Parser<'_> {
             }
         }
         self.i = saved;
+        self.retain_fact_receipt(
+            "endval_instruction_callback",
+            saved,
+            std::iter::once(opener_i..saved).collect(),
+        );
         self.model.endval_instructions.push(EndvalInstruction {
             learnt_in: options.learnt_in,
             learnt_in_span: options.learnt_in_span,
@@ -1816,25 +1855,29 @@ impl Parser<'_> {
         let parse_order = self.i;
         let mut owned = std::iter::once(self.i..self.i + 1).collect::<Vec<_>>();
         let start = self.bump().span.start;
-        let mut names = Vec::new();
-        while !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
-            if self.at(TokenKind::Ident) {
-                owned.push(self.i..self.i + 1);
-                let tok = self.bump();
-                let name = self.intern.intern(tok.text(self.src));
-                names.push((name, tok.span));
-            } else {
-                self.bump();
-            }
-        }
-        let end = if self.at(TokenKind::Semi) {
-            self.bump().span.end
-        } else {
-            self.current_start()
+        let Some(names) = self.read_named_declaration_list() else {
+            return;
         };
+        for &(name, span, order) in &names {
+            owned.push(order..order + 1);
+            self.record_named_slot(
+                NamedSlotKind::Database,
+                name,
+                span,
+                order,
+                true,
+                NamedSlotOwner::DatabaseDeclaration,
+            );
+        }
         self.model.databases.push(DatabaseDeclaration {
-            names,
-            span: Span { start, end },
+            names: names
+                .into_iter()
+                .map(|(name, span, _)| (name, span))
+                .collect(),
+            span: Span {
+                start,
+                end: self.tokens[self.i - 1].span.end,
+            },
         });
         self.retain_fact_receipt("database", parse_order, owned);
     }
@@ -1860,7 +1903,7 @@ impl Parser<'_> {
                 _ => None,
             };
             if let Some(message) = message {
-                self.model.shape_refuses.push(
+                self.record_shape_refusal(
                     ShapeRefuse::official(self.tokens[first].span, "set_time", message)
                         .with_parse_order(self.token_origins[first].start),
                 );
@@ -1874,7 +1917,7 @@ impl Parser<'_> {
                     "set_time",
                     "syntax error, unexpected MINUS, expecting PLUS or ')'",
                 ) {
-                    self.model.shape_refuses.push(refuse);
+                    self.record_shape_refusal(refuse);
                 }
                 date
             })
@@ -2017,7 +2060,7 @@ impl Parser<'_> {
                     None
                 };
                 if let Some(message) = message {
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(value.span, command, message)
                             .with_parse_order(self.token_origins[i + 2].start),
                     );
@@ -2035,7 +2078,7 @@ impl Parser<'_> {
                 skip_balanced_tokens(&self.tokens, i + 2, TokenKind::LParen, TokenKind::RParen)
                     .min(close);
             if self.tokens.get(i + 3).map(|t| t.kind) == Some(TokenKind::RParen) {
-                self.model.shape_refuses.push(
+                self.record_shape_refusal(
                     ShapeRefuse::official(
                         self.tokens[i + 3].span,
                         command,
@@ -2045,7 +2088,7 @@ impl Parser<'_> {
                 );
             }
             if self.tokens.get(after.saturating_sub(2)).map(|t| t.kind) == Some(TokenKind::Comma) {
-                self.model.shape_refuses.push(
+                self.record_shape_refusal(
                     ShapeRefuse::official(
                         self.tokens[after - 1].span,
                         command,
@@ -2065,7 +2108,7 @@ impl Parser<'_> {
                     } else {
                         "syntax error, unexpected FLOAT_NUMBER"
                     };
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(self.tokens[j].span, command, message)
                             .with_parse_order(self.token_origins[j].start),
                     );
@@ -2144,9 +2187,9 @@ impl Parser<'_> {
         ))
     }
 
-    pub(super) fn collect_subsample_statement(&mut self, from: usize, to: usize) {
+    pub(super) fn collect_subsample_statement(&mut self, from: usize, to: usize) -> bool {
         let Some((head, mut i)) = self.subsample_head_at(from) else {
-            return;
+            return false;
         };
         let mut owned = std::iter::once(from..i).collect::<Vec<_>>();
         let span = Span {
@@ -2165,13 +2208,19 @@ impl Parser<'_> {
                 owned.push(i - 1..after_source);
                 self.retain_fact_receipt("subsamples", from, owned);
             }
-            return;
+            return self.tokens.get(i).is_some_and(|_| {
+                self.tokens
+                    .get(to.saturating_sub(1))
+                    .is_some_and(|token| token.kind == TokenKind::Semi)
+            }) && self.subsample_head_at(i).is_some_and(|(_, after)| {
+                after + 1 == to && self.tokens[after].kind == TokenKind::Semi
+            });
         }
         if self.tokens.get(i).map(|t| t.kind) != Some(TokenKind::LParen) {
-            return;
+            return false;
         }
         if self.tokens.get(i + 1).map(|t| t.kind) == Some(TokenKind::RParen) {
-            self.model.shape_refuses.push(
+            self.record_shape_refusal(
                 ShapeRefuse::official(
                     self.tokens[i + 1].span,
                     "subsamples",
@@ -2182,15 +2231,21 @@ impl Parser<'_> {
         }
         i += 1;
         let mut ranges = Vec::new();
+        let mut grammar_complete = true;
+        let mut expect_row = true;
         while i < to && self.tokens[i].kind != TokenKind::RParen {
             if self.tokens[i].kind == TokenKind::Comma {
+                grammar_complete &= !expect_row;
+                expect_row = true;
                 i += 1;
                 continue;
             }
+            grammar_complete &= expect_row;
             let name_tok = self.tokens[i].clone();
             if name_tok.kind != TokenKind::Ident
                 || self.tokens.get(i + 1).map(|t| t.kind) != Some(TokenKind::Eq)
             {
+                grammar_complete = false;
                 i += 1;
                 continue;
             }
@@ -2198,7 +2253,7 @@ impl Parser<'_> {
                 if let Some(tok) = self.tokens.get(i + 2)
                     && tok.kind == TokenKind::Number
                 {
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(
                             tok.span,
                             "subsamples",
@@ -2207,6 +2262,7 @@ impl Parser<'_> {
                         .with_parse_order(self.token_origins[i + 2].start),
                     );
                 }
+                grammar_complete = false;
                 i += 1;
                 continue;
             };
@@ -2215,11 +2271,12 @@ impl Parser<'_> {
                 "subsamples",
                 "syntax error, unexpected MINUS, expecting PLUS or ':'",
             ) {
-                self.model.shape_refuses.push(refuse);
+                grammar_complete = false;
+                self.record_shape_refusal(refuse);
             }
             if !self.gap_is(after_first - 1, after_first, ":") {
                 if self.tokens.get(after_first).map(|t| t.kind) == Some(TokenKind::Comma) {
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(
                             self.tokens[after_first].span,
                             "subsamples",
@@ -2228,6 +2285,7 @@ impl Parser<'_> {
                         .with_parse_order(self.token_origins[after_first].start),
                     );
                 }
+                grammar_complete = false;
                 i += 1;
                 continue;
             }
@@ -2235,7 +2293,7 @@ impl Parser<'_> {
                 if let Some(tok) = self.tokens.get(after_first)
                     && tok.kind == TokenKind::Number
                 {
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(
                             tok.span,
                             "subsamples",
@@ -2244,6 +2302,7 @@ impl Parser<'_> {
                         .with_parse_order(self.token_origins[after_first].start),
                     );
                 }
+                grammar_complete = false;
                 i += 1;
                 continue;
             };
@@ -2252,10 +2311,12 @@ impl Parser<'_> {
                 "subsamples",
                 "syntax error, unexpected MINUS, expecting COMMA or ')'",
             ) {
-                self.model.shape_refuses.push(refuse);
+                grammar_complete = false;
+                self.record_shape_refusal(refuse);
             }
             let name = self.intern.intern(name_tok.text(self.src));
             ranges.push(SubsampleRange {
+                name_order: i,
                 name,
                 name_span: name_tok.span,
                 span: Span {
@@ -2267,7 +2328,18 @@ impl Parser<'_> {
             });
             owned.push(i..after_last);
             i = after_last;
+            expect_row = false;
         }
+        grammar_complete &= !expect_row
+            && self
+                .tokens
+                .get(i)
+                .is_some_and(|token| token.kind == TokenKind::RParen)
+            && self
+                .tokens
+                .get(i + 1)
+                .is_some_and(|token| token.kind == TokenKind::Semi)
+            && i + 2 == to;
         self.model.subsamples.push(SubsampleInstruction::Declare {
             head,
             ranges,
@@ -2275,6 +2347,7 @@ impl Parser<'_> {
             symbol_type_context: self.model.symbol_context(),
         });
         self.retain_fact_receipt("subsamples", from, owned);
+        grammar_complete
     }
 
     fn shock_opener_refuse(&mut self, at: usize, command: &str, expected: &str) -> bool {
@@ -2294,7 +2367,7 @@ impl Parser<'_> {
             (_, "all_values_required") => "ALL_VALUES_REQUIRED",
             _ => "IDENTIFIER",
         };
-        self.model.shape_refuses.push(
+        self.record_shape_refusal(
             ShapeRefuse::official(
                 token.span,
                 command,
@@ -2353,7 +2426,7 @@ impl Parser<'_> {
             return false;
         }
         let unexpected = self.bison_token_name(shape_end);
-        self.model.shape_refuses.push(
+        self.record_shape_refusal(
             ShapeRefuse::official(
                 self.tokens[shape_end].span,
                 "shocks",
@@ -2531,7 +2604,7 @@ impl Parser<'_> {
                 | ShockBlockKind::LearntIn => Some("syntax error, unexpected END, expecting VAR"),
             };
             if let Some(message) = message {
-                self.model.shape_refuses.push(
+                self.record_shape_refusal(
                     ShapeRefuse::official(self.tokens[body_end_i].span, &command, message)
                         .with_parse_order(self.token_origins[body_end_i].start),
                 );
@@ -2555,7 +2628,7 @@ impl Parser<'_> {
                 } else {
                     self.bison_token_name(next_i)
                 };
-                self.model.shape_refuses.push(
+                self.record_shape_refusal(
                     ShapeRefuse::official(
                         token.span,
                         &command,
@@ -2579,7 +2652,7 @@ impl Parser<'_> {
                     && self.tokens[i + 1].kind == TokenKind::Ident
                     && self.tokens[i + 2].kind == TokenKind::Comma
                 {
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(
                             self.tokens[i + 2].span,
                             &command,
@@ -2593,7 +2666,7 @@ impl Parser<'_> {
                     && self.tokens[i + 1].kind == TokenKind::Ident
                     && self.tokens[i + 2].kind == TokenKind::Eq
                 {
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(
                             self.tokens[i + 2].span,
                             &command,
@@ -2607,7 +2680,7 @@ impl Parser<'_> {
                     && self.tokens[i + 2].kind == TokenKind::Semi
                     && self.word_at(i + 3, "stderr")
                 {
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(
                             self.tokens[i + 3].span,
                             &command,
@@ -2636,7 +2709,7 @@ impl Parser<'_> {
                     } else {
                         "syntax error, unexpected SKEW, expecting VAR"
                     };
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(self.tokens[i].span, &command, message)
                             .with_parse_order(self.token_origins[i].start),
                     );
@@ -2674,7 +2747,7 @@ impl Parser<'_> {
                     _ => None,
                 };
                 if let Some(message) = message {
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(self.tokens[op_i].span, &command, message)
                             .with_parse_order(self.token_origins[op_i].start),
                     );
@@ -2685,7 +2758,7 @@ impl Parser<'_> {
         if command.eq_ignore_ascii_case("mshocks") {
             for i in opener_i + 1..body_i {
                 if self.tokens[i].kind == TokenKind::Comma {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
+                    self.record_shape_refusal(ShapeRefuse::official(
                         self.tokens[i].span, &command,
                         "syntax error, unexpected COMMA, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'",
                     ).with_parse_order(self.token_origins[i].start));

@@ -484,11 +484,17 @@ fn shared_written_spans_do_not_pair_changed_macro_occurrences() {
 }
 
 #[test]
-fn unretained_block_body_has_context_beside_owned_fields() {
+fn retained_observation_trends_and_equations_have_no_duplicate_command_context() {
     let before = "var y; parameters a b; observation_trends; y(a); end;";
     let diff = compare(before, &before.replace("y(a)", "y(b)"));
-    assert_eq!(commands(&diff).len(), 1);
-    assert_eq!(commands(&diff)[0].name, "observation_trends");
+    let rows = role(&diff, "observation_trends");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, "y");
+    assert!(rows[0]
+        .fields
+        .iter()
+        .any(|field| field.name == "trend_expression" && field.changed));
+    assert!(commands(&diff).is_empty());
     let before = "var y; model; [name='Output'] y=1; end;";
     let diff = compare(before, &before.replace("y=1", "y=2"));
     assert!(commands(&diff).is_empty());

@@ -4,27 +4,14 @@ use serde_json::Value;
 
 use crate::engine::language::lexer::{tokenize, TokenKind};
 
-const BLOCK_OPENERS: &[&str] = &[
-    "estimated_params_init",
-    "estimated_params_bounds",
-    "steady_state_model",
-    "observation_trends",
-    "ramsey_constraints",
-    "estimated_params",
-    "moment_calibration",
-    "irf_calibration",
-    "homotopy_setup",
-    "optim_weights",
-    "histval",
-    "endval",
-    "initval",
-    "shocks",
-    "occbin_constraints",
-    "verbatim",
-    "model",
-];
-
 const UNSAFE_CHARS: &[char] = &['\'', '"', '[', ']', '{', '}', '@', '#', '%', ':', '\\', '!'];
+
+#[derive(Clone, Copy, Default)]
+struct SourceLine {
+    preserve: bool,
+    opens: bool,
+    closes: bool,
+}
 
 /// Whole-file format result. `format_text` is `Some` only for [`FormatOutcome::Changed`].
 pub enum FormatOutcome {
@@ -152,12 +139,12 @@ pub(crate) fn format_range_outcome_with_limit(
             "The formatting range is outside the document or reversed.",
         );
     }
-    let preserved = native_command_lines(text, work_limit);
-    let depth = depth_before(&stripped_lines, &preserved, start);
+    let structure = source_lines(text, work_limit);
+    let depth = depth_before(&structure, start);
     let Some(formatted) = format_lines(
         &orig_lines[start..=end],
         &stripped_lines[start..=end],
-        &preserved[start..=end],
+        &structure[start..=end],
         indent_unit,
         depth,
     ) else {
@@ -196,8 +183,8 @@ fn reformat(
     }
     let orig_owned: Vec<String> = orig_lines.iter().map(|s| s.to_string()).collect();
     let stripped_owned: Vec<String> = stripped_lines.iter().map(|s| s.to_string()).collect();
-    let preserved = native_command_lines(&normalised, work_limit);
-    let mut out = format_lines(&orig_owned, &stripped_owned, &preserved, indent_unit, 0)?;
+    let structure = source_lines(&normalised, work_limit);
+    let mut out = format_lines(&orig_owned, &stripped_owned, &structure, indent_unit, 0)?;
     while out.last().is_some_and(|s| s.is_empty()) {
         out.pop();
     }
@@ -265,23 +252,74 @@ fn normalise_line_breaks(text: &str) -> String {
     out
 }
 
-fn structural_line(text: &str) -> &str {
-    text.strip_prefix('\u{feff}').unwrap_or(text)
-}
-
 /// Spaces separate arguments in MATLAB command syntax. The shared parser owns
 /// native line boundaries, including continuations and macro execution. Preserve
 /// whole physical lines when any part is native, verbatim, or opaque recovery.
-fn native_command_lines(
+/// Block transitions use the same parser's accepted token boundaries, including
+/// multiline headers. Equal written macro copies produce one transition.
+fn source_lines(
     text: &str,
     work_limit: crate::engine::macro_work::MacroWorkLimit,
-) -> Vec<bool> {
+) -> Vec<SourceLine> {
     let mut starts = vec![0];
     starts.extend(text.match_indices('\n').map(|(at, _)| at + 1));
     let model = crate::engine::language::parser::parse_with_budget(
         text,
         &mut crate::engine::language::macro_expr::MacroBudget::with_limit(work_limit, None),
     );
+    let fallback;
+    let structure = if model.macro_incomplete() {
+        // Source presentation uses an inert parse when execution stops. This
+        // does not create accepted language facts or execute a failed branch.
+        let inert = crate::engine::analysis::folding::inert_source(text);
+        fallback = crate::engine::language::parser::parse_expanded_controlled(
+            &inert,
+            tokenize(&inert),
+            None,
+            work_limit,
+        )
+        .0;
+        &fallback
+    } else {
+        &model
+    };
+    let mut lines = vec![SourceLine::default(); starts.len()];
+    let line_at = |offset: u32| starts.partition_point(|&at| at <= offset as usize) - 1;
+    for statement in &structure.statements {
+        if statement.kind != crate::engine::language::model::StatementKind::Block
+            || statement.native
+            || statement.name == "verbatim"
+        {
+            continue;
+        }
+        let Some(opener) = statement
+            .opener_range
+            .end
+            .checked_sub(1)
+            .and_then(|index| structure.expanded_tokens.get(index))
+            .filter(|token| token.kind == TokenKind::Semi)
+        else {
+            continue;
+        };
+        let open_line = line_at(opener.span.start);
+        lines[open_line].opens = true;
+        if statement.complete
+            && let Some(closer) = statement
+                .token_range
+                .end
+                .checked_sub(2)
+                .and_then(|index| structure.expanded_tokens.get(index))
+            && closer.kind == TokenKind::Ident
+            && closer.text(text).eq_ignore_ascii_case("end")
+        {
+            let close_line = line_at(closer.span.start);
+            if close_line == open_line {
+                lines[open_line].opens = false;
+            } else {
+                lines[close_line].closes = true;
+            }
+        }
+    }
     // Difference marks avoid rescanning long spans repeated by macro execution.
     let mut marks = vec![0i64; starts.len() + 1];
     let mut spans: Vec<_> = model
@@ -351,25 +389,23 @@ fn native_command_lines(
         }
     }
     let mut active = 0;
-    marks[..starts.len()]
-        .iter()
-        .map(|mark| {
-            active += mark;
-            active > 0
-        })
-        .collect()
+    for (line, mark) in lines.iter_mut().zip(&marks) {
+        active += mark;
+        line.preserve = active > 0;
+    }
+    lines
 }
 
-fn depth_before(stripped_lines: &[String], preserved: &[bool], upto: usize) -> usize {
+fn depth_before(structure: &[SourceLine], upto: usize) -> usize {
     let mut depth = 0usize;
-    for (stripped, preserve) in stripped_lines.iter().zip(preserved).take(upto) {
-        if *preserve {
+    for line in structure.iter().take(upto) {
+        if line.preserve {
             continue;
         }
-        let structural = structural_line(stripped);
-        if is_end_line(structural) {
+        if line.closes {
             depth = depth.saturating_sub(1);
-        } else if is_opener(structural) {
+        }
+        if line.opens {
             depth += 1;
         }
     }
@@ -379,25 +415,24 @@ fn depth_before(stripped_lines: &[String], preserved: &[bool], upto: usize) -> u
 fn format_lines(
     orig_lines: &[String],
     stripped_lines: &[String],
-    preserved: &[bool],
+    structure: &[SourceLine],
     indent_unit: &str,
     start_depth: usize,
 ) -> Option<Vec<String>> {
-    if orig_lines.len() != stripped_lines.len() || orig_lines.len() != preserved.len() {
+    if orig_lines.len() != stripped_lines.len() || orig_lines.len() != structure.len() {
         return None;
     }
     let mut out: Vec<String> = Vec::new();
     let mut depth = start_depth;
     let mut assign_run: Vec<(usize, String, String)> = Vec::new();
 
-    for ((orig, stripped), preserve) in orig_lines.iter().zip(stripped_lines).zip(preserved) {
-        if *preserve {
+    for ((orig, stripped), source_line) in orig_lines.iter().zip(stripped_lines).zip(structure) {
+        if source_line.preserve {
             flush_run(&mut out, &mut assign_run);
             out.push(orig.clone());
             continue;
         }
         let code = stripped.trim_end();
-        let structural = structural_line(stripped);
 
         if code.trim().is_empty() {
             flush_run(&mut out, &mut assign_run);
@@ -412,10 +447,13 @@ fn format_lines(
             continue;
         }
 
-        if is_end_line(structural) {
+        if source_line.closes {
             flush_run(&mut out, &mut assign_run);
             depth = depth.saturating_sub(1);
             out.push(format!("{}{}", indent_unit.repeat(depth), orig.trim()));
+            if source_line.opens {
+                depth += 1;
+            }
             continue;
         }
 
@@ -427,7 +465,7 @@ fn format_lines(
         if !trailing.is_empty() && !comment_prefix(trailing) {
             flush_run(&mut out, &mut assign_run);
             out.push(format!("{}{}", indent, orig.trim()));
-            if is_opener(structural) {
+            if source_line.opens {
                 depth += 1;
             }
             continue;
@@ -454,7 +492,7 @@ fn format_lines(
             None
         };
         if let Some((lhs, rest)) = assign {
-            if !is_opener(structural) {
+            if !source_line.opens {
                 assign_run.push((line_index, lhs.to_string(), rest.to_string()));
             } else {
                 flush_run(&mut out, &mut assign_run);
@@ -463,7 +501,7 @@ fn format_lines(
             flush_run(&mut out, &mut assign_run);
         }
 
-        if is_opener(structural) {
+        if source_line.opens {
             depth += 1;
         }
     }
@@ -493,63 +531,6 @@ fn flush_run(out: &mut [String], assign_run: &mut Vec<(usize, String, String)>) 
         }
     }
     assign_run.clear();
-}
-
-fn is_end_line(structural: &str) -> bool {
-    let s = structural.trim_start();
-    let rest = match strip_prefix_ci(s, "end") {
-        Some(r) => r,
-        None => return false,
-    };
-    let rest = rest.trim_start();
-    match rest.strip_prefix(';') {
-        Some(tail) => tail.chars().all(char::is_whitespace),
-        None => false,
-    }
-}
-
-fn is_opener(structural: &str) -> bool {
-    let mut s = structural.trim_start();
-    let mut matched = false;
-    for kw in BLOCK_OPENERS {
-        if let Some(rest) = strip_prefix_ci(s, kw)
-            && word_boundary(rest)
-        {
-            s = rest;
-            matched = true;
-            break;
-        }
-    }
-    if !matched {
-        return false;
-    }
-    s = s.trim_start();
-    if let Some(inner) = s.strip_prefix('(') {
-        let Some(close) = inner.find(')') else {
-            return false;
-        };
-        s = inner[close + 1..].trim_start();
-    }
-    match s.strip_prefix(';') {
-        Some(tail) => tail.chars().all(char::is_whitespace),
-        None => false,
-    }
-}
-
-fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
-    let plen = prefix.len();
-    if s.len() >= plen && s.as_bytes()[..plen].eq_ignore_ascii_case(prefix.as_bytes()) {
-        Some(&s[plen..])
-    } else {
-        None
-    }
-}
-
-fn word_boundary(rest: &str) -> bool {
-    match rest.chars().next() {
-        None => true,
-        Some(c) => !(c.is_ascii_alphanumeric() || c == '_'),
-    }
 }
 
 fn space_line(code: &str) -> Option<String> {

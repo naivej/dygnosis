@@ -11,6 +11,7 @@ use crate::engine::language::model::Model;
 use crate::engine::language::span::Span;
 use crate::engine::workspace::Workspace;
 
+mod named;
 mod ordinary;
 mod tags;
 
@@ -73,6 +74,7 @@ struct LocalIdentity {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Identity {
     Ordinary,
+    Named(usize),
     Local(LocalIdentity),
     Builtin,
 }
@@ -82,6 +84,8 @@ pub(crate) struct Binding {
     pub id: String,
     pub name: String,
     pub kind: String,
+    /// The owner of a head-specific name, such as `subsamples(alpha)`.
+    pub namespace: Option<String>,
     pub dimension: Option<String>,
     pub declaration: Option<(String, Span)>,
     pub definition: Option<(String, Span)>,
@@ -89,6 +93,10 @@ pub(crate) struct Binding {
 }
 
 impl Binding {
+    pub fn is_ordinary(&self) -> bool {
+        self.identity == Identity::Ordinary && ordinary::ordinary(&self.kind)
+    }
+
     pub fn is_local(&self) -> bool {
         matches!(self.identity, Identity::Local(_))
     }
@@ -141,9 +149,13 @@ pub(crate) struct SemanticModel {
     pub complete: bool,
     pub sources: HashMap<String, String>,
     facts: ModelLocals,
+    named: Vec<named::Fact>,
     mappings: HashMap<Span, (String, Span)>,
     tags: Vec<tags::Reference>,
     bindings: OnceLock<Vec<Binding>>,
+    ordinary_sites: OnceLock<HashMap<Name, Vec<Reference>>>,
+    parse_stop: Option<usize>,
+    accepted_events: HashSet<usize>,
 }
 
 impl SemanticModel {
@@ -182,7 +194,10 @@ impl SemanticModel {
             }
         }
         spans.extend(model.symbol_type_events.iter().map(|event| event.span));
-        let facts = ModelLocals::collect(&model);
+        let parse_stop = crate::engine::diagnostics::parse_preflight::first_refusal(&model)
+            .map(|stop| stop.order);
+        let facts = ModelLocals::collect_before(&model, parse_stop);
+        let named = named::collect(&model);
         check_cancelled()?;
         spans.extend(facts.declarations.iter().map(|row| row.span));
         spans.extend(facts.definitions.iter().map(|row| row.target_span));
@@ -207,6 +222,8 @@ impl SemanticModel {
                     .map(|text| (file, text.to_owned()))
             })
             .collect();
+        let accepted_events =
+            crate::engine::diagnostics::parse_preflight::accepted_symbol_events(&model, parse_stop);
         let mut result = Self {
             root: root.into(),
             revision,
@@ -214,9 +231,13 @@ impl SemanticModel {
             complete,
             sources,
             facts,
+            named,
             mappings,
             tags: Vec::new(),
             bindings: OnceLock::new(),
+            ordinary_sites: OnceLock::new(),
+            parse_stop,
+            accepted_events,
         };
         result.tags = tags::collect(&result, &result.model);
         check_cancelled()?;
@@ -255,6 +276,7 @@ impl SemanticModel {
             ),
             name: self.model.name(key.name).into(),
             kind: "model_local_variable".into(),
+            namespace: None,
             dimension: key.dimension.map(|name| self.model.name(name).into()),
             declaration: key
                 .declaration
@@ -293,27 +315,44 @@ impl SemanticModel {
     fn collect_bindings(&self) -> Vec<Binding> {
         let mut result = Vec::new();
         let mut names = HashSet::new();
-        for event in &self.model.symbol_type_events {
+        let kinds: HashMap<_, _> = self
+            .model
+            .symbol_type_events
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| self.accepted_events.contains(index))
+            .map(|(_, event)| (event.name, event.kind))
+            .collect();
+        for (index, event) in self.model.symbol_type_events.iter().enumerate() {
+            if !self.accepted_events.contains(&index) {
+                continue;
+            }
             if crate::engine::control::cancelled() {
                 break;
             }
             let name = self.model.name(event.name);
             if !names.insert(name.to_owned())
-                || self.model.final_symbol_kind(event.name) == Some("model_local_variable")
+                || kinds
+                    .get(&event.name)
+                    .is_some_and(|kind| kind.as_str() == "model_local_variable")
             {
                 continue;
             }
-            let kind = self
-                .model
-                .final_symbol_kind(event.name)
-                .unwrap_or(event.kind.as_str());
+            let kind = kinds.get(&event.name).unwrap_or(&event.kind).as_str();
             let declaration = ordinary::declaration(self, name)
                 .ok()
-                .map(|(target, _)| target);
+                .map(|(target, _)| target)
+                .filter(|(file, span)| {
+                    self.sources
+                        .get(file)
+                        .and_then(|source| source.get(span.start as usize..span.end as usize))
+                        == Some(name)
+                });
             result.push(Binding {
                 id: format!("{}:{}:ordinary:{name}", self.revision, self.root),
                 name: name.into(),
                 kind: kind.into(),
+                namespace: None,
                 dimension: self
                     .model
                     .written_declarations
@@ -335,6 +374,7 @@ impl SemanticModel {
                     id: format!("{}:{}:ordinary:{}", self.revision, self.root, tag.name),
                     name: tag.name.clone(),
                     kind: "var".into(),
+                    namespace: None,
                     dimension: None,
                     declaration: tag.written.clone(),
                     definition: None,
@@ -386,13 +426,24 @@ impl SemanticModel {
             }
         }
         // Calls are retained expression facts, including valid built-in names.
-        for (_, expr) in self.model.exprs.iter() {
+        let accepted_calls = self.accepted_calls();
+        let mut builtin_names = HashSet::new();
+        for (id, expr) in self.model.exprs.iter() {
             if crate::engine::control::cancelled() {
                 break;
             }
+            if matches!(
+                expr.kind,
+                crate::engine::language::expr::ExprKind::Call { .. }
+                    | crate::engine::language::expr::ExprKind::Expectation { .. }
+                    | crate::engine::language::expr::ExprKind::SteadyState { .. }
+            ) && !accepted_calls.contains_key(&id)
+            {
+                continue;
+            }
             let name = match expr.kind {
                 crate::engine::language::expr::ExprKind::Call { callee, .. }
-                    if self.model.final_symbol_kind(callee).is_none() =>
+                    if !kinds.contains_key(&callee) =>
                 {
                     Some(self.model.name(callee))
                 }
@@ -401,19 +452,28 @@ impl SemanticModel {
                 _ => None,
             };
             if let Some(name) = name {
-                if names.insert(name.into()) {
-                    result.push(Binding {
-                        id: format!("{}:{}:builtin:{name}", self.revision, self.root),
-                        name: name.into(),
-                        kind: "builtin_function".into(),
-                        dimension: None,
-                        declaration: None,
-                        definition: None,
-                        identity: Identity::Builtin,
-                    });
+                let name = match name.to_ascii_lowercase().as_str() {
+                    "expectation" => "EXPECTATION".to_string(),
+                    "steady_state" => "STEADY_STATE".to_string(),
+                    "sum" => "SUM".to_string(),
+                    _ => name.to_ascii_lowercase(),
+                };
+                if !builtin_names.insert(name.clone()) {
+                    continue;
                 }
+                result.push(Binding {
+                    id: format!("{}:{}:builtin:{name}", self.revision, self.root),
+                    name,
+                    kind: "builtin_function".into(),
+                    namespace: None,
+                    dimension: None,
+                    declaration: None,
+                    definition: None,
+                    identity: Identity::Builtin,
+                });
             }
         }
+        result.extend((0..self.named.len()).map(|id| named::binding(self, id)));
         result
     }
 
@@ -449,10 +509,14 @@ impl SemanticModel {
                 Selector::Target { file, byte } => {
                     if target_name.as_ref().is_some_and(|name| {
                         name != &binding.name
+                            && binding.kind != "external_function"
                             && !(binding.identity == Identity::Builtin
                                 && binding.name.eq_ignore_ascii_case(name))
                     }) {
                         return false;
+                    }
+                    if let Identity::Named(id) = binding.identity {
+                        return named::owns_target(self, id, file, *byte);
                     }
                     self.references(binding, true).iter().any(|site| {
                         site.written.as_ref().is_some_and(|(target, span)| {
@@ -475,65 +539,21 @@ impl SemanticModel {
         }
         match binding.identity {
             Identity::Local(key) => self.local_sites(key, include_declaration),
+            Identity::Named(id) => named::references(self, id, include_declaration),
             Identity::Ordinary => {
-                let sites = ordinary::binding_sites(&self.model, &binding.name);
-                let native = ordinary::native_orders(&self.model);
-                let declarations: HashSet<_> = self
+                if binding.kind == "external_function" {
+                    return self.external_sites(binding, include_declaration);
+                }
+                let mut result = self
                     .model
-                    .symbol_type_events
-                    .iter()
-                    .filter(|event| self.model.name(event.name) == binding.name && !event.changed)
-                    .map(|event| event.span)
-                    .collect();
-                let mut result: Vec<_> = self
-                    .model
-                    .expanded_tokens
-                    .iter()
-                    .take_while(|_| !crate::engine::control::cancelled())
-                    .enumerate()
-                    .filter(|(order, token)| {
-                        token.kind == TokenKind::Ident
-                            && token.text(&self.model.source) == binding.name
-                            && sites.contains(&token.span)
-                            && !native.contains(order)
-                    })
-                    .filter_map(|(order, token)| {
-                        let declaration = declarations.contains(&token.span);
-                        (include_declaration || !declaration).then(|| Reference {
-                            order,
-                            span: token.span,
-                            written: self.written(token.span),
-                            role: if declaration { "declaration" } else { "use" },
-                            dimension: super::model_locals::scope_at_order(&self.model, order)
-                                .flatten()
-                                .map(|name| self.model.name(name).into()),
-                            declaration,
-                        })
-                    })
-                    .collect();
-                result.extend(
-                    self.tags
-                        .iter()
-                        .take_while(|_| !crate::engine::control::cancelled())
-                        .filter(|tag| {
-                            tag.name == binding.name && (include_declaration || !tag.declaration)
-                        })
-                        .map(|tag| Reference {
-                            order: tag.order.unwrap_or(tag.declaration_order),
-                            span: tag
-                                .order
-                                .map(|order| self.model.expanded_tokens[order].span)
-                                .unwrap_or_default(),
-                            written: tag.written.clone(),
-                            role: if tag.declaration {
-                                "declaration"
-                            } else {
-                                "tag_reference"
-                            },
-                            dimension: None,
-                            declaration: tag.declaration,
-                        }),
-                );
+                    .intern
+                    .lookup(&binding.name)
+                    .and_then(|name| self.ordinary_site_inventory().get(&name))
+                    .into_iter()
+                    .flatten()
+                    .filter(|site| include_declaration || !site.declaration)
+                    .cloned()
+                    .collect::<Vec<_>>();
                 result.extend(self.call_sites(binding));
                 result.sort_by_key(|site| site.order);
                 result
@@ -542,49 +562,238 @@ impl SemanticModel {
         }
     }
 
-    fn call_sites(&self, binding: &Binding) -> Vec<Reference> {
-        let starts: HashSet<_> = self
-            .model
-            .exprs
+    /// All parser-owned ordinary-family sites in one cached traversal. Names
+    /// are keys for joining binding metadata; equal text is never site proof.
+    pub fn accepted_ordinary_sites(&self) -> impl Iterator<Item = (&str, &Reference)> {
+        self.ordinary_site_inventory()
             .iter()
-            .filter_map(|(_, expr)| {
+            .flat_map(move |(name, sites)| {
+                sites.iter().map(move |site| (self.model.name(*name), site))
+            })
+            .take_while(|_| !crate::engine::control::cancelled())
+    }
+
+    fn ordinary_site_inventory(&self) -> &HashMap<Name, Vec<Reference>> {
+        self.ordinary_sites.get_or_init(|| {
+            let sites = ordinary::binding_site_inventory(&self.model);
+            let native = ordinary::native_orders(&self.model);
+            let excluded_nonordinary = ordinary::excluded_nonordinary_orders(&self.model);
+            let refused_events: HashSet<_> = self
+                .model
+                .type_event_occurrences
+                .iter()
+                .filter(|(index, _)| !self.accepted_events.contains(index))
+                .flat_map(|(_, range)| range.clone())
+                .collect();
+            let mut declarations = HashMap::<Name, HashSet<usize>>::new();
+            for (index, range) in &self.model.type_event_occurrences {
+                let event = &self.model.symbol_type_events[*index];
+                if self.accepted_events.contains(index) && !event.changed {
+                    declarations
+                        .entry(event.name)
+                        .or_default()
+                        .insert(range.start);
+                }
+            }
+            let mut result = HashMap::<Name, Vec<Reference>>::new();
+            for (order, token) in self.model.expanded_tokens.iter().enumerate() {
+                if crate::engine::control::cancelled() {
+                    return HashMap::new();
+                }
+                if self.parse_stop.is_some_and(|stop| order >= stop)
+                    || token.kind != TokenKind::Ident
+                    || native.contains(&order)
+                    || excluded_nonordinary.contains(&order)
+                    || refused_events.contains(&order)
+                {
+                    continue;
+                }
+                let Some(name) = self.model.intern.lookup(token.text(&self.model.source)) else {
+                    continue;
+                };
+                if !sites
+                    .get(&name)
+                    .is_some_and(|sites| sites.contains(&token.span))
+                {
+                    continue;
+                }
+                let declaration = declarations
+                    .get(&name)
+                    .is_some_and(|sites| sites.contains(&order));
+                result.entry(name).or_default().push(Reference {
+                    order,
+                    span: token.span,
+                    written: self.written(token.span),
+                    role: if declaration { "declaration" } else { "use" },
+                    dimension: super::model_locals::scope_at_order(&self.model, order)
+                        .flatten()
+                        .map(|name| self.model.name(name).into()),
+                    declaration,
+                });
+            }
+            for tag in &self.tags {
+                if self
+                    .parse_stop
+                    .is_some_and(|stop| tag.declaration_order > stop)
+                {
+                    continue;
+                }
+                if crate::engine::control::cancelled() {
+                    return HashMap::new();
+                }
+                let Some(name) = self.model.intern.lookup(&tag.name) else {
+                    continue;
+                };
+                result.entry(name).or_default().push(Reference {
+                    order: tag.order.unwrap_or(tag.declaration_order),
+                    span: tag
+                        .order
+                        .map(|order| self.model.expanded_tokens[order].span)
+                        .unwrap_or_default(),
+                    written: tag.written.clone(),
+                    role: if tag.declaration {
+                        "declaration"
+                    } else {
+                        "tag_reference"
+                    },
+                    dimension: None,
+                    declaration: tag.declaration,
+                });
+            }
+            for sites in result.values_mut() {
+                sites.sort_by_key(|site| site.order);
+            }
+            result
+        })
+    }
+
+    fn accepted_calls(&self) -> HashMap<crate::engine::language::expr::ExprId, (usize, Span)> {
+        let accepted = crate::engine::analysis::named_callbacks::collect(&self.model);
+        let owners: HashSet<_> = accepted
+            .slots
+            .iter()
+            .filter_map(|index| match self.model.named_slots[*index].owner {
+                crate::engine::language::model::NamedSlotOwner::ModelOperator(owner) => Some(owner),
+                _ => None,
+            })
+            .collect();
+        let mut result: HashMap<_, _> = self
+            .model
+            .function_calls
+            .iter()
+            .filter(|call| {
+                accepted
+                    .refusal
+                    .as_ref()
+                    .is_none_or(|stop| call.callback_order <= stop.order)
+            })
+            .map(|call| (call.expr, (call.order, call.span)))
+            .collect();
+        result.extend(
+            self.model
+                .named_model_operator_exprs
+                .iter()
+                .filter(|(_, owner)| owners.contains(owner))
+                .map(|(id, owner)| {
+                    let row = &self.model.named_model_operators[*owner];
+                    (*id, (row.keyword_order, row.operator_span))
+                }),
+        );
+        result
+    }
+
+    fn call_sites(&self, binding: &Binding) -> Vec<Reference> {
+        let mut sites: Vec<_> = self
+            .accepted_calls()
+            .into_iter()
+            .filter(|(id, _)| {
                 use crate::engine::language::expr::ExprKind;
-                let matches = match &expr.kind {
-                    ExprKind::Call { callee, .. } => self.model.name(*callee) == binding.name,
+                match self.model.exprs.get(*id).kind {
+                    ExprKind::Call { callee, .. } => {
+                        self.model.name(callee) == binding.name
+                            || binding.identity == Identity::Builtin
+                                && self.model.name(callee).eq_ignore_ascii_case(&binding.name)
+                    }
                     ExprKind::Expectation { .. } => binding.name == "EXPECTATION",
                     ExprKind::SteadyState { .. } => binding.name == "STEADY_STATE",
                     _ => false,
-                };
-                matches.then_some(expr.span.start)
+                }
             })
-            .collect();
-        let native = ordinary::native_orders(&self.model);
-        self.model
-            .expanded_tokens
-            .iter()
-            .take_while(|_| !crate::engine::control::cancelled())
-            .enumerate()
-            .filter(|(order, token)| {
-                token.kind == TokenKind::Ident
-                    && (token.text(&self.model.source) == binding.name
-                        || binding.identity == Identity::Builtin
-                            && token
-                                .text(&self.model.source)
-                                .eq_ignore_ascii_case(&binding.name))
-                    && starts.contains(&token.span.start)
-                    && !native.contains(order)
-            })
-            .map(|(order, token)| Reference {
+            .map(|(_, (order, span))| Reference {
                 order,
-                span: token.span,
-                written: self.written(token.span),
+                span,
+                written: self.written(span),
                 role: "call",
                 dimension: super::model_locals::scope_at_order(&self.model, order)
                     .flatten()
                     .map(|name| self.model.name(name).into()),
                 declaration: false,
             })
-            .collect()
+            .collect();
+        sites.sort_by_key(|site| site.order);
+        sites
+    }
+
+    fn external_sites(&self, binding: &Binding, include_declaration: bool) -> Vec<Reference> {
+        let mut result = self.call_sites(binding);
+        if include_declaration {
+            result.extend(
+                self.model
+                    .symbol_type_events
+                    .iter()
+                    .enumerate()
+                    .take_while(|_| !crate::engine::control::cancelled())
+                    .filter(|(index, event)| {
+                        self.accepted_events.contains(index)
+                            && !event.changed
+                            && event.kind.as_str() == "external_function"
+                            && self.model.name(event.name) == binding.name
+                    })
+                    .filter_map(|(index, event)| {
+                        let order = self
+                            .model
+                            .type_event_occurrences
+                            .iter()
+                            .find(|(id, _)| *id == index)?
+                            .1
+                            .start;
+                        let span = self.external_name_span(event.span);
+                        Some(Reference {
+                            order,
+                            span,
+                            written: self.written(span),
+                            role: "declaration",
+                            dimension: None,
+                            declaration: true,
+                        })
+                    }),
+            );
+        }
+        result.sort_by_key(|site| site.order);
+        result
+    }
+
+    fn external_name_span(&self, span: Span) -> Span {
+        let Some(token) = self
+            .model
+            .expanded_tokens
+            .iter()
+            .find(|token| token.span == span && token.kind == TokenKind::String)
+        else {
+            return span;
+        };
+        let text = token.text(&self.model.source);
+        if text.len() >= 2
+            && matches!(text.as_bytes()[0], b'\'' | b'"')
+            && text.as_bytes().first() == text.as_bytes().last()
+        {
+            Span {
+                start: span.start + 1,
+                end: span.end - 1,
+            }
+        } else {
+            span
+        }
     }
 
     fn local_sites(&self, key: LocalIdentity, include_declaration: bool) -> Vec<Reference> {
@@ -760,6 +969,8 @@ impl SemanticModel {
 }
 
 #[cfg(test)]
+mod named_tests;
+#[cfg(test)]
 mod tests;
 
 /// The caller supplies exactly the owners it checked. This closes over edited
@@ -799,6 +1010,11 @@ pub(crate) fn rename(
                 decision.kind.into(),
             )
         }
+        Identity::Named(id) => (
+            named::rename(selected, id, replacement)?,
+            binding.declaration.clone(),
+            binding.kind.clone(),
+        ),
         Identity::Builtin => {
             return Err(Refusal::new(
                 "BUILTIN_SYMBOL",
@@ -839,6 +1055,30 @@ pub(crate) fn rename(
                 }
                 let other = compatible.into_iter().next().unwrap();
                 let targets = owner.local_rename(&other, replacement)?;
+                affected_bindings.insert(index, other);
+                targets
+            } else if matches!(binding.identity, Identity::Named(_)) {
+                let mut compatible: Vec<_> = owner
+                    .bindings()
+                    .into_iter()
+                    .filter(|other| {
+                        matches!(other.identity, Identity::Named(_))
+                            && other.name == binding.name
+                            && other.kind == kind
+                            && other.declaration == declaration
+                    })
+                    .collect();
+                if compatible.len() > 1 {
+                    compatible.retain(|other| matches!(other.identity, Identity::Named(id) if owner.named[id].origin == id));
+                }
+                if compatible.len() != 1 {
+                    return Err(BINDING);
+                }
+                let other = compatible.pop().unwrap();
+                let Identity::Named(id) = other.identity else {
+                    unreachable!()
+                };
+                let targets = named::rename(owner, id, replacement)?;
                 affected_bindings.insert(index, other);
                 targets
             } else {

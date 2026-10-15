@@ -5,29 +5,16 @@ use dygnosis::span::LineIndex;
 use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
 
-const DIRECTIVES: &[(&str, &str)] = &[
-    ("define", "Define a macro variable or function"),
-    ("include", "Insert another file"),
-    ("includepath", "Add a folder to the include search"),
-    ("if", "Keep the following text when the condition is true"),
-    ("ifdef", "Keep the following text when the name is defined"),
-    (
-        "ifndef",
-        "Keep the following text when the name is not defined",
-    ),
-    ("elseif", "Try another condition"),
-    ("else", "Take the remaining branch"),
-    ("endif", "End an if"),
-    ("for", "Repeat the following text for each value"),
-    ("endfor", "End a for"),
-    ("echo", "Show a macro message"),
-    ("error", "Stop expansion and show a message"),
-    ("echomacrovars", "Show macro variable values"),
-    (
-        "line",
-        "Mark a source line. Later checks keep the written file.",
-    ),
-];
+fn directives() -> Vec<(&'static str, &'static str)> {
+    dygnosis::catalog::syntax::in_context("macro_directive", Some("macro_directive"), None)
+        .map(|record| {
+            (
+                record.name.trim_start_matches("@#"),
+                record.summary.as_str(),
+            )
+        })
+        .collect()
+}
 
 async fn complete(marked: &str, extension: &str, trigger: Option<&str>) -> Vec<CompletionItem> {
     let byte = marked.find('|').expect("cursor marker");
@@ -72,8 +59,9 @@ async fn complete(marked: &str, extension: &str, trigger: Option<&str>) -> Vec<C
 #[tokio::test]
 async fn macro_completion_has_the_pinned_names_and_plain_name_edits() {
     let items = complete("var declared_name;\n@#def|", "mod", Some("#")).await;
-    assert_eq!(items.len(), DIRECTIVES.len());
-    for (order, (item, (name, documentation))) in items.iter().zip(DIRECTIVES).enumerate() {
+    let expected = directives();
+    assert_eq!(items.len(), expected.len());
+    for (order, (item, (name, documentation))) in items.iter().zip(&expected).enumerate() {
         assert_eq!(item.label, *name);
         assert_eq!(item.kind, Some(CompletionItemKind::KEYWORD));
         assert_eq!(item.detail.as_deref(), Some("macro directive"));
@@ -112,7 +100,7 @@ async fn macro_completion_reads_scanner_sites_even_when_expansion_fails() {
         ("@#|", "inc"),
         ("// non-ASCII 😀\r\n@#def|", "mod"),
     ] {
-        let expected: Vec<_> = DIRECTIVES.iter().map(|(name, _)| *name).collect();
+        let expected: Vec<_> = directives().iter().map(|(name, _)| *name).collect();
         for trigger in [None, Some("#")] {
             let items = complete(marked, extension, trigger).await;
             let labels: Vec<_> = items.iter().map(|item| item.label.as_str()).collect();
@@ -146,19 +134,20 @@ async fn macro_completion_replaces_the_name_from_leading_space_without_losing_sp
 
 #[tokio::test]
 async fn macro_completion_leaves_other_sites_manual_and_hash_trigger_quiet() {
-    for marked in [
-        "var y;\nmodel;\n#| tmp=y;\nend;",
-        "var y;\nbeta = @#|",
-        "var y;\n// @#|",
-        "var y;\n@#define |x=1",
-        "var y;\n@#if |1\n@#endif",
-        "var y;\n@{|}",
-        "var y;\n@#define x=1+\\\\\n |2",
+    for (marked, offers_language_names) in [
+        ("var y;\nmodel;\n#| tmp=y;\nend;", true),
+        ("var y;\nbeta = @#|", false),
+        ("var y;\n// @#|", false),
+        ("var y;\n@#define |x=1", true),
+        ("var y;\n@#if |1\n@#endif", true),
+        ("var y;\n@{|}", true),
+        ("var y;\n@#define x=1+\\\\\n |2", true),
     ] {
         let manual = complete(marked, "mod", None).await;
-        assert!(
+        assert_eq!(
             !manual.is_empty(),
-            "manual completion missing at {marked:?}"
+            offers_language_names,
+            "manual completion at {marked:?}"
         );
         assert!(
             manual

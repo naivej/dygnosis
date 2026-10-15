@@ -726,37 +726,14 @@ fn model_local_name(model: &Model, eq: &Equation) -> Option<Name> {
 /// and that one is **E317** (in `check_d_open`). Their walk stops at the first
 /// name it refuses, so this does too.
 fn check_prior_head_not_endo_or_exo(model: &Model) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-    for stmt in &model.dotted_statements {
-        if crate::engine::control::cancelled() {
-            return Default::default();
-        }
-        for head in crate::engine::diagnostics::check_d_ms::prior_std_corr_head_names(model, stmt) {
-            if crate::engine::control::cancelled() {
-                return Default::default();
-            }
-            if head.verdict != crate::engine::diagnostics::check_d_ms::PriorHeadVerdict::NotEndogenousOrExogenous {
-                continue;
-            }
-            diagnostics.push(Diagnostic {
-                span: stmt.span,
-                severity: Severity::Error,
-                code: "E059".to_string(),
-                message: format!(
-                    "{} is neither endogenous or exogenous.",
-                    model.name(head.name)
-                ),
-                fix: None,
-                related: Vec::new(),
-                tags: Vec::new(),
-                model_dimension: None,
-                display_keyword: None,
-                writing: None,
-            });
-            break;
-        }
-    }
-    diagnostics
+    model
+        .dotted_statements
+        .iter()
+        .filter_map(|statement| {
+            crate::engine::diagnostics::check_d_ms::prior_head_refusal(model, statement)
+        })
+        .filter(|row| row.code == "E059")
+        .collect()
 }
 
 /// Excluded initialization targets retain the established declaration/removal

@@ -474,3 +474,22 @@ async fn literal_macro_reads_keep_navigation_and_synthesized_names_refuse_rename
         .message
         .is_empty());
 }
+
+// A retained recovery declaration/definition after a Parse refusal cannot
+// become an accepted local navigation or completion target.
+#[tokio::test]
+async fn local_queries_exclude_actions_after_an_earlier_parse_refusal() {
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    let uri = Url::parse("file:///tmp/local-refused-prefix.mod").unwrap();
+    let text = "parameters p;std(p).prior(shape=normal,mean=0,stdev=1);model_local_variable z;var y;model;#z=1;y=z;end;";
+    open(server, &uri, text).await;
+    let pos = at(&uri, text, "y=z");
+    assert!(target(server, pos.clone(), false).await.is_none());
+    assert!(target(server, pos.clone(), true).await.is_none());
+    assert!(refs(server, pos.clone(), true).await.is_empty());
+    assert!(complete(server, pos)
+        .await
+        .iter()
+        .all(|item| item.label != "z"));
+}

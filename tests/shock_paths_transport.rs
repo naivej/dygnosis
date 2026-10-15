@@ -242,7 +242,13 @@ impl McpWire {
             json!({ "name": "dynare_diagnose", "arguments": args }),
         );
         assert!(reply.get("error").is_none(), "{reply}");
-        serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+        let envelope: Value =
+            serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(envelope["schema_version"], 3);
+        envelope["data"]["roots"][0]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .clone()
     }
 }
 
@@ -266,7 +272,7 @@ fn path_pairs_keep_written_owners_and_scalar_columns_on_stdio_mcp() {
                 } else {
                     format!("{}{fire}", HEAD.replace('\n', newline))
                 };
-                let mut args = json!({ "active_file": "main.mod", "file_content": root, "files": { "main.mod": "old disk text", "body.inc": fire } });
+                let mut args = json!({ "source": { "kind": "map", "root": "main.mod", "root_text": root, "files": { "main.mod": "old disk text", "body.inc": fire } } });
                 let rows = wire.diagnose(args.clone());
                 let errors: Vec<_> = rows.iter().filter(|row| row["code"] == pair.code).collect();
                 assert_eq!(
@@ -295,9 +301,10 @@ fn path_pairs_keep_written_owners_and_scalar_columns_on_stdio_mcp() {
                 assert_eq!(errors[0]["end_line"], end.line + 1);
                 assert_eq!(errors[0]["end_column"], end.character + 1);
                 if included {
-                    args["files"]["body.inc"] = json!(quiet);
+                    args["source"]["files"]["body.inc"] = json!(quiet);
                 } else {
-                    args["file_content"] = json!(format!("{}{quiet}", HEAD.replace('\n', newline)));
+                    args["source"]["root_text"] =
+                        json!(format!("{}{quiet}", HEAD.replace('\n', newline)));
                 }
                 let rows = wire.diagnose(args);
                 assert!(
@@ -359,7 +366,7 @@ async fn path_macro_copies_keep_per_root_multiplicity_and_source_navigation() {
                 .all(|row| row.code != Some(NumberOrString::String("E277".into()))),
             "inactive branch: {rows:?}"
         );
-        let mut args = json!({ "active_file": "main.mod", "file_content": root_text, "files": { "main.mod": "old disk text", "body.inc": body } });
+        let mut args = json!({ "source": { "kind": "map", "root": "main.mod", "root_text": root_text, "files": { "main.mod": "old disk text", "body.inc": body } } });
         let rows = wire.diagnose(args.clone());
         let errors: Vec<_> = rows.iter().filter(|row| row["code"] == "E278").collect();
         assert_eq!(errors.len(), 4, "{rows:?}");
@@ -375,7 +382,7 @@ async fn path_macro_copies_keep_per_root_multiplicity_and_source_navigation() {
             assert_eq!(row["end_column"], to.character + 1);
         }
         assert!(rows.iter().all(|row| row["code"] != "E277"));
-        args["file_content"] = json!(quiet);
+        args["source"]["root_text"] = json!(quiet);
         let rows = wire.diagnose(args);
         assert!(
             rows.iter().all(|row| row["severity"] != "ERROR"),

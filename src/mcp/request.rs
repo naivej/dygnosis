@@ -1142,6 +1142,7 @@ fn semantic_selection(
 
 fn binding_json(snapshot: &SourceSnapshot, binding: &Binding) -> Value {
     json!({"binding_id":binding.id,"name":binding.name,"kind":binding.kind,
+        "namespace":binding.namespace,
         "scope":if binding.dimension.is_some() {"dimension"} else {"aggregate"},"dimension":binding.dimension,
         "declaration":binding.declaration.as_ref().and_then(|(file,span)|location(snapshot,file,*span)),
         "definition":binding.definition.as_ref().and_then(|(file,span)|location(snapshot,file,*span))})
@@ -1203,7 +1204,12 @@ fn symbols(
             .iter()
             .zip(&snapshot.report.model_map.declarations)
             .find(|(decl, source)| {
-                model.model.name(decl.declaration.name) == binding.name
+                (binding.is_ordinary()
+                    || matches!(
+                        binding.kind.as_str(),
+                        "trend_var" | "log_trend_var" | "external_function"
+                    ))
+                    && model.model.name(decl.declaration.name) == binding.name
                     && binding.declaration.as_ref().is_some_and(|(file, span)| {
                         source.segments.iter().any(|segment| {
                             segment.file.as_deref().unwrap_or(&snapshot.root) == file
@@ -1217,7 +1223,7 @@ fn symbols(
             json!(declaration.and_then(|decl| decl.declaration.long_name.as_deref()));
         data["tex_name"] = json!(declaration.and_then(|decl| decl.declaration.tex_name.as_deref()));
         data["written_kind"] = json!(declaration.map(|decl| decl.written_kind.as_str()));
-        data["timing"] = if binding.is_local() {
+        data["timing"] = if !binding.is_ordinary() {
             Value::Null
         } else {
             let timing = crate::engine::analysis::timing::classify_variable_timing(&model.model);
@@ -1228,12 +1234,13 @@ fn symbols(
         };
         // Assignment traces keep their execution positions. A trace value is
         // not a claim that later native code retained that final value.
-        let values = if !params.canonical
-            || params
-                .output
-                .sections
-                .iter()
-                .any(|section| section == "assignments")
+        let values = if binding.is_ordinary()
+            && (!params.canonical
+                || params
+                    .output
+                    .sections
+                    .iter()
+                    .any(|section| section == "assignments"))
         {
             crate::engine::analysis::assignment_values::assignment_values(&model.model)
         } else {
@@ -1245,7 +1252,7 @@ fn symbols(
                 crate::engine::language::model::AssignmentIndex::Parameter(index) => &model.model.param_assignments[index],
                 crate::engine::language::model::AssignmentIndex::Helper(index) => &model.model.helper_assignments[index],
             };
-            (model.model.name(assignment.name)==binding.name && !binding.is_local()).then(||json!({"value":value.value,
+            (model.model.name(assignment.name)==binding.name).then(||json!({"value":value.value,
                 "statement_id":value.statement_id,"expression":assignment.expression,"provenance":"assignment execution position"}))
         }).collect::<Vec<_>>());
         if binding.is_local() {

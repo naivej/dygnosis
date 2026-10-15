@@ -236,8 +236,80 @@ pub enum SemiStructuralKind {
     PacModel,
 }
 
+impl SemiStructuralKind {
+    pub(crate) fn option_can_repeat(self, name: &str) -> bool {
+        let name = name.to_ascii_lowercase();
+        match self {
+            Self::VarExpectationModel => matches!(name.as_str(), "expression" | "discount"),
+            Self::PacModel => matches!(name.as_str(), "growth" | "auxname" | "kind"),
+            _ => false,
+        }
+    }
+}
+
+/// A grammar-completed name candidate. Typed owners select the successful
+/// driver callback before analysis publishes its accepted binding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum NamedSlotKind {
+    Dimension,
+    Database,
+    Model(SemiStructuralKind),
+    AuxiliaryModel(SemiStructuralKind),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NamedSlotOwner {
+    DimensionDeclaration,
+    DatabaseDeclaration,
+    DimensionLookup,
+    DatabaseReference,
+    HeterogeneousShock(usize),
+    ModelCommand(usize),
+    ModelOperator(usize),
+    PacTargetInfo,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct NamedSlot {
+    pub kind: NamedSlotKind,
+    pub name: Name,
+    pub span: Span,
+    pub order: usize,
+    pub declaration: bool,
+    pub owner: NamedSlotOwner,
+    pub callback_order: usize,
+}
+
+/// A named subsample operand, captured with its accepted head and token order.
+#[derive(Clone, Debug)]
+pub(crate) struct SubsampleUse {
+    pub statement: usize,
+    pub head: DottedHead,
+    pub name: Name,
+    pub span: Span,
+    pub order: usize,
+    /// Body forms look up a subsample; prior/options copies do not.
+    pub checked: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FunctionCall {
+    pub expr: ExprId,
+    pub callback_order: usize,
+    pub span: Span,
+    pub order: usize,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SteadyStateAction {
+    pub order: usize,
+    pub span: Span,
+    pub exogenous: Vec<Name>,
+}
+
 #[derive(Clone, Debug)]
 pub struct SemiStructuralCommand {
+    pub(crate) callback_completed: bool,
     pub(crate) parse_order: usize,
     pub(crate) active_tokens: Range<usize>,
     pub symbol_type_context: SymbolContext,
@@ -248,6 +320,7 @@ pub struct SemiStructuralCommand {
 
 #[derive(Clone, Debug)]
 pub struct SemiStructuralOption {
+    pub(crate) callback_order: usize,
     /// Option word as written, including its case.
     pub name: String,
     pub span: Span,
@@ -296,6 +369,9 @@ pub enum NamedModelOperatorKind {
 
 #[derive(Clone, Debug)]
 pub struct NamedModelOperator {
+    pub(crate) keyword_order: usize,
+    pub(crate) callback_order: usize,
+    pub(crate) scope: crate::engine::language::constructor::DataTreeScope,
     pub kind: NamedModelOperatorKind,
     pub name: Name,
     pub operator_span: Span,
@@ -346,6 +422,7 @@ pub struct DeterministicTrendsBlock {
 
 #[derive(Clone, Debug)]
 pub struct DeterministicTrendRow {
+    pub(crate) callback_order: usize,
     pub name: Name,
     pub name_span: Span,
     pub expression: WrittenExpression,
@@ -481,6 +558,17 @@ pub struct ModelExpressionUse {
     pub timing: i32,
     pub context: SymbolContext,
     pub command: &'static str,
+    pub(crate) scope: crate::engine::language::constructor::DataTreeScope,
+}
+
+/// An executed ordinary-expression constructor. Recovery may remove the
+/// accepted use, but cannot remove this earlier diagnostic action.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct OutsideExpressionCallback {
+    pub name: Name,
+    pub span: Span,
+    pub context: SymbolContext,
+    pub order: usize,
 }
 
 impl SymbolContext {
@@ -509,6 +597,8 @@ pub enum SurgeryKind {
 
 #[derive(Clone, Debug)]
 pub struct OccbinExpr {
+    /// Binary constructor shape; `None` is not a BinaryOpNode.
+    pub(crate) constructed_binary: Option<bool>,
     pub text: String,
     pub span: Span,
     pub expr: Option<ExprId>,
@@ -520,6 +610,10 @@ pub struct OccbinExpr {
 pub struct OccbinConstraint {
     pub(crate) parse_order: usize,
     pub(crate) name_tokens: Range<usize>,
+    pub(crate) callback_order: usize,
+    pub(crate) symbol_type_context: SymbolContext,
+    /// Every executed clause, including an overwritten duplicate.
+    pub(crate) clauses: Vec<(&'static str, OccbinExpr)>,
     pub name: String,
     pub name_span: Span,
     pub bind: Option<OccbinExpr>,
@@ -674,6 +768,8 @@ pub struct OptimWeight {
 #[derive(Clone, Debug)]
 pub struct RamseyConstraint {
     pub(crate) active_tokens: Range<usize>,
+    pub(crate) callback_order: Option<usize>,
+    pub(crate) parse_match: Option<crate::engine::language::constructor::ComplementarityMatch>,
     pub expr: Option<ExprId>,
     pub span: Span,
 }
@@ -1051,6 +1147,7 @@ pub enum SubsampleHead {
 
 #[derive(Clone, Debug)]
 pub struct SubsampleRange {
+    pub(crate) name_order: usize,
     pub name: Name,
     pub name_span: Span,
     pub first: DateExpr,
@@ -1143,6 +1240,10 @@ pub struct AssignmentSyntax {
 
 #[derive(Clone, Debug, Default)]
 pub struct Model {
+    pub(crate) named_slots: Vec<NamedSlot>,
+    pub(crate) subsample_uses: Vec<SubsampleUse>,
+    /// Complete written callees, including qualified external function names.
+    pub(crate) function_calls: Vec<FunctionCall>,
     pub source: String,
     /// Resolved analysis context for auxiliary macro checks and edit proofs.
     pub(crate) macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
@@ -1162,6 +1263,9 @@ pub struct Model {
     pub written_declarations: Vec<WrittenDeclaration>,
     pub written_equations: Vec<WrittenEquation>,
     pub type_event_occurrences: Vec<(usize, Range<usize>)>,
+    pub(crate) type_event_callback_orders: HashMap<usize, usize>,
+    pub(crate) early_type_event_actions: std::collections::HashSet<usize>,
+    pub(crate) endogenous_tag_actions: std::collections::HashSet<usize>,
     pub write_targets: Vec<WrittenWrite>,
     pub endogenous: Vec<Decl>,
     pub exogenous: Vec<Decl>,
@@ -1173,7 +1277,7 @@ pub struct Model {
     pub helper_assignments: Vec<Assignment>,
     pub equations: Vec<Equation>,
     /// SUM argument role when the call was parsed; later removal cannot invalidate that earlier role check.
-    pub sum_argument_roles: HashMap<ExprId, bool>,
+    pub(crate) sum_arguments: HashMap<ExprId, Option<(Name, i32, bool)>>,
     pub semi_structural_commands: Vec<SemiStructuralCommand>,
     pub named_model_operators: Vec<NamedModelOperator>,
     /// Direct receipt from the named-operator reader to its existing leaf call.
@@ -1186,9 +1290,8 @@ pub struct Model {
     /// `model_remove` / `model_replace` statements, file order, with what each removed.
     pub equation_surgery: Vec<EquationSurgery>,
     /// Endogenous a `model_remove` dropped from the model (7.1's `excludedVariable`
-    /// type). The symbol is no longer in `endogenous`, but it was declared before the
-    /// removal: `filter_initial_state` refuses it with the timing message, not with
-    /// the undeclared one.
+    /// type). The symbol is no longer in `endogenous`, but its declaration and
+    /// type history remain available to source-position checks.
     pub excluded_endogenous: Vec<Decl>,
     /// `var_remove` changes these names to the excluded type. Command lists
     /// read the final type, whereas expressions are checked in source order.
@@ -1211,9 +1314,13 @@ pub struct Model {
     pub steady_state_rhs_uses: Vec<(Name, Span, SymbolContext)>,
     /// Ordinary expression uses in effective Parse order, excluding native text.
     pub outside_expression_uses: Vec<(Name, Span, SymbolContext)>,
+    pub(crate) outside_expression_callbacks: Vec<OutsideExpressionCallback>,
     /// The private official DataTree used by each completed expression allocation.
     pub(crate) constructor_scopes:
         HashMap<ExprId, crate::engine::language::constructor::DataTreeScope>,
+    pub(crate) constructor_contexts: HashMap<ExprId, SymbolContext>,
+    pub(crate) constructor_orders: HashMap<ExprId, usize>,
+    pub(crate) steady_state_actions: Vec<SteadyStateAction>,
     /// Facts collected from completed shock-path constructor roots. Written
     /// references remain separate for comparison and source ownership.
     pub(crate) path_value_facts:
@@ -1312,6 +1419,8 @@ pub struct Model {
     /// Proven positions of parser refusals in the original expanded stream.
     /// Written spans can repeat or run backwards through a macro loop.
     pub(crate) parse_issue_orders: Vec<(Span, usize)>,
+    /// Exact refusing executions; unlike spans these distinguish macro copies.
+    pub(crate) parse_issue_callbacks: Vec<(ParseIssue, usize)>,
     pub(crate) expanded_token_origins: Vec<Range<usize>>,
     /// Reserved-symbol expression uses captured while reading Dynare blocks.
     pub reserved_block_symbol_uses: Vec<Span>,
@@ -1455,6 +1564,9 @@ pub struct Model {
     pub identification_order: Option<(i32, Span)>,
     /// `identification(max_dim_cova_group=N)` number and its span.
     pub max_dim_cova_group: Option<(i32, Span)>,
+    /// All IdentificationStatement constructor options and their exact tokens.
+    pub(crate) identification_max_dimensions: Vec<(i32, Span, usize)>,
+    pub(crate) equation_tag_duplicates: Vec<(String, Span, usize)>,
     /// `discretionary_policy(order=N)` number and its span.
     pub discretionary_order: Option<(i32, Span)>,
     /// First `hp_filter` on `stoch_simul`.
@@ -1554,6 +1666,7 @@ pub struct Model {
     pub retyped_trend_decls: Vec<Decl>,
     /// Every `var(deflator=…)` / `var(log_deflator=…)` name, file order.
     pub nonstationary_vars: Vec<NonstationaryVar>,
+    pub(crate) deflator_variables: HashMap<ExprId, Vec<Name>>,
     /// `filter_initial_state;` … `end;` (first block).
     pub filter_initial_state_block: Option<Span>,
     /// Parsed `filter_initial_state` entries (own vec; not `histval`).
@@ -1587,6 +1700,8 @@ pub struct Model {
     pub matched_moments: Vec<MatchedMoment>,
     /// One span per `matched_moments;` … `end;`.
     pub matched_moments_blocks: Vec<Span>,
+    pub(crate) moment_block_callbacks: Vec<MomentBlockCallback>,
+    pub(crate) moment_name_callbacks: Vec<MomentNameCallback>,
     /// Every `matched_irfs` block, file order.
     pub matched_irfs: Vec<MatchedIrfsBlock>,
     /// Every `matched_irfs_weights` block, file order.
@@ -1613,6 +1728,7 @@ pub struct Model {
 /// One parse-stage sentence on a moment or calibration block.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MomSyntax {
+    pub(crate) parse_order: usize,
     pub span: Span,
     /// The sentence 7.1 prints for this token.
     pub message: String,
@@ -1806,6 +1922,8 @@ pub fn mod_file_local_in_model_message(name: &str) -> String {
 /// The dotted `….prior(…)` / `….options(…)` / `….subsamples(…)` statement family.
 #[derive(Clone, Debug)]
 pub struct DottedStatement {
+    pub(crate) active_tokens: Range<usize>,
+    pub(crate) callback_completed: bool,
     pub symbol_type_context: SymbolContext,
     /// Completion position of this execution in the original expanded token stream.
     pub(crate) parse_order: usize,
@@ -2018,6 +2136,21 @@ pub struct MatchedMoment {
     pub(crate) walk_context: SymbolContext,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct MomentBlockCallback {
+    pub rows: Range<usize>,
+    pub order: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct MomentNameCallback {
+    pub order: usize,
+    pub context: SymbolContext,
+    pub block: &'static str,
+    pub endogenous: Vec<(Name, Span)>,
+    pub exogenous: Option<(Name, Span)>,
+}
+
 /// One `matched_irfs` block.
 #[derive(Clone, Debug)]
 pub struct MatchedIrfsBlock {
@@ -2045,6 +2178,7 @@ pub struct MatchedIrfsWeightsBlock {
 /// One `var ENDO; varexo EXO; periods …; values …; weights …;` row.
 #[derive(Clone, Debug)]
 pub struct MatchedIrfsRow {
+    pub(crate) active_tokens: Range<usize>,
     /// Direct accepted item ranges preserve order through macro expansion.
     pub(crate) period_tokens: Vec<IrfPeriodTokens>,
     pub(crate) value_tokens: Vec<std::ops::Range<usize>>,

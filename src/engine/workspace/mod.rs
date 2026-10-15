@@ -1426,6 +1426,30 @@ impl Workspace {
         ))
     }
 
+    /// Literal joined-source positions for a written cursor. Repeated include
+    /// executions remain separate; generated or resized segments supply no proof.
+    pub(crate) fn effective_positions(&mut self, uri: &str, file: &str, byte: u32) -> Vec<u32> {
+        let Some(key) = self.ensure_loaded(uri) else {
+            return Vec::new();
+        };
+        let spliced = self.spliced_source(&key);
+        let mut positions: Vec<_> = spliced
+            .segments
+            .iter()
+            .filter(|segment| {
+                segment.file.as_deref() == Some(file)
+                    && segment.spliced.end - segment.spliced.start
+                        == segment.origin.end - segment.origin.start
+                    && segment.origin.start <= byte
+                    && byte <= segment.origin.end
+            })
+            .map(|segment| segment.spliced.start + byte - segment.origin.start)
+            .collect();
+        positions.sort_unstable();
+        positions.dedup();
+        positions
+    }
+
     pub fn expand_report(&mut self, uri: &str) -> Option<&ExpandReport> {
         let key = self.ensure_loaded(uri)?;
         if !self.expand.contains_key(&key) {

@@ -1,0 +1,12 @@
+var y;
+varexo e;
+parameters a;
+a=0.5;
+model;
+y=a*y(-1)+e;
+end;
+conditional_forecast_paths;
+var y;
+periods 2000Q1;
+values 2;
+end;

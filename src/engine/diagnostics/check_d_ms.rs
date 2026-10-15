@@ -47,7 +47,7 @@ use crate::engine::language::span::Span;
 /// ordered against its units by file position.
 pub fn check_d_ms(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
-    if check_parse_phase(model, &mut out, None) {
+    if check_parse_phase(model, &mut out, None).is_some() {
         return out;
     }
     check_check_phase(model, &mut out);
@@ -83,7 +83,7 @@ pub(crate) fn check_parse_before(model: &Model, syntax: &[Diagnostic]) -> Vec<Di
 
 /// The shape refusals the family's own records carry, in file order.
 /// Statement-level rows live on `Model::shape_refuses`; each block keeps its own.
-fn shape_refuses(model: &Model) -> Vec<&ShapeRefuse> {
+pub(crate) fn shape_refuses(model: &Model) -> Vec<&ShapeRefuse> {
     let mut rows: Vec<&ShapeRefuse> = model.shape_refuses.iter().collect();
     for block in &model.svar_identifications {
         if crate::engine::control::cancelled() {
@@ -158,7 +158,7 @@ fn unit_end(model: &Model, unit: &CheckUnit) -> u32 {
 
 /// A known token-level syntax error keeps the official text. Otherwise a
 /// generic bison refusal uses our short wording naming the command or option.
-fn shape_refuse_message(refuse: &ShapeRefuse) -> String {
+pub(crate) fn shape_refuse_message(refuse: &ShapeRefuse) -> String {
     refuse
         .official_message
         .as_deref()
@@ -170,7 +170,11 @@ fn shape_refuse_message(refuse: &ShapeRefuse) -> String {
 
 /// The refusals the pin prints while reading the file, in file order. Returns `true`
 /// when one fired.
-fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>, before: Option<usize>) -> bool {
+fn check_parse_phase(
+    model: &Model,
+    out: &mut Vec<Diagnostic>,
+    before: Option<usize>,
+) -> Option<usize> {
     let mut before = before;
     // Parse actions and grammar refusals compete in executed token order.
     // Macro iterations can execute a later written line before an earlier one.
@@ -315,10 +319,10 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>, before: Option<us
             }
         } else {
             if before.is_some() {
-                return false;
+                return None;
             }
             push(out, refuse.span, "E001", shape_refuse_message(refuse));
-            return true;
+            return Some(0);
         }
     }
     units.retain_mut(|(at, unit)| {
@@ -358,7 +362,7 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>, before: Option<us
     let mut subsamples = model.subsamples.iter().peekable();
 
     let mut subsample_ranges: HashMap<(Name, Option<Name>), HashSet<Name>> = HashMap::new();
-    for (_, unit) in units {
+    for (order, unit) in units {
         if crate::engine::control::cancelled() {
             return Default::default();
         }
@@ -441,10 +445,20 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>, before: Option<us
             }
         };
         if fired {
-            return true;
+            return Some(order);
         }
     }
-    false
+    None
+}
+
+/// First ordered Parse refusal, without running the later check/write phases.
+pub(crate) fn parse_refusal(model: &Model) -> Option<(Diagnostic, usize)> {
+    let mut diagnostics = Vec::new();
+    let order = check_parse_phase(model, &mut diagnostics, None)?;
+    diagnostics
+        .into_iter()
+        .next()
+        .map(|diagnostic| (diagnostic, order))
 }
 
 fn subsample_key(head: &SubsampleHead) -> (Name, Option<Name>) {
@@ -563,6 +577,92 @@ fn check_subsample_parse(
             false
         }
     }
+}
+
+/// Accepted named callbacks reuse the driver's ordered head and label checks.
+/// Recovery statements/instructions remain intact for diagnostic ownership.
+#[derive(Default)]
+pub(crate) struct NamedCallbacks {
+    pub dotted: HashSet<usize>,
+    pub subsamples: HashSet<usize>,
+    pub complete: bool,
+    pub frontier: Option<usize>,
+    pub refusal: Option<crate::engine::diagnostics::parse_preflight::ParseRefusal>,
+}
+
+pub(crate) fn named_callbacks(model: &Model) -> NamedCallbacks {
+    let mut result = NamedCallbacks {
+        complete: true,
+        ..Default::default()
+    };
+    let mut ranges = HashMap::new();
+    let mut instructions = model.subsamples.iter().enumerate().peekable();
+    for (index, statement) in model.dotted_statements.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Default::default();
+        }
+        let instruction = (statement.kind == DottedKind::Subsamples)
+            .then(|| {
+                instructions
+                    .peek()
+                    .filter(|(index, _)| {
+                        model
+                            .fact_receipts
+                            .get("subsamples")
+                            .and_then(|rows| rows.get(*index))
+                            .is_some_and(|receipt| {
+                                receipt.parse_order == statement.active_tokens.start
+                            })
+                    })
+                    .map(|_| ())
+                    .and_then(|_| instructions.next())
+            })
+            .flatten();
+        let mut refused = !statement.callback_completed;
+        let mut diagnostics = Vec::new();
+        if !refused {
+            refused = check_dotted_head_and_subsample(model, statement, &ranges, &mut diagnostics);
+            if let Some(diagnostic) = prior_head_refusal(model, statement) {
+                diagnostics.push(diagnostic);
+                refused = true;
+            }
+        }
+        if !refused && statement.kind == DottedKind::Subsamples {
+            if let Some((instruction_index, instruction)) = instruction {
+                refused = check_subsample_parse(model, instruction, &mut ranges, &mut diagnostics);
+                if !refused {
+                    result.subsamples.insert(instruction_index);
+                }
+            } else {
+                refused = true;
+            }
+        }
+        if refused {
+            result.complete = false;
+            if result
+                .refusal
+                .as_ref()
+                .is_none_or(|prior| statement.active_tokens.end < prior.order)
+            {
+                let diagnostic = diagnostics.first();
+                result.refusal = Some(crate::engine::diagnostics::parse_preflight::ParseRefusal {
+                    order: statement.active_tokens.end,
+                    span: diagnostic.map_or(statement.span, |row| row.span),
+                    cause: diagnostic.map_or_else(|| "The prior, options or subsamples statement did not complete its Parse callback.".into(), |row| row.message.clone()),
+                });
+            }
+            result.frontier = Some(
+                result
+                    .frontier
+                    .map_or(statement.active_tokens.end, |prior| {
+                        prior.min(statement.active_tokens.end)
+                    }),
+            );
+        } else {
+            result.dotted.insert(index);
+        }
+    }
+    result
 }
 
 fn dotted_named_key(head: &DottedHead) -> Option<((Name, Option<Name>), Name)> {
@@ -712,12 +812,18 @@ fn check_dotted_head_and_subsample(
     if stmt.kind == DottedKind::Subsamples {
         return false;
     }
-    if let Some((name, span)) = model
-        .option_twice
+    let mut seen = HashSet::new();
+    if let Some(option) = stmt
+        .options
         .iter()
-        .find(|(_, span)| span.start >= stmt.span.start && span.end <= stmt.span.end)
+        .find(|option| !seen.insert(option.name.to_ascii_lowercase()))
     {
-        push(out, *span, "E271", format!("option {name} declared twice"));
+        push(
+            out,
+            option.span,
+            "E271",
+            format!("option {} declared twice", option.name),
+        );
         return true;
     }
     if let DottedHead::Param { first, .. } = stmt.head
@@ -2153,6 +2259,38 @@ pub(crate) fn prior_std_corr_head_names(
         return Vec::new();
     }
     classify_std_corr_head_names(model, &stmt.head, stmt.symbol_type_context)
+}
+
+/// One shared prior-head refusal owner for diagnostics and accepted callbacks.
+pub(crate) fn prior_head_refusal(model: &Model, statement: &DottedStatement) -> Option<Diagnostic> {
+    for head in prior_std_corr_head_names(model, statement) {
+        let (span, code, message) = match head.verdict {
+            PriorHeadVerdict::Undeclared => (
+                head.span,
+                "E058",
+                format!(
+                    "Variable '{}' in prior is not declared.",
+                    model.name(head.name)
+                ),
+            ),
+            PriorHeadVerdict::ExogenousDeterministic => (
+                head.span,
+                "E317",
+                format!("{} is an exogenous deterministic.", model.name(head.name)),
+            ),
+            PriorHeadVerdict::NotEndogenousOrExogenous => (
+                statement.span,
+                "E059",
+                format!(
+                    "{} is neither endogenous or exogenous.",
+                    model.name(head.name)
+                ),
+            ),
+            _ => continue,
+        };
+        return Some(Diagnostic::new(span, Severity::Error, code, message));
+    }
+    None
 }
 
 /// The same sentence on the top-level assignment. 7.1's `init_param` runs

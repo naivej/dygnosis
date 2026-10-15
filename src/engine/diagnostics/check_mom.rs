@@ -26,7 +26,7 @@ use crate::engine::language::expr::{BinOp, ExprId, ExprKind, UnOp};
 use crate::engine::language::intern::Name;
 use crate::engine::language::model::{
     FamilyValueKind, IrfCalibrationRow, MatchedIrfsBlock, MatchedIrfsRow, MatchedIrfsWeight,
-    MatchedIrfsWeightsBlock, MatchedMoment, Model, MomStatement,
+    MatchedIrfsWeightsBlock, MatchedMoment, Model, MomStatement, SymbolContext,
 };
 use crate::engine::language::span::Span;
 
@@ -70,6 +70,156 @@ pub fn check_mom(model: &Model) -> Vec<Diagnostic> {
     check_statements(&ctx)
 }
 
+/// Pure Parse callbacks. Check-only method requirements remain in
+/// check_statements. Each row/block owns its expanded execution receipt.
+pub(crate) fn parse_refusals(model: &Model) -> Vec<(Diagnostic, usize)> {
+    if model.mom_syntax.is_empty()
+        && model.mom_statements.is_empty()
+        && model.moment_block_callbacks.is_empty()
+        && model.moment_name_callbacks.is_empty()
+        && model.matched_irfs.is_empty()
+        && model.matched_irfs_weights.is_empty()
+        && model.moment_calibration.is_empty()
+        && model.irf_calibration.is_empty()
+    {
+        return Vec::new();
+    }
+    let ctx = Ctx::new(model);
+    let mut out: Vec<_> = model
+        .mom_syntax
+        .iter()
+        .map(|syntax| {
+            (
+                err(syntax.span, "E001", syntax.message.clone()),
+                syntax.parse_order,
+            )
+        })
+        .collect();
+    for (index, statement) in model.mom_statements.iter().enumerate() {
+        if let Some(diagnostic) = mom_statement_refusal(statement) {
+            out.push((
+                diagnostic,
+                super::parse_preflight::callback_order(model, "mom_statement_callback", index),
+            ));
+        }
+    }
+    for (name, span, order, empty) in model
+        .matched_irfs
+        .iter()
+        .map(|block| {
+            (
+                "matched_irfs",
+                block.span,
+                block.parse_order,
+                block.rows.is_empty(),
+            )
+        })
+        .chain(model.matched_irfs_weights.iter().map(|block| {
+            (
+                "matched_irfs_weights",
+                block.span,
+                block.parse_order,
+                block.rows.is_empty(),
+            )
+        }))
+        .chain(model.moment_calibration.iter().map(|block| {
+            (
+                "moment_calibration",
+                block.span,
+                block.parse_order,
+                block.rows.is_empty(),
+            )
+        }))
+        .chain(model.irf_calibration.iter().map(|block| {
+            (
+                "irf_calibration",
+                block.span,
+                block.parse_order,
+                block.rows.is_empty(),
+            )
+        }))
+    {
+        if empty {
+            out.push((
+                err(span, "E001", shape_message(name, "at least one row")),
+                super::parse_preflight::statement_callback_order(model, order),
+            ));
+        }
+    }
+    for callback in &model.moment_name_callbacks {
+        if crate::engine::control::cancelled() {
+            return Vec::new();
+        }
+        ctx.context.set(Some(callback.context));
+        let mut diagnostic = callback
+            .endogenous
+            .iter()
+            .find_map(|&(name, span)| endo_slot(&ctx, name, span, callback.block));
+        if diagnostic.is_none()
+            && let Some((name, span)) = callback.exogenous
+        {
+            diagnostic = if callback.block == "irf_calibration" {
+                if !ctx.declared(name) {
+                    Some(undeclared(&ctx, name, span, callback.block))
+                } else if !ctx.exogenous(name) {
+                    let (endo, span) = callback.endogenous[0];
+                    Some(err(
+                        span,
+                        "E387",
+                        format!("Variable {} is not an exogenous.", model.name(endo)),
+                    ))
+                } else {
+                    None
+                }
+            } else {
+                exo_slot(&ctx, name, span, callback.block)
+            };
+        }
+        if let Some(diagnostic) = diagnostic {
+            out.push((diagnostic, callback.order));
+        }
+    }
+    ctx.context.set(None);
+    for (index, callback) in model.moment_block_callbacks.iter().enumerate() {
+        let Some(order) = callback.order else {
+            continue;
+        };
+        let rows: Vec<_> = model.matched_moments[callback.rows.clone()]
+            .iter()
+            .collect();
+        if rows.is_empty() {
+            out.push((
+                err(
+                    model.matched_moments_blocks[index],
+                    "E001",
+                    shape_message("matched_moments", "at least one row"),
+                ),
+                order.saturating_sub(2),
+            ));
+        } else if let Some(diagnostic) = walk_block(&ctx, &rows) {
+            out.push((diagnostic, order));
+        }
+    }
+    for block in &model.matched_irfs {
+        for (index, row) in block.rows.iter().enumerate() {
+            if let Some(diagnostic) = irfs_row_counts(row)
+                .or_else(|| irfs_row_date(&ctx, row))
+                .or_else(|| irfs_pair_seen(&ctx, block, index))
+            {
+                out.push((diagnostic, row.active_tokens.end));
+            }
+        }
+    }
+    for block in &model.matched_irfs_weights {
+        for (index, row) in block.rows.iter().enumerate() {
+            if let Some(diagnostic) = weights_tuple_seen(&ctx, block, index) {
+                out.push((diagnostic, row.active_tokens.end));
+            }
+        }
+    }
+    out
+}
+
 /// One parse-stage refusal: where 7.1's parser stops, which check inside that
 /// spot it is, and the sentence.
 struct Unit {
@@ -108,46 +258,36 @@ fn err(span: Span, code: &str, message: impl Into<String>) -> Diagnostic {
 fn collect_mom_statements(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
     for stmt in &ctx.model.mom_statements {
         if crate::engine::control::cancelled() {
-            return Default::default();
+            return;
         }
-        if stmt.has_option_list && stmt.options.is_empty() {
-            push(
-                units,
-                seq,
-                stmt.span.start,
-                0,
-                err(
-                    stmt.span,
-                    "E001",
-                    shape_message("method_of_moments", "at least one option"),
-                ),
-            );
-            continue;
-        }
-        let Some(opt) = stmt
-            .options
-            .iter()
-            .find(|opt| opt.name.eq_ignore_ascii_case("mom_method"))
-        else {
-            continue;
-        };
-        let spelled = opt.has_value
-            && opt.value_kind == FamilyValueKind::Scalar
-            && is_bare_method(&opt.value_text);
-        if !spelled {
-            push(
-                units,
-                seq,
-                opt.span.start,
-                0,
-                err(
-                    opt.span,
-                    "E001",
-                    shape_message("method_of_moments", "GMM, SMM, or IRF_MATCHING"),
-                ),
-            );
+        if let Some(diagnostic) = mom_statement_refusal(stmt) {
+            push(units, seq, diagnostic.span.start, 0, diagnostic);
         }
     }
+}
+
+fn mom_statement_refusal(stmt: &MomStatement) -> Option<Diagnostic> {
+    if stmt.has_option_list && stmt.options.is_empty() {
+        return Some(err(
+            stmt.span,
+            "E001",
+            shape_message("method_of_moments", "at least one option"),
+        ));
+    }
+    let option = stmt
+        .options
+        .iter()
+        .find(|option| option.name.eq_ignore_ascii_case("mom_method"))?;
+    (!(option.has_value
+        && option.value_kind == FamilyValueKind::Scalar
+        && is_bare_method(&option.value_text)))
+    .then(|| {
+        err(
+            option.span,
+            "E001",
+            shape_message("method_of_moments", "GMM, SMM, or IRF_MATCHING"),
+        )
+    })
 }
 
 /// `mom_method=GMM` and friends: a bare identifier, one of the three methods.
@@ -200,7 +340,7 @@ fn collect_matched_moments(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) 
                 push(units, seq, pos, 0, diag);
             }
         }
-        if let Some(diag) = walk_block(ctx, &rows, block.end) {
+        if let Some(diag) = walk_block(ctx, &rows) {
             push(units, seq, block.end, 4, diag);
         }
     }
@@ -564,7 +704,7 @@ fn undeclared(ctx: &Ctx<'_>, name: Name, span: Span, block: &str) -> Diagnostic 
 
 /// The walk over one `matched_moments` block, at the block's `end;`. The first
 /// row whose expression fails supplies the sentence.
-fn walk_block(ctx: &Ctx<'_>, rows: &[&MatchedMoment], end: u32) -> Option<Diagnostic> {
+fn walk_block(ctx: &Ctx<'_>, rows: &[&MatchedMoment]) -> Option<Diagnostic> {
     for row in rows {
         if crate::engine::control::cancelled() {
             return Default::default();
@@ -572,7 +712,7 @@ fn walk_block(ctx: &Ctx<'_>, rows: &[&MatchedMoment], end: u32) -> Option<Diagno
         let Some(expr) = row.expr else {
             continue;
         };
-        if let Some(reason) = ctx.walk(expr, end, row.walk_context) {
+        if let Some(reason) = ctx.walk(expr, row.walk_context) {
             return Some(err(
                 ctx.model.exprs.get(expr).span,
                 "E386",
@@ -668,6 +808,7 @@ impl Folded {
 }
 
 struct Ctx<'a> {
+    context: Cell<Option<SymbolContext>>,
     model: &'a Model,
     endogenous: HashSet<Name>,
     exogenous: HashSet<Name>,
@@ -753,6 +894,7 @@ impl<'a> Ctx<'a> {
             });
         }
         Self {
+            context: Cell::new(None),
             model,
             endogenous,
             exogenous,
@@ -765,21 +907,36 @@ impl<'a> Ctx<'a> {
     }
 
     fn declared(&self, name: Name) -> bool {
+        if let Some(context) = self.context.get() {
+            return self.model.symbol_kind_in_context(name, context).is_some();
+        }
         self.declared.contains(&name)
     }
 
     /// Endogenous as of `at`: a later `model_remove` has not run yet.
     fn endogenous(&self, name: Name) -> bool {
+        if let Some(context) = self.context.get() {
+            return self.model.symbol_kind_in_context(name, context) == Some("var")
+                && !self.model.heterogeneous_in_context(name, context);
+        }
         self.endogenous.contains(&name) || self.model.surgery_exit_after(name, 0)
     }
 
     /// A plain `varexo`. The parser records a `varexo_det` name in both lists, so
     /// the deterministic set is what separates the two.
     fn exogenous(&self, name: Name) -> bool {
+        if let Some(context) = self.context.get() {
+            return self.model.symbol_kind_in_context(name, context) == Some("varexo")
+                && !self.model.heterogeneous_in_context(name, context);
+        }
         self.exogenous.contains(&name) && !self.deterministic_exogenous.contains(&name)
     }
 
     fn deterministic_exogenous(&self, name: Name) -> bool {
+        if let Some(context) = self.context.get() {
+            return self.model.symbol_kind_in_context(name, context) == Some("varexo_det")
+                && !self.model.heterogeneous_in_context(name, context);
+        }
         self.deterministic_exogenous.contains(&name)
     }
 
@@ -854,22 +1011,20 @@ impl<'a> Ctx<'a> {
     fn walk(
         &self,
         expr: ExprId,
-        at: u32,
         context: crate::engine::language::model::SymbolContext,
     ) -> Option<String> {
-        self.walk_folded(&self.fold(expr), at, context)
+        self.walk_folded(&self.fold(expr), context)
     }
 
     fn walk_folded(
         &self,
         folded: &Folded,
-        at: u32,
         context: crate::engine::language::model::SymbolContext,
     ) -> Option<String> {
         match folded {
             Folded::Var { name, .. } => {
                 if self.model.symbol_kind_in_context(*name, context) == Some("var")
-                    || self.model.surgery_exit_after(*name, at)
+                    && !self.model.heterogeneous_in_context(*name, context)
                 {
                     None
                 } else {
@@ -888,8 +1043,8 @@ impl<'a> Ctx<'a> {
                 } else {
                     (second, first)
                 };
-                self.walk_folded(first, at, context)
-                    .or_else(|| self.walk_folded(second, at, context))
+                self.walk_folded(first, context)
+                    .or_else(|| self.walk_folded(second, context))
             }
             Folded::Pow(left, right) => {
                 if !matches!(**left, Folded::Var { .. }) {
@@ -906,7 +1061,7 @@ impl<'a> Ctx<'a> {
                         )
                     }
                 }
-                self.walk_folded(left, at, context)
+                self.walk_folded(left, context)
             }
             Folded::Plus(..) | Folded::Minus(..) | Folded::Divide(..) | Folded::BinaryOp => {
                 Some("Unsupported binary operator".to_string())
@@ -932,9 +1087,9 @@ impl<'a> Ctx<'a> {
             },
             ExprKind::Number => {
                 let text = self.source(self.model.exprs.get(expr).span);
-                match text.parse::<f64>() {
-                    Ok(value) => self.num_written(value, text),
-                    Err(_) => Folded::Other,
+                match crate::engine::language::lexer::parse_numeric_literal(text) {
+                    Some(value) => self.num_written(value, text),
+                    None => Folded::Other,
                 }
             }
             ExprKind::Unary { op: UnOp::Pos, arg } => self.fold(*arg),
@@ -1485,4 +1640,76 @@ fn has_flag(stmt: &MomStatement, name: &str) -> bool {
     stmt.options
         .iter()
         .any(|opt| opt.name.eq_ignore_ascii_case(name) && !opt.has_value)
+}
+
+#[cfg(test)]
+mod parse_receipt_tests {
+    use super::*;
+
+    #[test]
+    fn moment_receipts_keep_stage_and_callback_order() {
+        // Guards Check-only method options from stopping later Parse actions.
+        let model = crate::parse("method_of_moments;database kept;");
+        assert!(check_mom(&model).iter().any(|row| row.code == "E382"));
+        assert!(parse_refusals(&model).is_empty());
+        // Guards counts and the end-block moment walk being omitted from the frontier.
+        for (text, code) in [
+            ("var y;varexo e;matched_irfs;var y;varexo e;periods 1 2;values 1;end;database later;", "E390"),
+            ("var y;matched_moments;y+1;end;database later;", "E386"),
+        ] {
+            let model = crate::parse(text);
+            let (_, order) = parse_refusals(&model).into_iter().find(|(row, _)| row.code == code).unwrap();
+            let later = model.expanded_tokens.iter().position(|token| token.text(&model.source) == "database").unwrap();
+            assert!(order <= later, "{text}");
+        }
+        for block in [
+            "matched_moments",
+            "matched_irfs",
+            "matched_irfs_weights",
+            "moment_calibration",
+            "irf_calibration",
+        ] {
+            let model = crate::parse(&format!("{block};end;database later;"));
+            assert!(
+                parse_refusals(&model)
+                    .iter()
+                    .any(|(row, _)| row.code == "E001"),
+                "{block}"
+            );
+        }
+    }
+
+    #[test]
+    fn moment_name_receipts_use_their_execution_type_and_survive_later_syntax() {
+        // Guards future retyping and repeated written spans changing earlier roles.
+        let model = crate::parse("@#for i in 1:2\n@#if i==1\nparameters p;\n@#else\nchange_type(var)p;\n@#endif\nmoment_calibration;p,p,+;end;\n@#endfor\n");
+        let rows: Vec<_> = parse_refusals(&model)
+            .into_iter()
+            .filter(|(row, _)| row.code == "E317")
+            .collect();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, model.moment_name_callbacks[0].order);
+        let model = crate::parse(
+            "parameters p;varexo e;matched_irfs;var p;varexo e;periods garbage;end;database later;",
+        );
+        let (_, order) = parse_refusals(&model)
+            .into_iter()
+            .find(|(row, _)| row.code == "E317")
+            .unwrap();
+        assert_eq!(model.expanded_tokens[order].text(&model.source), "periods");
+    }
+
+    #[test]
+    fn empty_moment_callback_precedes_a_later_macro_copy_syntax_failure() {
+        // Guards syntax in a later equal-span copy suppressing the first empty body.
+        let model = crate::parse("@#for i in 1:2\n@#if i==1\n@#define body=\"\"\n@#else\n@#define body=\"garbage;\"\n@#endif\nmatched_irfs;@{body} end;database ghost@{i};\n@#endfor\n");
+        let first_database = model
+            .expanded_tokens
+            .iter()
+            .position(|token| token.text(&model.source) == "database")
+            .unwrap();
+        assert!(parse_refusals(&model)
+            .iter()
+            .any(|(row, order)| row.code == "E001" && *order <= first_database));
+    }
 }

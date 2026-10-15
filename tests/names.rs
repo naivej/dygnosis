@@ -959,9 +959,21 @@ async fn opaque_and_partial_targets_do_not_gain_fabricated_writes() {
     let document = uri("partial.mod");
     let text="var y; parameters p;\n[y,p]=native_call();\nobj.y=p;\nmodel; y=; end;\nsteady_state_model; y=; end;\nsteady_state_model; y(0)=1; end;\nmodel; #y(0)=1; y=0; end;\n";
     open(server, &document, text).await;
-    let rows = server
+    let opaque = server
         .document_highlight(DocumentHighlightParams {
             text_document_position_params: position(&document, text, "[y,p]", 1),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        opaque.is_none(),
+        "native target has no accepted Dynare binding"
+    );
+    let rows = server
+        .document_highlight(DocumentHighlightParams {
+            text_document_position_params: position(&document, text, "var y", 4),
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         })

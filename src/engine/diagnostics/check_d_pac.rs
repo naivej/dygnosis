@@ -1,6 +1,6 @@
 //! Dynare 7.2 semi-structural refusals on the written `.mod` file.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::engine::diagnostics::{Diagnostic, Severity};
 use crate::engine::language::expr::{BinOp, ExprId, ExprKind, UnOp};
@@ -75,16 +75,46 @@ fn required(command: &SemiStructuralCommand, name: &str) -> Diagnostic {
 /// ParsingDriver and shared parse-level name/option checks. A parse refusal
 /// prevents Dynare from running checkPass or transformPass.
 pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
+    let mut out = named_callbacks(model).diagnostics;
+    out.sort_by_key(|diag| (diag.span.start, diag.span.end));
+    out.into_iter().take(1).collect()
+}
+
+/// Successful Parse callbacks share the diagnostic pass's ordered checks.
+/// Raw command/operator rows remain available when a callback is refused.
+#[derive(Default)]
+pub(crate) struct NamedCallbacks {
+    pub commands: HashSet<usize>,
+    pub operators: HashSet<usize>,
+    pub variable_lookups: HashSet<usize>,
+    pub complete: bool,
+    pub frontier: Option<usize>,
+    pub cause: Option<String>,
+    pub cause_span: Option<Span>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+pub(crate) fn named_callbacks(model: &Model) -> NamedCallbacks {
+    let mut result = NamedCallbacks {
+        complete: true,
+        ..Default::default()
+    };
     let mut out = Vec::new();
-    for (name, span) in &model.option_twice {
+    for (index, (name, span)) in model.option_twice.iter().enumerate() {
         if crate::engine::control::cancelled() {
             return Default::default();
         }
-        if model
-            .semi_structural_commands
-            .iter()
-            .any(|command| command.span.start <= span.start && span.end <= command.span.end)
-        {
+        if model.semi_structural_commands.iter().any(|command| {
+            model
+                .fact_receipts
+                .get("option_duplicate_callback")
+                .and_then(|rows| rows.get(index))
+                .is_some_and(|receipt| {
+                    command
+                        .active_tokens
+                        .contains(&receipt.parse_order.saturating_sub(1))
+                })
+        }) {
             out.push(error(
                 *span,
                 "E271",
@@ -93,10 +123,34 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
         }
     }
     let mut model_names: HashSet<(SemiStructuralKind, Name)> = HashSet::new();
+    let mut option_refusal_orders = HashMap::new();
     for command in &model.semi_structural_commands {
         if crate::engine::control::cancelled() {
             return Default::default();
         }
+        let before = out.len();
+        let refuse_at = |result: &mut NamedCallbacks, order: usize, cause: String, span: Span| {
+            if result.frontier.is_none_or(|prior| order < prior) {
+                result.frontier = Some(order);
+                result.cause = Some(cause);
+                result.cause_span = Some(span);
+            }
+        };
+        let mut seen_options = HashSet::new();
+        let duplicate_option = command.options.iter().find(|option| {
+            !command.kind.option_can_repeat(&option.name)
+                && !seen_options.insert(option.name.to_ascii_lowercase())
+        });
+        if let Some(option) = duplicate_option {
+            option_refusal_orders.insert(command.parse_order, option.callback_order);
+            refuse_at(
+                &mut result,
+                option.callback_order,
+                format!("option {} declared twice", option.name),
+                option.span,
+            );
+        }
+        let duplicate_option = duplicate_option.is_some();
         match command.kind {
             SemiStructuralKind::VarModel => {
                 if option(command, "model_name").is_none() {
@@ -126,7 +180,15 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
                         crate::engine::diagnostics::check_mom::outside_model_expression(model, id)
                     })
                 {
+                    let cause = refusal.message.clone();
                     out.push(refusal);
+                    result.complete = false;
+                    refuse_at(
+                        &mut result,
+                        command.active_tokens.end,
+                        cause,
+                        out.get(before).map_or(command.span, |row| row.span),
+                    );
                     continue;
                 }
                 let variable = symbol_option(command, "variable");
@@ -151,7 +213,16 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
                         .symbol_kind_in_context(name, command.symbol_type_context)
                         .is_none()
                 {
+                    result.complete = false;
+                    refuse_at(&mut result, command.active_tokens.end, format!("The variable '{}' is unknown; the named model callback did not complete.", model.name(name)), variable.map_or(command.span, |(_, span)| span));
                     continue;
+                }
+                if variable.is_some()
+                    && expression.is_none()
+                    && command.callback_completed
+                    && !duplicate_option
+                {
+                    result.variable_lookups.insert(command.parse_order);
                 }
                 if let Some(discount) = expression_option(command, "discount")
                     && !valid_var_discount(model, discount)
@@ -208,7 +279,10 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
                 }
             }
         }
-        if let Some((name, span)) = symbol_option(command, "model_name")
+        if command.callback_completed
+            && out.len() == before
+            && !duplicate_option
+            && let Some((name, span)) = symbol_option(command, "model_name")
             && !model_names.insert((command.kind, name))
         {
             let article = match command.kind {
@@ -226,6 +300,23 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
                 ),
             ));
         }
+        if command.callback_completed && out.len() == before && !duplicate_option {
+            result.commands.insert(command.parse_order);
+        } else {
+            result.complete = false;
+            let cause = out
+                .get(before)
+                .map(|row| row.message.clone())
+                .unwrap_or_else(|| {
+                    "The named model command did not complete its Parse callback.".into()
+                });
+            refuse_at(
+                &mut result,
+                command.active_tokens.end,
+                cause,
+                out.get(before).map_or(command.span, |row| row.span),
+            );
+        }
     }
     for block in &model.deterministic_trends {
         if crate::engine::control::cancelled() {
@@ -238,6 +329,14 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
             if let Some(refusal) = row.expression.expr.and_then(|id| {
                 crate::engine::diagnostics::check_mom::outside_model_expression(model, id)
             }) {
+                if result
+                    .frontier
+                    .is_none_or(|prior| row.callback_order < prior)
+                {
+                    result.frontier = Some(row.callback_order);
+                    result.cause = Some(refusal.message.clone());
+                    result.cause_span = Some(refusal.span);
+                }
                 out.push(refusal);
                 continue;
             }
@@ -245,6 +344,14 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
                 .symbol_kind_in_context(row.name, row.expression.symbol_type_context)
                 .is_none()
             {
+                if result
+                    .frontier
+                    .is_none_or(|prior| row.callback_order < prior)
+                {
+                    result.frontier = Some(row.callback_order);
+                    result.cause = Some(format!("Unknown symbol: {}.", model.name(row.name)));
+                    result.cause_span = Some(row.name_span);
+                }
                 out.push(error(
                     row.name_span,
                     "E058",
@@ -253,37 +360,60 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
             }
         }
     }
-    for operator in &model.named_model_operators {
+    for (index, operator) in model.named_model_operators.iter().enumerate() {
         if crate::engine::control::cancelled() {
             return Default::default();
+        }
+        let before = out.len();
+        if model.semi_structural_commands.iter().any(|command| {
+            command
+                .active_tokens
+                .contains(&operator.callback_order.saturating_sub(1))
+                && option_refusal_orders
+                    .get(&command.parse_order)
+                    .is_some_and(|order| *order < operator.callback_order)
+        }) {
+            result.complete = false;
+            continue;
         }
         let label = match operator.kind {
             NamedModelOperatorKind::VarExpectation => "var_expectation",
             NamedModelOperatorKind::PacExpectation => "pac_expectation",
             NamedModelOperatorKind::PacTargetNonstationary => "pac_target_nonstationary",
         };
-        if model.epilogue_block.is_some_and(|block| {
-            block.start <= operator.span.start && operator.span.end <= block.end
-        }) {
+        if operator.scope == crate::engine::language::constructor::DataTreeScope::Epilogue {
             out.push(error(
                 operator.operator_span,
                 "E445",
                 format!("The '{label}' operator is forbidden in 'epilogue'."),
             ));
-        } else if model
-            .occbin_constraints_blocks
-            .iter()
-            .any(|block| block.start <= operator.span.start && operator.span.end <= block.end)
-        {
+        } else if matches!(
+            operator.scope,
+            crate::engine::language::constructor::DataTreeScope::Occbin(_)
+        ) {
             out.push(error(
                 operator.operator_span,
                 "E182",
                 format!("The '{label}' operator is forbidden in 'occbin_constraints'."),
             ));
         }
+        if out.len() == before {
+            result.operators.insert(index);
+        } else {
+            result.complete = false;
+            if result
+                .frontier
+                .is_none_or(|prior| operator.callback_order < prior)
+            {
+                result.frontier = Some(operator.callback_order);
+                result.cause = out.get(before).map(|row| row.message.clone());
+                result.cause_span = out.get(before).map(|row| row.span);
+            }
+        }
     }
-    out.sort_by_key(|diag| (diag.span.start, diag.span.end));
-    out.into_iter().take(1).collect()
+    result.complete &= out.is_empty();
+    result.diagnostics = out;
+    result
 }
 
 fn valid_var_discount(model: &Model, expression: &WrittenExpression) -> bool {

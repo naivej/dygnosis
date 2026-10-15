@@ -8,7 +8,8 @@ use tower_lsp::lsp_types::{
     Documentation, ParameterInformation, ParameterLabel, SignatureHelp, SignatureInformation,
 };
 
-use crate::engine::catalog::{command_options, is_known_command, option_doc, HET_SHOCKS_OVERWRITE};
+use crate::engine::catalog::syntax;
+use crate::engine::catalog::{is_known_command, option_doc, HET_SHOCKS_OVERWRITE};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -62,7 +63,9 @@ pub(crate) fn signature_help(src: &str, byte: u32) -> Option<SignatureHelp> {
 
 fn option_list(command: &str, heterogeneous: bool) -> Vec<(&'static str, &'static str)> {
     let mut out = Vec::new();
-    for &(name, doc) in command_options(command) {
+    for option in crate::lsp::syntax_intel::options(command) {
+        let name = option.name.as_str();
+        let doc = option.summary.as_str();
         if heterogeneous && name != "heterogeneity" && name != "overwrite" {
             continue;
         }
@@ -199,16 +202,172 @@ fn open_frames(src: &str, end: usize) -> Vec<Frame> {
 }
 
 fn is_block_opener(word: &str) -> bool {
-    crate::engine::language::parser::BLOCK_OPENERS.contains(&word)
-        || matches!(
-            word,
-            "mshocks"
-                | "estimated_params"
-                | "verbatim"
-                | "model_replace"
-                | "svar_identification"
-                | "conditional_forecast_paths"
-        )
+    syntax::is_block(word)
+}
+
+/// Key/value selection uses the same balanced scan as option signature help.
+/// A value expression must not receive the list of option keys.
+pub(crate) fn option_context(src: &str, byte: u32) -> Option<(String, Option<String>)> {
+    let cursor = byte as usize;
+    let frames = open_frames(src, cursor);
+    let (command, start) = if let Some(frame) = frames
+        .iter()
+        .rev()
+        .find(|frame| frame.command.as_deref().is_some_and(is_known_command))
+    {
+        (frame.command.clone()?, frame.content_start)
+    } else {
+        let command = crate::engine::editing::refs::option_owner_at(src, byte)?;
+        // Qualified prior/options heads are written after a user-name slot.
+        if !matches!(command.as_str(), "prior" | "options" | "subsamples") {
+            return None;
+        }
+        let frame = frames
+            .iter()
+            .rev()
+            .find(|frame| frame.kind == Kind::Paren)?;
+        (command, frame.content_start)
+    };
+    let segment = segment_starts(src, start, cursor).last().copied()?;
+    let prefix = &src[segment..cursor];
+    let key = first_ident(src, segment, cursor);
+    let value = crate::engine::language::lexer::tokenize(prefix)
+        .iter()
+        .any(|token| token.kind == crate::engine::language::lexer::TokenKind::Eq);
+    Some((command, value.then_some(key)))
+}
+
+/// Function argument help shares the reference's arities and accepted contexts.
+pub(crate) fn function_signature_help(
+    src: &str,
+    byte: u32,
+    context: &str,
+) -> Option<SignatureHelp> {
+    use crate::engine::language::lexer::TokenKind;
+    let cursor = byte as usize;
+    let start = crate::engine::language::macro_expand::scan_macro_tokens(src)
+        .into_iter()
+        .find(|token| {
+            matches!(token.kind, TokenKind::MacroDir | TokenKind::MacroInterp)
+                && token.span.start <= byte
+                && byte <= token.span.end
+        })
+        .map_or(0, |token| token.span.start as usize + 2);
+    let prefix = src.get(start..cursor)?;
+    let mut frames: Vec<(Kind, Option<String>, usize, usize)> = Vec::new();
+    let mut pending = None;
+    let mut closed = None;
+    let mut i = 0;
+    while let Some(atom) = next_atom(prefix, &mut i, prefix.len()) {
+        match atom {
+            Atom::Ident(name) => {
+                pending = Some(name.to_owned());
+                closed = None;
+            }
+            Atom::Open(Kind::Paren) => {
+                let (name, group) = pending
+                    .take()
+                    .map(|name| (Some(name), 0))
+                    .or_else(|| closed.take())
+                    .unwrap_or((None, 0));
+                frames.push((Kind::Paren, name, 0, group));
+            }
+            Atom::Open(kind) => {
+                frames.push((kind, None, 0, 0));
+                pending = None;
+                closed = None;
+            }
+            Atom::Close(kind) => {
+                closed = frames
+                    .iter()
+                    .rposition(|frame| frame.0 == kind)
+                    .and_then(|index| {
+                        let (_, name, _, group) = frames.remove(index);
+                        frames.truncate(index);
+                        (kind == Kind::Paren).then_some((name, group + 1))
+                    });
+                pending = None;
+            }
+            Atom::Comma => {
+                if let Some(frame) = frames.last_mut()
+                    && frame.0 == Kind::Paren
+                {
+                    frame.2 += 1;
+                }
+                pending = None;
+                closed = None;
+            }
+            Atom::Semi => {
+                if !frames
+                    .iter()
+                    .any(|frame| matches!(frame.0, Kind::Bracket | Kind::Brace))
+                {
+                    frames.clear();
+                }
+                pending = None;
+                closed = None;
+            }
+            Atom::Other => {
+                pending = None;
+                closed = None;
+            }
+        }
+    }
+    let (_, name, argument, group) = frames.iter().rev().find(|frame| frame.1.is_some())?;
+    let name = name.as_deref()?;
+    let record = syntax::in_context(context, None, None).find(|record| {
+        matches!(
+            record.kind.as_str(),
+            "function" | "operator" | "macro_function"
+        ) && record.name.eq_ignore_ascii_case(name)
+    })?;
+    let signatures: Vec<_> = record
+        .signatures
+        .iter()
+        .filter_map(|label| {
+            let mut from = 0;
+            for _ in 0..=*group {
+                from = label[from..].find('(')? + from + 1;
+            }
+            let end = label[from..].find(')')? + from;
+            let mut offset = from;
+            let parameters: Vec<_> = label[from..end]
+                .split(',')
+                .filter(|value| !value.is_empty())
+                .map(|value| {
+                    let begin = offset + value.len() - value.trim_start().len();
+                    let last = offset + value.trim_end().len();
+                    offset += value.len() + 1;
+                    ParameterInformation {
+                        label: ParameterLabel::LabelOffsets([
+                            utf16_len(&label[..begin]),
+                            utf16_len(&label[..last]),
+                        ]),
+                        documentation: None,
+                    }
+                })
+                .collect();
+            Some(SignatureInformation {
+                label: label.clone(),
+                documentation: Some(Documentation::String(record.summary.clone())),
+                active_parameter: (*argument < parameters.len()).then_some(*argument as u32),
+                parameters: Some(parameters),
+            })
+        })
+        .collect();
+    if signatures.is_empty() {
+        return None;
+    }
+    let active = signatures
+        .iter()
+        .position(|signature| signature.active_parameter.is_some())
+        .unwrap_or(0) as u32;
+    let active_parameter = signatures[active as usize].active_parameter;
+    Some(SignatureHelp {
+        signatures,
+        active_signature: Some(active),
+        active_parameter,
+    })
 }
 
 /// End of the option list: the matching `)`, a `;` at list depth, or the end of the file.

@@ -161,43 +161,11 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
 
     let anchor = policy_anchor;
 
-    'policy_checks: for (index, statement) in model.policy_command_statements.iter().enumerate() {
-        if !statement.discount_parameter_valid {
-            diagnostics.push(Diagnostic::new(
-                statement.span,
-                Severity::Error,
-                "E378",
-                "optimal_policy_discount_factor is not a parameter",
-            ));
-            break;
-        }
-        for instrument in model
-            .instrument_uses
-            .iter()
-            .filter(|use_| use_.command_index == index)
-        {
-            if instrument.kind == Some("var") {
-                continue;
-            }
-            let name = model.name(instrument.name);
-            let (span, code, message) = if instrument.kind.is_none() {
-                (
-                    instrument.command_span,
-                    "E101",
-                    format!("Policy instrument '{name}' is not a declared endogenous variable."),
-                )
-            } else {
-                (
-                    instrument.span,
-                    "E317",
-                    format!("{name} is not endogenous."),
-                )
-            };
-            diagnostics.push(Diagnostic::new(span, Severity::Error, code, message));
-            // The pinned parser stops at the first invalid instrument.
-            break 'policy_checks;
-        }
-    }
+    diagnostics.extend(
+        parse_refusals(model)
+            .into_iter()
+            .map(|(diagnostic, _)| diagnostic),
+    );
 
     if let Some(d) = model.planner_discount
         && !(0.0 < d && d <= 1.0)
@@ -229,6 +197,58 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
                 "E103",
                 "The osr statement requires either an optim_weights block or a planner_objective",
             ));
+        }
+    }
+
+    diagnostics
+}
+
+/// Driver actions after the complete policy command. Model/planner requirements
+/// and discretionary order are later Check actions and do not stop Parse.
+pub(crate) fn parse_refusals(model: &Model) -> Vec<(Diagnostic, usize)> {
+    let mut diagnostics = Vec::new();
+    'policy_checks: for (index, statement) in model.policy_command_statements.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Vec::new();
+        }
+        let order = super::parse_preflight::statement_callback_order(model, statement.parse_order);
+        if !statement.discount_parameter_valid {
+            diagnostics.push((
+                Diagnostic::new(
+                    statement.span,
+                    Severity::Error,
+                    "E378",
+                    "optimal_policy_discount_factor is not a parameter",
+                ),
+                order,
+            ));
+            break;
+        }
+        for instrument in model
+            .instrument_uses
+            .iter()
+            .filter(|use_| use_.command_index == index)
+        {
+            if instrument.kind == Some("var") {
+                continue;
+            }
+            let name = model.name(instrument.name);
+            let (span, code, message) = if instrument.kind.is_none() {
+                (
+                    instrument.command_span,
+                    "E101",
+                    format!("Policy instrument '{name}' is not a declared endogenous variable."),
+                )
+            } else {
+                (
+                    instrument.span,
+                    "E317",
+                    format!("{name} is not endogenous."),
+                )
+            };
+            diagnostics.push((Diagnostic::new(span, Severity::Error, code, message), order));
+            // The pinned parser stops at the first invalid instrument.
+            break 'policy_checks;
         }
     }
 
@@ -290,5 +310,41 @@ fn trim_trailing_zeros(s: &mut String) {
     }
     if s.ends_with('.') {
         s.pop();
+    }
+}
+
+#[cfg(test)]
+mod parse_receipt_tests {
+    use super::*;
+
+    #[test]
+    fn policy_callbacks_keep_types_order_and_check_stage_separate() {
+        // Guards a refused instrument or discount action from publishing the
+        // next statement; planner requirements must remain later Check errors.
+        for (source, code) in [
+            (
+                "ramsey_model(instruments=(missing));database later;",
+                "E101",
+            ),
+            (
+                "parameters p;ramsey_model(instruments=(p));database later;",
+                "E317",
+            ),
+            (
+                "var optimal_policy_discount_factor;discretionary_policy;database later;",
+                "E378",
+            ),
+        ] {
+            let model = crate::parse(source);
+            let (diagnostic, order) = parse_refusals(&model).into_iter().next().unwrap();
+            assert_eq!(diagnostic.code, code, "{source}");
+            assert_eq!(model.expanded_tokens[order].text(&model.source), "database");
+            assert!(diagnostic.span.start < model.expanded_tokens[order].span.start);
+        }
+        let model = crate::parse("parameters p;change_type(var) p;ramsey_model(instruments=(p));");
+        assert!(parse_refusals(&model).is_empty());
+        assert!(check_w100(&model)
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E100"));
     }
 }

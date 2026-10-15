@@ -66,6 +66,13 @@ pub struct ModelLocals {
 
 impl ModelLocals {
     pub fn collect(model: &Model) -> Self {
+        Self::collect_before(model, None)
+    }
+
+    pub(crate) fn collect_before(model: &Model, stop: Option<usize>) -> Self {
+        let accepted_events = stop.map(|_| {
+            crate::engine::diagnostics::parse_preflight::accepted_symbol_events(model, stop)
+        });
         let mut facts = Self::default();
         for (declaration_index, row) in model.written_declarations.iter().enumerate() {
             if crate::engine::control::cancelled() {
@@ -75,6 +82,11 @@ impl ModelLocals {
                 continue;
             }
             let decl = &row.declaration;
+            if accepted_events.as_ref().is_some_and(|events| {
+                !events.contains(&decl.symbol_type_context.index().saturating_sub(1))
+            }) {
+                continue;
+            }
             // A refused different-type declaration is not a local binding.
             let earlier = model.symbol_type_events
                 [..decl.symbol_type_context.index().saturating_sub(1)]
@@ -113,6 +125,11 @@ impl ModelLocals {
             let Some(rhs_expr) = eq.rhs_expr else {
                 continue;
             };
+            if stop.is_some_and(|stop| eq.active_tokens.end + 1 > stop)
+                || stop.is_some() && definitions.contains_key(&(row.dimension, name))
+            {
+                continue;
+            }
             let index = facts.definitions.len();
             definitions.insert((row.dimension, name), index);
             facts.definitions.push(LocalDefinition {
@@ -153,7 +170,8 @@ impl ModelLocals {
                 .iter()
                 .take_while(|read| read.parse_order < eq.active_tokens.end)
                 .filter(|read| {
-                    names.contains(&(read.name, read.span))
+                    stop.is_none_or(|stop| read.parse_order < stop)
+                        && names.contains(&(read.name, read.span))
                         && model.symbol_kind_in_context(read.name, read.context)
                             == Some("model_local_variable")
                 })

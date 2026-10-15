@@ -59,6 +59,10 @@ Type `@#` at the start of a line to see macro directive suggestions such as
 `define`, `if` and `for`.
 [Macro expansion](effective-model.md) shows the resulting model text.
 
+Macro definitions also appear in Outline as named entries. Select one to open
+its written definition; macro loops and conditional branches remain folding
+regions.
+
 ## Source edits
 
 Right-click in the editor and choose **Format Document** to format the file,
@@ -66,8 +70,10 @@ or select text and choose **Format Selection** to format that selection. Both us
 [tabs or spaces](settings:dynare.formatIndent). Native MATLAB lines and
 `verbatim` text keep their spacing. Run **Expand Selection** from the Command
 Palette to select a larger source region; run it again to grow the selection.
-Enable **Editor: Linked Editing** in Settings to edit known occurrences of a
-declared name together in the current document.
+Formatting follows recognized block boundaries, including later blocks.
+Enable **Editor: Linked Editing** in Settings to edit accepted occurrences of a
+declared name together when the complete change belongs to one document.
+Use **Rename symbol** for a change across files.
 
 [Quick Fix](diagnostics.md) offers available repairs for a selected check,
 such as a missing declaration, identifier or semicolon.

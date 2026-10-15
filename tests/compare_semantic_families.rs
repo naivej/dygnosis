@@ -333,8 +333,8 @@ fn ms_options_keep_matrix_shape_text_and_order() {
     appended(
         SemanticFamily::MsSbvar,
         "options",
-        "sbvar(coefficient_prior_hyperparameters=[1,2,3]);",
-        "sbvar(coefficient_prior_hyperparameters=[1,3,2]);",
+        "sbvar(coefficients_prior_hyperparameters=[1,2,3]);",
+        "sbvar(coefficients_prior_hyperparameters=[1,3,2]);",
     );
 }
 

@@ -55,7 +55,11 @@ fn views(inner: &mut Inner, uri: &Url) -> Vec<LocalView> {
                 inner.workspace.get_effective_model(root.as_str())?
             }
             .clone();
-            let facts = ModelLocals::collect(&model);
+            let facts = ModelLocals::collect_before(
+                &model,
+                crate::engine::diagnostics::parse_preflight::first_refusal(&model)
+                    .map(|refusal| refusal.order),
+            );
             Some(LocalView {
                 root,
                 model,
@@ -507,7 +511,11 @@ pub(super) fn info_origins(
     map: &crate::engine::workspace::model_map::WrittenModelMap,
     result: &mut Value,
 ) {
-    let facts = ModelLocals::collect(model);
+    let facts = ModelLocals::collect_before(
+        model,
+        crate::engine::diagnostics::parse_preflight::first_refusal(model)
+            .map(|refusal| refusal.order),
+    );
     let Some(locals) = result.get_mut("model_locals") else {
         return;
     };

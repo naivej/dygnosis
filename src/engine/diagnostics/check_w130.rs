@@ -10,6 +10,28 @@ use crate::engine::language::span::{LineIndex, Span};
 
 const SPECIAL_CALLS: &[&str] = &["abs", "max", "min", "sign"];
 
+#[cfg(test)]
+mod parse_receipt_tests {
+    use super::*;
+    use crate::engine::language::parser::parse;
+
+    // The target's type callback follows its completed RHS. Undefined RHS
+    // ordering is a Check error and must not refuse an accepted Parse tree.
+    #[test]
+    fn parse_receipts_include_target_types_but_not_steady_state_order() {
+        let model = parse(include_str!(
+            "../../../tests/fixtures/w130/e481_target_type.mod"
+        ));
+        let rows = parse_refusals(&model);
+        let (diagnostic, order) = rows.first().unwrap();
+        assert_eq!(diagnostic.code, "E481");
+        assert_eq!(*order, model.steady_state_equations[0].active_tokens.end);
+        let model = parse("var x y;steady_state_model;x=y;y=1;end;");
+        assert!(check_w130(&model).iter().any(|row| row.code == "E130"));
+        assert!(parse_refusals(&model).is_empty());
+    }
+}
+
 const MATH_BUILTINS: &[&str] = &[
     "exp", "log", "ln", "log2", "log10", "sqrt", "cbrt", "abs", "sign", "sin", "cos", "tan",
     "asin", "acos", "atan", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "floor", "ceil",
@@ -67,6 +89,15 @@ fn check_w201(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_ss_target_types(model: &Model) -> Vec<Diagnostic> {
+    parse_refusals(model)
+        .into_iter()
+        .map(|(diagnostic, _)| diagnostic)
+        .collect()
+}
+
+/// The output-type action runs after the RHS and its terminating semicolon.
+/// The equation's retained execution range distinguishes repeated macro rows.
+pub(crate) fn parse_refusals(model: &Model) -> Vec<(Diagnostic, usize)> {
     let mut diagnostics = Vec::new();
     for eq in &model.steady_state_equations {
         if crate::engine::control::cancelled() {
@@ -89,11 +120,14 @@ fn check_ss_target_types(model: &Model) -> Vec<Diagnostic> {
             if model.steady_state_target_is_valid(target) {
                 continue;
             }
-            diagnostics.push(Diagnostic::new(
-                target.span,
-                Severity::Error,
-                "E481",
-                format!("{} has incorrect type", model.name(target.name)),
+            diagnostics.push((
+                Diagnostic::new(
+                    target.span,
+                    Severity::Error,
+                    "E481",
+                    format!("{} has incorrect type", model.name(target.name)),
+                ),
+                eq.active_tokens.end,
             ));
         }
     }

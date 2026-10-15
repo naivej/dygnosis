@@ -6,7 +6,9 @@ use crate::engine::diagnostics::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::engine::language::expr::{BinOp, ExprId, ExprKind};
 use crate::engine::language::intern::Name;
 use crate::engine::language::lexer::{tokenize, Token, TokenKind};
-use crate::engine::language::model::{Equation, Model, OccbinConstraint, OccbinExpr};
+use crate::engine::language::model::{
+    Equation, Model, OccbinConstraint, OccbinExpr, SymbolContext,
+};
 use crate::engine::language::span::Span;
 
 pub fn check_occbin(model: &Model) -> Vec<Diagnostic> {
@@ -18,24 +20,366 @@ pub fn check_occbin(model: &Model) -> Vec<Diagnostic> {
     out
 }
 
+/// Constructor, regime, equation and end-block actions are separate Parse
+/// callbacks. The maximum-block and missing-regime tests remain later Check.
+pub(crate) fn parse_refusals(model: &Model) -> Vec<(Diagnostic, usize)> {
+    let locals = model_locals(model);
+    let mut rows = Vec::new();
+    for constraint in &model.occbin_constraints {
+        let mut seen = HashSet::new();
+        for (clause, piece) in &constraint.clauses {
+            if crate::engine::control::cancelled() {
+                return Vec::new();
+            }
+            let Some(id) = piece.expr else {
+                continue;
+            };
+            let mut diagnostics = Vec::new();
+            walk_occbin_expr_inner(
+                model,
+                id,
+                &locals,
+                Some(&piece.active_tokens),
+                &mut diagnostics,
+            );
+            for diagnostic in diagnostics {
+                let order = crate::engine::diagnostics::parse_preflight::within(
+                    model,
+                    piece.active_tokens.clone(),
+                    diagnostic.span,
+                    true,
+                )
+                .unwrap_or(piece.active_tokens.start);
+                rows.push((diagnostic, order));
+            }
+            if !seen.insert(*clause) {
+                let span = model.expanded_tokens[piece.active_tokens.start].span;
+                rows.push((
+                    error(
+                        span,
+                        "E184",
+                        format!("The '{clause}' clause is declared multiple times"),
+                    ),
+                    piece.active_tokens.end,
+                ));
+            }
+        }
+        for (clause, piece) in [
+            ("bind", constraint.bind.as_ref()),
+            ("relax", constraint.relax.as_ref()),
+        ] {
+            if let Some(piece) = piece
+                && piece.constructed_binary == Some(false)
+            {
+                rows.push((
+                    error(
+                        piece.span,
+                        "E181",
+                        format!("The '{clause}' expression must be an inequality constraint."),
+                    ),
+                    constraint.callback_order,
+                ));
+            }
+        }
+    }
+    rows.extend(equation_parse_refusals(model));
+    for constraint in &model.occbin_constraints {
+        let Some(statement) = model.statements.iter().find(|statement| {
+            statement.name == "occbin_constraints"
+                && statement.complete
+                && statement.token_range.contains(&constraint.parse_order)
+        }) else {
+            continue;
+        };
+        let parameter = format!("occbin_{}_bind", constraint.name);
+        let known = model.intern.lookup(&parameter).is_some_and(|name| {
+            model
+                .symbol_kind_in_context(name, constraint.symbol_type_context)
+                .is_some()
+        }) || model.written_equations.iter().any(|row| {
+            row.dimension.is_none()
+                && !row.equation.static_tag
+                && row.equation.active_tokens.end < statement.token_range.end
+                && ["bind", "relax"].iter().any(|key| {
+                    row.equation
+                        .tag_map
+                        .get(*key)
+                        .is_some_and(|value| split_names(value).contains(&constraint.name.as_str()))
+                })
+        });
+        if !known {
+            rows.push((
+                error(
+                    constraint.name_span,
+                    "E175",
+                    format!(
+                        "No equation has been declared for constraint '{}'",
+                        constraint.name
+                    ),
+                ),
+                statement.token_range.end,
+            ));
+        } else if constraint
+            .bind
+            .as_ref()
+            .is_none_or(|bind| bind.constructed_binary.is_none())
+        {
+            let span = constraint
+                .bind
+                .as_ref()
+                .map_or(constraint.span, |bind| bind.span);
+            rows.push((
+                error(
+                    span,
+                    "E174",
+                    format!(
+                        "The 'bind' expression is missing in constraint '{}'",
+                        constraint.name
+                    ),
+                ),
+                statement.token_range.end,
+            ));
+        }
+    }
+    rows
+}
+
+/// The driver creates OccBin parameters after complementarity validation and
+/// before it rejects duplicate regimes. The parser shares these predicates.
+fn equation_parse_refusals(model: &Model) -> Vec<(Diagnostic, usize)> {
+    let mut rows: Vec<_> = model
+        .equation_tag_duplicates
+        .iter()
+        .map(|(key, span, order)| {
+            (
+                error(
+                    *span,
+                    "E256",
+                    format!("Tag '{key}' cannot be used twice for the same equation"),
+                ),
+                *order,
+            )
+        })
+        .collect();
+    let mut trackers = BTreeMap::<String, OccbinRegimeTracker>::new();
+    for written in &model.written_equations {
+        if crate::engine::control::cancelled() {
+            return Vec::new();
+        }
+        let eq = &written.equation;
+        if eq.is_local {
+            continue;
+        }
+        let context = eq
+            .rhs_expr
+            .or(eq.lhs_expr)
+            .and_then(|id| model.constructor_contexts.get(&id))
+            .copied()
+            .unwrap_or_default();
+        let order = eq.active_tokens.end
+            + usize::from(
+                model
+                    .expanded_tokens
+                    .get(eq.active_tokens.end)
+                    .is_some_and(|token| token.kind == TokenKind::Semi),
+            );
+        let mut diagnostics = Vec::new();
+        if eq.tag_map.contains_key("mcp") {
+            if eq.complementarity.is_some() {
+                diagnostics.push(error(eq.span, "E180", "Can't have both an 'mcp' tag and a complementarity condition after the perpendicular symbol"));
+            } else {
+                check_mcp_form_at(
+                    model,
+                    eq,
+                    Some(context),
+                    written.dimension.is_some(),
+                    &mut diagnostics,
+                );
+            }
+        }
+        if let Some(comp) = &eq.complementarity
+            && comp.matched.is_none()
+        {
+            diagnostics.push(error(
+                comp.span,
+                "E183",
+                "Complementarity condition has an incorrect form",
+            ));
+        }
+        let has_bind = eq.tag_map.contains_key("bind");
+        let has_relax = eq.tag_map.contains_key("relax");
+        if written.dimension.is_none() && !eq.static_tag && (has_bind || has_relax) {
+            if !eq.tag_map.contains_key("name") {
+                diagnostics.push(error(
+                    eq.span,
+                    "E173",
+                    "An equation with a 'bind' or 'relax' tag must have a 'name' tag.",
+                ));
+            }
+            check_tag_pieces_at(model, eq, "bind", Some(context), &mut diagnostics);
+            check_tag_pieces_at(model, eq, "relax", Some(context), &mut diagnostics);
+            let bind = split_names(eq.tag_map.get("bind").map_or("", String::as_str));
+            let relax = split_names(eq.tag_map.get("relax").map_or("", String::as_str));
+            if let Some(name) = bind.iter().find(|name| relax.contains(name)) {
+                diagnostics.push(error(
+                    eq.span,
+                    "E176",
+                    format!("The constraint '{name}' is both in the 'bind' and 'relax' tags"),
+                ));
+            } else if bind.iter().chain(&relax).all(|name| is_occbin_ident(name))
+                && let Some(name) = eq.tag_map.get("name")
+            {
+                let tracker = trackers.entry(name.clone()).or_default();
+                if let Err(RegimeError::AlreadyPresent {
+                    bind,
+                    relax,
+                    earlier,
+                }) = tracker.add_regime(
+                    &bind,
+                    &relax,
+                    RelatedDiagnostic::equation(model, eq, eq.span),
+                ) {
+                    diagnostics.push(error(eq.span, "E177", format!("The regime corresponding to {} has already been declared for this equation", render_bind_relax(&bind, &relax))).with_related(*earlier));
+                }
+            }
+        }
+        rows.extend(
+            diagnostics
+                .into_iter()
+                .map(|diagnostic| (diagnostic, order)),
+        );
+    }
+    rows
+}
+
+#[cfg(test)]
+mod parse_receipt_tests {
+    use super::*;
+    use crate::engine::language::parser::parse;
+
+    // Constructor errors stop inside their retained clause execution. A later
+    // OccBin structural Check error must not mark that Parse prefix refused.
+    #[test]
+    fn parse_receipts_stop_at_the_constructor_not_check_structure() {
+        let model = parse("var y;varexo e;occbin_constraints;name 'c';bind e>0;end;");
+        let rows = parse_refusals(&model);
+        let (diagnostic, order) = rows.first().unwrap();
+        assert_eq!(diagnostic.code, "E182");
+        assert_eq!(model.expanded_tokens[order - 1].text(&model.source), "e");
+        let model = parse("var y;model;[name='c',bind='c']y=0;[name='d',bind='d']y=0;end;occbin_constraints;name 'c';bind y>0;end;occbin_constraints;name 'd';bind y>0;end;");
+        assert!(check_occbin(&model).iter().any(|row| row.code == "E170"));
+        assert!(parse_refusals(&model).is_empty());
+    }
+
+    #[test]
+    fn equation_and_end_block_callbacks_keep_original_receipts() {
+        // Guards equation Parse errors and end-block refusals from becoming
+        // complete named prefixes. A duplicate tag refuses before RHS calls.
+        let model = parse("var y;model;[bind='c']y=0;end;database later;");
+        assert!(parse_refusals(&model)
+            .iter()
+            .any(|(diagnostic, _)| diagnostic.code == "E173"));
+        let model = parse("var y;model;[name='a',name='b']y=pac_expectation(m);end;");
+        let (_, order) = parse_refusals(&model)
+            .into_iter()
+            .find(|(diagnostic, _)| diagnostic.code == "E256")
+            .unwrap();
+        assert!(order < model.named_model_operators[0].keyword_order);
+        let model = parse("var y;model;[name='a',bind='c']y=0;end;occbin_constraints;name 'c';relax y>0;end;database later;");
+        let (diagnostic, order) = parse_refusals(&model)
+            .into_iter()
+            .find(|(diagnostic, _)| diagnostic.code == "E174")
+            .unwrap();
+        assert_eq!(model.expanded_tokens[order].text(&model.source), "database");
+        assert_eq!(model.expanded_tokens[order - 2].text(&model.source), "end");
+        assert!(diagnostic.span.start < model.expanded_tokens[order - 2].span.start);
+        let model = parse("var y;occbin_constraints;name 'c';bind y>0;end;database later;model;[name='a',bind='c']y=0;end;");
+        assert!(parse_refusals(&model)
+            .iter()
+            .any(|(diagnostic, _)| diagnostic.code == "E175"));
+    }
+
+    #[test]
+    fn every_clause_and_legacy_mcp_literal_use_their_actual_parse_rules() {
+        // Guards an overwritten clause from hiding its earlier constructor
+        // failure, and raw token heuristics from rejecting accepted MCP text.
+        let model = parse("var y;varexo e;occbin_constraints;name 'c';bind e>0;bind y>0;end;");
+        let rows = parse_refusals(&model);
+        let first = rows.iter().min_by_key(|(_, order)| *order).unwrap();
+        assert_eq!(first.0.code, "E182");
+        assert_eq!(model.expanded_tokens[first.1 - 1].text(&model.source), "e");
+        assert!(rows.iter().any(|(diagnostic, _)| diagnostic.code == "E184"));
+        let model = parse("var y;model;[mcp='y>1+p']y=0;end;");
+        assert!(parse_refusals(&model).is_empty());
+        let model = parse("var y;model;[mcp='y(-1)>0']y=0;end;");
+        assert!(parse_refusals(&model)
+            .iter()
+            .any(|(diagnostic, _)| diagnostic.code == "E262"));
+    }
+}
+
 fn error(span: Span, code: &str, message: impl Into<String>) -> Diagnostic {
     Diagnostic::new(span, Severity::Error, code, message)
 }
 
 fn check_mcp_form(model: &Model, eq: &Equation, out: &mut Vec<Diagnostic>) {
+    let context = eq
+        .rhs_expr
+        .or(eq.lhs_expr)
+        .and_then(|id| model.constructor_contexts.get(&id))
+        .copied();
+    check_mcp_form_at(model, eq, context, false, out);
+}
+
+fn check_mcp_form_at(
+    model: &Model,
+    eq: &Equation,
+    context: Option<SymbolContext>,
+    heterogeneous: bool,
+    out: &mut Vec<Diagnostic>,
+) {
+    check_mcp_form_using(model, eq, context, heterogeneous, &model.intern, out);
+}
+
+pub(crate) fn before_occbin_parameters(
+    model: &Model,
+    eq: &Equation,
+    context: SymbolContext,
+    heterogeneous: bool,
+    intern: &crate::engine::language::intern::Interner,
+) -> bool {
+    if eq
+        .complementarity
+        .as_ref()
+        .is_some_and(|comp| comp.matched.is_none())
+        || eq.complementarity.is_some() && eq.tag_map.contains_key("mcp")
+    {
+        return false;
+    }
+    let mut diagnostics = Vec::new();
+    check_mcp_form_using(
+        model,
+        eq,
+        Some(context),
+        heterogeneous,
+        intern,
+        &mut diagnostics,
+    );
+    diagnostics.is_empty()
+}
+
+fn check_mcp_form_using(
+    model: &Model,
+    eq: &Equation,
+    context: Option<SymbolContext>,
+    heterogeneous: bool,
+    intern: &crate::engine::language::intern::Interner,
+    out: &mut Vec<Diagnostic>,
+) {
     let Some(value) = eq.tag_map.get("mcp") else {
         return;
     };
-    let tokens: Vec<Token> = tokenize(value)
-        .into_iter()
-        .filter(|t| t.kind != TokenKind::Eof)
-        .collect();
-    let ineq = tokens.iter().position(|t| {
-        matches!(
-            t.kind,
-            TokenKind::Lt | TokenKind::Gt | TokenKind::Le | TokenKind::Ge
-        )
-    });
+    let ineq = value.find('<').or_else(|| value.find('>'));
     let Some(i) = ineq else {
         out.push(error(
             eq.span,
@@ -44,9 +388,15 @@ fn check_mcp_form(model: &Model, eq: &Equation, out: &mut Vec<Diagnostic>) {
         ));
         return;
     };
-    let lhs = &tokens[..i];
-    let rhs = &tokens[i + 1..];
-    if !mcp_lhs_is_var(lhs) {
+    let name = value[..i].trim();
+    let rhs = value[i + 1..].trim();
+    let kind = intern.lookup(name).and_then(|name| {
+        context.map_or_else(
+            || model.final_symbol_kind(name),
+            |context| model.symbol_kind_in_context(name, context),
+        )
+    });
+    if kind.is_none() {
         out.push(error(
             eq.span,
             "E262",
@@ -54,20 +404,18 @@ fn check_mcp_form(model: &Model, eq: &Equation, out: &mut Vec<Diagnostic>) {
         ));
         return;
     }
-    let name = lhs[0].text(value);
-    let endo = model.endogenous.iter().any(|d| model.name(d.name) == name);
-    let declared = endo
-        || model.exogenous.iter().any(|d| model.name(d.name) == name)
-        || model.parameters.iter().any(|d| model.name(d.name) == name);
-    if !declared {
+    if heterogeneous {
         out.push(error(
             eq.span,
-            "E262",
-            "Left-hand side of expression in 'mcp' tag is not a variable",
+            "E479",
+            "'mcp' tags are not allowed in heterogeneous model blocks",
         ));
         return;
     }
-    if !endo {
+    let ordinary = intern.lookup(name).is_some_and(|name| {
+        context.is_none_or(|context| !model.heterogeneous_in_context(name, context))
+    });
+    if kind != Some("var") || !ordinary {
         out.push(error(
             eq.span,
             "E263",
@@ -75,13 +423,27 @@ fn check_mcp_form(model: &Model, eq: &Equation, out: &mut Vec<Diagnostic>) {
         ));
         return;
     }
-    if !mcp_rhs_is_constant(rhs, value) {
+    if !mcp_constant_prefix(rhs) {
         out.push(error(
             eq.span,
             "E264",
             "Right-hand side of expression in 'mcp' tag should be a constant",
         ));
     }
+}
+
+/// The legacy tag writer uses strtod and does not require its end pointer to
+/// consume the rest. This is a numeric prefix, not a Dynare expression.
+fn mcp_constant_prefix(text: &str) -> bool {
+    let text = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let lower = text.to_ascii_lowercase();
+    lower.starts_with("inf")
+        || lower.starts_with("nan")
+        || text.as_bytes().first().is_some_and(u8::is_ascii_digit)
+        || text
+            .strip_prefix('.')
+            .and_then(|text| text.as_bytes().first())
+            .is_some_and(u8::is_ascii_digit)
 }
 
 /// Heterogeneous `[mcp]` stops at the variable lookup. A declared name is
@@ -154,24 +516,11 @@ fn mcp_lhs_is_var(tokens: &[Token]) -> bool {
     false
 }
 
-fn mcp_rhs_is_constant(tokens: &[Token], _src: &str) -> bool {
-    match tokens {
-        [t] if t.kind == TokenKind::Number => true,
-        [sign, t]
-            if matches!(sign.kind, TokenKind::Plus | TokenKind::Minus)
-                && t.kind == TokenKind::Number =>
-        {
-            true
-        }
-        _ => false,
-    }
-}
-
 fn split_names(s: &str) -> Vec<&str> {
     s.split(',').filter(|p| !p.is_empty()).collect()
 }
 
-fn is_occbin_ident(s: &str) -> bool {
+pub(crate) fn is_occbin_ident(s: &str) -> bool {
     let mut chars = s.chars();
     let Some(first) = chars.next() else {
         return false;
@@ -289,7 +638,7 @@ fn check_constraint_rows(model: &Model, out: &mut Vec<Diagnostic>) {
                 return Default::default();
             }
             if let Some(id) = expr.expr {
-                walk_occbin_expr_inner(model, id, &locals, out);
+                walk_occbin_expr_inner(model, id, &locals, None, out);
             }
         }
     }
@@ -483,6 +832,7 @@ fn walk_occbin_expr_inner(
     model: &Model,
     id: ExprId,
     locals: &HashSet<Name>,
+    owner: Option<&std::ops::Range<usize>>,
     out: &mut Vec<Diagnostic>,
 ) {
     let expr = model.exprs.get(id);
@@ -505,7 +855,28 @@ fn walk_occbin_expr_inner(
                 ));
                 return;
             }
-            match decl_class(model, *name, locals) {
+            let class = if let Some(owner) = owner {
+                model
+                    .model_expression_uses
+                    .iter()
+                    .find(|use_| {
+                        use_.name == *name
+                            && use_.span == *ident_span
+                            && owner.contains(&use_.parse_order)
+                    })
+                    .and_then(
+                        |use_| match model.symbol_kind_in_context(*name, use_.context) {
+                            Some("var") => Some(DeclClass::Endogenous),
+                            Some("varexo" | "varexo_det") => Some(DeclClass::Exo),
+                            Some("parameters") => Some(DeclClass::Parameter),
+                            Some("model_local_variable") => Some(DeclClass::Local),
+                            _ => None,
+                        },
+                    )
+            } else {
+                decl_class(model, *name, locals)
+            };
+            match class {
                 Some(DeclClass::Exo) => {
                     let n = model.name(*name);
                     out.push(error(
@@ -531,7 +902,7 @@ fn walk_occbin_expr_inner(
                 "E182",
                 "The 'expectation' operator is forbidden in 'occbin_constraints'.",
             ));
-            walk_occbin_expr_inner(model, *arg, locals, out);
+            walk_occbin_expr_inner(model, *arg, locals, owner, out);
         }
         ExprKind::Call { callee, args } => {
             let callee_s = model.name(*callee);
@@ -563,15 +934,15 @@ fn walk_occbin_expr_inner(
                 if crate::engine::control::cancelled() {
                     return Default::default();
                 }
-                walk_occbin_expr_inner(model, *arg, locals, out);
+                walk_occbin_expr_inner(model, *arg, locals, owner, out);
             }
         }
         ExprKind::Unary { arg, .. } | ExprKind::SteadyState { arg } => {
-            walk_occbin_expr_inner(model, *arg, locals, out);
+            walk_occbin_expr_inner(model, *arg, locals, owner, out);
         }
         ExprKind::Binary { lhs, rhs, .. } => {
-            walk_occbin_expr_inner(model, *lhs, locals, out);
-            walk_occbin_expr_inner(model, *rhs, locals, out);
+            walk_occbin_expr_inner(model, *lhs, locals, owner, out);
+            walk_occbin_expr_inner(model, *rhs, locals, owner, out);
         }
         ExprKind::Number | ExprKind::String | ExprKind::Error | ExprKind::PathNamespace { .. } => {}
     }
@@ -754,6 +1125,16 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
 }
 
 fn check_tag_pieces(model: &Model, eq: &Equation, key: &str, out: &mut Vec<Diagnostic>) {
+    check_tag_pieces_at(model, eq, key, None, out);
+}
+
+fn check_tag_pieces_at(
+    model: &Model,
+    eq: &Equation,
+    key: &str,
+    context: Option<SymbolContext>,
+    out: &mut Vec<Diagnostic>,
+) {
     let Some(value) = eq.tag_map.get(key) else {
         return;
     };
@@ -771,7 +1152,17 @@ fn check_tag_pieces(model: &Model, eq: &Equation, key: &str, out: &mut Vec<Diagn
             ));
         } else {
             let param = format!("occbin_{piece}_bind");
-            if name_is_var_like(model, &param) {
+            let collision = context.map_or_else(
+                || name_is_var_like(model, &param),
+                |context| {
+                    model
+                        .intern
+                        .lookup(&param)
+                        .and_then(|name| model.symbol_kind_in_context(name, context))
+                        .is_some_and(|kind| kind != "parameters")
+                },
+            );
+            if collision {
                 out.push(error(
                     eq.span,
                     "E185",

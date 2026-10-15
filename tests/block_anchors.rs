@@ -507,8 +507,7 @@ fn shared_include_summary_multiplicity_remains_separate_for_each_root() {
         ),
         (
             "shared.inc".to_string(),
-            "/*😀中*/steady_state_model; x = 0; end;\n@#for i in 1:2\nvarobs x;\n@#endfor\n"
-                .to_string(),
+            "/*😀中*/steady_state_model; x = 0; end;\n".to_string(),
         ),
     ]);
     let report = dygnosis::dynare_workspace_diagnose(
@@ -531,6 +530,24 @@ fn shared_include_summary_multiplicity_remains_separate_for_each_root() {
             assert_eq!(diagnostic["column"], 7);
             assert_eq!(diagnostic["end_column"], 25);
         }
+    }
+    // A Parse refusal suppresses the Check summary, but keeps its own shared-file anchor.
+    let mut files = files;
+    files
+        .get_mut("shared.inc")
+        .unwrap()
+        .push_str("@#for i in 1:2\nvarobs x;\n@#endfor\n");
+    let report = dygnosis::dynare_workspace_diagnose(
+        Some(&files),
+        Some(&["a.mod".to_string(), "b.mod".to_string()]),
+        None,
+    )
+    .unwrap();
+    for root in report["roots"].as_array().unwrap() {
+        let diagnostics = root["diagnostics"].as_array().unwrap();
+        assert!(!diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "W042"));
         let repeat: Vec<_> = diagnostics
             .iter()
             .filter(|diagnostic| diagnostic["code"] == "E258")

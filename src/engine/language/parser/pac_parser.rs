@@ -6,9 +6,9 @@ use crate::engine::language::intern::Name;
 use crate::engine::language::lexer::{Token, TokenKind};
 use crate::engine::language::model::{
     DeterministicTrendRow, DeterministicTrendsBlock, NamedModelOperator, NamedModelOperatorKind,
-    PacTargetComponent, PacTargetComponentRow, PacTargetInfoBlock, PacTargetInfoRow, ParseIssue,
-    ParseIssueKind, SemiStructuralCommand, SemiStructuralKind, SemiStructuralOption,
-    SemiStructuralValue, WrittenExpression,
+    NamedSlotKind, NamedSlotOwner, PacTargetComponent, PacTargetComponentRow, PacTargetInfoBlock,
+    PacTargetInfoRow, ParseIssue, ParseIssueKind, SemiStructuralCommand, SemiStructuralKind,
+    SemiStructuralOption, SemiStructuralValue, WrittenExpression,
 };
 use crate::engine::language::span::Span;
 
@@ -41,6 +41,10 @@ impl Parser<'_> {
 
     pub(super) fn parse_semi_structural_command(&mut self, kind: SemiStructuralKind) {
         let start_i = self.i;
+        let named_start = self.model.named_slots.len();
+        let issues_before = self.model.parse_issues.len();
+        let refuses_before = self.model.shape_refuses.len();
+        let mut completed = true;
         let start = self.bump().span.start;
         let mut options = Vec::new();
         if !self.at(TokenKind::LParen) {
@@ -50,31 +54,41 @@ impl Parser<'_> {
         }
         self.bump();
         if self.at(TokenKind::RParen) {
+            completed = false;
             self.pac_syntax(self.pac_option_expectation(kind));
         }
         while !self.at(TokenKind::RParen) && !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
             let before = self.i;
             if let Some(option) = self.parse_semi_structural_option(kind) {
-                if !allows_repeated_option(kind, &option.name)
+                if !kind.option_can_repeat(&option.name)
                     && options.iter().any(|prior: &SemiStructuralOption| {
                         prior.name.eq_ignore_ascii_case(&option.name)
                     })
                 {
+                    self.retain_fact_receipt(
+                        "option_duplicate_callback",
+                        option.callback_order,
+                        Vec::new(),
+                    );
                     self.model
                         .option_twice
                         .push((official_option_key(kind, &option.name), option.span));
                 }
                 options.push(option);
+            } else {
+                completed = false;
             }
             if self.at(TokenKind::Comma) {
                 self.bump();
                 if self.at(TokenKind::RParen) {
+                    completed = false;
                     self.pac_syntax(self.pac_option_expectation(kind));
                 }
             } else if !self.at(TokenKind::RParen)
                 && !self.at(TokenKind::Semi)
                 && !self.at(TokenKind::Eof)
             {
+                completed = false;
                 self.pac_syntax("COMMA or ')' ");
                 self.recover_pac_option();
                 self.eat(TokenKind::Comma);
@@ -84,11 +98,13 @@ impl Parser<'_> {
             }
         }
         if !self.at(TokenKind::RParen) {
+            completed = false;
             self.pac_syntax("')'");
         } else {
             self.bump();
         }
         if !self.at(TokenKind::Semi) {
+            completed = false;
             self.pac_syntax("';'");
         }
         let end = if self.at(TokenKind::Semi) {
@@ -96,9 +112,23 @@ impl Parser<'_> {
         } else {
             self.tokens[self.i.saturating_sub(1)].span.end
         };
+        completed &= self.model.parse_issues.len() == issues_before
+            && self.model.shape_refuses.len() == refuses_before;
+        if !completed {
+            // Option strings do not declare/link a model until the complete
+            // command callback. Nested expression operators have their own
+            // earlier callbacks and must survive this enclosing refusal.
+            let provisional = self.model.named_slots.split_off(named_start);
+            self.model
+                .named_slots
+                .extend(provisional.into_iter().filter(|slot| {
+                    !slot.declaration && !matches!(slot.kind, NamedSlotKind::AuxiliaryModel(_))
+                }));
+        }
         self.model
             .semi_structural_commands
             .push(SemiStructuralCommand {
+                callback_completed: completed,
                 parse_order: start_i,
                 active_tokens: start_i..self.i,
                 symbol_type_context: self.model.symbol_context(),
@@ -160,6 +190,7 @@ impl Parser<'_> {
         };
         if value_type == PacOptionType::Flag {
             return Some(SemiStructuralOption {
+                callback_order: self.i,
                 name: token.text(self.src).to_string(),
                 span: token.span,
                 value: SemiStructuralValue::Flag,
@@ -172,9 +203,32 @@ impl Parser<'_> {
         self.bump();
         let value = match value_type {
             PacOptionType::Flag => unreachable!(),
-            PacOptionType::Symbol => self
-                .read_pac_symbol()
-                .map(|(name, span)| SemiStructuralValue::Symbol { name, span }),
+            PacOptionType::Symbol => {
+                let order = self.i;
+                self.read_pac_symbol().map(|(name, span)| {
+                    if word == "model_name" {
+                        self.record_named_slot(
+                            NamedSlotKind::Model(kind),
+                            name,
+                            span,
+                            order,
+                            true,
+                            NamedSlotOwner::ModelCommand(self.model.semi_structural_commands.len()),
+                        );
+                    }
+                    if word == "auxiliary_model_name" {
+                        self.record_named_slot(
+                            NamedSlotKind::AuxiliaryModel(kind),
+                            name,
+                            span,
+                            order,
+                            false,
+                            NamedSlotOwner::ModelCommand(self.model.semi_structural_commands.len()),
+                        );
+                    }
+                    SemiStructuralValue::Symbol { name, span }
+                })
+            }
             PacOptionType::Tags => self.read_pac_tag_list().map(SemiStructuralValue::Tags),
             PacOptionType::Expression => {
                 let previous_context = self.model_function_context;
@@ -190,6 +244,7 @@ impl Parser<'_> {
                 .map(|(text, span)| SemiStructuralValue::Kind { text, span }),
         }?;
         Some(SemiStructuralOption {
+            callback_order: self.i,
             name: token.text(self.src).to_string(),
             span: token.span,
             value,
@@ -386,7 +441,18 @@ impl Parser<'_> {
         callee: Name,
         kind: NamedModelOperatorKind,
     ) -> ExprId {
+        let scope = self.constructor_scope();
+        let model_context = !matches!(
+            scope,
+            crate::engine::language::constructor::DataTreeScope::General
+                | crate::engine::language::constructor::DataTreeScope::SteadyState
+                | crate::engine::language::constructor::DataTreeScope::ShockPaths
+        );
         self.bump(); // `(`
+        let name_order = self.i;
+        if !model_context {
+            self.pac_syntax_at(name_order - 2, "");
+        }
         let name =
             if self.at(TokenKind::Ident) && !is_pac_reserved(self.tokens[self.i].text(self.src)) {
                 self.read_pac_symbol()
@@ -394,6 +460,7 @@ impl Parser<'_> {
                 self.pac_syntax("");
                 None
             };
+        let completed = model_context && name.is_some() && self.at(TokenKind::RParen);
         if name.is_some() && !self.at(TokenKind::RParen) {
             self.pac_syntax("')'");
         }
@@ -409,9 +476,25 @@ impl Parser<'_> {
             start: keyword.span.start,
             end,
         };
-        let retained_index = name.map(|(name, name_span)| {
+        let retained_index = name.filter(|_| completed).map(|(name, name_span)| {
+            let model_kind = match kind {
+                NamedModelOperatorKind::VarExpectation => SemiStructuralKind::VarExpectationModel,
+                NamedModelOperatorKind::PacExpectation
+                | NamedModelOperatorKind::PacTargetNonstationary => SemiStructuralKind::PacModel,
+            };
             let index = self.model.named_model_operators.len();
+            self.record_named_slot(
+                NamedSlotKind::Model(model_kind),
+                name,
+                name_span,
+                name_order,
+                false,
+                NamedSlotOwner::ModelOperator(index),
+            );
             self.model.named_model_operators.push(NamedModelOperator {
+                keyword_order: name_order - 2,
+                callback_order: self.i,
+                scope: self.constructor_scope(),
                 kind,
                 name,
                 operator_span: keyword.span,
@@ -444,16 +527,30 @@ impl Parser<'_> {
             return;
         }
         self.bump();
+        let name_order = self.i;
         let name = self.read_pac_symbol();
+        let mut opener_completed = name.is_some();
         if !self.at(TokenKind::RParen) {
+            opener_completed = false;
             self.pac_syntax("')'");
         } else {
             self.bump();
         }
         if !self.at(TokenKind::Semi) {
+            opener_completed = false;
             self.pac_syntax("';'");
         }
         self.eat(TokenKind::Semi);
+        if opener_completed && let Some((name, span)) = name {
+            self.record_named_slot(
+                NamedSlotKind::Model(SemiStructuralKind::PacModel),
+                name,
+                span,
+                name_order,
+                false,
+                NamedSlotOwner::PacTargetInfo,
+            );
+        }
         let opener = Span {
             start,
             end: self.tokens[self.i.saturating_sub(1)].span.end,
@@ -593,6 +690,7 @@ impl Parser<'_> {
                     self.model.deterministic_trends_dups.push((name, name_span));
                 }
                 rows.push(DeterministicTrendRow {
+                    callback_order: self.i,
                     name,
                     name_span,
                     expression,
@@ -653,10 +751,13 @@ impl Parser<'_> {
                 expected.trim()
             )
         };
-        self.model.parse_issues.push(ParseIssue {
-            kind: ParseIssueKind::BisonSyntax(message),
-            span: token.span,
-        });
+        self.record_issue_at(
+            at,
+            ParseIssue {
+                kind: ParseIssueKind::BisonSyntax(message),
+                span: token.span,
+            },
+        );
     }
 
     fn has_pac_refusal(&self) -> bool {
@@ -766,17 +867,6 @@ fn is_pac_reserved(word: &str) -> bool {
     RESERVED
         .iter()
         .any(|known| word.eq_ignore_ascii_case(known))
-}
-
-fn allows_repeated_option(kind: SemiStructuralKind, name: &str) -> bool {
-    let name = name.to_ascii_lowercase();
-    match kind {
-        SemiStructuralKind::VarExpectationModel => {
-            matches!(name.as_str(), "expression" | "discount")
-        }
-        SemiStructuralKind::PacModel => matches!(name.as_str(), "growth" | "auxname" | "kind"),
-        _ => false,
-    }
 }
 
 fn official_option_key(kind: SemiStructuralKind, name: &str) -> String {

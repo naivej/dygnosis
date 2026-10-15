@@ -468,15 +468,13 @@ async fn rename_and_references_include_pac_discount_parameter() {
     }
 }
 
-// Guards the new discount binding from making generated names editable or
-// treating a PAC model name as an ordinary parameter reference.
+// Generated discounts cannot become editable literal sites. A known PAC-model
+// identity with the same spelling must remain separate from the parameter.
 #[tokio::test]
 async fn rename_pac_discount_keeps_generated_and_unbound_slot_guards() {
     let fixture = Fixture::new();
-    for text in [
-        "parameters beta; pac_model(model_name=pac_y, discount=@{\"beta\"});\n",
-        "parameters beta; pac_model(model_name=beta, discount=beta);\n",
-    ] {
+    {
+        let text = "parameters beta; pac_model(model_name=pac_y, discount=@{\"beta\"});\n";
         let root = fixture.write("unproved_pac.mod", text);
         let (service, _socket) = new_service();
         open(service.inner(), &root, text, 1).await;
@@ -490,6 +488,19 @@ async fn rename_pac_discount_keeps_generated_and_unbound_slot_guards() {
             .await
             .is_none());
     }
+    let text = "parameters beta; pac_model(model_name=beta, discount=beta);\n";
+    let root = fixture.write("separate_pac.mod", text);
+    let (service, _socket) = new_service();
+    open(service.inner(), &root, text, 1).await;
+    let changes = edits(
+        rename(service.inner(), &root, text, "beta;", "betta")
+            .await
+            .expect("known PAC and parameter namespaces stay separate"),
+    );
+    assert_eq!(
+        apply(text, &changes[&root].1),
+        "parameters betta; pac_model(model_name=beta, discount=betta);\n"
+    );
 }
 
 // Guards safe shared bindings being lost and incompatible shared bindings being edited.

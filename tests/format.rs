@@ -206,3 +206,68 @@ fn format_range_assignments() {
     let original = slice_lines(&src, start, end);
     assert_ne!(rust.2, original);
 }
+
+// Guards omitted block heads and multiline headers using parser boundaries,
+// including the range formatter's initial depth and the following root command.
+#[test]
+fn retained_block_boundaries_control_whole_and_range_indentation() {
+    let source = "var y;\nvarexo e;\nparameters p;\np=0.5;\nmodel(\nlinear\n);\ny=p*y(-1)+e;\nend;\nconditional_forecast_paths;\nvar y;\nperiods 1;\nvalues 2;\nend;\nmshocks;\nvar e;\nperiods 1;\nvalues 0.5;\nend;\nsteady;\n";
+    let formatted = format_text(source, "\t").expect("block bodies need indentation");
+    for body in ["y = p * y(-1) + e;", "var y;", "periods 1;", "values 0.5;"] {
+        assert!(
+            formatted.contains(&format!("\n\t{body}\n")),
+            "{body}: {formatted}"
+        );
+    }
+    assert!(formatted.ends_with("end;\nsteady;\n"));
+    assert_eq!(format_text(&formatted, "\t"), None);
+    let start = line_of(source, "var y;\nperiods");
+    let end = line_of(source, "values 2;");
+    let (_, _, replacement) = format_range(source, start, end, "\t").expect("range body");
+    assert_eq!(replacement, "\tvar y;\n\tperiods 1;\n\tvalues 2;");
+    let before = dygnosis::parser::parse(source);
+    let after = dygnosis::parser::parse(&formatted);
+    let structure = |model: &dygnosis::model::Model| {
+        model
+            .statements
+            .iter()
+            .map(|row| (row.name.clone(), row.kind, row.complete))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(structure(&before), structure(&after));
+}
+
+// Guards a closer discarding an opener on the same physical line. Whole and
+// range formatting must agree on the following body's depth and root command.
+#[test]
+fn mixed_close_open_lines_keep_following_block_depth() {
+    for opener in ["initval", "model"] {
+        for indent in ["\t", "  "] {
+            let source = format!("var y;\nmodel;\ny=1;\n   end; {opener};\ny=2;\nend;\nsteady;\n");
+            let formatted = format_text(&source, indent).expect("block bodies need indentation");
+            assert!(
+                formatted.contains(&format!(
+                    "\nend; {opener};\n{indent}y = 2;\nend;\nsteady;\n"
+                )),
+                "{formatted}"
+            );
+            assert_eq!(format_text(&formatted, indent), None);
+            let (_, _, block_range) =
+                format_range(&source, 3, 5, indent).expect("mixed transition and body range");
+            assert_eq!(block_range, format!("end; {opener};\n{indent}y = 2;\nend;"));
+            let (_, _, body_range) =
+                format_range(&source, 4, 4, indent).expect("following body range");
+            assert_eq!(body_range, format!("{indent}y = 2;"));
+            assert_eq!(format_range(&formatted, 3, 6, indent), None);
+            assert_eq!(format_range(&source, 6, 6, indent), None);
+            let structure = |text: &str| {
+                dygnosis::parse(text)
+                    .statements
+                    .iter()
+                    .map(|row| (row.name.clone(), row.kind, row.complete))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(structure(&source), structure(&formatted));
+        }
+    }
+}

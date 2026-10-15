@@ -2,6 +2,12 @@
 
 use crate::engine::language::span::Span;
 
+/// The pinned NumConstNode value uses strtod. A D exponent is one lexer
+/// token, but strtod reads only its decimal mantissa; keep its written text.
+pub(crate) fn parse_numeric_literal(text: &str) -> Option<f64> {
+    text.split(['d', 'D']).next()?.parse().ok()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TokenKind {
     Ident,
@@ -499,7 +505,7 @@ impl Lexer<'_> {
                 self.bump();
             }
         }
-        if matches!(self.peek(), 'e' | 'E') {
+        if matches!(self.peek(), 'e' | 'E' | 'd' | 'D') {
             let save = self.pos;
             self.bump();
             if matches!(self.peek(), '+' | '-') {

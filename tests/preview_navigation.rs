@@ -876,7 +876,7 @@ async fn readable_layout_uses_original_statement_facts_after_native_line_boundar
 #[tokio::test]
 async fn readable_include_macro_copies_have_separate_ranges_and_keep_written_targets_on_refresh() {
     let source = "var y; model;\r\n@#include \"readable.inc\"\r\nend;";
-    let body = "@#for i in 1:2\r\n#k=@{i}; [name='😀'] y=k+\r\n@{i};\r\n@#endfor\r\n";
+    let body = "@#for i in 1:2\r\n#k@{i}=@{i}; [name='😀'] y=k@{i}+\r\n@{i};\r\n@#endfor\r\n";
     let root = Url::parse("file:///C:/dygnosis-preview/includes.mod").unwrap();
     let include = Url::parse("file:///C:/dygnosis-preview/readable.inc").unwrap();
     let (service, _socket) = new_service();
@@ -887,13 +887,21 @@ async fn readable_include_macro_copies_have_separate_ranges_and_keep_written_tar
     let first = readable_preview(backend, &root).await;
     same_preview_facts(&compact, &first);
     assert_eq!(first["complete"], true, "{first}");
-    assert_eq!(first["effective_text"], "var y ;\nmodel ;\n    #k = 1 ;\n    [name = '😀'] y = k+1 ;\n    #k = 2 ;\n    [name = '😀'] y = k+2 ;\nend ;");
+    assert_eq!(first["effective_text"], "var y ;\nmodel ;\n    #k1 = 1 ;\n    [name = '😀'] y = k1+\n1 ;\n    #k2 = 2 ;\n    [name = '😀'] y = k2+\n2 ;\nend ;");
     let rows = first["navigation"].as_array().unwrap();
     assert_eq!(rows.len(), 4);
     assert_eq!(rows[1]["written_locations"], rows[3]["written_locations"]);
     assert_ne!(rows[1]["effective_range"], rows[3]["effective_range"]);
     assert_eq!(rows[1]["effective_range"]["start"]["line"], 3);
-    assert_eq!(rows[3]["effective_range"]["start"]["line"], 5);
+    assert_eq!(rows[3]["effective_range"]["start"]["line"], 6);
+    for row in [&rows[1], &rows[3]] {
+        let range = &row["effective_range"];
+        assert_eq!(
+            range["end"]["line"].as_u64().unwrap(),
+            range["start"]["line"].as_u64().unwrap() + 1,
+            "the mapped equation must retain both emitted lines"
+        );
+    }
     for row in rows {
         assert_eq!(row["written_locations"][0]["uri"], include.as_str());
         assert_eq!(
@@ -906,13 +914,13 @@ async fn readable_include_macro_copies_have_separate_ranges_and_keep_written_tar
         first,
         "jump revalidation returns the same display copy"
     );
-    open(backend, &include, &body.replace("k+", "k+1+"), 2).await;
+    open(backend, &include, &body.replace("k@{i}+", "k@{i}+1+"), 2).await;
     let refreshed = readable_preview(backend, &root).await;
     assert_ne!(refreshed["revision"], first["revision"]);
     assert!(refreshed["effective_text"]
         .as_str()
         .unwrap()
-        .contains("    [name = '😀'] y = k+1+2 ;"));
+        .contains("    [name = '😀'] y = k2+1+\n2 ;"));
     same_preview_facts(&preview(backend, &root).await, &refreshed);
 }
 
@@ -945,7 +953,7 @@ async fn readable_incomplete_previews_keep_partial_text_and_withhold_navigation(
 
 #[tokio::test]
 async fn source_layout_keeps_written_spacing_and_leaves_shared_output_unchanged() {
-    let source = "var y;\nmodel;\ny=c;\nend;\n";
+    let source = "var y;\nmodel;\ny=y(-1);\nend;\n";
     let root = Url::parse("file:///C:/dygnosis-preview/source.mod").unwrap();
     let (service, _socket) = new_service();
     let backend = service.inner();
@@ -957,7 +965,7 @@ async fn source_layout_keeps_written_spacing_and_leaves_shared_output_unchanged(
     assert_eq!(source_view["complete"], true, "{source_view}");
     assert_eq!(
         source_view["effective_text"],
-        "var y;\nmodel;\ny=c;\nend;\n"
+        "var y;\nmodel;\ny=y(-1);\nend;\n"
     );
     same_preview_facts(&compact, &source_view);
     assert_eq!(preview(backend, &root).await, compact);
@@ -985,7 +993,7 @@ async fn source_layout_covers_macros_includes_branches_and_crlf() {
     open(
         backend,
         &include,
-        "@#for i in 1:2\n#k=@{i}; [name='😀'] y=k+@{i};\n@#endfor",
+        "@#for i in 1:2\n#k@{i}=@{i}; [name='😀'] y=k@{i}+@{i};\n@#endfor",
         1,
     )
     .await;
@@ -996,20 +1004,20 @@ async fn source_layout_covers_macros_includes_branches_and_crlf() {
     assert!(!text.contains('\r'), "{text}");
     assert!(!text.contains("bad"), "{text}");
     assert!(!text.contains("@#"), "{text}");
-    assert!(text.contains("#k=1;"), "{text}");
-    assert!(text.contains("#k=2;"), "{text}");
-    assert!(text.contains("[name='😀'] y=k+1;"), "{text}");
-    assert!(text.contains("[name='😀'] y=k+2;"), "{text}");
+    assert!(text.contains("#k1=1;"), "{text}");
+    assert!(text.contains("#k2=2;"), "{text}");
+    assert!(text.contains("[name='😀'] y=k1+1;"), "{text}");
+    assert!(text.contains("[name='😀'] y=k2+2;"), "{text}");
     same_preview_facts(&compact, &source_view);
     let rows = source_view["navigation"].as_array().unwrap();
     assert_eq!(rows.len(), 4);
     assert_eq!(
         json_slice(text, &rows[1]["effective_range"], true),
-        "[name='😀'] y=k+1"
+        "[name='😀'] y=k1+1"
     );
     assert_eq!(
         json_slice(text, &rows[3]["effective_range"], true),
-        "[name='😀'] y=k+2"
+        "[name='😀'] y=k2+2"
     );
 }
 
@@ -1044,14 +1052,17 @@ async fn source_layout_drops_include_directive_indent_and_keeps_file_spacing() {
     open(
         backend,
         &root,
-        "model;\n  @#include \"include-indent-body.inc\"\nend;\n",
+        "var y;\nmodel;\n  @#include \"include-indent-body.inc\"\nend;\n",
         1,
     )
     .await;
     open(backend, &include, "y=1;\n", 1).await;
     let source_view = source_preview(backend, &root).await;
     assert_eq!(source_view["complete"], true, "{source_view}");
-    assert_eq!(source_view["effective_text"], "model;\ny=1;\nend;\n");
+    assert_eq!(
+        source_view["effective_text"],
+        "var y;\nmodel;\ny=1;\nend;\n"
+    );
     same_preview_facts(&preview(backend, &root).await, &source_view);
 }
 
@@ -1064,14 +1075,17 @@ async fn source_layout_include_without_final_newline_keeps_line_separator() {
     open(
         backend,
         &root,
-        "model;\n@#include \"include-nonew-body.inc\"\nend;\n",
+        "var y;\nmodel;\n@#include \"include-nonew-body.inc\"\nend;\n",
         1,
     )
     .await;
     open(backend, &include, "y=1;", 1).await;
     let source_view = source_preview(backend, &root).await;
     assert_eq!(source_view["complete"], true, "{source_view}");
-    assert_eq!(source_view["effective_text"], "model;\ny=1;\nend;\n");
+    assert_eq!(
+        source_view["effective_text"],
+        "var y;\nmodel;\ny=1;\nend;\n"
+    );
     same_preview_facts(&preview(backend, &root).await, &source_view);
 }
 
@@ -1725,7 +1739,7 @@ async fn source_layout_macro_ranges_shade_bodies_includes_and_identifiers() {
         1,
     )
     .await;
-    open(backend, &include, "z=1;\n", 1).await;
+    open(backend, &include, "#z=1;\n", 1).await;
     let source_view = source_preview(backend, &root).await;
     let readable = readable_preview(backend, &root).await;
     let compact = preview(backend, &root).await;
@@ -1743,7 +1757,7 @@ async fn source_layout_macro_ranges_shade_bodies_includes_and_identifiers() {
     let joined = shaded.join("|");
     assert!(joined.contains("beta_2"), "{joined}");
     assert!(joined.contains("parameters gamma_1;"), "{joined}");
-    assert!(joined.contains("z=1;"), "{joined}");
+    assert!(joined.contains("#z=1;"), "{joined}");
     assert!(!joined.contains("var y"), "{joined}");
     assert!(!joined.contains("y=1;"), "{joined}");
     // Adjacent/overlapping ranges are already merged server-side.

@@ -3,6 +3,10 @@
 use super::*;
 use crate::engine::analysis::symbols::{self, Selector, SemanticModel};
 
+fn source_index(text: &str) -> LineIndex {
+    LineIndex::new(&crate::engine::language::parser::normalize_newlines(text))
+}
+
 pub(super) const SOURCE: &str = symbols::SOURCE.message;
 pub(super) const MAPPING: &str = symbols::MAPPING.message;
 pub(super) const STALE: &str =
@@ -16,7 +20,10 @@ pub(super) struct Decision {
     roots: Vec<Url>,
 }
 
-fn capture(inner: &mut Inner, root: &Url) -> std::result::Result<SemanticModel, &'static str> {
+pub(super) fn capture(
+    inner: &mut Inner,
+    root: &Url,
+) -> std::result::Result<SemanticModel, &'static str> {
     let revision = inner.root_revision(root).ok_or(SOURCE)?;
     SemanticModel::capture(&mut inner.workspace, root.as_str(), revision)
         .map_err(|reason| reason.message)
@@ -31,7 +38,7 @@ pub(super) fn decide(
     let doc = inner.document(uri).ok_or(SOURCE)?;
     let text = doc.text.clone();
     let version = doc.version;
-    let byte = LineIndex::new(&text).offset_utf16(&text, span_pos(pos.position));
+    let byte = source_index(&text).offset_utf16(&text, span_pos(pos.position));
     if inner.context_ambiguous(uri) {
         return Err("Choose a model owner before requesting Rename for this file.");
     }
@@ -138,7 +145,7 @@ pub(super) fn decide(
                 .to_owned();
             sources.insert(
                 edit.file.clone(),
-                (target_uri, LineIndex::new(&source), source),
+                (target_uri, source_index(&source), source),
             );
         }
         let (target_uri, index, source) = sources.get(&edit.file).ok_or(MAPPING)?;
@@ -173,7 +180,7 @@ pub(super) fn decide(
         }
     }
     Ok(Decision {
-        range: span_range(&LineIndex::new(&text), &text, selected_span),
+        range: span_range(&source_index(&text), &text, selected_span),
         edit: versioned_workspace_edit(inner, changes),
         roots,
     })
@@ -185,7 +192,7 @@ pub(super) fn decide(
 pub(super) fn definition(inner: &mut Inner, pos: &TextDocumentPositionParams) -> Option<Location> {
     let uri = &pos.text_document.uri;
     let text = inner.document(uri)?.text.clone();
-    let byte = LineIndex::new(&text).offset_utf16(&text, span_pos(pos.position));
+    let byte = source_index(&text).offset_utf16(&text, span_pos(pos.position));
     let file = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
     let roots = inner.context_roots(uri);
     let mut agreed = None;
@@ -196,7 +203,7 @@ pub(super) fn definition(inner: &mut Inner, pos: &TextDocumentPositionParams) ->
         let target = naming_edit_url(inner, &root, &file)?;
         let source = view.sources.get(&file)?;
         source.get(span.start as usize..span.end as usize)?;
-        let location = Location::new(target, span_range(&LineIndex::new(source), source, span));
+        let location = Location::new(target, span_range(&source_index(source), source, span));
         if agreed.as_ref().is_some_and(|prior| prior != &location) {
             return None;
         }
@@ -211,7 +218,7 @@ pub(super) fn references(
     include_declaration: bool,
 ) -> Option<Vec<Location>> {
     let text = inner.document(&pos.text_document.uri)?.text.clone();
-    let byte = LineIndex::new(&text).offset_utf16(&text, span_pos(pos.position));
+    let byte = source_index(&text).offset_utf16(&text, span_pos(pos.position));
     let file =
         crate::engine::workspace::include_resolver::normalize_uri(pos.text_document.uri.as_str());
     let mut roots = inner.context_roots(&pos.text_document.uri);
@@ -238,7 +245,7 @@ pub(super) fn references(
             if source.get(span.start as usize..span.end as usize).is_none() {
                 continue;
             }
-            let location = Location::new(uri, span_range(&LineIndex::new(source), source, span));
+            let location = Location::new(uri, span_range(&source_index(source), source, span));
             if !locations.contains(&location) {
                 locations.push(location);
             }

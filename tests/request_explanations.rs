@@ -123,7 +123,7 @@ async fn partial_model_information_and_preview_name_the_missing_include() {
     open(
         server,
         &uri,
-        "var y;\n@#include \"missing.inc\"\nmodel;y=0;end;\n",
+        "var y;\n@#include \"missing.inc\"\nmodel;y=possibly_in_missing_include;end;\n",
     )
     .await;
     for command in ["dynare/modelInfo", "dynare/showEffectiveModel"] {
@@ -144,5 +144,11 @@ async fn partial_model_information_and_preview_name_the_missing_include() {
             "{command}: {result}"
         );
         assert!(!result["message"].as_str().unwrap().is_empty());
+        assert!(
+            !result["incomplete_reasons"]
+                .to_string()
+                .contains("PARSE_REFUSED"),
+            "a missing declaration include must not produce a downstream Parse claim: {result}"
+        );
     }
 }

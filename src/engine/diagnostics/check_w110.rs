@@ -123,10 +123,8 @@ fn check_w060(model: &Model) -> Vec<Diagnostic> {
 
 /// Completed regular rows whose duplicate action refuses during Parse.
 pub(crate) fn completed_regular_parse_duplicates(model: &Model) -> Vec<(Diagnostic, usize)> {
-    let mut orders = Vec::new();
-    check_shock_stmts(model, Some(&mut orders))
+    completed_parse_duplicates(model)
         .into_iter()
-        .zip(orders)
         .filter(|(diagnostic, order)| {
             diagnostic.code == "E111"
                 && model
@@ -134,6 +132,16 @@ pub(crate) fn completed_regular_parse_duplicates(model: &Model) -> Vec<(Diagnost
                     .iter()
                     .any(|row| row.parse_order == *order)
         })
+        .collect()
+}
+
+/// The exact duplicate actions shared by regular and heterogeneous shocks.
+pub(crate) fn completed_parse_duplicates(model: &Model) -> Vec<(Diagnostic, usize)> {
+    let mut orders = Vec::new();
+    check_shock_stmts(model, Some(&mut orders))
+        .into_iter()
+        .zip(orders)
+        .filter(|(diagnostic, _)| matches!(diagnostic.code.as_str(), "E111" | "E393" | "E394"))
         .collect()
 }
 

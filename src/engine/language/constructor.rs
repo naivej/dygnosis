@@ -6,6 +6,13 @@ use crate::engine::language::intern::Name;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) type NodeId = usize;
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ComplementarityMatch {
+    Triple(Name),
+    NotAnInequality,
+    BoundsNotConstant,
+    Malformed,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum DataTreeScope {
     General,
@@ -105,6 +112,131 @@ impl Default for ConstructorTree {
 }
 
 impl ConstructorTree {
+    pub(crate) fn variable(&self, id: NodeId) -> Option<(Name, i32)> {
+        match self.nodes[id] {
+            Node::Ident(name, timing, _) => Some((name, timing)),
+            _ => None,
+        }
+    }
+    /// Variables surviving Parse construction, following the current model-local
+    /// definitions. Each constructed node is visited once, including shared DAGs.
+    pub(crate) fn variables(
+        &self,
+        root: NodeId,
+        local: impl Fn(Name) -> Option<NodeId>,
+    ) -> Vec<Name> {
+        let mut pending = vec![root];
+        let mut seen = HashSet::new();
+        let mut names = HashSet::new();
+        while let Some(id) = pending.pop() {
+            if crate::engine::control::cancelled() {
+                return Vec::new();
+            }
+            if !seen.insert(id) {
+                continue;
+            }
+            match &self.nodes[id] {
+                Node::Ident(name, _, _) => {
+                    if let Some(definition) = local(*name) {
+                        pending.push(definition);
+                    } else {
+                        names.insert(*name);
+                    }
+                }
+                Node::PathNamespace(reference) => {
+                    names.insert(reference.symbol);
+                }
+                Node::Neg(arg) | Node::SteadyState(arg) | Node::Expectation(_, arg) => {
+                    pending.push(*arg)
+                }
+                Node::Binary(_, lhs, rhs) => pending.extend([*lhs, *rhs]),
+                Node::Builtin(_, args) | Node::Call(_, args) => pending.extend(args),
+                Node::Number(_) | Node::Opaque(_) => {}
+            }
+        }
+        names.into_iter().collect()
+    }
+
+    /// The pin matches the constructed inequality, after Parse identities.
+    pub(crate) fn complementarity(
+        &self,
+        root: NodeId,
+        endogenous: impl Fn(Name) -> bool,
+        dynamic_bound: impl Fn(NodeId) -> bool,
+    ) -> ComplementarityMatch {
+        let Node::Binary(op, lhs, rhs) = self.nodes[root] else {
+            return ComplementarityMatch::NotAnInequality;
+        };
+        let greater = if op == BinOp::Gt as u8 || op == BinOp::Ge as u8 {
+            true
+        } else if op == BinOp::Lt as u8 || op == BinOp::Le as u8 {
+            false
+        } else {
+            return ComplementarityMatch::NotAnInequality;
+        };
+        let target = |id| match self.nodes[id] {
+            Node::Ident(name, 0, _) if endogenous(name) => Some(name),
+            _ => None,
+        };
+        for (candidate, bound) in [(lhs, rhs), (rhs, lhs)] {
+            if let Some(name) = target(candidate) {
+                return if dynamic_bound(bound) {
+                    ComplementarityMatch::BoundsNotConstant
+                } else {
+                    ComplementarityMatch::Triple(name)
+                };
+            }
+        }
+        let Node::Binary(inner_op, lower, candidate) = self.nodes[lhs] else {
+            return ComplementarityMatch::Malformed;
+        };
+        let same_direction = if greater {
+            inner_op == BinOp::Gt as u8 || inner_op == BinOp::Ge as u8
+        } else {
+            inner_op == BinOp::Lt as u8 || inner_op == BinOp::Le as u8
+        };
+        let Some(name) = target(candidate).filter(|_| same_direction) else {
+            return ComplementarityMatch::Malformed;
+        };
+        if dynamic_bound(lower) || dynamic_bound(rhs) {
+            ComplementarityMatch::BoundsNotConstant
+        } else {
+            ComplementarityMatch::Triple(name)
+        }
+    }
+
+    pub(crate) fn complementarity_bounds(
+        &self,
+        root: NodeId,
+        name: Name,
+    ) -> (Option<NodeId>, Option<NodeId>) {
+        let Node::Binary(op, lhs, rhs) = self.nodes[root] else {
+            unreachable!()
+        };
+        let greater = op == BinOp::Gt as u8 || op == BinOp::Ge as u8;
+        if matches!(self.nodes[lhs], Node::Ident(candidate, 0, _) if candidate == name) {
+            return if greater {
+                (Some(rhs), None)
+            } else {
+                (None, Some(rhs))
+            };
+        }
+        if matches!(self.nodes[rhs], Node::Ident(candidate, 0, _) if candidate == name) {
+            return if greater {
+                (None, Some(lhs))
+            } else {
+                (Some(lhs), None)
+            };
+        }
+        let Node::Binary(_, lower, _) = self.nodes[lhs] else {
+            unreachable!()
+        };
+        if greater {
+            (Some(rhs), Some(lower))
+        } else {
+            (Some(lower), Some(rhs))
+        }
+    }
     fn select_scope(&mut self, scope: DataTreeScope) {
         self.scope = scope;
         if let Some(&(zero, one, minus_one)) = self.scopes.get(&scope) {

@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use super::parse_preflight::callback_order;
 use crate::engine::diagnostics::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::engine::language::expr::{ExprId, ExprKind};
 use crate::engine::language::intern::Name;
@@ -56,7 +57,69 @@ pub fn check_d_block(model: &Model) -> Vec<Diagnostic> {
     out
 }
 
+/// Parse-only receipts over the same predicates used by diagnostics. Check-only
+/// OSR bounds are excluded; epilogue role checks here are constructor actions.
+pub(crate) fn parse_refusals(model: &Model) -> Vec<(Diagnostic, usize)> {
+    let mut out = check_histval_lag_dup_with_orders(model);
+    out.extend(check_planner_lead_local_with_orders(model));
+    out.extend(check_varexobs_with_orders(model));
+    out.extend(check_static_tag_with_orders(model));
+    out.extend(check_generate_irfs_with_orders(model));
+    out.extend(model_expression_refusals(model));
+    out.extend(
+        check_option_twice(model)
+            .into_iter()
+            .enumerate()
+            .map(|(index, diagnostic)| {
+                (
+                    diagnostic,
+                    callback_order(model, "option_duplicate_callback", index),
+                )
+            }),
+    );
+    out.extend(
+        check_namespace(model)
+            .into_iter()
+            .enumerate()
+            .map(|(index, diagnostic)| {
+                (
+                    diagnostic,
+                    callback_order(model, "namespace_callback", index),
+                )
+            }),
+    );
+    out.extend(
+        check_const_fold(model)
+            .into_iter()
+            .enumerate()
+            .map(|(index, diagnostic)| {
+                (
+                    diagnostic,
+                    callback_order(model, "constant_fold_callback", index),
+                )
+            }),
+    );
+    for receipt in &model.outside_expression_callbacks {
+        if crate::engine::control::cancelled() {
+            return Vec::new();
+        }
+        if let Some(diagnostic) =
+            outside_expression_role_refusal(model, receipt.name, receipt.span, receipt.context)
+        {
+            out.push((diagnostic, receipt.order));
+        }
+    }
+    out
+}
+
 fn check_histval_lag_dup(model: &Model) -> Vec<Diagnostic> {
+    check_histval_lag_dup_with_orders(model)
+        .into_iter()
+        .map(|(diagnostic, _)| diagnostic)
+        .collect()
+}
+
+fn check_histval_lag_dup_with_orders(model: &Model) -> Vec<(Diagnostic, usize)> {
     let mut seen: HashMap<(Name, i32), Span> = HashMap::new();
     let mut out = Vec::new();
     for (index, entry) in model.histval.iter().enumerate() {
@@ -68,21 +131,25 @@ fn check_histval_lag_dup(model: &Model) -> Vec<Diagnostic> {
         }
         let name = model.name(entry.name);
         if entry.lag > 0 {
-            out.push(err(
-                entry.span,
-                "E242",
-                format!("histval: the lag on {name} should be less than or equal to 0"),
+            out.push((
+                err(
+                    entry.span,
+                    "E242",
+                    format!("histval: the lag on {name} should be less than or equal to 0"),
+                ),
+                entry.active_tokens.end,
             ));
         }
         if let Some(&first) = seen.get(&(entry.name, entry.lag)) {
-            out.push(
+            out.push((
                 err(
                     entry.span,
                     "E243",
                     format!("histval: {name}({}) declared twice", entry.lag),
                 )
                 .with_related(RelatedDiagnostic::new(first, "Earlier history entry")),
-            );
+                entry.active_tokens.end,
+            ));
         } else {
             seen.insert((entry.name, entry.lag), entry.span);
         }
@@ -91,6 +158,13 @@ fn check_histval_lag_dup(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_planner_lead_local(model: &Model) -> Vec<Diagnostic> {
+    check_planner_lead_local_with_orders(model)
+        .into_iter()
+        .map(|(diagnostic, _)| diagnostic)
+        .collect()
+}
+
+fn check_planner_lead_local_with_orders(model: &Model) -> Vec<(Diagnostic, usize)> {
     if model.planner_objective_expr.is_none() {
         return Vec::new();
     }
@@ -112,19 +186,25 @@ fn check_planner_lead_local(model: &Model) -> Vec<Diagnostic> {
             continue;
         }
         if r.timing != 0 {
-            out.push(err(
-                span,
-                "E252",
-                "Leads and lags on variables are forbidden in 'planner_objective'.",
+            out.push((
+                err(
+                    span,
+                    "E252",
+                    "Leads and lags on variables are forbidden in 'planner_objective'.",
+                ),
+                r.parse_order,
             ));
             break;
         }
         if kind == Some("model_local_variable") {
             let name = model.name(r.name);
-            out.push(err(
-                span,
-                "E253",
-                format!("Model local variable {name} cannot be used in 'planner_objective'."),
+            out.push((
+                err(
+                    span,
+                    "E253",
+                    format!("Model local variable {name} cannot be used in 'planner_objective'."),
+                ),
+                r.parse_order,
             ));
             break;
         }
@@ -152,31 +232,45 @@ fn check_osr_bounds_type(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_varexobs(model: &Model) -> Vec<Diagnostic> {
+    check_varexobs_with_orders(model)
+        .into_iter()
+        .map(|(diagnostic, _)| diagnostic)
+        .collect()
+}
+
+fn check_varexobs_with_orders(model: &Model) -> Vec<(Diagnostic, usize)> {
     let mut out = Vec::new();
     if model.varexobs_statement_count >= 2 {
         let span = model
             .varexobs_second_span
             .or(model.varexobs_span)
             .unwrap_or(Span { start: 0, end: 1 });
-        out.push(err(
-            span,
-            "E259",
-            "varexobs: you cannot have several 'varexobs' statements in the same MOD file",
+        out.push((
+            err(
+                span,
+                "E259",
+                "varexobs: you cannot have several 'varexobs' statements in the same MOD file",
+            ),
+            callback_order(model, "varexobs_header_callback", 1),
         ));
     }
-    let exo: HashSet<Name> = model.exogenous.iter().map(|d| d.name).collect();
-    for v in &model.varexobs {
+    for (index, v) in model.varexobs.iter().enumerate() {
         if crate::engine::control::cancelled() {
             return Default::default();
         }
-        if exo.contains(&v.name) {
+        if model.symbol_kind_in_context(v.name, v.symbol_type_context) == Some("varexo")
+            && !model.heterogeneous_in_context(v.name, v.symbol_type_context)
+        {
             continue;
         }
         let name = model.name(v.name);
-        out.push(err(
-            v.span,
-            "E260",
-            format!("varexobs: {name} is not an exogenous variable"),
+        out.push((
+            err(
+                v.span,
+                "E260",
+                format!("varexobs: {name} is not an exogenous variable"),
+            ),
+            callback_order(model, "varexobs", index) + 1,
         ));
     }
     out
@@ -207,6 +301,13 @@ fn check_option_twice(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_static_tag(model: &Model) -> Vec<Diagnostic> {
+    check_static_tag_with_orders(model)
+        .into_iter()
+        .map(|(diagnostic, _)| diagnostic)
+        .collect()
+}
+
+fn check_static_tag_with_orders(model: &Model) -> Vec<(Diagnostic, usize)> {
     let mut out = Vec::new();
     for eq in &model.equations {
         if crate::engine::control::cancelled() {
@@ -218,19 +319,27 @@ fn check_static_tag(model: &Model) -> Vec<Diagnostic> {
         if eq.lhs_expr.is_some_and(|id| expr_has_dynamics(model, id))
             || eq.rhs_expr.is_some_and(|id| expr_has_dynamics(model, id))
         {
-            out.push(err(
+            out.push((err(
                 eq.span,
                 "E272",
                 "An equation tagged [static] cannot contain leads, lags, expectations, diff or STEADY_STATE operators",
-            ));
+            ), eq.active_tokens.end));
         }
     }
     out
 }
 
 fn check_generate_irfs(model: &Model) -> Vec<Diagnostic> {
+    check_generate_irfs_with_orders(model)
+        .into_iter()
+        .map(|(diagnostic, _)| diagnostic)
+        .collect()
+}
+
+fn check_generate_irfs_with_orders(model: &Model) -> Vec<(Diagnostic, usize)> {
     let mut out = Vec::new();
     let mut seen: HashSet<Name> = HashSet::new();
+    let mut exo_index = 0;
     for (index, el) in model.generate_irfs.iter().enumerate() {
         if crate::engine::control::cancelled() {
             return Default::default();
@@ -244,27 +353,32 @@ fn check_generate_irfs(model: &Model) -> Vec<Diagnostic> {
         }
         let name = model.name(el.name);
         if !seen.insert(el.name) {
-            out.push(err(
+            out.push((err(
                 el.span,
                 "E273",
                 format!(
                     "Names in the generate_irfs block must be unique but you entered '{name}' more than once."
                 ),
-            ));
+            ), callback_order(model, "generate_irfs_callback", index)));
         }
         let mut exo_seen: HashSet<Name> = HashSet::new();
         for (exo, span) in &el.exos {
+            let exo_order = callback_order(model, "generate_irfs_exog_callback", exo_index);
+            exo_index += 1;
             if crate::engine::control::cancelled() {
                 return Default::default();
             }
             if !exo_seen.insert(*exo) {
-                out.push(err(
-                    *span,
-                    "E274",
-                    format!(
-                        "You have set the exogenous variable {} twice.",
-                        model.name(*exo)
+                out.push((
+                    err(
+                        *span,
+                        "E274",
+                        format!(
+                            "You have set the exogenous variable {} twice.",
+                            model.name(*exo)
+                        ),
                     ),
+                    exo_order,
                 ));
             }
         }
@@ -326,6 +440,13 @@ fn check_outside_assignment_roles(model: &Model) -> Vec<Diagnostic> {
 /// ParsingDriver::add_model_variable checks these roles before the consumer's
 /// own restrictions. Read the captured symbol table, including macro order.
 fn check_model_expression_roles(model: &Model) -> Vec<Diagnostic> {
+    model_expression_refusals(model)
+        .into_iter()
+        .map(|(diagnostic, _)| diagnostic)
+        .collect()
+}
+
+pub(crate) fn model_expression_refusals(model: &Model) -> Vec<(Diagnostic, usize)> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     for usage in &model.model_expression_uses {
@@ -346,7 +467,7 @@ fn check_model_expression_roles(model: &Model) -> Vec<Diagnostic> {
         if let Some((code, message)) = refusal
             && seen.insert((usage.name, usage.span, code))
         {
-            out.push(err(usage.span, code, message));
+            out.push((err(usage.span, code, message), usage.parse_order));
         }
     }
     out
@@ -411,4 +532,82 @@ fn expr_has_dynamics(model: &Model, id: ExprId) -> bool {
 
 fn err(span: Span, code: &str, message: impl Into<String>) -> Diagnostic {
     Diagnostic::new(span, Severity::Error, code, message)
+}
+
+#[cfg(test)]
+mod parse_receipt_tests {
+    use super::*;
+
+    #[test]
+    fn ordinary_constructor_receipts_keep_identity_after_row_rollback() {
+        // Guards a later refusal being joined to a discarded accepted-use row.
+        let model = crate::parse("parameters p;trend_var(growth_factor=1) A;var y;observation_trends;y(p) garbage;y(A);end;database after;");
+        let (diagnostic, order) = parse_refusals(&model)
+            .into_iter()
+            .find(|(row, _)| row.code == "E310")
+            .unwrap();
+        let receipt = model
+            .outside_expression_callbacks
+            .iter()
+            .find(|receipt| model.name(receipt.name) == "A")
+            .unwrap();
+        assert_eq!(diagnostic.span, receipt.span);
+        assert_eq!(order, receipt.order);
+        assert_eq!(model.expanded_tokens[order - 1].text(&model.source), "A");
+
+        // A genuine constructor refusal survives a later malformed row tail.
+        let model =
+            crate::parse("trend_var(growth_factor=1) A;var y;observation_trends;y(A) garbage;end;");
+        assert!(model.outside_expression_uses.is_empty());
+        assert!(parse_refusals(&model)
+            .iter()
+            .any(|(row, _)| row.code == "E310"));
+    }
+
+    #[test]
+    fn parse_receipts_exclude_osr_check_and_keep_history_callback_order() {
+        // Guards OSR's later parameter-type Check from becoming a Parse stop.
+        let model = crate::parse("var y;osr_params_bounds;y,0,1;end;database later;");
+        assert!(check_d_block(&model).iter().any(|row| row.code == "E255"));
+        assert!(parse_refusals(&model).is_empty());
+
+        // Guards a duplicate history callback being attached to the first row.
+        let model = crate::parse("var y;histval;y(0)=0;y(0)=1;end;database later;");
+        let (diagnostic, order) = parse_refusals(&model)
+            .into_iter()
+            .find(|(row, _)| row.code == "E243")
+            .unwrap();
+        assert_eq!(diagnostic.span, model.histval[1].span);
+        assert_eq!(order, model.histval[1].active_tokens.end);
+        assert!(order > model.histval[0].active_tokens.end);
+    }
+
+    #[test]
+    fn varexobs_uses_each_callback_type_instead_of_later_declarations() {
+        // Guards later declarations/retypes from retroactively accepting an
+        // earlier Parse role, including copies of one written macro row.
+        for source in [
+            "varexobs e;varexo e;",
+            "parameters e;varexobs e;change_type(varexo)e;",
+            "varexo_det e;varexobs e;",
+            "heterogeneity_dimension h;varexo(heterogeneity=h) e;varexobs e;",
+        ] {
+            let model = crate::parse(source);
+            assert!(parse_refusals(&model)
+                .iter()
+                .any(|(row, _)| row.code == "E260"));
+        }
+        let model = crate::parse("varexo e;varexobs e;");
+        assert!(parse_refusals(&model).is_empty());
+        let model = crate::parse("@#for i in 1:2\n@#if i == 1\nparameters e;\n@#else\nchange_type(varexo)e;\n@#endif\nvarexobs e;\n@#endfor\n");
+        let rows: Vec<_> = parse_refusals(&model)
+            .into_iter()
+            .filter(|(row, _)| row.code == "E260")
+            .collect();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].1,
+            model.fact_receipts["varexobs"][0].parse_order + 1
+        );
+    }
 }

@@ -27,6 +27,13 @@ files, and supports untitled Dynare documents. Type the new name in the box
 titled **Dygnosis: Rename symbol**, then press Enter. MATLAB companion text is
 outside its scope.
 
+Declared heterogeneity dimensions, trends, named subsamples, and VAR/PAC model
+names can also be navigated and renamed when their full source relationship is
+known. A trend's TeX label remains metadata when its name changes. Database and
+external function names also have definition and reference navigation. Built-in
+operators such as `EXPECTATION` and `STEADY_STATE` have call references and help;
+they have no user declaration to rename.
+
 Rename also updates literal references in an equation's `endogenous` or
 `mcp` tag. Existing quotes around the tag value stay in place.
 Equation `name` tags and symbol `long_name` labels remain unchanged.
@@ -50,6 +57,11 @@ controls these groups.
 Model equations and assignments inside blocks keep their current places.
 Each Outline row opens its written source; repeated macro copies do not add
 duplicate rows for the same statement.
+
+Named macro definitions appear as Outline entries. Declared dimensions, trends,
+external functions and named VAR/PAC model identities appear under their
+declarations. Expression operators such as `diff`, `log`, `SUM`,
+`EXPECTATION` and `STEADY_STATE` remain part of their expression row.
 
 Heterogeneous `model`, `var` and `varexo` headings show their written option,
 for example `model(heterogeneity=households)` and

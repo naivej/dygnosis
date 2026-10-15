@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.11.27
+
+- Syntax help, completion and highlighting cover Dynare commands, options,
+  expressions, macro forms, and PAC/VAR model syntax in their accepted
+  contexts. Native MATLAB and `verbatim` text keep their own language context.
+- Outline includes named macro definitions, declared dimensions, trends,
+  external functions and named VAR/PAC models. Expression operators remain
+  within their equation or definition row.
+- Navigate declared dimensions, trends, named subsamples and VAR/PAC models.
+  References and Rename follow their accepted declarations and uses when the
+  complete source relationship is known. External namespace/database names,
+  database members and external function implementation names explain their
+  Rename limit; built-in operators have references but no editable declaration.
+- Formatting recognizes all parsed Dynare block kinds while preserving native
+  MATLAB and `verbatim` text. Linked Editing follows known declared names only
+  within the current file.
+- References include accepted conditional-path and calibration names, trend
+  expressions and special model operators. `EXPECTATION` and `STEADY_STATE`
+  are recognized as operators; their argument names keep their own references.
+- MCP advertises 12 tools with one job each. `dynare_syntax` includes options;
+  diagnostic reference, single/batch checks, binding/references and source
+  actions each have one entry point. Canonical results use contract 3 with
+  bounded collections. Existing clients can select `mcp --profile legacy-v2`
+  during 0.11.27; that profile is scheduled for removal in 0.11.28.
+- Extraction retains required VAR/PAC definitions, auxiliary equations, target
+  context and model locals. The fragment states retained extra context and
+  omitted runtime setup.
+
 ## v0.11.26
 
 - W022 again reports a parameter used only by `pac_model`'s `discount` option,

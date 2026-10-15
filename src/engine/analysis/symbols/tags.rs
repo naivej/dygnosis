@@ -158,6 +158,14 @@ pub(super) fn collect(view: &SemanticModel, model: &Model) -> Vec<Reference> {
                 {
                     let key = tokens[order].text(&model.source).to_ascii_lowercase();
                     let value_order = order + 2;
+                    if key == "endogenous"
+                        && !model
+                            .endogenous_tag_actions
+                            .contains(&row.equation.parse_order)
+                    {
+                        order += 1;
+                        continue;
+                    }
                     if let Some(token) = tokens
                         .get(value_order)
                         .filter(|token| token.kind == TokenKind::String)
@@ -190,6 +198,10 @@ pub(super) fn collect(view: &SemanticModel, model: &Model) -> Vec<Reference> {
                 break;
             }
             if !found.contains(key)
+                && (key != "endogenous"
+                    || model
+                        .endogenous_tag_actions
+                        .contains(&row.equation.parse_order))
                 && let Some(value) = row.equation.tag_map.get(key)
                 && let Some((_, name)) = semantic_name(key, value)
             {

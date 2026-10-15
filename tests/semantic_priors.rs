@@ -530,12 +530,27 @@ fn included_prior_edit_retains_semantic_detail_and_private_proof() {
 }
 
 #[test]
-fn legacy_prior_alias_remains_context_without_invented_named_prior() {
+fn priors_alias_retains_one_named_prior_comparison() {
     let diff = compare(
         "parameters p; priors; p,0.4; end;",
         "parameters p; priors; p,0.5; end;",
     );
-    assert!(prior_rows(&diff).is_empty());
+    let rows = prior_rows(&diff);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, "parameter p");
+    assert_eq!(
+        field(rows[0], "optimizer.initial").before,
+        FieldState::text("0.4")
+    );
+    assert_eq!(
+        field(rows[0], "optimizer.initial").after,
+        FieldState::text("0.5")
+    );
+    assert!(diff
+        .semantic
+        .rows
+        .iter()
+        .all(|row| row.family != SemanticFamily::Commands));
 }
 
 #[test]

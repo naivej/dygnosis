@@ -14,15 +14,28 @@ use crate::engine::language::span::Span;
 const STATEMENTS: &str = "model_remove/model_replace/exclude_eqs/include_eqs";
 
 pub fn check_d_surgery(model: &Model) -> Vec<Diagnostic> {
+    parse_receipts(model)
+        .into_iter()
+        .map(|(diagnostic, _)| diagnostic)
+        .collect()
+}
+
+pub(crate) fn parse_receipts(model: &Model) -> Vec<(Diagnostic, usize)> {
     let mut out = Vec::new();
+    let mut orders = Vec::new();
     for surgery in &model.equation_surgery {
         if crate::engine::control::cancelled() {
             return Default::default();
         }
         // 7.1 refuses a repeated key while parsing the tag list, so the statement never
         // gets as far as matching equations.
+        let before = out.len();
         if !surgery.tag_twice.is_empty() {
             check_tag_twice(surgery, &mut out);
+            orders.extend(std::iter::repeat_n(
+                surgery.opener_tokens.end,
+                out.len() - before,
+            ));
             continue;
         }
         check_not_found(surgery, &mut out);
@@ -30,8 +43,12 @@ pub fn check_d_surgery(model: &Model) -> Vec<Diagnostic> {
         if !surgery.replace {
             check_no_single_variable(surgery, &mut out);
         }
+        orders.extend(std::iter::repeat_n(
+            surgery.opener_tokens.end,
+            out.len() - before,
+        ));
     }
-    out
+    out.into_iter().zip(orders).collect()
 }
 
 /// Added W212: an initialization written before a name was genuinely excluded.

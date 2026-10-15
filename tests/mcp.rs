@@ -533,21 +533,6 @@ fn registered_tools_include_format() {
             "tools/list must not contain {name}: {blob}"
         );
     }
-    let descriptions = tools
-        .iter()
-        .map(|tool| {
-            (
-                tool["name"].as_str().unwrap(),
-                tool["description"].as_str().unwrap(),
-            )
-        })
-        .collect::<HashMap<_, _>>();
-    assert!(descriptions["dynare_find_references"].contains("semantic symbol binding"));
-    assert!(descriptions["dynare_rename"].contains("complete semantic Rename"));
-    assert!(descriptions["dynare_symbol_info"].contains("Inspect one semantic symbol"));
-    assert!(
-        descriptions["dynare_code_actions"].contains("Each action is a separate complete proposal")
-    );
 }
 
 #[test]

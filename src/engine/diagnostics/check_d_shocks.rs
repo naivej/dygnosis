@@ -11,7 +11,63 @@ use crate::engine::language::model::{
 };
 use crate::engine::language::span::Span;
 
-fn error(out: &mut Vec<Diagnostic>, span: Span, code: &str, message: impl Into<String>) {
+/// Diagnostics and exact producing execution owners travel together. Display
+/// spans stay unchanged; they cannot identify a repeated macro execution.
+struct OrderedRows<'a> {
+    model: &'a Model,
+    diagnostics: Vec<Diagnostic>,
+    orders: Vec<usize>,
+    owner: std::ops::Range<usize>,
+    callback: Option<usize>,
+}
+
+impl<'a> OrderedRows<'a> {
+    fn new(model: &'a Model) -> Self {
+        Self {
+            model,
+            diagnostics: Vec::new(),
+            orders: Vec::new(),
+            owner: 0..0,
+            callback: None,
+        }
+    }
+    fn own(&mut self, key: &'static str, index: usize) {
+        let receipt = self
+            .model
+            .fact_receipts
+            .get(key)
+            .and_then(|rows| rows.get(index));
+        self.owner = receipt
+            .and_then(|row| row.claims.first())
+            .cloned()
+            .unwrap_or(0..0);
+        self.callback = None;
+    }
+    fn push(&mut self, diagnostic: Diagnostic) {
+        let order = self
+            .callback
+            .or_else(|| {
+                crate::engine::diagnostics::parse_preflight::within(
+                    self.model,
+                    self.owner.clone(),
+                    diagnostic.span,
+                    true,
+                )
+            })
+            .unwrap_or(self.owner.start);
+        self.orders.push(order);
+        self.diagnostics.push(diagnostic);
+    }
+}
+
+impl std::ops::Deref for OrderedRows<'_> {
+    type Target = Vec<Diagnostic>;
+    fn deref(&self) -> &Self::Target {
+        &self.diagnostics
+    }
+}
+
+fn error(out: &mut OrderedRows<'_>, span: Span, code: &str, message: impl Into<String>) {
     out.push(Diagnostic::new(span, Severity::Error, code, message));
 }
 
@@ -35,7 +91,7 @@ fn has_kind(
 
 fn exogenous(
     model: &Model,
-    out: &mut Vec<Diagnostic>,
+    out: &mut OrderedRows<'_>,
     name: Name,
     at: (Span, crate::engine::language::model::SymbolContext),
     allow_det: bool,
@@ -65,7 +121,7 @@ fn exogenous(
 
 fn endogenous(
     model: &Model,
-    out: &mut Vec<Diagnostic>,
+    out: &mut OrderedRows<'_>,
     name: Name,
     at: (Span, crate::engine::language::model::SymbolContext),
 ) -> bool {
@@ -83,16 +139,34 @@ fn endogenous(
 }
 
 pub fn check_d_shocks(model: &Model) -> Vec<Diagnostic> {
-    let mut out = Vec::new();
-    for (span, code, message) in &model.path_parse_errors {
+    ordered_rows(model, false).diagnostics
+}
+
+pub(crate) fn parse_refusals(model: &Model) -> Vec<(Diagnostic, usize)> {
+    let rows = ordered_rows(model, true);
+    rows.diagnostics
+        .into_iter()
+        .zip(rows.orders)
+        .filter(|(diagnostic, _)| !matches!(diagnostic.code.as_str(), "E420" | "E271"))
+        .collect()
+}
+
+fn ordered_rows(model: &Model, all_owners: bool) -> OrderedRows<'_> {
+    let mut out = OrderedRows::new(model);
+    for (index, (span, code, message)) in model.path_parse_errors.iter().enumerate() {
+        out.callback = Some(crate::engine::diagnostics::parse_preflight::callback_order(
+            model,
+            "path_error_callback",
+            index,
+        ));
         if crate::engine::control::cancelled() {
-            return Default::default();
+            return OrderedRows::new(model);
         }
         error(&mut out, *span, code, message);
     }
     for (name, span) in &model.option_twice {
         if crate::engine::control::cancelled() {
-            return Default::default();
+            return OrderedRows::new(model);
         }
         let shock_option = model
             .shock_paths
@@ -124,7 +198,7 @@ pub fn check_d_shocks(model: &Model) -> Vec<Diagnostic> {
             );
         }
     }
-    if !out.is_empty() {
+    if !out.is_empty() && !all_owners {
         return out;
     }
     check_irf_shocks_options(model, &mut out);
@@ -136,8 +210,9 @@ pub fn check_d_shocks(model: &Model) -> Vec<Diagnostic> {
     out
 }
 
-fn check_stochastic_names(model: &Model, out: &mut Vec<Diagnostic>) {
-    for block in &model.shock_blocks {
+fn check_stochastic_names(model: &Model, out: &mut OrderedRows<'_>) {
+    for (index, block) in model.shock_blocks.iter().enumerate() {
+        out.own("shock_block_callback", index);
         if crate::engine::control::cancelled() {
             return Default::default();
         }
@@ -232,8 +307,10 @@ pub(crate) fn completed_regular_parse_unknowns(model: &Model) -> Vec<(Diagnostic
     out
 }
 
-fn check_irf_shocks_options(model: &Model, out: &mut Vec<Diagnostic>) {
+fn check_irf_shocks_options(model: &Model, out: &mut OrderedRows<'_>) {
     for option in &model.irf_shocks_options {
+        out.owner = option.active_tokens.clone();
+        out.callback = None;
         if crate::engine::control::cancelled() {
             return Default::default();
         }
@@ -263,7 +340,7 @@ fn check_irf_shocks_options(model: &Model, out: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_range(out: &mut Vec<Diagnostic>, range: &PeriodRange) {
+fn check_range(out: &mut OrderedRows<'_>, range: &PeriodRange) {
     if let (PeriodPoint::Integer(first), Some(PeriodPoint::Integer(last))) =
         (&range.first, &range.last)
         && first > last
@@ -277,8 +354,9 @@ fn check_range(out: &mut Vec<Diagnostic>, range: &PeriodRange) {
     }
 }
 
-fn check_scheduled(model: &Model, out: &mut Vec<Diagnostic>) {
-    for block in &model.shock_blocks {
+fn check_scheduled(model: &Model, out: &mut OrderedRows<'_>) {
+    for (index, block) in model.shock_blocks.iter().enumerate() {
+        out.own("shock_block_callback", index);
         if crate::engine::control::cancelled() {
             return Default::default();
         }
@@ -291,6 +369,11 @@ fn check_scheduled(model: &Model, out: &mut Vec<Diagnostic>) {
         if let Some(PeriodPoint::Integer(n)) = learnt
             && *n < 1
         {
+            out.callback = Some(crate::engine::diagnostics::parse_preflight::callback_order(
+                model,
+                "shock_block_callback",
+                index,
+            ));
             let command = if block.kind == ShockBlockKind::Multiplicative {
                 "mshocks"
             } else {
@@ -303,6 +386,7 @@ fn check_scheduled(model: &Model, out: &mut Vec<Diagnostic>) {
                 format!("{command}: value '{n}' is not allowed for 'learnt_in' option"),
             );
         }
+        out.callback = None;
         for row in &block.scheduled {
             if crate::engine::control::cancelled() {
                 return Default::default();
@@ -480,8 +564,9 @@ fn operation_word(operation: ShockOperation) -> &'static str {
     }
 }
 
-fn check_endval(model: &Model, out: &mut Vec<Diagnostic>) {
-    for block in &model.endval_instructions {
+fn check_endval(model: &Model, out: &mut OrderedRows<'_>) {
+    for (index, block) in model.endval_instructions.iter().enumerate() {
+        out.own("endval_instruction_callback", index);
         if crate::engine::control::cancelled() {
             return Default::default();
         }
@@ -489,6 +574,11 @@ fn check_endval(model: &Model, out: &mut Vec<Diagnostic>) {
         if let Some(PeriodPoint::Integer(n)) = learnt
             && *n < 1
         {
+            out.callback = Some(crate::engine::diagnostics::parse_preflight::callback_order(
+                model,
+                "endval_instruction_callback",
+                index,
+            ));
             error(
                 out,
                 block.learnt_in_span.unwrap_or(block.span),
@@ -496,6 +586,7 @@ fn check_endval(model: &Model, out: &mut Vec<Diagnostic>) {
                 format!("endval: value '{n}' is not allowed for 'learnt_in' option"),
             );
         }
+        out.callback = None;
         let nondefault = matches!(learnt, Some(PeriodPoint::Date(_)))
             || matches!(learnt, Some(PeriodPoint::Integer(n)) if *n > 1);
         for entry in &block.entries {
@@ -541,9 +632,18 @@ fn check_endval(model: &Model, out: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_databases(model: &Model, out: &mut Vec<Diagnostic>) {
+fn check_databases(model: &Model, out: &mut OrderedRows<'_>) {
     let mut seen = HashSet::new();
-    for statement in &model.databases {
+    for (index, statement) in model.databases.iter().enumerate() {
+        out.own("database", index);
+        out.callback = Some(
+            crate::engine::diagnostics::parse_preflight::statement_callback_order(
+                model,
+                crate::engine::diagnostics::parse_preflight::callback_order(
+                    model, "database", index,
+                ),
+            ),
+        );
         if crate::engine::control::cancelled() {
             return Default::default();
         }
@@ -563,8 +663,9 @@ fn check_databases(model: &Model, out: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_paths(model: &Model, out: &mut Vec<Diagnostic>) {
-    for block in &model.shock_paths {
+fn check_paths(model: &Model, out: &mut OrderedRows<'_>) {
+    for (index, block) in model.shock_paths.iter().enumerate() {
+        out.own("shock_path_callback", index);
         if crate::engine::control::cancelled() {
             return Default::default();
         }
@@ -579,7 +680,8 @@ fn check_paths(model: &Model, out: &mut Vec<Diagnostic>) {
         }
     }
     // The companion block has its separate value grammar and callback checks.
-    for block in &model.controlled_paths {
+    for (index, block) in model.controlled_paths.iter().enumerate() {
+        out.own("controlled_path_callback", index);
         if crate::engine::control::cancelled() {
             return Default::default();
         }
@@ -660,7 +762,7 @@ fn check_paths(model: &Model, out: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_path_self_variables(model: &Model, stanza: &PathStanza, out: &mut Vec<Diagnostic>) {
+fn check_path_self_variables(model: &Model, stanza: &PathStanza, out: &mut OrderedRows<'_>) {
     let PathTarget::Exogenous { name, .. } = stanza.target else {
         return;
     };

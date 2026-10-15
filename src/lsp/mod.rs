@@ -4,6 +4,8 @@ pub(crate) mod model_map;
 pub(crate) mod names;
 pub mod settings;
 pub(crate) mod signature_help;
+mod syntax_intel;
+mod typed_names;
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -30,10 +32,7 @@ use tower_lsp::{Client, ClientSocket, LanguageServer, LspService, Server};
 use crate::engine::analysis::model_info::{
     assigned_number, classify_variable_timing, format_timing_line, TimingClass,
 };
-use crate::engine::catalog::{
-    command_options, family_help, option_doc, FAMILY_COMMAND_HELP, FAMILY_OPERATOR_HELP,
-    HETEROGENEITY_OPTION, HET_SHOCKS_OVERWRITE,
-};
+use crate::engine::catalog::{option_doc, HETEROGENEITY_OPTION, HET_SHOCKS_OVERWRITE};
 use crate::engine::comparison::{compare_models_with_sources, CompareSource};
 use crate::engine::diagnostics::explain;
 use crate::engine::diagnostics::{check_file, check_in_workspace_with_origins, DiagnosticSet};
@@ -44,8 +43,7 @@ use crate::engine::editing::format::{
     format_outcome_with_limit, format_range_outcome_with_limit, FormatOutcome, RangeFormatOutcome,
 };
 use crate::engine::editing::refs::{
-    enclosing_paren_has_ident, ident_at, is_legal_ident, occurrences, option_command_at,
-    option_owner_at,
+    enclosing_paren_has_ident, ident_at, is_legal_ident, option_command_at, option_owner_at,
 };
 use crate::engine::language::expand::{EquationOrigin, OriginFrame};
 use crate::engine::language::lexer::{tokenize, TokenKind};
@@ -59,78 +57,6 @@ use crate::lsp::settings::{
     MODEL_INFO_SCHEMA_VERSION,
 };
 use crate::{Severity, VERSION};
-
-const DYNARE_KEYWORDS: &[(&str, &str)] = &[
-    ("var", "Declare endogenous variables"),
-    ("varexo", "Declare exogenous variables"),
-    ("parameters", "Declare parameters"),
-    ("model", "Begin model equation block"),
-    ("model_remove", "Remove equations by tag"),
-    ("model_replace", "Replace equations by tag"),
-    ("end", "End a block"),
-    ("steady_state_model", "Define steady state computation"),
-    ("initval", "Set initial values for steady state computation"),
-    ("endval", "Set terminal values"),
-    ("shocks", "Define shock processes"),
-    ("steady", "Compute the steady state"),
-    ("check", "Check Blanchard-Kahn conditions"),
-    ("stoch_simul", "Compute stochastic simulation"),
-    ("simul", "Compute deterministic simulation"),
-    ("resid", "Compute residuals of model equations"),
-    ("estimated_params", "Define parameters to estimate"),
-    ("estimation", "Run Bayesian or ML estimation"),
-    ("varobs", "Declare observed variables"),
-    ("calib_smoother", "Run the calibrated smoother"),
-    ("forecast", "Compute forecasts"),
-    ("osr", "Optimal simple rules"),
-    ("ramsey_model", "Ramsey optimal policy model"),
-    ("planner_objective", "Define planner's objective for Ramsey"),
-    ("identification", "Run identification analysis"),
-    ("sensitivity", "Run sensitivity analysis"),
-    ("sbvar", "Estimate a Markov-switching SBVAR model"),
-    (
-        "svar_identification",
-        "Describe the SVAR identification restrictions",
-    ),
-    (
-        "svar_global_identification_check",
-        "Check the SVAR identification globally",
-    ),
-    (
-        "conditional_forecast_paths",
-        "Constrain an endogenous path before conditional_forecast",
-    ),
-    (
-        "plot_conditional_forecast",
-        "Plot the conditional and unconditional forecasts",
-    ),
-    ("prior", "Prior distribution for a parameter"),
-    ("method_of_moments", "Run method of moments estimation"),
-    (
-        "matched_moments",
-        "Specify the product moments used in estimation",
-    ),
-    (
-        "matched_irfs",
-        "Specify the empirical IRFs matched in estimation",
-    ),
-    (
-        "matched_irfs_weights",
-        "Specify the weighting matrix used for IRF matching",
-    ),
-    ("irf_calibration", "Define IRF calibration criteria"),
-    ("moment_calibration", "Define moment calibration criteria"),
-];
-
-const BUILTIN_FNS: &[(&str, &str)] = &[
-    ("exp", "Exponential function exp(x)"),
-    ("log", "Natural logarithm log(x)"),
-    ("ln", "Natural logarithm ln(x)"),
-    ("sqrt", "Square root sqrt(x)"),
-    ("abs", "Absolute value abs(x)"),
-    ("sin", "Sine function"),
-    ("cos", "Cosine function"),
-];
 
 const OUT_CODES: &[&str] = &[
     "E040", "W040", "W041", "I041", "W071", "I070", "I071", "W080", "W081", "DYNR",
@@ -301,6 +227,56 @@ impl Inner {
         self.workspace
             .set_root_macro_work_limit(uri.as_str(), settings.macro_work_limit);
         settings
+    }
+
+    fn syntax_context(
+        &mut self,
+        uri: &Url,
+        text: &str,
+        byte: u32,
+        signature: bool,
+    ) -> Option<syntax_intel::Context> {
+        let read = if signature {
+            syntax_intel::signature_context
+        } else {
+            syntax_intel::context
+        };
+        let local = self
+            .workspace
+            .get_model(uri.as_str())
+            .and_then(|model| read(model, text, byte));
+        // Macro and literal/comment checks concern the displayed source. Native
+        // fragments can acquire a Dynare context only from a proven include.
+        if local
+            .as_ref()
+            .is_some_and(|context| context.language == "macro_expression")
+        {
+            return local;
+        }
+        if self.context_ambiguous(uri) {
+            return None;
+        }
+        let roots = self.context_roots(uri);
+        if roots.is_empty() {
+            return local;
+        }
+        let file = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
+        let mut contexts = Vec::new();
+        for root in roots {
+            self.prepare_root(&root);
+            let positions = self
+                .workspace
+                .effective_positions(root.as_str(), &file, byte);
+            let model = self.workspace.get_effective_model(root.as_str())?;
+            for position in positions {
+                contexts.push(read(model, &model.source, position)?);
+            }
+        }
+        let first = contexts.first()?;
+        contexts
+            .iter()
+            .all(|context| context == first)
+            .then(|| first.clone())
     }
 
     fn presentation_for(&self, uri: &Url) -> PresentationSettings {
@@ -739,15 +715,30 @@ impl Backend {
         let normalized = crate::engine::language::parser::normalize_newlines(&text);
         let index = LineIndex::new(&normalized);
         let byte = index.offset_utf16(&text, span_pos(pos.position));
-        let (word, span) = ident_at(&text, byte)?;
+        if let Some(hover) = typed_names::hover(&mut inner, pos) {
+            return hover;
+        }
+        let (word, span) = syntax_intel::word_at(&text, byte)?;
         let range = Some(span_range(&index, &text, span));
+        if macro_directive_name_at(&normalized, byte).is_some() {
+            let result = crate::engine::catalog::syntax::query(
+                &crate::engine::catalog::syntax::SyntaxQuery {
+                    name: Some(word.clone()),
+                    kind: Some("macro_directive".into()),
+                    ..Default::default()
+                },
+            );
+            if let Some(record) = result.records.first() {
+                return Some(markdown_hover(syntax_intel::documentation(record), range));
+            }
+        }
         if let Some(cmd) = option_command_at(&text, byte)
-            && let Some((name, command_doc)) = command_options(&cmd)
-                .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case(&word))
+            && let Some(option) =
+                syntax_intel::options(&cmd).find(|option| option.name.eq_ignore_ascii_case(&word))
         {
             let mut md = format!("**`{cmd}` option**: `{word}`");
-            let description = shocks_overwrite_doc(&text, byte, &cmd, name, command_doc);
+            let description =
+                shocks_overwrite_doc(&text, byte, &cmd, &option.name, &option.summary);
             if !description.is_empty() {
                 md.push_str("\n\n");
                 md.push_str(description);
@@ -760,8 +751,24 @@ impl Backend {
             let md = format!("**`{head}` option**: `heterogeneity`\n\n{HETEROGENEITY_OPTION}");
             return Some(markdown_hover(md, range));
         }
-        if let Some(help) = family_help(&word) {
-            return Some(markdown_hover(format!("**`{word}`**\n\n{help}"), range));
+        if let Some(context) = inner.syntax_context(&pos.text_document.uri, &text, byte, false) {
+            let matches: Vec<_> = syntax_intel::records(&context)
+                .into_iter()
+                .filter(|record| {
+                    record.name.eq_ignore_ascii_case(&word)
+                        || record
+                            .aliases
+                            .iter()
+                            .any(|alias| alias.eq_ignore_ascii_case(&word))
+                })
+                .map(syntax_intel::documentation)
+                .collect();
+            if !matches.is_empty() {
+                return Some(markdown_hover(
+                    format!("**`{word}`**\n\n{}", matches.join("\n\n")),
+                    range,
+                ));
+            }
         }
         let preferences = inner.presentation_for(&pos.text_document.uri);
         let views = inner.name_views(&pos.text_document.uri)?;
@@ -802,7 +809,11 @@ impl Backend {
                 roots.len() == 1,
             )
             .with_known_uris(inner.docs.keys().chain(std::iter::once(root)));
-            views.push(view.symbols(&preferences));
+            let mut rows = view.symbols(&preferences);
+            if let Ok(semantic) = rename::capture(&mut inner, root) {
+                model_map::add_binding_symbols(&mut rows, &semantic, uri, &text, &preferences);
+            }
+            views.push(rows);
         }
         if roots.len() > 1 {
             return Some(common_leaves(views));
@@ -965,22 +976,42 @@ impl Backend {
         let text = inner.document(&pos.text_document.uri)?.text.clone();
         let normalized = crate::engine::language::parser::normalize_newlines(&text);
         let index = LineIndex::new(&normalized);
-        let byte = index.offset_utf16(&text, span_pos(pos.position));
-        let (word, _) = ident_at(&text, byte)?;
+        let references = rename::references(&mut inner, pos, true)?;
+        let typed = typed_names::sites(&mut inner, &pos.text_document.uri);
         let views = inner.name_views(&pos.text_document.uri)?;
         let sites: Vec<_> = views
             .iter()
             .map(|(model, map)| NameSites::new(model, map, &pos.text_document.uri, &text))
             .collect();
-        let hits = occurrences(&text, &word)
+        let file = crate::engine::workspace::include_resolver::normalize_uri(
+            pos.text_document.uri.as_str(),
+        );
+        let hits = references
             .into_iter()
-            .map(|span| DocumentHighlight {
-                range: span_range(&index, &text, span),
-                kind: Some(if sites.iter().all(|sites| sites.is_write(span)) {
-                    DocumentHighlightKind::WRITE
-                } else {
-                    DocumentHighlightKind::READ
-                }),
+            .filter(|location| {
+                crate::engine::workspace::include_resolver::normalize_uri(location.uri.as_str())
+                    == file
+            })
+            .map(|location| {
+                let span = Span {
+                    start: index.offset_utf16(&text, span_pos(location.range.start)),
+                    end: index.offset_utf16(&text, span_pos(location.range.end)),
+                };
+                DocumentHighlight {
+                    range: location.range,
+                    kind: Some(
+                        if typed
+                            .as_ref()
+                            .and_then(|sites| sites.at(span))
+                            .is_some_and(|(_, declaration)| declaration)
+                            || sites.iter().all(|sites| sites.is_write(span))
+                        {
+                            DocumentHighlightKind::WRITE
+                        } else {
+                            DocumentHighlightKind::READ
+                        },
+                    ),
+                }
             })
             .collect::<Vec<_>>();
         if hits.is_empty() {
@@ -1020,24 +1051,54 @@ impl Backend {
         if let Some(item) = metadata_completion_item(&mut inner, &pos.text_document.uri, byte) {
             return Some(CompletionResponse::Array(vec![item]));
         }
-        if let Some(cmd) = option_command_at(&text, byte) {
-            let items = command_options(&cmd)
-                .iter()
-                .map(|(name, doc_str)| {
-                    let documentation = shocks_overwrite_doc(&text, byte, &cmd, name, doc_str);
-                    CompletionItem {
-                        label: (*name).into(),
-                        kind: Some(CompletionItemKind::PROPERTY),
-                        detail: Some(format!("{cmd} option")),
-                        documentation: Some(Documentation::String(documentation.into())),
-                        ..CompletionItem::default()
-                    }
-                })
-                .collect::<Vec<_>>();
-            if items.is_empty() {
-                return None;
-            }
+        let mut syntax_context = inner.syntax_context(&pos.text_document.uri, &text, byte, false);
+        let Some(mut syntax_context) = syntax_context.take() else {
+            return Some(CompletionResponse::Array(Vec::new()));
+        };
+        if syntax_context.language == "macro_expression" {
+            let mut items = syntax_intel::completions(&syntax_context);
+            items.extend(syntax_intel::macro_definitions(&text).into_iter().map(
+                |(name, _, _, function)| CompletionItem {
+                    label: name,
+                    kind: Some(if function {
+                        CompletionItemKind::FUNCTION
+                    } else {
+                        CompletionItemKind::VARIABLE
+                    }),
+                    detail: Some("written macro definition".into()),
+                    ..CompletionItem::default()
+                },
+            ));
             return Some(CompletionResponse::Array(items));
+        }
+        if let Some(items) = typed_names::completions(&mut inner, &pos.text_document.uri, byte) {
+            return Some(CompletionResponse::Array(items));
+        }
+        let mut value_items = Vec::new();
+        if let Some((cmd, option)) = crate::lsp::signature_help::option_context(&text, byte) {
+            if let Some(option) = option {
+                syntax_context.language = "expression";
+                value_items = syntax_intel::option_values(&cmd, &option);
+            } else {
+                let items = syntax_intel::options(&cmd)
+                    .map(|option| {
+                        let name = option.name.as_str();
+                        let documentation =
+                            shocks_overwrite_doc(&text, byte, &cmd, name, &option.summary);
+                        CompletionItem {
+                            label: name.into(),
+                            kind: Some(CompletionItemKind::PROPERTY),
+                            detail: Some(format!("{cmd} option")),
+                            documentation: Some(Documentation::String(documentation.into())),
+                            ..CompletionItem::default()
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if items.is_empty() {
+                    return None;
+                }
+                return Some(CompletionResponse::Array(items));
+            }
         }
         if let Some(head) = heterogeneity_declaration_head(&text, byte) {
             return Some(CompletionResponse::Array(vec![CompletionItem {
@@ -1056,27 +1117,39 @@ impl Backend {
                 &preferences,
                 inner.completion_label_details,
                 inner.completion_snippets,
+                &syntax_context,
             )
         });
         let mut items = groups.next()?;
         for group in groups {
             items.retain(|item| group.contains(item));
         }
+        items.extend(value_items);
         items.extend(locals::completions(
             &mut inner,
             &pos.text_document.uri,
             byte,
             &preferences,
         ));
+        items.extend(typed_names::expression_completions(
+            &mut inner,
+            &pos.text_document.uri,
+            byte,
+        ));
         Some(CompletionResponse::Array(items))
     }
 
     fn signature_at(&self, pos: &TextDocumentPositionParams) -> Option<SignatureHelp> {
-        let inner = self.lock_inner();
+        let mut inner = self.lock_inner();
         let doc = inner.document(&pos.text_document.uri)?;
-        let index = LineIndex::new(&doc.text);
+        let index = LineIndex::new(&crate::engine::language::parser::normalize_newlines(
+            &doc.text,
+        ));
         let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
-        crate::lsp::signature_help::signature_help(&doc.text, byte)
+        let text = doc.text.clone();
+        let context = inner.syntax_context(&pos.text_document.uri, &text, byte, true)?;
+        crate::lsp::signature_help::function_signature_help(&text, byte, context.language)
+            .or_else(|| crate::lsp::signature_help::signature_help(&text, byte))
     }
 
     fn prepare_rename_at(&self, pos: &TextDocumentPositionParams) -> Result<Range> {
@@ -1233,23 +1306,32 @@ impl Backend {
     }
 
     fn linked_ranges(&self, pos: &TextDocumentPositionParams) -> Option<LinkedEditingRanges> {
-        let inner = self.lock_inner();
-        let doc = inner.document(&pos.text_document.uri)?;
-        let index = LineIndex::new(&doc.text);
-        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
-        let (word, _) = ident_at(&doc.text, byte)?;
-        if !is_declared_in_open(&inner, &word) {
+        let mut inner = self.lock_inner();
+        let decision = rename::decide(&mut inner, pos, None).ok()?;
+        let DocumentChanges::Edits(documents) = decision.edit.document_changes? else {
+            return None;
+        };
+        // Linked editing can update one document only. The Rename provider owns
+        // complete changes which also require another source file.
+        if documents
+            .iter()
+            .any(|document| document.text_document.uri != pos.text_document.uri)
+        {
             return None;
         }
-        let spans = occurrences(&doc.text, &word);
-        if spans.len() < 2 {
+        let ranges: Vec<_> = documents
+            .into_iter()
+            .flat_map(|document| document.edits)
+            .filter_map(|edit| match edit {
+                OneOf::Left(edit) => Some(edit.range),
+                OneOf::Right(_) => None,
+            })
+            .collect();
+        if ranges.len() < 2 {
             return None;
         }
         Some(LinkedEditingRanges {
-            ranges: spans
-                .into_iter()
-                .map(|span| span_range(&index, &doc.text, span))
-                .collect(),
+            ranges,
             word_pattern: None,
         })
     }
@@ -1433,6 +1515,7 @@ impl Backend {
     fn semantic_tokens(&self, uri: &Url, range: Option<Range>) -> Option<SemanticTokens> {
         let mut inner = self.lock_inner();
         let text = inner.document(uri)?.text.clone();
+        let typed = typed_names::sites(&mut inner, uri);
         let views = inner.name_views(uri)?;
         let sites: Vec<_> = views
             .iter()
@@ -1458,10 +1541,18 @@ impl Backend {
             {
                 continue;
             }
-            let role = sites.first()?.0.role(name, tok.span);
-            if !sites
-                .iter()
-                .all(|(sites, _)| sites.role(name, tok.span) == role)
+            let typed = typed.as_ref().and_then(|sites| sites.at(tok.span));
+            let role = typed.map(|(role, _)| role).or_else(|| {
+                sites
+                    .first()?
+                    .0
+                    .role(name, tok.span)
+                    .filter(|role| *role == NameRole::ModelLocal)
+            });
+            if typed.is_none()
+                && !sites
+                    .iter()
+                    .all(|(sites, _)| sites.role(name, tok.span) == role)
             {
                 continue;
             }
@@ -1475,7 +1566,10 @@ impl Backend {
                 .iter()
                 .map(|(sites, timing)| {
                     let mut mods = 0u32;
-                    if sites.is_declaration(tok.span) {
+                    if typed.map_or_else(
+                        || sites.is_declaration(tok.span),
+                        |(_, declaration)| declaration,
+                    ) {
                         mods |= mapping.declaration;
                     }
                     if role == NameRole::Endogenous
@@ -1505,6 +1599,30 @@ impl Backend {
                 tok.text(&text).encode_utf16().count() as u32
             };
             raw.push((start.line, start.character, length, ttype, mods));
+        }
+        if let Some(typed) = &typed {
+            let mut positions: HashSet<_> = raw.iter().map(|token| (token.0, token.1)).collect();
+            for (span, role, declaration) in typed.iter() {
+                let start = index.position_utf16(&text, span.start);
+                if range.is_some_and(|range| {
+                    !pos_in_range_half_open(Position::new(start.line, start.character), range)
+                }) {
+                    continue;
+                }
+                let Some(token_type) = mapping.token_type(role) else {
+                    continue;
+                };
+                let end = index.position_utf16(&text, span.end);
+                if start.line == end.line && positions.insert((start.line, start.character)) {
+                    raw.push((
+                        start.line,
+                        start.character,
+                        end.character - start.character,
+                        token_type,
+                        if declaration { mapping.declaration } else { 0 },
+                    ));
+                }
+            }
         }
         raw.sort_by_key(|t| (t.0, t.1));
         let mut data = Vec::new();
@@ -3747,16 +3865,6 @@ fn find_decl<'a>(model: &'a Model, word: &str) -> Option<&'a Decl> {
         .or_else(|| find_named(&model.retyped_trend_decls, model, word))
 }
 
-fn is_declared_in_open(inner: &Inner, word: &str) -> bool {
-    inner.docs.keys().any(|uri| {
-        inner
-            .workspace
-            .get_model(uri.as_str())
-            .and_then(|m| find_decl(m, word))
-            .is_some()
-    })
-}
-
 fn fix_title(d: &crate::Diagnostic) -> String {
     if let Some(rest) = d.message.split_once("Fix:") {
         let suffix = rest.1.trim();
@@ -3935,46 +4043,25 @@ fn macro_directive_name_at(text: &str, byte: u32) -> Option<Span> {
 }
 
 fn macro_directive_completions(range: Range, prefix: &str) -> Vec<CompletionItem> {
-    const DIRECTIVES: &[(&str, &str)] = &[
-        ("define", "Define a macro variable or function"),
-        ("include", "Insert another file"),
-        ("includepath", "Add a folder to the include search"),
-        ("if", "Keep the following text when the condition is true"),
-        ("ifdef", "Keep the following text when the name is defined"),
-        (
-            "ifndef",
-            "Keep the following text when the name is not defined",
-        ),
-        ("elseif", "Try another condition"),
-        ("else", "Take the remaining branch"),
-        ("endif", "End an if"),
-        ("for", "Repeat the following text for each value"),
-        ("endfor", "End a for"),
-        ("echo", "Show a macro message"),
-        ("error", "Stop expansion and show a message"),
-        ("echomacrovars", "Show macro variable values"),
-        (
-            "line",
-            "Mark a source line. Later checks keep the written file.",
-        ),
-    ];
-    DIRECTIVES
-        .iter()
+    crate::engine::catalog::syntax::in_context("macro_directive", Some("macro_directive"), None)
         .enumerate()
-        .map(|(order, (name, documentation))| CompletionItem {
-            label: (*name).into(),
-            kind: Some(CompletionItemKind::KEYWORD),
-            detail: Some("macro directive".into()),
-            documentation: Some(Documentation::String((*documentation).into())),
-            sort_text: Some(format!("{order:02}")),
-            filter_text: Some((*name).into()),
-            insert_text: Some((*name).into()),
-            insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
-            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                range,
-                new_text: format!("{prefix}{name}"),
-            })),
-            ..CompletionItem::default()
+        .map(|(order, record)| {
+            let name = record.name.trim_start_matches("@#");
+            CompletionItem {
+                label: name.into(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some("macro directive".into()),
+                documentation: Some(Documentation::String(record.summary.clone())),
+                sort_text: Some(format!("{order:02}")),
+                filter_text: Some(name.into()),
+                insert_text: Some(name.into()),
+                insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                    range,
+                    new_text: format!("{prefix}{name}"),
+                })),
+                ..CompletionItem::default()
+            }
         })
         .collect()
 }
@@ -3984,17 +4071,9 @@ fn default_completions(
     preferences: &PresentationSettings,
     label_details: bool,
     snippets: bool,
+    context: &syntax_intel::Context,
 ) -> Vec<CompletionItem> {
-    let mut items = Vec::new();
-    for (kw, doc) in DYNARE_KEYWORDS.iter().chain(FAMILY_COMMAND_HELP) {
-        items.push(CompletionItem {
-            label: (*kw).into(),
-            kind: Some(CompletionItemKind::KEYWORD),
-            detail: Some("Dynare keyword".into()),
-            documentation: Some(Documentation::String((*doc).into())),
-            ..CompletionItem::default()
-        });
-    }
+    let mut items = syntax_intel::completions(context);
     for d in model.final_decls(&["var"]) {
         let name = model.name(d.name);
         items.push(name_completion(
@@ -4033,16 +4112,10 @@ fn default_completions(
             label_details,
         ));
     }
-    for (name, doc) in BUILTIN_FNS.iter().chain(FAMILY_OPERATOR_HELP) {
-        items.push(CompletionItem {
-            label: (*name).into(),
-            kind: Some(CompletionItemKind::FUNCTION),
-            detail: Some("built-in function".into()),
-            documentation: Some(Documentation::String((*doc).into())),
-            ..CompletionItem::default()
-        });
-    }
-    for block in ["model", "steady_state_model", "initval", "endval", "shocks"] {
+    for block in ["model", "steady_state_model", "initval", "endval", "shocks"]
+        .into_iter()
+        .filter(|_| context.language == "top_level")
+    {
         items.push(CompletionItem {
             label: block.into(),
             kind: Some(CompletionItemKind::SNIPPET),

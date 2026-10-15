@@ -427,8 +427,10 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
     }, "native repository comparison MCP tool discovery");
     const repositoryInput = { repository_path: repositoryPath, before: { kind: "git", root_file: "root.mod", ref: afterCommit }, after: { kind: "working", root_file: "root.mod" } };
     const invoke = async input => {
-      const result = await vscode.lm.invokeTool(mcpTool.name, { input }, token.token);
-      return JSON.parse(result.content.filter(item => item instanceof vscode.LanguageModelTextPart).map(item => item.value).join("\n"));
+      const result = await vscode.lm.invokeTool(mcpTool.name, { input: { comparison: { kind: "repository", ...input } } }, token.token);
+      const envelope = JSON.parse(result.content.filter(item => item instanceof vscode.LanguageModelTextPart).map(item => item.value).join("\n"));
+      assert.equal(envelope.schema_version, 3);
+      return envelope.data;
     };
     const mcpSaved = await invoke(repositoryInput);
     assert.deepEqual(mcpSaved.changed_equations, savedWire.diff.changed_equations);
@@ -551,7 +553,15 @@ exports.run = async function run() {
     const extension = vscode.extensions.getExtension("CoconutWater.dygnosis");
     assert.ok(extension);
     const service = await extension.activate();
-    assert.ok(["all", "mcp", "semantic", "folding", "presentation", "rename", "project"].includes(scope), "Native host scope must be all, mcp, semantic, folding, presentation, rename, or project");
+    assert.ok(["all", "mcp", "semantic", "folding", "presentation", "rename", "project", "syntax"].includes(scope), "Unknown native host scope");
+    if (scope === "syntax") {
+      await require("./helpers/syntax_host.cjs").checkSyntax(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, currentSnapshot, writeObservedInput });
+      await service.shutdown();
+      evidence.artifacts_after = await historyArtifacts();
+      assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "native syntax acceptance uses one matching candidate");
+      evidence.passed = true;
+      return;
+    }
     if (scope === "mcp") {
       evidence.native_vscode_mcp = await probeNativeMcp(vscode, extension.id);
       evidence.checks.push("native VS Code MCP discovery, semantic symbol selection, references and guarded Rename proposal");

@@ -31,6 +31,9 @@ use crate::engine::language::model::{
     RamseyConstraint, RemovedEquation, ShockKind, ShockStmt, ShocksSemiFamily, SurgeryExit,
     SurgeryKind, SymbolTypeEvent, TrendVar, VarRemovedName,
 };
+use crate::engine::language::model::{
+    FunctionCall, NamedSlot, NamedSlotKind, NamedSlotOwner, SubsampleUse,
+};
 use crate::engine::language::span::Span;
 
 mod pac_parser;
@@ -170,6 +173,7 @@ pub(crate) fn parse_expanded_controlled(
         initial_source_cursor: 0,
         completed_block_separator: None,
         refused_row_ends: HashSet::new(),
+        deferred_end_refusals: HashSet::new(),
         symbol_list_id: 1,
         in_model: false,
         in_equation_body: false,
@@ -255,6 +259,7 @@ impl FamilyValue {
     }
 }
 struct ParsedTag {
+    endogenous: Option<(Name, Span, usize)>,
     static_tag: bool,
     dynamic_tag: bool,
     flags: Vec<String>,
@@ -1034,6 +1039,7 @@ struct Parser<'a> {
     completed_block_separator: Option<(usize, usize)>,
     /// Original delimiter tokens left after a lexer-refused collected row.
     refused_row_ends: HashSet<usize>,
+    deferred_end_refusals: HashSet<usize>,
     /// Bumped once per statement that lists names, so `CommandSymbol::list_id`
     /// groups one statement's list.
     symbol_list_id: u32,
@@ -1057,9 +1063,37 @@ struct Parser<'a> {
 }
 
 impl Parser<'_> {
+    fn record_named_slot(
+        &mut self,
+        kind: NamedSlotKind,
+        name: Name,
+        span: Span,
+        order: usize,
+        declaration: bool,
+        owner: NamedSlotOwner,
+    ) {
+        self.model.named_slots.push(NamedSlot {
+            kind,
+            name,
+            span,
+            order,
+            declaration,
+            owner,
+            callback_order: self.i,
+        });
+    }
+
     fn cancelled(&self) -> bool {
         crate::engine::control::flag_cancelled(self.cancellation.as_deref())
     }
+    fn record_shape_refusal(&mut self, mut refuse: ShapeRefuse) {
+        if refuse.parse_order.is_none() {
+            refuse.parse_order =
+                Some(self.token_origins[self.i.min(self.token_origins.len() - 1)].start);
+        }
+        self.model.shape_refuses.push(refuse);
+    }
+
     fn record_symbol_declaration(
         &mut self,
         name: Name,
@@ -1096,6 +1130,9 @@ impl Parser<'_> {
         kind: crate::engine::language::model::SymbolKind,
     ) -> crate::engine::language::model::SymbolContext {
         let order = self.model.symbol_context();
+        self.model
+            .type_event_callback_orders
+            .insert(self.model.symbol_type_events.len(), self.i);
         self.model.symbol_type_events.push(SymbolTypeEvent {
             name,
             span,
@@ -1766,6 +1803,9 @@ impl Parser<'_> {
     }
 
     fn parse_declaration(&mut self, keyword: &str) -> Vec<Decl> {
+        let declaration_from = self.i;
+        let named_start = self.model.named_slots.len();
+        let issues_before = self.model.parse_issues.len();
         let start = self.current_start();
         let keyword_is_var = self.at_ident_ci("var");
         let keyword_is_varexo = self.at_ident_ci("varexo");
@@ -1893,7 +1933,31 @@ impl Parser<'_> {
                 },
             });
         }
+        let named_callback_completed = self.at(TokenKind::Semi)
+            && !decls.is_empty()
+            && !recorded_missing
+            && self.model.parse_issues.len() == issues_before;
         self.eat(TokenKind::Semi);
+        // The declaration driver looks up the dimension inside its per-name
+        // loop. parameters() refuses dsge_prior_weight before that lookup.
+        let lookup_attempted = !keyword_is_parameters
+            || decls
+                .first()
+                .is_some_and(|decl| self.intern.get(decl.name) != "dsge_prior_weight");
+        if !named_callback_completed || !lookup_attempted {
+            let provisional = self.model.named_slots.split_off(named_start);
+            self.model.named_slots.extend(
+                provisional
+                    .into_iter()
+                    .filter(|slot| slot.kind != NamedSlotKind::Dimension),
+            );
+        } else {
+            for slot in &mut self.model.named_slots[named_start..] {
+                if slot.owner == NamedSlotOwner::DimensionLookup {
+                    slot.callback_order = self.i;
+                }
+            }
+        }
         if keyword_is_parameters {
             for decl in &decls {
                 if self.intern.get(decl.name) == "dsge_prior_weight"
@@ -1904,7 +1968,20 @@ impl Parser<'_> {
             }
         }
         if keyword_is_var && (log_deflator || deflator.is_some()) {
+            if let Some(id) = deflator {
+                let names = self.constructors.variables(self.constructed[&id], |name| {
+                    self.constructor_locals
+                        .get(&(DataTreeScope::Dynamic, name))
+                        .copied()
+                });
+                self.model.deflator_variables.insert(id, names);
+            }
             for decl in &decls {
+                self.retain_fact_receipt(
+                    "nonstationary_callback",
+                    self.i,
+                    std::iter::once(declaration_from..self.i).collect(),
+                );
                 self.model.nonstationary_vars.push(NonstationaryVar {
                     name: decl.name,
                     span: decl.span,
@@ -1995,7 +2072,16 @@ impl Parser<'_> {
                         if self.at(TokenKind::Ident) {
                             let tok = self.bump();
                             let name = self.lexeme(&tok).to_string();
-                            heterogeneity = Some((self.intern.intern(&name), tok.span));
+                            let name = self.intern.intern(&name);
+                            heterogeneity = Some((name, tok.span));
+                            self.record_named_slot(
+                                NamedSlotKind::Dimension,
+                                name,
+                                tok.span,
+                                self.i - 1,
+                                false,
+                                NamedSlotOwner::DimensionLookup,
+                            );
                             if !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
                                 self.hetero_bison_refuse(self.i, Some("')'"));
                             }
@@ -2161,6 +2247,20 @@ impl Parser<'_> {
             _ => self.hetero_bison_refuse(value_index + 1, Some("')'")),
         }
         let dimension = self.intern.intern(&dimension_lex);
+        if self
+            .tokens
+            .get(value_index + 1)
+            .is_some_and(|token| token.kind == TokenKind::RParen)
+        {
+            self.record_named_slot(
+                NamedSlotKind::Dimension,
+                dimension,
+                dimension_span,
+                value_index,
+                false,
+                NamedSlotOwner::DimensionLookup,
+            );
+        }
         Some((dimension, dimension_span))
     }
 
@@ -2222,48 +2322,71 @@ impl Parser<'_> {
         self.hetero_eq_token_ranges.push(ranges);
     }
 
+    /// `symbol_list ';'` has one callback after the complete list. Recovery
+    /// tokens are not accepted declarations in dimension/database tables.
+    fn read_named_declaration_list(&mut self) -> Option<Vec<(Name, Span, usize)>> {
+        let mut names = Vec::new();
+        loop {
+            if !self.at_local_symbol(false) {
+                self.refuse_local_symbol(false);
+                self.skip_to_stmt_end();
+                self.eat(TokenKind::Semi);
+                return None;
+            }
+            let order = self.i;
+            let token = self.bump();
+            names.push((self.intern.intern(token.text(self.src)), token.span, order));
+            if self.at(TokenKind::Semi) {
+                self.bump();
+                return Some(names);
+            }
+            if self.at(TokenKind::Comma) {
+                self.bump();
+            } else if !self.at_local_symbol(false) {
+                self.hetero_bison_refuse(self.i, None);
+                self.skip_to_stmt_end();
+                self.eat(TokenKind::Semi);
+                return None;
+            }
+        }
+    }
+
     /// `heterogeneity_dimension name1, name2;` — one record per name, file order.
     fn parse_heterogeneity_dimension(&mut self) {
         let start = self.bump().span.start;
-        let mut names: Vec<(Name, Span)> = Vec::new();
-        while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
-            if self.at(TokenKind::Ident) {
-                let tok = self.bump();
-                let name = self.lexeme(&tok).to_string();
-                let name = self.intern.intern(&name);
-                names.push((name, tok.span));
-                self.model.written_declarations.push(
-                    crate::engine::language::model::WrittenDeclaration {
-                        statement_id: self.model.statements.len(),
-                        written_kind: "heterogeneity_dimension".to_string(),
-                        token_range: self.i - 1..self.i,
-                        declaration: Decl {
-                            parse_order: self.i,
-                            symbol_type_context: self.model.symbol_context(),
-                            name,
-                            span: tok.span,
-                            long_name: None,
-                            tex_name: None,
-                            log_transform: false,
-                            heterogeneity: None,
-                        },
-                    },
-                );
-            } else if self.at(TokenKind::Number) {
-                self.hetero_bison_refuse(self.i, None);
-                self.bump();
-            } else {
-                self.bump();
-            }
-        }
-        let end = if self.at(TokenKind::Semi) {
-            self.bump().span.end
-        } else {
-            self.current_start()
+        let Some(names) = self.read_named_declaration_list() else {
+            return;
         };
-        self.eat(TokenKind::Semi);
-        let span = Span { start, end };
-        for (name, name_span) in names {
+        let span = Span {
+            start,
+            end: self.tokens[self.i - 1].span.end,
+        };
+        for (name, name_span, order) in names {
+            self.record_named_slot(
+                NamedSlotKind::Dimension,
+                name,
+                name_span,
+                order,
+                true,
+                NamedSlotOwner::DimensionDeclaration,
+            );
+            self.model.written_declarations.push(
+                crate::engine::language::model::WrittenDeclaration {
+                    statement_id: self.model.statements.len(),
+                    written_kind: "heterogeneity_dimension".to_string(),
+                    token_range: order..order + 1,
+                    declaration: Decl {
+                        parse_order: order + 1,
+                        symbol_type_context: self.model.symbol_context(),
+                        name,
+                        span: name_span,
+                        long_name: None,
+                        tex_name: None,
+                        log_transform: false,
+                        heterogeneity: None,
+                    },
+                },
+            );
             self.model
                 .heterogeneity_dimensions
                 .push(HeterogeneityDimension {
@@ -2354,6 +2477,11 @@ impl Parser<'_> {
                     name.to_ascii_lowercase()
                 };
                 if seen.insert(key, ()).is_some() {
+                    self.retain_fact_receipt(
+                        "option_duplicate_callback",
+                        self.i,
+                        std::iter::once(option_i..self.i).collect(),
+                    );
                     self.model.option_twice.push((internal, name_tok.span));
                 }
                 let option_end = if value.is_some() {
@@ -2666,7 +2794,7 @@ impl Parser<'_> {
                 continue;
             }
             let tok = self.bump();
-            self.model.shape_refuses.push(
+            self.record_shape_refusal(
                 ShapeRefuse::new(tok.span, "var_remove", "a list of symbols")
                     .with_parse_order(self.token_origins[self.i - 1].start),
             );
@@ -3650,6 +3778,7 @@ impl Parser<'_> {
         if self.i >= end_i || !self.at(TokenKind::Ident) {
             return None;
         }
+        let row_from = self.i;
         let name_tok = self.bump();
         let lexeme = self.lexeme(&name_tok).to_string();
         let name = self.intern.intern(&lexeme);
@@ -3670,12 +3799,18 @@ impl Parser<'_> {
                 if self.at(TokenKind::Number) {
                     self.bump();
                 }
+                self.retain_fact_receipt("generate_irfs_exog_callback", self.i, Vec::new());
                 exos.push((exo, exo_tok.span));
                 continue;
             }
             self.bump();
         }
         let end = self.finish_shock_stmt(end_i);
+        self.retain_fact_receipt(
+            "generate_irfs_callback",
+            self.i,
+            std::iter::once(row_from..self.i).collect(),
+        );
         Some(GenerateIrfsElement {
             name,
             span: Span {
@@ -3708,13 +3843,22 @@ impl Parser<'_> {
                 continue;
             }
             let before = self.i;
-            if let Some(assignment) = self.parse_named_assignment() {
+            // Bison declares the epilogue LHS before reading its RHS, so a
+            // self-reference is already in scope at its constructor action.
+            if self.looks_like_assignment_start() {
+                let token = self.tokens[self.i].clone();
+                let name = self.intern.intern(token.text(self.src));
                 self.record_symbol_declaration(
-                    assignment.name,
-                    assignment.span,
+                    name,
+                    token.span,
                     crate::engine::language::model::SymbolKind::Epilogue,
                 );
                 self.retain_last_symbol_occurrence(before);
+                self.model
+                    .type_event_callback_orders
+                    .insert(self.model.symbol_type_events.len() - 1, before + 1);
+            }
+            if let Some(assignment) = self.parse_named_assignment() {
                 self.model.epilogue.push(assignment);
             }
             if self.i <= before {
@@ -3755,6 +3899,17 @@ impl Parser<'_> {
             self.eat(TokenKind::RParen);
         }
         while !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
+            if self.at(TokenKind::Latex) {
+                let tok = self.bump();
+                let tex_name = closed_tex_name(self.lexeme(&tok));
+                if let Some(row) = self.model.written_declarations.last_mut()
+                    && row.statement_id == self.model.statements.len()
+                {
+                    row.declaration.tex_name = tex_name;
+                    row.token_range.end = self.i;
+                }
+                continue;
+            }
             if self.at(TokenKind::LParen) {
                 self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
                 continue;
@@ -4108,6 +4263,7 @@ impl Parser<'_> {
         if !self.at(TokenKind::Ident) {
             return None;
         }
+        let row_from = self.i;
         let first = self.bump();
         let first_lex = self.lexeme(&first).to_string();
         self.eat(TokenKind::Comma);
@@ -4119,6 +4275,11 @@ impl Parser<'_> {
         let second = self.bump();
         let second_lex = self.lexeme(&second).to_string();
         let end = self.finish_shock_stmt(end_i);
+        self.retain_fact_receipt(
+            "init2shocks_callback",
+            self.i,
+            std::iter::once(row_from..self.i).collect(),
+        );
         Some(Init2ShocksRow {
             symbol_type_context: self.model.symbol_context(),
             endo: self.intern.intern(&first_lex),
@@ -4164,6 +4325,7 @@ impl Parser<'_> {
         if !self.at(TokenKind::Ident) {
             return None;
         }
+        let row_from = self.i;
         let name_tok = self.bump();
         let lex = self.lexeme(&name_tok).to_string();
         if !self.at(TokenKind::Comma) {
@@ -4183,6 +4345,11 @@ impl Parser<'_> {
             }
         }
         let end = self.finish_shock_stmt(end_i);
+        self.retain_fact_receipt(
+            "homotopy_callback",
+            self.i,
+            std::iter::once(row_from..self.i).collect(),
+        );
         Some(HomotopyRow {
             symbol_type_context: self.model.symbol_context(),
             name: self.intern.intern(&lex),
@@ -4265,6 +4432,7 @@ impl Parser<'_> {
             if self.at(TokenKind::Ident) {
                 let tok = self.bump();
                 let lex = self.lexeme(&tok).to_string();
+                self.retain_fact_receipt("shock_group_member_callback", self.i, Vec::new());
                 members.push((self.intern.intern(&lex), tok.span));
                 continue;
             }
@@ -4317,6 +4485,7 @@ impl Parser<'_> {
         if self.model.method_of_moments_span.is_none() {
             self.model.method_of_moments_span = Some(keyword);
         }
+        self.retain_fact_receipt("mom_statement_callback", self.i, Vec::new());
         self.model.mom_statements.push(MomStatement {
             span: Span {
                 start: keyword.start,
@@ -4358,6 +4527,17 @@ impl Parser<'_> {
         for row in &mut self.model.matched_moments[first_row..] {
             row.walk_context = walk_context;
         }
+        self.model.moment_block_callbacks.push(
+            crate::engine::language::model::MomentBlockCallback {
+                rows: first_row..self.model.matched_moments.len(),
+                order: (saved > body_end_i
+                    && self
+                        .tokens
+                        .get(saved - 1)
+                        .is_some_and(|token| token.kind == TokenKind::Semi))
+                .then_some(saved),
+            },
+        );
         self.in_equation_body = false;
         self.i = saved;
     }
@@ -4451,6 +4631,7 @@ impl Parser<'_> {
     /// A token the grammar cannot reduce records 7.1's sentence and abandons the
     /// rest of the block: their parser stops at the first of these.
     fn read_matched_irfs_row(&mut self, end_i: usize, block_empty: bool) -> Option<MatchedIrfsRow> {
+        let row_i = self.i;
         let start = self.current_start();
         if !self.at_ident_ci("var") && !self.at_ident_ci("varexo") {
             let expecting = if block_empty {
@@ -4490,6 +4671,11 @@ impl Parser<'_> {
         }
         let (endogenous, endogenous_span) = endogenous?;
         let (exogenous, exogenous_span) = exogenous?;
+        self.record_moment_names(
+            "matched_irfs",
+            vec![(endogenous, endogenous_span)],
+            Some((exogenous, exogenous_span)),
+        );
         if !self.at_ident_ci("periods") {
             self.record_syntax_at(self.i, Some("PERIODS"));
             self.i = end_i;
@@ -4514,6 +4700,7 @@ impl Parser<'_> {
         let end = self.finish_row(end_i);
         represented_tokens.extend(value_weights.represented_tokens);
         Some(MatchedIrfsRow {
+            active_tokens: row_i..self.i,
             period_tokens: periods.tokens,
             value_tokens: value_weights.value_tokens,
             weight_tokens: value_weights.weight_tokens,
@@ -4584,11 +4771,21 @@ impl Parser<'_> {
             self.read_weighted_symbol()?;
         self.eat(TokenKind::Comma);
         let (left_exo, left_exo_span) = self.read_symbol()?;
+        self.record_moment_names(
+            "matched_irfs_weights",
+            vec![(left_endo, left_endo_span)],
+            Some((left_exo, left_exo_span)),
+        );
         self.eat(TokenKind::Comma);
         let (right_endo, right_endo_span, right_periods, right_periods_span) =
             self.read_weighted_symbol()?;
         self.eat(TokenKind::Comma);
         let (right_exo, right_exo_span) = self.read_symbol()?;
+        self.record_moment_names(
+            "matched_irfs_weights",
+            vec![(right_endo, right_endo_span)],
+            Some((right_exo, right_exo_span)),
+        );
         self.eat(TokenKind::Comma);
         let (weight_text, weight_span, weight_expr) = self.read_expression_text();
         let end = self.finish_row(end_i);
@@ -4694,6 +4891,11 @@ impl Parser<'_> {
             return None;
         }
         let end = self.finish_row(end_i);
+        self.record_moment_names(
+            "moment_calibration",
+            vec![(first, first_span), (second, second_span)],
+            None,
+        );
         Some(MomentCalibrationRow {
             active_tokens: row_i..self.i,
             first,
@@ -4777,6 +4979,11 @@ impl Parser<'_> {
             return None;
         }
         let end = self.finish_row(end_i);
+        self.record_moment_names(
+            "irf_calibration",
+            vec![(endogenous, endogenous_span)],
+            Some((exogenous, exogenous_span)),
+        );
         Some(IrfCalibrationRow {
             active_tokens: row_i..self.i,
             endogenous,
@@ -4881,6 +5088,7 @@ impl Parser<'_> {
 
     fn record_mom_syntax(&mut self, span: Span, message: impl Into<String>) {
         self.model.mom_syntax.push(MomSyntax {
+            parse_order: self.i,
             span,
             message: message.into(),
         });
@@ -4900,6 +5108,24 @@ impl Parser<'_> {
             None => format!("syntax error, unexpected {unexpected}"),
         };
         self.record_mom_syntax(span, message);
+        self.model.mom_syntax.last_mut().unwrap().parse_order = index;
+    }
+
+    fn record_moment_names(
+        &mut self,
+        block: &'static str,
+        endogenous: Vec<(Name, Span)>,
+        exogenous: Option<(Name, Span)>,
+    ) {
+        self.model
+            .moment_name_callbacks
+            .push(crate::engine::language::model::MomentNameCallback {
+                order: self.i,
+                context: self.model.symbol_context(),
+                block,
+                endogenous,
+                exogenous,
+            });
     }
 
     fn bison_token_name(&self, index: usize) -> String {
@@ -5662,14 +5888,14 @@ impl Parser<'_> {
         if option_span.is_some() && command.eq_ignore_ascii_case("svar_global_identification_check")
         {
             let tok = self.tokens[self.i - 1].span;
-            self.model.shape_refuses.push(
+            self.record_shape_refusal(
                 ShapeRefuse::new(tok, &command, "no option list")
                     .with_parse_order(self.token_origins[self.i - 1].start),
             );
         }
         if option_span.is_none() && requires_option_list(&command) {
             let tok = self.tokens[self.i].span;
-            self.model.shape_refuses.push(
+            self.record_shape_refusal(
                 ShapeRefuse::new(tok, &command, "an option list")
                     .with_parse_order(self.token_origins[self.i].start),
             );
@@ -5698,7 +5924,7 @@ impl Parser<'_> {
                 .any(|sym| sym.list_id == self.symbol_list_id)
         {
             let tok = self.tokens[self.i].span;
-            self.model.shape_refuses.push(
+            self.record_shape_refusal(
                 ShapeRefuse::new(tok, &command, "a list of endogenous names")
                     .with_parse_order(self.token_origins[self.i].start),
             );
@@ -5739,7 +5965,7 @@ impl Parser<'_> {
         // list, and `data()` needs at least one option in it.
         if !has_list {
             let tok = self.tokens[self.i].span;
-            self.model.shape_refuses.push(
+            self.record_shape_refusal(
                 ShapeRefuse::new(tok, "data", "an option list")
                     .with_parse_order(self.token_origins[self.i].start),
             );
@@ -5810,12 +6036,39 @@ impl Parser<'_> {
 
     /// A copy's right-hand head is already inside the grammar. Its plain first
     /// name may be unknown, in which case the driver's type check refuses it.
-    fn dotted_copy_head_at(&mut self, index: usize) -> Option<DottedHead> {
+    fn dotted_copy_head_at(&mut self, index: usize) -> Option<(DottedHead, usize)> {
         let saved = self.i;
         self.i = index;
-        let head = self.dotted_head_at_with_gate(false).map(|(head, _)| head);
+        let head = self
+            .dotted_head_at_with_gate(false)
+            .map(|(head, body)| (head, index + body + 1));
         self.i = saved;
         head
+    }
+
+    fn retain_subsample_use(&mut self, head: &DottedHead, start: usize, checked: bool) {
+        let slot = match head {
+            DottedHead::Param {
+                second: Some(name), ..
+            } => Some((*name, start + 2)),
+            DottedHead::Std {
+                second: Some(name), ..
+            } => Some((*name, start + 5)),
+            DottedHead::Corr {
+                third: Some(name), ..
+            } => Some((*name, start + 7)),
+            _ => None,
+        };
+        if let Some((name, order)) = slot {
+            self.model.subsample_uses.push(SubsampleUse {
+                statement: self.model.dotted_statements.len(),
+                head: head.clone(),
+                name,
+                span: self.tokens[order].span,
+                order,
+                checked,
+            });
+        }
     }
 
     fn dotted_head_at_with_gate(
@@ -5978,6 +6231,15 @@ impl Parser<'_> {
         let (Some(a), Some(b)) = (self.tokens.get(left), self.tokens.get(right)) else {
             return false;
         };
+        if let (Some(a), Some(b)) = (&a.emitted, &b.emitted)
+            && std::sync::Arc::ptr_eq(&a.source, &b.source)
+        {
+            return a
+                .source
+                .text
+                .get(a.span.end as usize..b.span.start as usize)
+                .is_some_and(|gap| gap == s);
+        }
         self.src
             .get(a.span.end as usize..b.span.start as usize)
             .is_some_and(|gap| gap == s)
@@ -6251,6 +6513,10 @@ impl Parser<'_> {
                         .get(previous_end..token_start)
                         .is_some_and(|gap| gap.contains('\n')))
                 {
+                    if self.in_equation_body {
+                        self.deferred_end_refusals.insert(i);
+                        return false;
+                    }
                     failure = Some((token.span, "syntax error, unexpected END"));
                 }
                 break;
@@ -6483,7 +6749,7 @@ impl Parser<'_> {
     fn parse_handed_over_statement(&mut self) {
         let start = self.tokens[self.i].span.start;
         if let Some(refuse) = self.handed_over_refusal() {
-            self.model.shape_refuses.push(refuse);
+            self.record_shape_refusal(refuse);
         }
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
             if self.at(TokenKind::LParen) {
@@ -6823,6 +7089,11 @@ impl Parser<'_> {
     /// One dotted statement. A `prior` body is read; an `options` / `subsamples`
     /// body is claimed but not read, so its contents never reach a check.
     fn parse_dotted_statement(&mut self) {
+        let from = self.i;
+        let refuses_before = self.model.shape_refuses.len();
+        let issues_before = self.model.parse_issues.len();
+        let mut callback_completed = false;
+        let mut copy_after = None;
         let (kind, body_at) = self
             .at_dotted_statement()
             .expect("caller checked the dotted head");
@@ -6834,7 +7105,11 @@ impl Parser<'_> {
         let open = body_at + 1;
         let has_body = self.kind_at(open) == Some(TokenKind::LParen);
         let copy_source = if self.kind_at(open) == Some(TokenKind::Eq) {
-            self.dotted_copy_head_at(self.i + open + 1)
+            let start = self.i + open + 1;
+            self.dotted_copy_head_at(start).map(|(head, after)| {
+                copy_after = Some(after);
+                head
+            })
         } else {
             None
         };
@@ -6852,7 +7127,7 @@ impl Parser<'_> {
                 options = self.read_family_options(self.i + open, close);
                 self.record_parsed_option_twice(&options);
                 if options.is_empty() {
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(
                             self.tokens[close.saturating_sub(1)].span,
                             "prior",
@@ -6867,13 +7142,13 @@ impl Parser<'_> {
                 if let Some(refuse) = crate::engine::language::shape_gate::option_refusal(
                     self.src, subject, &options, table,
                 ) {
-                    self.model.shape_refuses.push(refuse);
+                    self.record_shape_refusal(refuse);
                 }
             } else if kind == DottedKind::Options {
                 options = self.read_family_options(self.i + open, close);
                 self.record_parsed_option_twice(&options);
                 if options.is_empty() {
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(
                             self.tokens[close.saturating_sub(1)].span,
                             "options",
@@ -6892,16 +7167,24 @@ impl Parser<'_> {
                         .iter()
                         .find(|opt| opt.name.eq_ignore_ascii_case("overwrite"))
                     {
-                        self.model.shape_refuses.push(ShapeRefuse::official(
+                        self.record_shape_refusal(ShapeRefuse::official(
                             opt.span,
                             "options",
                             "syntax error, unexpected IDENTIFIER, expecting BOUNDS or JSCALE or INIT",
                         ).with_parse_order(opt.parse_order));
                     } else {
-                        self.model.shape_refuses.push(refuse);
+                        self.record_shape_refusal(refuse);
                     }
                 }
             }
+            callback_completed = self
+                .tokens
+                .get(close.saturating_sub(1))
+                .is_some_and(|token| token.kind == TokenKind::RParen)
+                && self
+                    .tokens
+                    .get(close)
+                    .is_some_and(|token| token.kind == TokenKind::Semi);
             k = close - self.i;
         }
         while matches!(
@@ -6923,12 +7206,37 @@ impl Parser<'_> {
                 .map(|t| t.span.end)
                 .unwrap_or_else(|| self.src.len() as u32)
         };
+        if !has_body {
+            callback_completed = copy_after.is_some_and(|after| {
+                self.tokens
+                    .get(after)
+                    .is_some_and(|token| token.kind == TokenKind::Semi)
+                    && self.tokens[after - 1]
+                        .text(self.src)
+                        .eq_ignore_ascii_case(match kind {
+                            DottedKind::Prior => "prior",
+                            DottedKind::Options => "options",
+                            DottedKind::Subsamples => "subsamples",
+                        })
+            });
+        }
         if kind == DottedKind::Subsamples {
-            self.collect_subsample_statement(self.i, (self.i + k).min(self.tokens.len()));
+            callback_completed &=
+                self.collect_subsample_statement(self.i, (self.i + k).min(self.tokens.len()));
+        }
+        callback_completed &= self.model.shape_refuses.len() == refuses_before
+            && self.model.parse_issues.len() == issues_before;
+        if callback_completed {
+            self.retain_subsample_use(&head, from, has_body);
+            if let Some(source) = &copy_source {
+                self.retain_subsample_use(source, from + open + 1, false);
+            }
         }
         let parse_order = self.token_origins[(self.i + k).saturating_sub(1)].start;
         self.i = (self.i + k).min(self.tokens.len().saturating_sub(1));
         self.model.dotted_statements.push(DottedStatement {
+            active_tokens: from..self.i,
+            callback_completed,
             symbol_type_context: self.model.symbol_context(),
             parse_order,
             kind,
@@ -7226,7 +7534,7 @@ impl Parser<'_> {
                 .with_parse_order(self.token_origins[body_end_i.min(self.tokens.len() - 1)].start),
             );
         }
-        for element in &elements {
+        for (element_index, element) in elements.iter().enumerate() {
             if let SvarIdentificationElement::ExclusionLag {
                 lag: Some(_),
                 span,
@@ -7234,7 +7542,18 @@ impl Parser<'_> {
             } = element
                 && equations.is_empty()
             {
-                shape_refuses.push(ShapeRefuse::new(*span, "exclusion lag", "an equation row"));
+                let after = element_parse_orders[element_index]
+                    .and_then(|order| {
+                        self.token_origins
+                            .iter()
+                            .position(|origin| origin.start <= order && order < origin.end)
+                    })
+                    .map(|index| (index + 1).min(self.token_origins.len() - 1))
+                    .unwrap_or(body_end_i);
+                shape_refuses.push(
+                    ShapeRefuse::new(*span, "exclusion lag", "an equation row")
+                        .with_parse_order(self.token_origins[after].start),
+                );
             }
         }
         self.model.svar_identifications.push(SvarIdentification {
@@ -7958,6 +8277,38 @@ impl Parser<'_> {
             }
             self.model.ramsey_constraints.push(RamseyConstraint {
                 active_tokens: before..self.i,
+                callback_order: (saved > body_end_i
+                    && self
+                        .tokens
+                        .get(saved - 1)
+                        .is_some_and(|t| t.kind == TokenKind::Semi))
+                .then_some(saved),
+                parse_match: expr.map(|id| {
+                    let context = self.model.symbol_context();
+                    self.constructors.complementarity(
+                        self.constructed[&id],
+                        |name| {
+                            self.model.symbol_kind_in_context(name, context) == Some("var")
+                                && !self.model.heterogeneous_in_context(name, context)
+                        },
+                        |bound| {
+                            self.constructors
+                                .variables(bound, |name| {
+                                    self.constructor_locals
+                                        .get(&(DataTreeScope::Dynamic, name))
+                                        .copied()
+                                })
+                                .into_iter()
+                                .any(|name| {
+                                    !self.model.heterogeneous_in_context(name, context)
+                                        && matches!(
+                                            self.model.symbol_kind_in_context(name, context),
+                                            Some("var" | "varexo" | "varexo_det")
+                                        )
+                                })
+                        },
+                    )
+                }),
                 expr,
                 span: Span {
                     start: stmt_start,
@@ -8044,6 +8395,7 @@ impl Parser<'_> {
         let mut relax = None;
         let mut error_bind = None;
         let mut error_relax = None;
+        let mut clauses = Vec::new();
         let mut rejected = false;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
             let clause = if self.at_ident_ci("error_bind") {
@@ -8073,6 +8425,21 @@ impl Parser<'_> {
             let expr_end = self.current_start();
             let text = join_lexemes(self.src, &self.tokens[expr_i..expr_end_i]);
             let occ = OccbinExpr {
+                constructed_binary: expr.and_then(|id| self.constructed.get(&id)).and_then(
+                    |&node| {
+                        if let crate::engine::language::constructor::Node::Binary(op, _, _) =
+                            self.constructors.node(node)
+                        {
+                            Some(
+                                [BinOp::Lt, BinOp::Gt, BinOp::Le, BinOp::Ge]
+                                    .iter()
+                                    .any(|kind| *op == *kind as u8),
+                            )
+                        } else {
+                            None
+                        }
+                    },
+                ),
                 text,
                 span: Span {
                     start: expr_start,
@@ -8081,6 +8448,7 @@ impl Parser<'_> {
                 expr,
                 active_tokens: clause_i..expr_end_i + usize::from(self.at(TokenKind::Semi)),
             };
+            clauses.push((clause, occ.clone()));
             match clause {
                 "bind" => bind = Some(occ),
                 "relax" => relax = Some(occ),
@@ -8101,6 +8469,9 @@ impl Parser<'_> {
         self.model.occbin_constraints.push(OccbinConstraint {
             parse_order,
             name_tokens,
+            callback_order: self.i,
+            symbol_type_context: self.model.symbol_context(),
+            clauses,
             name,
             name_span,
             bind,
@@ -8115,6 +8486,8 @@ impl Parser<'_> {
     }
 
     fn parse_shocks_block(&mut self, record_stmts: bool) {
+        let issues_before = self.model.parse_issues.len();
+        let refuses_before = self.model.shape_refuses.len();
         let is_shocks = self.at_ident_ci("shocks");
         let opener_i = self.i;
         let keyword = self.tokens[opener_i].text(self.src).to_ascii_lowercase();
@@ -8196,6 +8569,37 @@ impl Parser<'_> {
             self.record_missing_shocks_semis(body_i, body_end_i);
         }
         self.record_shock_shape_refuses(opener_i, body_i, body_end_i, block_kind);
+        // The dimension is looked up by end_heterogeneous_shocks, after the
+        // complete body and END ';', rather than while scanning its opener.
+        if block_kind == crate::engine::language::model::ShockBlockKind::Heterogeneous
+            && self.model.parse_issues.len() == issues_before
+            && self.model.shape_refuses.len() == refuses_before
+            && self
+                .tokens
+                .get(body_i.saturating_sub(1))
+                .is_some_and(|token| token.kind == TokenKind::Semi)
+            && self
+                .tokens
+                .get(body_end_i)
+                .is_some_and(|token| token.text(self.src).eq_ignore_ascii_case("end"))
+            && self
+                .tokens
+                .get(body_end_i + 1)
+                .is_some_and(|token| token.kind == TokenKind::Semi)
+            && let Some(block) = self.model.shock_blocks.last()
+            && !block.stochastic.is_empty()
+            && let Some((name, span)) = block.options.heterogeneity
+            && let Some(order) = (opener_i..body_i).find(|&order| self.tokens[order].span == span)
+        {
+            self.record_named_slot(
+                NamedSlotKind::Dimension,
+                name,
+                span,
+                order,
+                false,
+                NamedSlotOwner::HeterogeneousShock(self.model.shock_blocks.len() - 1),
+            );
+        }
         let incomplete_regular_row = matches!(
             block_kind,
             crate::engine::language::model::ShockBlockKind::Regular
@@ -8255,6 +8659,7 @@ impl Parser<'_> {
     fn parse_varexobs(&mut self) {
         let start = self.current_start();
         self.bump();
+        self.retain_fact_receipt("varexobs_header_callback", self.i, Vec::new());
         self.model.varexobs_statement_count += 1;
         while !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
             if self.at(TokenKind::Comma) || self.at(TokenKind::Latex) {
@@ -8382,7 +8787,7 @@ impl Parser<'_> {
             } else {
                 "IDENTIFIER"
             };
-            self.model.shape_refuses.push(ShapeRefuse::official(
+            self.record_shape_refusal(ShapeRefuse::official(
                 self.tokens[self.i].span,
                 "estimated_params_remove",
                 format!("syntax error, unexpected {token}, expecting ';'"),
@@ -8409,11 +8814,14 @@ impl Parser<'_> {
             body_end_i,
         );
         if body_i == body_end_i && !bad_opener {
-            self.model.shape_refuses.push(ShapeRefuse::new(
-                self.tokens[body_end_i].span,
-                "estimated_params_remove",
-                "at least one removal row",
-            ));
+            self.record_shape_refusal(
+                ShapeRefuse::new(
+                    self.tokens[body_end_i].span,
+                    "estimated_params_remove",
+                    "at least one removal row",
+                )
+                .with_parse_order(self.token_origins[body_end_i].start),
+            );
         }
         self.model.estimated_params_remove_span = Some(Span {
             start: opener_span.start,
@@ -8856,7 +9264,7 @@ impl Parser<'_> {
             ExprKind::Number => {
                 let span = self.model.exprs.get(id).span;
                 let raw = self.src.get(span.start as usize..span.end as usize)?;
-                raw.parse().ok()
+                crate::engine::language::lexer::parse_numeric_literal(raw)
             }
             ExprKind::Ident { name, timing, .. } => {
                 if *timing != 0 {
@@ -9046,11 +9454,14 @@ impl Parser<'_> {
         while i < end_i {
             if self.tokens[i].kind == TokenKind::Semi {
                 if matches!(target, EstimatedParamsTarget::Remove) {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        self.tokens[i].span,
-                        "estimated_params_remove",
-                        "syntax error, unexpected ';'",
-                    ));
+                    self.record_shape_refusal(
+                        ShapeRefuse::official(
+                            self.tokens[i].span,
+                            "estimated_params_remove",
+                            "syntax error, unexpected ';'",
+                        )
+                        .with_parse_order(self.token_origins[i].start),
+                    );
                 }
                 entry_start = self.tokens[i].span.end;
                 i += 1;
@@ -9063,11 +9474,14 @@ impl Parser<'_> {
             let has_semi = i < end_i && self.tokens[i].kind == TokenKind::Semi;
             if !has_semi {
                 if matches!(target, EstimatedParamsTarget::Remove) {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        self.tokens[end_i].span,
-                        "estimated_params_remove",
-                        "syntax error, unexpected END, expecting ';'",
-                    ));
+                    self.record_shape_refusal(
+                        ShapeRefuse::official(
+                            self.tokens[end_i].span,
+                            "estimated_params_remove",
+                            "syntax error, unexpected END, expecting ';'",
+                        )
+                        .with_parse_order(self.token_origins[end_i].start),
+                    );
                 }
                 break;
             }
@@ -9075,11 +9489,14 @@ impl Parser<'_> {
             if matches!(target, EstimatedParamsTarget::Remove)
                 && !self.estimated_remove_row_spelled(stmt_start, i)
             {
-                self.model.shape_refuses.push(ShapeRefuse::new(
-                    self.tokens[stmt_start].span,
-                    "estimated_params_remove",
-                    "a parameter, stderr, skew, or corr row",
-                ));
+                self.record_shape_refusal(
+                    ShapeRefuse::new(
+                        self.tokens[stmt_start].span,
+                        "estimated_params_remove",
+                        "a parameter, stderr, skew, or corr row",
+                    )
+                    .with_parse_order(self.token_origins[stmt_start].start),
+                );
                 entry_start = entry_end;
                 i += 1;
                 continue;
@@ -10144,6 +10561,8 @@ impl Parser<'_> {
             return self.parse_model_local_definition();
         }
 
+        let issues_before = self.model.parse_issues.len();
+        let mut endogenous_tag = None;
         let stmt_i = self.i;
         let stmt_start = self.current_start();
         let mut static_tag = false;
@@ -10153,6 +10572,7 @@ impl Parser<'_> {
         let mut tag_twice = Vec::new();
         while self.at(TokenKind::LBrack) {
             let tag = self.parse_tag();
+            endogenous_tag = tag.endogenous.or(endogenous_tag);
             static_tag |= tag.static_tag;
             dynamic_tag |= tag.dynamic_tag;
             tags.extend(tag.flags);
@@ -10201,7 +10621,7 @@ impl Parser<'_> {
             let comp_end_i = self.i;
             let comp_end = self.current_start();
             let text = join_lexemes(self.src, &self.tokens[comp_i..comp_end_i]);
-            let matched = comp_expr.and_then(|id| self.match_complementarity(id));
+            let matched = comp_expr.and_then(|id| self.constructed_complementarity(id));
             complementarity = Some(Complementarity {
                 text,
                 span: Span {
@@ -10215,8 +10635,16 @@ impl Parser<'_> {
         if !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) && !self.at_block_stop() {
             self.skip_to_stmt_end();
         }
+        if self.deferred_end_refusals.remove(&self.i) {
+            self.push_bison(
+                self.tokens[self.i].span,
+                "syntax error, unexpected END".into(),
+            );
+            return None;
+        }
         let stmt_end_i = self.i;
         let stmt_end = self.current_start();
+        let completed = self.at(TokenKind::Semi);
         self.eat(TokenKind::Semi);
 
         if lhs_refused || rhs_refused {
@@ -10253,7 +10681,113 @@ impl Parser<'_> {
                 self.alloc_error(eq.span)
             });
         }
+        if completed
+            && lhs_ok
+            && rhs_ok
+            && eq.tag_twice.is_empty()
+            && self.model.parse_issues.len() == issues_before
+        {
+            if let Some((name, span, token)) = endogenous_tag {
+                self.apply_endogenous_tag(name, span, token, stmt_i);
+            }
+            self.apply_occbin_parameters(&eq);
+        }
         Some((eq, stmt_i..stmt_end_i))
+    }
+
+    fn apply_endogenous_tag(&mut self, name: Name, span: Span, token: usize, equation: usize) {
+        use crate::engine::language::model::SymbolKind;
+        let context = self.model.symbol_context();
+        let events_before = self.model.symbol_type_events.len();
+        match self.model.symbol_kind_in_context(name, context) {
+            Some("var") if !self.model.heterogeneous_in_context(name, context) => {}
+            Some(_) => {
+                self.record_symbol_change(name, span, SymbolKind::Var);
+                self.retain_last_symbol_occurrence(token);
+                self.rehome_symbol(name, ChangeTypeKind::Var);
+                if let Some(decl) = self
+                    .model
+                    .endogenous
+                    .iter_mut()
+                    .find(|decl| decl.name == name)
+                {
+                    decl.heterogeneity = None;
+                }
+            }
+            None => {
+                self.record_symbol_declaration(name, span, SymbolKind::Var);
+                self.retain_last_symbol_occurrence(token);
+                self.model.endogenous.push(Decl {
+                    name,
+                    span,
+                    parse_order: self.i,
+                    symbol_type_context: self.model.symbol_context(),
+                    long_name: None,
+                    tex_name: None,
+                    log_transform: false,
+                    heterogeneity: None,
+                });
+            }
+        }
+        if self.model.symbol_type_events.len() > events_before {
+            let index = self.model.symbol_type_events.len() - 1;
+            self.model.type_event_callback_orders.insert(index, self.i);
+            self.model.early_type_event_actions.insert(index);
+        }
+        self.symbol_roles
+            .insert(name, EstimatedNameRole::Endogenous);
+        self.model.endogenous_tag_actions.insert(equation);
+    }
+
+    fn apply_occbin_parameters(&mut self, eq: &Equation) {
+        use crate::engine::language::model::SymbolKind;
+        if eq.static_tag
+            || !eq.tag_map.contains_key("name")
+            || !crate::engine::diagnostics::check_occbin::before_occbin_parameters(
+                &self.model,
+                eq,
+                self.model.symbol_context(),
+                matches!(self.constructor_scope(), DataTreeScope::Heterogeneous(_)),
+                &self.intern,
+            )
+        {
+            return;
+        }
+        for key in ["bind", "relax"] {
+            for constraint in eq
+                .tag_map
+                .get(key)
+                .into_iter()
+                .flat_map(|value| value.split(','))
+            {
+                if constraint.is_empty() {
+                    continue;
+                }
+                if !crate::engine::diagnostics::check_occbin::is_occbin_ident(constraint) {
+                    return;
+                }
+                let name = self.intern.intern(&format!("occbin_{constraint}_bind"));
+                match self.model.final_symbol_kind(name) {
+                    Some("parameters")
+                        if !self
+                            .model
+                            .heterogeneous_in_context(name, self.model.symbol_context()) =>
+                    {
+                        continue
+                    }
+                    Some(_) => return,
+                    None => {}
+                }
+                self.record_symbol_declaration(name, eq.span, SymbolKind::Parameters);
+                let index = self.model.symbol_type_events.len() - 1;
+                self.model.type_event_callback_orders.insert(index, self.i);
+                self.model.early_type_event_actions.insert(index);
+                self.model
+                    .type_event_occurrences
+                    .push((index, eq.active_tokens.end..self.i));
+                self.symbol_roles.insert(name, EstimatedNameRole::Parameter);
+            }
+        }
     }
 
     /// Exact `# symbol = model_expression ;` production. A refused row creates
@@ -10380,6 +10914,7 @@ impl Parser<'_> {
 
     fn parse_tag(&mut self) -> ParsedTag {
         self.bump();
+        let mut endogenous = None;
         let mut static_tag = false;
         let mut dynamic_tag = false;
         let mut flags = Vec::new();
@@ -10397,8 +10932,20 @@ impl Parser<'_> {
                 if self.at(TokenKind::Eq) {
                     self.bump();
                     if self.at(TokenKind::String) {
+                        let token = self.i;
                         let v = self.bump();
                         value = unquote_string(self.lexeme(&v));
+                        if key == "endogenous" {
+                            let span = if v.lexeme.is_none() {
+                                Span {
+                                    start: v.span.start + 1,
+                                    end: v.span.end.saturating_sub(1),
+                                }
+                            } else {
+                                v.span
+                            };
+                            endogenous = Some((self.intern.intern(&value), span, token));
+                        }
                     } else if self.at(TokenKind::Ident) || self.at(TokenKind::Number) {
                         let v = self.bump();
                         value = self.lexeme(&v).to_string();
@@ -10414,6 +10961,9 @@ impl Parser<'_> {
                 }
                 if map.contains_key(&key) {
                     twice.push((key.clone(), tok.span));
+                    self.model
+                        .equation_tag_duplicates
+                        .push((key.clone(), tok.span, self.i));
                 }
                 map.insert(key, value);
             } else {
@@ -10422,6 +10972,7 @@ impl Parser<'_> {
         }
         self.eat(TokenKind::RBrack);
         ParsedTag {
+            endogenous,
             static_tag,
             dynamic_tag,
             flags,
@@ -10632,11 +11183,16 @@ impl Parser<'_> {
     }
 
     fn record_issue(&mut self, issue: ParseIssue) {
-        if let Some(origin) = self.token_origins.get(self.i) {
+        self.record_issue_at(self.i, issue);
+    }
+
+    fn record_issue_at(&mut self, at: usize, issue: ParseIssue) {
+        if let Some(origin) = self.token_origins.get(at) {
             self.model
                 .parse_issue_orders
                 .push((issue.span, origin.start));
         }
+        self.model.parse_issue_callbacks.push((issue.clone(), at));
         self.model.parse_issues.push(issue);
     }
 
@@ -10685,15 +11241,18 @@ impl Parser<'_> {
                 if self.lexeme(tok).len() > 1 && self.lexeme(tok).ends_with('"') {
                     continue;
                 }
-                issues.push(ParseIssue {
-                    kind: ParseIssueKind::BisonSyntax(
-                        "character unrecognized by lexer".to_string(),
-                    ),
-                    span: Span {
-                        start: tok.span.start,
-                        end: tok.span.start + 1,
+                issues.push((
+                    i,
+                    ParseIssue {
+                        kind: ParseIssueKind::BisonSyntax(
+                            "character unrecognized by lexer".to_string(),
+                        ),
+                        span: Span {
+                            start: tok.span.start,
+                            end: tok.span.start + 1,
+                        },
                     },
-                });
+                ));
                 continue;
             }
             if self.in_native_line_assignment(i)
@@ -10702,13 +11261,18 @@ impl Parser<'_> {
             {
                 continue;
             }
-            issues.push(ParseIssue {
-                kind: ParseIssueKind::DoubleQuotedString,
-                span: tok.span,
-            });
+            issues.push((
+                i,
+                ParseIssue {
+                    kind: ParseIssueKind::DoubleQuotedString,
+                    span: tok.span,
+                },
+            ));
         }
         if !issues.is_empty() {
-            self.model.parse_issues.extend(issues);
+            for (at, issue) in issues {
+                self.record_issue_at(at, issue);
+            }
             self.model
                 .parse_issues
                 .sort_by_key(|issue| issue.span.start);
@@ -11200,7 +11764,7 @@ impl Parser<'_> {
         }
         if self.at(TokenKind::Number) {
             let tok = self.bump();
-            let value = self.lexeme(&tok).parse::<f64>().ok();
+            let value = crate::engine::language::lexer::parse_numeric_literal(self.lexeme(&tok));
             let id = self.alloc(ExprKind::Number, tok.span);
             if let Some(value) = value {
                 self.model.numeric_literals.insert(id, value);
@@ -11251,6 +11815,7 @@ impl Parser<'_> {
         if self.path_context.is_some() {
             return self.parse_path_ident_expr();
         }
+        let ident_order = self.i;
         let tok = self.bump();
         let lexeme = self.lexeme(&tok).to_string();
         // Inside a block the word `end` is the closer, never a name. `+ end + 0`
@@ -11267,6 +11832,18 @@ impl Parser<'_> {
             });
         }
         let name = self.intern.intern(&lexeme);
+        if lexeme.eq_ignore_ascii_case("nan") || lexeme.eq_ignore_ascii_case("inf") {
+            if self.in_steady_state_rhs || !self.model_function_context {
+                return self.alloc(ExprKind::Number, tok.span);
+            }
+            let token = if lexeme.eq_ignore_ascii_case("nan") {
+                "NAN_CONSTANT"
+            } else {
+                "INF_CONSTANT"
+            };
+            self.push_bison(tok.span, format!("syntax error, unexpected {token}"));
+            return self.alloc(ExprKind::Error, tok.span);
+        }
         if self.in_dynare_block && lexeme == "dsge_prior_weight" {
             self.model.reserved_block_symbol_uses.push(tok.span);
         }
@@ -11322,6 +11899,7 @@ impl Parser<'_> {
                     return self.parse_call(
                         callee,
                         Token::with_lexeme(TokenKind::Ident, span, qualified),
+                        ident_order,
                     );
                 }
                 if self.model_function_context {
@@ -11332,6 +11910,7 @@ impl Parser<'_> {
                     );
                     return self.alloc(ExprKind::Error, span);
                 }
+                self.retain_fact_receipt("namespace_callback", self.i, Vec::new());
                 self.model.namespace_qualified.push((qualified, span));
                 let expr = self.alloc(ExprKind::Error, span);
                 self.model.namespace_qualified_exprs.insert(expr);
@@ -11344,6 +11923,7 @@ impl Parser<'_> {
                 start: tok.span.start,
                 end: rhs.span.end,
             };
+            self.retain_fact_receipt("namespace_callback", self.i, Vec::new());
             self.model
                 .namespace_qualified
                 .push((format!("{lexeme}.{rhs_lex}"), span));
@@ -11384,10 +11964,10 @@ impl Parser<'_> {
             );
         }
         if lexeme.eq_ignore_ascii_case("expectation") && self.looks_like_expectation() {
-            return self.parse_expectation(tok);
+            return self.parse_expectation(tok, ident_order);
         }
         if lexeme.eq_ignore_ascii_case("steady_state") {
-            return self.parse_steady_state(tok);
+            return self.parse_steady_state(tok, ident_order);
         }
         if let Some(kind) = pac_parser::named_operator_kind(&lexeme) {
             return self.parse_named_model_operator(tok, name, kind);
@@ -11395,48 +11975,113 @@ impl Parser<'_> {
         if !becoming_call && self.looks_like_timing() && !self.is_expression_builtin(&lexeme) {
             return self.parse_timing(name, tok);
         }
-        self.parse_call(name, tok)
+        self.parse_call(name, tok, ident_order)
     }
 
-    fn parse_expectation(&mut self, kw: Token) -> ExprId {
+    fn parse_expectation(&mut self, kw: Token, order: usize) -> ExprId {
+        let issues = self.model.parse_issues.len();
         let (shift, _) = self.parse_signed_int_in_parens();
         self.eat(TokenKind::LParen);
         let arg = match self.parse_expr() {
             Some(id) => id,
             None => self.alloc_error(kw.span),
         };
+        let completed = self.at(TokenKind::RParen) && !self.pac_expr_has_error(arg);
         let end = if self.at(TokenKind::RParen) {
             self.bump().span.end
         } else {
             self.expr_span(arg).end
         };
-        self.alloc(
+        let id = self.alloc(
             ExprKind::Expectation { shift, arg },
             Span {
                 start: kw.span.start,
                 end,
             },
-        )
+        );
+        if completed
+            && self.model.parse_issues.len() == issues
+            && !self.refused_constructors.contains(&id)
+            && !self.in_native_assignment
+        {
+            self.model.function_calls.push(FunctionCall {
+                expr: id,
+                callback_order: self.i,
+                span: kw.span,
+                order,
+            });
+        }
+        id
     }
 
-    fn parse_steady_state(&mut self, kw: Token) -> ExprId {
+    fn parse_steady_state(&mut self, kw: Token, order: usize) -> ExprId {
+        let issues = self.model.parse_issues.len();
         self.eat(TokenKind::LParen);
         let arg = match self.parse_expr() {
             Some(id) => id,
             None => self.alloc_error(kw.span),
         };
+        let completed = self.at(TokenKind::RParen) && !self.pac_expr_has_error(arg);
         let end = if self.at(TokenKind::RParen) {
             self.bump().span.end
         } else {
             self.expr_span(arg).end
         };
-        self.alloc(
+        let id = self.alloc(
             ExprKind::SteadyState { arg },
             Span {
                 start: kw.span.start,
                 end,
             },
-        )
+        );
+        if completed && self.model_function_context && self.model.parse_issues.len() == issues {
+            let scope = self.constructor_scope();
+            let mut exogenous = self
+                .constructors
+                .variables(self.constructed[&arg], |name| {
+                    self.constructor_locals.get(&(scope, name)).copied()
+                })
+                .into_iter()
+                .filter(|name| {
+                    matches!(
+                        self.model.final_symbol_kind(*name),
+                        Some("varexo" | "varexo_det")
+                    ) && !self
+                        .model
+                        .heterogeneous_in_context(*name, self.model.symbol_context())
+                })
+                .collect::<Vec<_>>();
+            exogenous.sort_by(|left, right| self.intern.get(*left).cmp(self.intern.get(*right)));
+            if !exogenous.is_empty() {
+                self.refused_constructors.insert(id);
+                self.model
+                    .constructor_refused_statements
+                    .insert(self.model.statements.len());
+            }
+            self.model.steady_state_actions.push(
+                crate::engine::language::model::SteadyStateAction {
+                    order: self.i,
+                    span: Span {
+                        start: kw.span.start,
+                        end,
+                    },
+                    exogenous,
+                },
+            );
+        }
+        if completed
+            && self.model.parse_issues.len() == issues
+            && !self.refused_constructors.contains(&id)
+            && !self.in_native_assignment
+        {
+            self.model.function_calls.push(FunctionCall {
+                expr: id,
+                callback_order: self.i,
+                span: kw.span,
+                order,
+            });
+        }
+        id
     }
 
     fn parse_timing(&mut self, name: Name, ident: Token) -> ExprId {
@@ -11462,9 +12107,14 @@ impl Parser<'_> {
         )
     }
 
-    fn parse_call(&mut self, callee: Name, kw: Token) -> ExprId {
+    fn parse_call(&mut self, callee: Name, kw: Token, callee_order: usize) -> ExprId {
         let callee_token = self.i - 1;
         let parse_issues_before = self.model.parse_issues.len();
+        if self.model_function_context
+            && self.intern.get(callee).eq_ignore_ascii_case("EXPECTATION")
+        {
+            self.record_syntax_at(self.i, Some("an integer shift followed by '(expression)'"));
+        }
         self.eat(TokenKind::LParen);
         let mut args = Vec::new();
         let builtin = (!self.in_native_assignment)
@@ -11577,7 +12227,8 @@ impl Parser<'_> {
             );
         }
         self.in_model_call_args = previous_argument_scope;
-        let end = if self.at(TokenKind::RParen) {
+        let closed = self.at(TokenKind::RParen);
+        let end = if closed {
             self.bump().span.end
         } else {
             args.last()
@@ -11612,6 +12263,7 @@ impl Parser<'_> {
             && !is_builtin_function(self.intern.get(callee))
             && !self.is_known_symbol(callee)
         {
+            self.retain_fact_receipt("epilogue_unknown_call", self.i, Vec::new());
             self.model.epilogue_undeclared_calls.push((callee, kw.span));
         }
         if self.model_function_context
@@ -11622,7 +12274,7 @@ impl Parser<'_> {
                 .iter()
                 .any(|stmt| stmt.name.is_some_and(|(name, _)| name == callee))
         {
-            self.model.shape_refuses.push(ShapeRefuse::official(kw.span, "external_function", format!("Before using {}() in the model block, you must first declare it via the external_function() statement", self.intern.get(callee))));
+            self.record_shape_refusal(ShapeRefuse::official(kw.span, "external_function", format!("Before using {}() in the model block, you must first declare it via the external_function() statement", self.intern.get(callee))));
         }
         if !self.model_function_context
             && !self.in_native_assignment
@@ -11643,19 +12295,27 @@ impl Parser<'_> {
             );
             self.retain_last_symbol_occurrence(callee_token);
         }
-        let sum_role = if self.intern.get(callee).eq_ignore_ascii_case("SUM") {
-            Some(
-                args.first()
-                    .is_some_and(|id| match &self.model.exprs.get(*id).kind {
-                        ExprKind::Ident { name, .. } => {
-                            self.model.is_heterogeneous_endogenous(*name)
-                        }
-                        _ => false,
-                    }),
-            )
-        } else {
-            None
-        };
+        let sum_argument = self
+            .intern
+            .get(callee)
+            .eq_ignore_ascii_case("SUM")
+            .then(|| {
+                (args.len() == 1)
+                    .then(|| self.constructors.variable(self.constructed[&args[0]]))
+                    .flatten()
+                    .map(|(name, timing)| {
+                        (
+                            name,
+                            timing,
+                            self.model
+                                .symbol_kind_in_context(name, self.model.symbol_context())
+                                == Some("var")
+                                && self
+                                    .model
+                                    .heterogeneous_in_context(name, self.model.symbol_context()),
+                        )
+                    })
+            });
         let id = self.alloc(
             ExprKind::Call { callee, args },
             Span {
@@ -11663,6 +12323,18 @@ impl Parser<'_> {
                 end,
             },
         );
+        if !self.in_native_assignment
+            && closed
+            && self.model.parse_issues.len() == parse_issues_before
+            && !self.refused_constructors.contains(&id)
+        {
+            self.model.function_calls.push(FunctionCall {
+                expr: id,
+                callback_order: self.i,
+                span: kw.span,
+                order: callee_order,
+            });
+        }
         if self.path_context.is_some() {
             self.path_call_refs.insert(
                 id,
@@ -11681,8 +12353,8 @@ impl Parser<'_> {
                 },
             );
         }
-        if let Some(role) = sum_role {
-            self.model.sum_argument_roles.insert(id, role);
+        if let Some(argument) = sum_argument {
+            self.model.sum_arguments.insert(id, argument);
         }
         id
     }
@@ -11748,11 +12420,7 @@ impl Parser<'_> {
             Some(format!("To use an external function ({name}) within the model block, you must first declare it via the external_function() statement."))
         };
         if let Some(message) = message {
-            self.model.shape_refuses.push(ShapeRefuse::official(
-                span,
-                "external_function",
-                message,
-            ));
+            self.record_shape_refusal(ShapeRefuse::official(span, "external_function", message));
         }
     }
 
@@ -11906,6 +12574,14 @@ impl Parser<'_> {
                 name, ident_span, ..
             } = &kind
         {
+            self.model.outside_expression_callbacks.push(
+                crate::engine::language::model::OutsideExpressionCallback {
+                    name: *name,
+                    span: *ident_span,
+                    context: self.model.symbol_context(),
+                    order: self.i,
+                },
+            );
             self.model.outside_expression_uses.push((
                 *name,
                 *ident_span,
@@ -11915,6 +12591,7 @@ impl Parser<'_> {
                 self.model.final_symbol_kind(*name),
                 Some("trend_var" | "log_trend_var")
             ) {
+                self.retain_fact_receipt("trend_outside_callback", self.i, Vec::new());
                 self.model.trend_outside_uses.push((*name, *ident_span));
             }
         }
@@ -11942,6 +12619,7 @@ impl Parser<'_> {
                     timing: *timing,
                     context: self.model.symbol_context(),
                     command: self.model_expression_command,
+                    scope: self.constructor_scope(),
                 },
             );
             if self.model.final_symbol_kind(*name) == Some("excluded") {
@@ -11954,7 +12632,7 @@ impl Parser<'_> {
             ExprKind::Number => self
                 .src
                 .get(span.start as usize..span.end as usize)
-                .and_then(|raw| raw.parse::<f64>().ok())
+                .and_then(crate::engine::language::lexer::parse_numeric_literal)
                 .filter(|v| v.is_finite()),
             ExprKind::Unary { op, arg } => self.interned_value(*arg).map(|v| match op {
                 UnOp::Pos => v,
@@ -11996,6 +12674,10 @@ impl Parser<'_> {
     fn construct_expr(&mut self, id: ExprId) {
         let scope = self.constructor_scope();
         self.model.constructor_scopes.insert(id, scope);
+        self.model.constructor_orders.insert(id, self.i);
+        self.model
+            .constructor_contexts
+            .insert(id, self.model.symbol_context());
         let expr = self.model.exprs.get(id);
         let name_refused = if let ExprKind::Ident { name, timing, .. } = expr.kind {
             let kind = self.model.final_symbol_kind(name);
@@ -12006,6 +12688,12 @@ impl Parser<'_> {
                     kind,
                     Some("external_function" | "mod_file_local" | "excluded")
                 ) || kind == Some("epilogue") && !self.in_epilogue
+                    || self.in_epilogue
+                        && (kind.is_none()
+                            || matches!(kind, Some("varexo" | "varexo_det"))
+                            || self
+                                .model
+                                .heterogeneous_in_context(name, self.model.symbol_context()))
                     || kind == Some("varexo_det") && timing != 0
                     || self.model_expression_command == "planner_objective"
                         && (timing != 0
@@ -12060,14 +12748,27 @@ impl Parser<'_> {
             ExprKind::Error => true,
             _ => false,
         };
-        let node = if refused_child || name_refused || call_refused {
+        let epilogue_operator_refused = self.in_epilogue
+            && match &expr.kind {
+                ExprKind::Expectation { .. } | ExprKind::SteadyState { .. } => true,
+                ExprKind::Call { callee, .. } => {
+                    self.intern.get(*callee).eq_ignore_ascii_case("SUM")
+                        || !self.is_expression_builtin(self.intern.get(*callee))
+                            && !self.is_known_symbol(*callee)
+                }
+                _ => false,
+            };
+        let node = if refused_child || name_refused || call_refused || epilogue_operator_refused {
             self.refused_constructors.insert(id);
             self.constructors.opaque(id)
         } else {
             // Tokens retain emitted literal spelling, including interpolation.
             let literal = matches!(expr.kind, ExprKind::Number).then(|| {
                 let text = self.tokens[self.i.saturating_sub(1)].text(self.src);
-                (text, text.parse().ok())
+                (
+                    text,
+                    crate::engine::language::lexer::parse_numeric_literal(text),
+                )
             });
             let ident_value = if let ExprKind::Ident { name, .. } = expr.kind {
                 self.model_function_context
@@ -12128,6 +12829,7 @@ impl Parser<'_> {
                     None
                 };
                 if let Some((code, message)) = code {
+                    self.retain_fact_receipt("constant_fold_callback", self.i, Vec::new());
                     self.model
                         .const_fold_errors
                         .push((span, code, message.into()));
@@ -12144,6 +12846,7 @@ impl Parser<'_> {
             let numerator = self
                 .constructors
                 .display(numerator, |name| self.intern.get(name));
+            self.retain_fact_receipt("constant_fold_callback", self.i, Vec::new());
             self.model.const_fold_errors.push((span, "E278", format!(
                 "Division by zero when forming ({numerator})/(0); denominator simplified to 0 (possibly after substituting a variable set to 0)."
             )));
@@ -12199,7 +12902,7 @@ impl Parser<'_> {
                 let from = self.i;
                 self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
                 if saw_trailing_symbol {
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(
                             self.tokens[from].span,
                             opener.as_deref().unwrap_or("symbol list"),
@@ -12214,7 +12917,7 @@ impl Parser<'_> {
                     if handed_option_command(cmd) {
                         let options = self.read_family_options(from, self.i);
                         if options.is_empty() {
-                            self.model.shape_refuses.push(
+                            self.record_shape_refusal(
                                 ShapeRefuse::official(
                                     self.tokens[self.i.saturating_sub(1)].span,
                                     cmd,
@@ -12230,7 +12933,7 @@ impl Parser<'_> {
                                 self.src, cmd, &options,
                             )
                         {
-                            self.model.shape_refuses.push(refuse);
+                            self.record_shape_refusal(refuse);
                         }
                     }
                     if cmd.eq_ignore_ascii_case("stoch_simul") {
@@ -12284,7 +12987,7 @@ impl Parser<'_> {
                 let word = self.lexeme(&self.tokens[self.i]).to_string();
                 if let Some(message) = reserved_trailing_option_error(&word) {
                     let span = self.tokens[self.i].span;
-                    self.model.shape_refuses.push(
+                    self.record_shape_refusal(
                         ShapeRefuse::official(span, &cmd, message)
                             .with_parse_order(self.token_origins[self.i].start),
                     );
@@ -12296,7 +12999,7 @@ impl Parser<'_> {
                 continue;
             }
             if self.at(TokenKind::Eq) && saw_trailing_symbol {
-                self.model.shape_refuses.push(
+                self.record_shape_refusal(
                     ShapeRefuse::official(
                         self.tokens[self.i].span,
                         opener.as_deref().unwrap_or("symbol list"),
@@ -12379,7 +13082,7 @@ impl Parser<'_> {
                 "syntax error, unexpected MINUS, expecting COMMA or ')'"
             };
             if let Some(refuse) = self.date_suffix_refusal_at(next, opener, minus_message) {
-                self.model.shape_refuses.push(refuse);
+                self.record_shape_refusal(refuse);
             }
         }
         if opener.eq_ignore_ascii_case("perfect_foresight_setup")
@@ -12398,11 +13101,14 @@ impl Parser<'_> {
                         && row.span.start == opt.span.start
                 });
                 if !parsed_date && opt.eq && opt.value_lex.parse::<i64>().is_ok() {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        opt.value_span,
-                        opener,
-                        "syntax error, unexpected INT_NUMBER, expecting DATE",
-                    ));
+                    self.record_shape_refusal(
+                        ShapeRefuse::official(
+                            opt.value_span,
+                            opener,
+                            "syntax error, unexpected INT_NUMBER, expecting DATE",
+                        )
+                        .with_parse_order(self.token_origins[opt.token_index + 2].start),
+                    );
                 }
             }
         }
@@ -12416,9 +13122,10 @@ impl Parser<'_> {
                     None
                 };
                 if let Some(message) = message {
-                    self.model
-                        .shape_refuses
-                        .push(ShapeRefuse::official(opt.span, opener, message));
+                    self.record_shape_refusal(
+                        ShapeRefuse::official(opt.span, opener, message)
+                            .with_parse_order(self.token_origins[opt.token_index].start),
+                    );
                 }
             }
         }
@@ -12619,14 +13326,20 @@ impl Parser<'_> {
                     }
                 } else if opt.ident.eq_ignore_ascii_case("max_dim_cova_group")
                     && let Some(n) = parse_int_lexeme(&opt.value_lex)
-                    && self.model.max_dim_cova_group.is_none()
                 {
-                    self.model.max_dim_cova_group = Some((n, opt.value_span));
-                    self.record_setting_receipt(
-                        "max_dim_cova_group",
-                        opt.active_tokens.clone(),
-                        Some(from..to),
-                    );
+                    self.model.identification_max_dimensions.push((
+                        n,
+                        opt.value_span,
+                        opt.token_index,
+                    ));
+                    if self.model.max_dim_cova_group.is_none() {
+                        self.model.max_dim_cova_group = Some((n, opt.value_span));
+                        self.record_setting_receipt(
+                            "max_dim_cova_group",
+                            opt.active_tokens.clone(),
+                            Some(from..to),
+                        );
+                    }
                 }
             } else if opener.eq_ignore_ascii_case("stoch_simul") {
                 if opt.ident.eq_ignore_ascii_case("hp_filter")
@@ -12808,6 +13521,11 @@ impl Parser<'_> {
             if let Entry::Vacant(e) = seen.entry(key) {
                 e.insert(opt.span);
             } else {
+                self.retain_fact_receipt(
+                    "option_duplicate_callback",
+                    opt.active_tokens.end,
+                    vec![opt.active_tokens.clone()],
+                );
                 self.model.option_twice.push((opt.ident, opt.span));
             }
         }
@@ -12820,14 +13538,17 @@ impl Parser<'_> {
             if crate::engine::language::pinned_options::allows(command, &opt.ident) != Some(false) {
                 continue;
             }
-            self.model.shape_refuses.push(ShapeRefuse::official(
-                opt.span,
-                command,
-                format!(
-                    "syntax error, unexpected option '{}' in '{command}'",
-                    opt.ident
-                ),
-            ));
+            self.record_shape_refusal(
+                ShapeRefuse::official(
+                    opt.span,
+                    command,
+                    format!(
+                        "syntax error, unexpected option '{}' in '{command}'",
+                        opt.ident
+                    ),
+                )
+                .with_parse_order(self.token_origins[opt.token_index].start),
+            );
         }
     }
 
@@ -12846,11 +13567,19 @@ impl Parser<'_> {
                     next.filter(|token| matches!(token.kind, TokenKind::Comma | TokenKind::RParen))
                 };
                 if let Some(token) = refused {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        token.span,
-                        command,
-                        "syntax error, empty option in 'external_function'",
-                    ));
+                    let refused_at = if matches!(previous, TokenKind::LParen | TokenKind::Comma) {
+                        index
+                    } else {
+                        index + 1
+                    };
+                    self.record_shape_refusal(
+                        ShapeRefuse::official(
+                            token.span,
+                            command,
+                            "syntax error, empty option in 'external_function'",
+                        )
+                        .with_parse_order(self.token_origins[refused_at].start),
+                    );
                 }
             }
         }
@@ -12877,14 +13606,17 @@ impl Parser<'_> {
             {
                 continue;
             }
-            self.model.shape_refuses.push(ShapeRefuse::official(
-                pair[1].span,
-                command,
-                format!(
-                    "syntax error, expected ',' before option '{}' in '{command}'",
-                    pair[1].ident
-                ),
-            ));
+            self.record_shape_refusal(
+                ShapeRefuse::official(
+                    pair[1].span,
+                    command,
+                    format!(
+                        "syntax error, expected ',' before option '{}' in '{command}'",
+                        pair[1].ident
+                    ),
+                )
+                .with_parse_order(self.token_origins[pair[1].token_index].start),
+            );
         }
     }
 
@@ -13006,21 +13738,27 @@ impl Parser<'_> {
                         .first()
                         .is_some_and(|token| token.kind == TokenKind::Minus)
                 {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        value[0].span,
-                        command,
-                        "syntax error, unexpected MINUS, expecting INT_NUMBER",
-                    ));
+                    self.record_shape_refusal(
+                        ShapeRefuse::official(
+                            value[0].span,
+                            command,
+                            "syntax error, unexpected MINUS, expecting INT_NUMBER",
+                        )
+                        .with_parse_order(self.token_origins[opt.token_index + 2].start),
+                    );
                     continue;
                 }
-                self.model.shape_refuses.push(ShapeRefuse::official(
-                    opt.span,
-                    command,
-                    format!(
-                        "syntax error, invalid value for option '{}' in '{command}'",
-                        opt.ident
-                    ),
-                ));
+                self.record_shape_refusal(
+                    ShapeRefuse::official(
+                        opt.span,
+                        command,
+                        format!(
+                            "syntax error, invalid value for option '{}' in '{command}'",
+                            opt.ident
+                        ),
+                    )
+                    .with_parse_order(self.token_origins[opt.token_index].start),
+                );
             }
         }
     }
@@ -13121,6 +13859,11 @@ impl Parser<'_> {
             if seen.insert(key, ()).is_none() {
                 continue;
             }
+            self.retain_fact_receipt(
+                "option_duplicate_callback",
+                opt.active_tokens.end,
+                vec![opt.active_tokens.clone()],
+            );
             self.model.option_twice.push((opt.name.clone(), opt.span));
         }
     }
@@ -13141,7 +13884,7 @@ impl Parser<'_> {
         if options.is_empty() {
             // `name()` — the grammar's list needs at least one option.
             let at = self.tokens[open_i].span;
-            self.model.shape_refuses.push(
+            self.record_shape_refusal(
                 ShapeRefuse::new(at, command, "at least one option")
                     .with_parse_order(self.token_origins[open_i].start),
             );
@@ -13150,7 +13893,7 @@ impl Parser<'_> {
         if let Some(refuse) =
             crate::engine::language::shape_gate::option_refusal(self.src, command, options, table)
         {
-            self.model.shape_refuses.push(refuse);
+            self.record_shape_refusal(refuse);
         }
     }
 
@@ -13349,6 +14092,62 @@ impl Parser<'_> {
 
     fn lexeme<'a>(&'a self, tok: &'a Token) -> &'a str {
         tok.text(self.src)
+    }
+
+    fn constructed_complementarity(&self, id: ExprId) -> Option<ComplementarityTriple> {
+        use crate::engine::language::constructor::ComplementarityMatch;
+        let root = self.constructed[&id];
+        let context = self.model.symbol_context();
+        let scope = self.constructor_scope();
+        let result = self.constructors.complementarity(
+            root,
+            |name| {
+                self.model.symbol_kind_in_context(name, context) == Some("var")
+                    && match scope {
+                        DataTreeScope::Heterogeneous(dimension) => {
+                            self.model.heterogeneous_in_context(name, context)
+                                && self.model.endogenous.iter().any(|decl| {
+                                    decl.name == name
+                                        && decl.symbol_type_context.index() <= context.index()
+                                        && decl
+                                            .heterogeneity
+                                            .is_some_and(|(declared, _)| declared == dimension)
+                                })
+                        }
+                        _ => !self.model.heterogeneous_in_context(name, context),
+                    }
+            },
+            |bound| {
+                self.constructors
+                    .variables(bound, |name| {
+                        self.constructor_locals.get(&(scope, name)).copied()
+                    })
+                    .into_iter()
+                    .any(|name| {
+                        !self.model.heterogeneous_in_context(name, context)
+                            && matches!(
+                                self.model.symbol_kind_in_context(name, context),
+                                Some("var" | "varexo" | "varexo_det")
+                            )
+                    })
+            },
+        );
+        let ComplementarityMatch::Triple(name) = result else {
+            return None;
+        };
+        if let Some(written) = self.match_complementarity(id) {
+            return Some(written);
+        }
+        let (lower, upper) = self.constructors.complementarity_bounds(root, name);
+        let text = |node| {
+            self.constructors
+                .display(node, |symbol| self.intern.get(symbol))
+        };
+        Some(ComplementarityTriple {
+            variable: self.intern.get(name).to_string(),
+            lower_bound: lower.map(text),
+            upper_bound: upper.map(text),
+        })
     }
 
     fn match_complementarity(&self, id: ExprId) -> Option<ComplementarityTriple> {
@@ -14593,5 +15392,50 @@ mod tests {
         let empty = parse(&format!("{src}discretionary_policy(instruments=());"));
         assert!(empty.discretionary_has_instruments_option);
         assert!(empty.instruments.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod pinned_literal_tests {
+    use super::*;
+
+    #[test]
+    fn d_exponents_and_ordinary_constants_keep_their_pinned_expression_roles() {
+        // Guards token splitting creating a phantom d3 symbol or Inf/NaN local.
+        for source in [
+            "var y;model;y=1d3;end;",
+            "parameters p;p=1D-3;",
+            "parameters p;p=Inf;",
+            "parameters p;p=NaN;",
+        ] {
+            let model = parse(source);
+            assert!(
+                model.parse_issues.is_empty(),
+                "{source}: {:?}",
+                model.parse_issues
+            );
+            assert!(model
+                .symbol_type_events
+                .iter()
+                .all(|event| !["d3", "D", "Inf", "NaN"].contains(&model.name(event.name))));
+            assert!(model
+                .equations
+                .first()
+                .and_then(|equation| equation.rhs_expr)
+                .or_else(|| model
+                    .param_assignments
+                    .first()
+                    .and_then(|assignment| assignment.expr))
+                .is_some_and(|id| matches!(model.exprs.get(id).kind, ExprKind::Number)));
+        }
+        // The pin accepts D lexically but its strtod constructor reads the
+        // mantissa. 1d3-1 therefore constructs zero and the division refuses.
+        let model = parse("parameters p;p=1/(1d3-1);");
+        assert!(model
+            .const_fold_errors
+            .iter()
+            .any(|(_, code, _)| *code == "E278"));
+        let model = parse("var y;model;y=Inf;end;");
+        assert!(model.parse_issues.iter().any(|issue| matches!(&issue.kind, ParseIssueKind::BisonSyntax(message) if message.contains("INF_CONSTANT"))));
     }
 }

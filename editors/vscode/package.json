@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.26",
+  "version": "0.11.27",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -1526,6 +1526,8 @@
     "eslint": "^10.0.0",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.0.0",
+    "vscode-oniguruma": "1.7.0",
+    "vscode-textmate": "9.2.0",
     "yauzl": "3.4.0"
   },
   "dependencies": {

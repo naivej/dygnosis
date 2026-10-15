@@ -444,7 +444,7 @@ fn repeated_literal_with_native_execution_withholds_rename() {
     assert_eq!(rename(&[view], 0, &binding, "rho").unwrap_err(), BINDING);
 }
 
-// Rename cannot give a previously unresolved read a different binding.
+// Parse refusal takes precedence over a later binding-capture decision.
 #[test]
 fn rename_refuses_to_capture_unresolved_replacement_uses() {
     for text in [
@@ -455,9 +455,17 @@ fn rename_refuses_to_capture_unresolved_replacement_uses() {
         let binding = choose(&view, "helper");
         assert_eq!(
             rename(&[view], 0, &binding, "other").unwrap_err().code,
-            "BINDING_CAPTURE"
+            "INCOMPLETE_INPUT"
         );
     }
+    // VAREXP's expression accepts an unresolved name at Parse. Rename still
+    // must not give that existing read the parameter's binding.
+    let view = model("parameters helper;var_expectation_model(model_name=m,expression=helper+other,auxiliary_model_name=aux,horizon=1);");
+    let binding = choose(&view, "helper");
+    assert_eq!(
+        rename(&[view], 0, &binding, "other").unwrap_err().code,
+        "BINDING_CAPTURE"
+    );
 }
 
 // Compatible owners can share one verified local declaration and definition.
@@ -508,4 +516,35 @@ fn shared_local_owners_require_matching_written_binding_and_scope() {
         rename(&[first, second], 0, &binding, "shared_helper").unwrap_err(),
         BINDING
     );
+}
+
+// Guards bulk color-site projection using equal text as evidence. Only the
+// parser's declaration/write/read sites can acquire an ordinary role.
+#[test]
+fn accepted_ordinary_inventory_excludes_native_and_named_lookalikes() {
+    let text = "parameters a;a=.5;var y;model;[name='Y']y=a*y(-1);end;var_model(model_name=a,eqtags=['Y']);verbatim;a = a + y;end;";
+    let view = model(text);
+    let sites: Vec<_> = view
+        .accepted_ordinary_sites()
+        .filter(|(name, _)| *name == "a")
+        .collect();
+    let ordinary = view
+        .bindings()
+        .into_iter()
+        .find(|row| row.name == "a" && row.is_ordinary())
+        .unwrap();
+    let references = view.references(&ordinary, true);
+    assert_eq!(sites.len(), 3);
+    assert_eq!(
+        sites.iter().map(|(_, site)| site.order).collect::<Vec<_>>(),
+        references.iter().map(|site| site.order).collect::<Vec<_>>()
+    );
+    let named_start = text.find("model_name=a").unwrap() as u32 + "model_name=".len() as u32;
+    let native_start = text.find("verbatim;").unwrap() as u32;
+    assert!(sites
+        .iter()
+        .all(|(_, site)| site.span.start != named_start && site.span.start < native_start));
+    let without_declaration = view.references(&ordinary, false);
+    assert_eq!(without_declaration.len(), 2);
+    assert!(without_declaration.iter().all(|site| !site.declaration));
 }

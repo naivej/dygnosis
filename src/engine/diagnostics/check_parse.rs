@@ -472,9 +472,30 @@ fn leading_ident(s: &str) -> Option<&str> {
 }
 
 fn format_recorded_issues(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
+    format_issues(model, index, &model.parse_issues)
+}
+
+pub(crate) fn recorded_refusal(
+    model: &Model,
+    issue: &crate::engine::language::model::ParseIssue,
+) -> Option<Diagnostic> {
+    format_issues(
+        model,
+        &LineIndex::new(&model.source),
+        std::slice::from_ref(issue),
+    )
+    .into_iter()
+    .next()
+}
+
+fn format_issues(
+    model: &Model,
+    index: &LineIndex,
+    issues: &[crate::engine::language::model::ParseIssue],
+) -> Vec<Diagnostic> {
     let src = &model.source;
     let mut out = Vec::new();
-    for issue in &model.parse_issues {
+    for issue in issues {
         if crate::engine::control::cancelled() {
             return Default::default();
         }

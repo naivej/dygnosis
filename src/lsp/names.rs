@@ -13,30 +13,46 @@ pub(crate) enum NameRole {
     Exogenous,
     Parameter,
     ModelLocal,
+    Dimension,
+    Database,
+    NamedModel,
+    Subsample,
+    Trend,
+    ExternalFunction,
 }
 
 impl NameRole {
     pub fn index(self) -> usize {
-        match self {
-            Self::Endogenous => 0,
-            Self::Exogenous => 1,
-            Self::Parameter => 2,
-            Self::ModelLocal => 3,
-        }
+        self as usize
     }
 }
 
-const ROLES: [&str; 4] = [
+const ROLES: [&str; 10] = [
     "dynareEndogenous",
     "dynareExogenous",
     "dynareParameter",
     "dynareModelLocal",
+    "dynareDimension",
+    "dynareDatabase",
+    "dynareModel",
+    "dynareSubsample",
+    "dynareTrend",
+    "dynareExternalFunction",
 ];
+
+fn standard_role(index: usize) -> SemanticTokenType {
+    match index {
+        4 | 6 => SemanticTokenType::NAMESPACE,
+        7 => SemanticTokenType::PROPERTY,
+        9 => SemanticTokenType::FUNCTION,
+        _ => SemanticTokenType::VARIABLE,
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct SemanticMapping {
     pub legend: SemanticTokensLegend,
-    types: [Option<u32>; 4],
+    types: [Option<u32>; ROLES.len()],
     pub declaration: u32,
     pub forward: u32,
     pub predetermined: u32,
@@ -46,10 +62,26 @@ impl Default for SemanticMapping {
     fn default() -> Self {
         Self {
             legend: SemanticTokensLegend {
-                token_types: vec![SemanticTokenType::VARIABLE],
+                token_types: vec![
+                    SemanticTokenType::VARIABLE,
+                    SemanticTokenType::NAMESPACE,
+                    SemanticTokenType::PROPERTY,
+                    SemanticTokenType::FUNCTION,
+                ],
                 token_modifiers: Vec::new(),
             },
-            types: [Some(0); 4],
+            types: [
+                Some(0),
+                Some(0),
+                Some(0),
+                Some(0),
+                Some(1),
+                Some(0),
+                Some(1),
+                Some(2),
+                Some(0),
+                Some(3),
+            ],
             declaration: 0,
             forward: 0,
             predetermined: 0,
@@ -64,7 +96,7 @@ impl SemanticMapping {
                 token_types: Vec::new(),
                 token_modifiers: Vec::new(),
             },
-            types: [None; 4],
+            types: [None; ROLES.len()],
             declaration: 0,
             forward: 0,
             predetermined: 0,
@@ -79,6 +111,8 @@ impl SemanticMapping {
                 .any(|token| token.as_str() == *custom)
             {
                 Some(SemanticTokenType::new(custom))
+            } else if capability.token_types.contains(&standard_role(role)) {
+                Some(standard_role(role))
             } else if capability
                 .token_types
                 .contains(&SemanticTokenType::VARIABLE)

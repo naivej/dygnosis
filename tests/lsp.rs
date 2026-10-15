@@ -666,6 +666,28 @@ fn completion_labels(resp: CompletionResponse) -> Vec<String> {
     }
 }
 
+async fn completion_items_at(
+    server: &dygnosis::server::Backend,
+    uri: &Url,
+    text: &str,
+    byte: usize,
+) -> Vec<CompletionItem> {
+    match server
+        .completion(CompletionParams {
+            text_document_position: tdp(uri.clone(), text, byte),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        })
+        .await
+        .unwrap()
+        .expect("completion")
+    {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    }
+}
+
 #[allow(deprecated)]
 fn nested_symbols(resp: DocumentSymbolResponse) -> Vec<DocumentSymbol> {
     match resp {
@@ -1073,21 +1095,6 @@ async fn heterogeneity_names_reach_completion_and_hover() {
         .did_open(open_params(uri.clone(), text.clone(), 1))
         .await;
 
-    let response = service
-        .inner()
-        .completion(CompletionParams {
-            text_document_position: tdp(uri.clone(), &text, text.len()),
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .expect("completion rpc")
-        .expect("name completion");
-    let items = match response {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
-    };
     for (name, help, kind) in [
         (
             "heterogeneity_dimension",
@@ -1117,7 +1124,7 @@ async fn heterogeneity_names_reach_completion_and_hover() {
         (
             "heterogeneity",
             "var, varexo, parameters, model, or shocks",
-            CompletionItemKind::KEYWORD,
+            CompletionItemKind::PROPERTY,
         ),
         (
             "SUM",
@@ -1125,6 +1132,13 @@ async fn heterogeneity_names_reach_completion_and_hover() {
             CompletionItemKind::FUNCTION,
         ),
     ] {
+        let needle = if name == "heterogeneity" {
+            "var(heterogeneity"
+        } else {
+            name
+        };
+        let byte = text.find(needle).unwrap() + needle.len() - name.len();
+        let items = completion_items_at(service.inner(), &uri, &text, byte).await;
         let item = items.iter().find(|item| item.label == name).unwrap();
         assert_eq!(item.kind, Some(kind), "{name} kind");
         let Some(Documentation::String(doc)) = &item.documentation else {
@@ -1149,7 +1163,7 @@ async fn heterogeneity_names_reach_completion_and_hover() {
                 .expect("name hover"),
         );
         let hover_help = if name == "heterogeneity" {
-            "dimension name"
+            "heterogeneity dimension"
         } else {
             help
         };
@@ -1227,7 +1241,10 @@ async fn heterogeneity_names_reach_completion_and_hover() {
         let Some(Documentation::String(doc)) = &item.documentation else {
             panic!("{opener} missing option help");
         };
-        assert!(doc.contains("dimension name"), "{opener}: {doc}");
+        assert!(
+            doc.to_ascii_lowercase().contains("heterogeneity dimension"),
+            "{opener}: {doc}"
+        );
     }
 }
 
@@ -1722,21 +1739,6 @@ async fn semi_structural_names_reach_completion_and_hover() {
         .did_open(open_params(uri.clone(), text.clone(), 1))
         .await;
 
-    let response = service
-        .inner()
-        .completion(CompletionParams {
-            text_document_position: tdp(uri.clone(), &text, text.len()),
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .expect("completion rpc")
-        .expect("name completion");
-    let items = match response {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
-    };
     for (name, help, kind) in [
         (
             "var_model",
@@ -1784,6 +1786,13 @@ async fn semi_structural_names_reach_completion_and_hover() {
             CompletionItemKind::FUNCTION,
         ),
     ] {
+        let needle = if name == "deterministic_trends" {
+            format!("{name};")
+        } else {
+            format!("{name}(")
+        };
+        let byte = text.find(&needle).unwrap();
+        let items = completion_items_at(service.inner(), &uri, &text, byte).await;
         let item = items.iter().find(|item| item.label == name).unwrap();
         assert_eq!(item.kind, Some(kind), "{name} kind");
         let Some(Documentation::String(doc)) = &item.documentation else {
@@ -3819,10 +3828,10 @@ async fn signature_help_heterogeneous_shocks_use_that_option_list() {
 }
 
 #[tokio::test]
-async fn signature_help_is_absent_outside_an_option_list() {
+async fn signature_help_uses_known_calls_and_option_lists_only() {
     let equation = "model;\ny = log(y(-1));\nend;\n";
     let in_call = equation.find("log(").unwrap() + "log(".len();
-    assert!(signature_at_byte(equation, in_call).await.is_none());
+    assert!(signature_at_byte(equation, in_call).await.is_some());
     let on_name = equation.find("y =").unwrap();
     assert!(signature_at_byte(equation, on_name).await.is_none());
 
@@ -3835,7 +3844,7 @@ async fn signature_help_is_absent_outside_an_option_list() {
 
     let declaration = "var(heterogeneity=d) a;";
     let option = declaration.find("heterogeneity").unwrap();
-    assert!(signature_at_byte(declaration, option).await.is_none());
+    assert!(signature_at_byte(declaration, option).await.is_some());
 
     let after_model = "var y; model; y = 0; end; stoch_simul(order";
     assert!(signature_at_byte(after_model, after_model.len())

@@ -5,6 +5,10 @@ pub(super) fn ordinary(kind: &str) -> bool {
     matches!(kind, "var" | "varexo" | "varexo_det" | "parameters")
 }
 
+fn renameable(kind: &str) -> bool {
+    ordinary(kind) || matches!(kind, "trend_var" | "log_trend_var")
+}
+
 /// Dynare statements own their execution tokens. Native blocks and tokens
 /// outside those statements have no Dynare symbol binding.
 pub(super) fn native_orders(model: &Model) -> HashSet<usize> {
@@ -27,17 +31,59 @@ pub(super) fn native_orders(model: &Model) -> HashSet<usize> {
     native
 }
 
+/// Preserve the execution proof when accepted sites share written macro spans.
+pub(super) fn excluded_nonordinary_orders(model: &Model) -> HashSet<usize> {
+    let callbacks = crate::engine::analysis::named_callbacks::collect(model);
+    let mut excluded: HashSet<_> = model
+        .dotted_statements
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !callbacks.dotted.contains(index))
+        .flat_map(|(_, statement)| statement.active_tokens.clone())
+        .collect();
+    excluded.extend(model.named_slots.iter().map(|slot| slot.order));
+    let commands = crate::engine::diagnostics::check_d_pac::named_callbacks(model);
+    for command in &model.semi_structural_commands {
+        for option in &command.options {
+            if !matches!(
+                option.value,
+                crate::engine::language::model::SemiStructuralValue::Symbol { .. }
+            ) {
+                continue;
+            }
+            let ordinary = command.kind
+                == crate::engine::language::model::SemiStructuralKind::VarExpectationModel
+                && option.name.eq_ignore_ascii_case("variable")
+                && commands.variable_lookups.contains(&command.parse_order)
+                || command.kind == crate::engine::language::model::SemiStructuralKind::PacModel
+                    && option.name.eq_ignore_ascii_case("discount")
+                    && command.callback_completed;
+            if !ordinary {
+                excluded.insert(option.callback_order.saturating_sub(1));
+            }
+        }
+    }
+    excluded
+}
+
 /// Parser-owned name slots. An equal spelling in a file/function/label slot
 /// is not evidence that the token refers to the selected ordinary symbol.
 pub(super) fn binding_sites(model: &Model, name: &str) -> HashSet<Span> {
+    let Some(name) = model.intern.lookup(name) else {
+        return HashSet::new();
+    };
+    binding_site_inventory(model)
+        .remove(&name)
+        .unwrap_or_default()
+}
+
+pub(super) fn binding_site_inventory(model: &Model) -> HashMap<Name, HashSet<Span>> {
     use crate::engine::language::model::{
         DottedHead, PathTarget, SemiStructuralKind, SemiStructuralValue, ShockKind,
     };
-    let mut sites = HashSet::new();
+    let mut sites = HashMap::<Name, HashSet<Span>>::new();
     let mut add = |symbol, span| {
-        if model.name(symbol) == name {
-            sites.insert(span);
-        }
+        sites.entry(symbol).or_default().insert(span);
     };
     for event in &model.symbol_type_events {
         if crate::engine::control::cancelled() {
@@ -55,14 +101,13 @@ pub(super) fn binding_sites(model: &Model, name: &str) -> HashSet<Span> {
         if crate::engine::control::cancelled() {
             break;
         }
-        if model.name(write.name) == name {
-            for token in &model.expanded_tokens[write.token_range.clone()] {
-                if crate::engine::control::cancelled() {
-                    break;
-                }
-                if token.kind == TokenKind::Ident && token.text(&model.source) == name {
-                    add(write.name, token.span);
-                }
+        for token in &model.expanded_tokens[write.token_range.clone()] {
+            if crate::engine::control::cancelled() {
+                break;
+            }
+            if token.kind == TokenKind::Ident && token.text(&model.source) == model.name(write.name)
+            {
+                add(write.name, token.span);
             }
         }
     }
@@ -85,18 +130,26 @@ pub(super) fn binding_sites(model: &Model, name: &str) -> HashSet<Span> {
         }
         add(row.name, row.span);
     }
+    let model_callbacks = crate::engine::diagnostics::check_d_pac::named_callbacks(model);
     for command in &model.semi_structural_commands {
         if crate::engine::control::cancelled() {
             break;
         }
-        if command.kind != SemiStructuralKind::PacModel {
+        if command.kind != SemiStructuralKind::PacModel
+            && !model_callbacks
+                .variable_lookups
+                .contains(&command.parse_order)
+        {
             continue;
         }
         for option in &command.options {
             if crate::engine::control::cancelled() {
                 break;
             }
-            if option.name.eq_ignore_ascii_case("discount")
+            if (command.kind == SemiStructuralKind::PacModel
+                && option.name.eq_ignore_ascii_case("discount")
+                || command.kind == SemiStructuralKind::VarExpectationModel
+                    && option.name.eq_ignore_ascii_case("variable"))
                 && let SemiStructuralValue::Symbol { name: symbol, span } = &option.value
             {
                 add(*symbol, *span);
@@ -249,21 +302,17 @@ pub(super) fn binding_sites(model: &Model, name: &str) -> HashSet<Span> {
                 ShockKind::Cov(symbols) | ShockKind::Skew(symbols) => symbols.clone(),
                 ShockKind::Corr { a, b } => vec![*a, *b],
             };
-            if symbols.iter().any(|symbol| model.name(*symbol) == name) {
-                for token in model.expanded_tokens[target.parse_order..]
-                    .iter()
-                    .take_while(|token| !matches!(token.kind, TokenKind::Eq | TokenKind::Semi))
+            for token in model.expanded_tokens[target.parse_order..]
+                .iter()
+                .take_while(|token| !matches!(token.kind, TokenKind::Eq | TokenKind::Semi))
+            {
+                if token.kind == TokenKind::Ident
+                    && let Some(symbol) = symbols
+                        .iter()
+                        .copied()
+                        .find(|symbol| model.name(*symbol) == token.text(&model.source))
                 {
-                    if token.kind == TokenKind::Ident && token.text(&model.source) == name {
-                        add(
-                            symbols
-                                .iter()
-                                .copied()
-                                .find(|symbol| model.name(*symbol) == name)
-                                .unwrap(),
-                            token.span,
-                        );
-                    }
+                    add(symbol, token.span);
                 }
             }
         }
@@ -298,7 +347,7 @@ pub(super) fn binding_sites(model: &Model, name: &str) -> HashSet<Span> {
                     }
                     if model
                         .symbol_kind_in_context(reference.name, reference.symbol_type_context)
-                        .is_some_and(|kind| kind != "database_variable")
+                        .is_some()
                     {
                         add(reference.name, reference.ident_span);
                     }
@@ -327,31 +376,24 @@ pub(super) fn binding_sites(model: &Model, name: &str) -> HashSet<Span> {
             add(symbol, *span);
         }
     }
-    let mut statement_at = vec![None; model.expanded_tokens.len()];
-    for (index, statement) in model.statements.iter().enumerate() {
+    let callbacks = crate::engine::analysis::named_callbacks::collect(model);
+    for (_, row) in model
+        .dotted_statements
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| callbacks.dotted.contains(index))
+    {
         if crate::engine::control::cancelled() {
             break;
         }
-        for order in statement.token_range.clone() {
-            if crate::engine::control::cancelled() {
-                break;
-            }
-            statement_at[order] = Some(index);
-        }
-    }
-    for row in &model.dotted_statements {
-        if crate::engine::control::cancelled() {
-            break;
-        }
-        let target_start = token_spans.get(&row.span.start).copied();
-        // copy_source is the accepted source binding. Its first token follows
-        // the copy '=' in this parser execution, not in an arbitrary text scan.
-        let source_start = statement_at
-            .get(row.parse_order)
-            .copied()
-            .flatten()
-            .and_then(|index| model.statements.get(index))
-            .and_then(|statement| model.expanded_tokens.get(statement.token_range.clone()))
+        let target_start = model
+            .expanded_tokens
+            .get(row.active_tokens.start)
+            .map(|token| token.span);
+        // Both heads are read from this exact accepted parser execution.
+        let source_start = model
+            .expanded_tokens
+            .get(row.active_tokens.clone())
             .and_then(|tokens| {
                 tokens
                     .iter()
@@ -410,9 +452,6 @@ pub(super) fn decision(
     if !view.complete {
         return Err(INCOMPLETE);
     }
-    if !is_legal_ident(name) || !is_legal_ident(replacement) {
-        return Err(IDENTIFIER);
-    }
     let model = &view.model;
     let tags = &view.tags;
     let (declaration, kind) = declaration(view, name)?;
@@ -421,8 +460,45 @@ pub(super) fn decision(
         .iter()
         .find(|event| model.name(event.name) == name);
     // A retype through a model-local binding requires that binding's guards.
-    if !ordinary(kind) || event.is_some_and(|event| !ordinary(event.kind.as_str())) {
+    if kind == "external_function"
+        || event.is_some_and(|event| event.kind.as_str() == "external_function")
+    {
+        return Err(Refusal::new("EXTERNAL_IMPLEMENTATION", "An external function name also identifies its MATLAB implementation. Rename cannot update that implementation and its callers outside this model; no edits were proposed."));
+    }
+    if kind == "database_variable" {
+        return Err(Refusal::new("EXTERNAL_DATABASE_MEMBER", "This name identifies a member of an external database. Rename cannot update that database's fields; no edits were proposed."));
+    }
+    if !is_legal_ident(name) || !is_legal_ident(replacement) {
+        return Err(IDENTIFIER);
+    }
+    if !renameable(kind) || event.is_some_and(|event| !renameable(event.kind.as_str())) {
         return Err(BINDING);
+    }
+    if model
+        .shock_paths
+        .iter()
+        .chain(&model.controlled_paths)
+        .flat_map(|block| &block.stanzas)
+        .flat_map(|stanza| &stanza.values)
+        .filter(|value| value.completed)
+        .flat_map(|value| &value.path_refs)
+        .any(|reference| {
+            !reference.call
+                && model.name(reference.name) == name
+                && reference.namespace.as_ref().is_some_and(|namespace| {
+                    !matches!(
+                        namespace.as_str(),
+                        "init" | "initval" | "self" | "prev" | "learnt_in"
+                    ) && model.databases.iter().any(|database| {
+                        database
+                            .names
+                            .iter()
+                            .any(|(database, _)| model.name(*database) == namespace)
+                    })
+                })
+        })
+    {
+        return Err(Refusal::new("EXTERNAL_DATABASE_MEMBER", "This symbol is also used as an explicit field of an external database. Rename cannot update that database's column; no edits were proposed."));
     }
     if name != replacement
         && model
@@ -481,6 +557,16 @@ pub(super) fn decision(
             continue;
         }
         if native.contains(&order) {
+            continue;
+        }
+        if !binding_sites.contains(&token.span)
+            && view.named.iter().any(|fact| {
+                fact.declarations
+                    .iter()
+                    .chain(&fact.uses)
+                    .any(|site| site.order == order)
+            })
+        {
             continue;
         }
         // Native MATLAB text has no Dynare binding. It is not a rename target.
@@ -628,7 +714,13 @@ pub(super) fn declaration(
         {
             tag.written.clone().ok_or(MAPPING)?
         }
-        (Some((_, event)), _) => view.written(event.span).ok_or(MAPPING)?,
+        (Some((_, event)), _) => view
+            .written(if event.kind.as_str() == "external_function" {
+                view.external_name_span(event.span)
+            } else {
+                event.span
+            })
+            .ok_or(MAPPING)?,
         (None, Some(tag)) => tag.written.clone().ok_or(MAPPING)?,
         (None, None) => return Err(BINDING),
     };

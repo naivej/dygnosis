@@ -34,6 +34,7 @@ pub(crate) mod diagnostic_anchors;
 pub(crate) mod diagnostic_links;
 pub mod e010;
 pub mod explain;
+pub(crate) mod parse_preflight;
 pub(crate) mod usage;
 
 use crate::engine::language::model::Model;
@@ -360,59 +361,9 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
         return Vec::new();
     }
     let surgery_parse = crate::engine::diagnostics::check_d_surgery::check_d_surgery(model);
-    // The equation/declaration/surgery families are parsed before checkPass.
-    // Mixed families contribute only the named parse refusals below. In
-    // particular, a check-stage Error elsewhere must not suppress an earlier
-    // PAC checkPass refusal.
-    // The bare-name warrant has no diagnostic sentence, but its path read
-    // is unavailable. An incomplete path cannot supply an accepted Parse tree.
-    let parse_refused = path_parse_incomplete
-        || equation_parse
-            .iter()
-            .chain(&declaration_parse)
-            .chain(&surgery_parse)
-            .any(|diag| diag.severity == Severity::Error)
-        || occbin_diags.iter().any(|diag| diag.code == "E182")
-        || observed_diags
-            .iter()
-            .any(|diag| matches!(diag.code.as_str(), "E093" | "E261"))
-        || block_diags.iter().any(|diag| {
-            matches!(
-                diag.code.as_str(),
-                "E020"
-                    | "E182"
-                    | "E252"
-                    | "E253"
-                    | "E271"
-                    | "E275"
-                    | "E276"
-                    | "E277"
-                    | "E278"
-                    | "E279"
-                    | "E280"
-                    | "E281"
-                    | "E282"
-                    | "E294"
-                    | "E310"
-                    | "E426"
-            )
-        })
-        || steady_state_diags.iter().any(|diag| diag.code == "E481")
-        || open_diags.iter().any(|diag| {
-            matches!(
-                diag.code.as_str(),
-                "E058"
-                    | "E059"
-                    | "E288"
-                    | "E289"
-                    | "E290"
-                    | "E291"
-                    | "E292"
-                    | "E293"
-                    | "E294"
-                    | "E310"
-            )
-        });
+    // Parse-stage ownership lives with the refusal receipt producers. Check
+    // and Transform diagnostics cannot terminate the accepted Parse prefix.
+    let parse_refused = path_parse_incomplete || parse_preflight::first_refusal(model).is_some();
     let mut out = Vec::new();
     if crate::engine::control::cancelled() {
         return Vec::new();

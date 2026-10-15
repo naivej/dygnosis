@@ -17,6 +17,7 @@ pub fn parser_complete(model: &crate::engine::language::model::Model) -> bool {
             .statements
             .iter()
             .all(|statement| statement.native || statement.complete)
+        && crate::engine::analysis::named_callbacks::collect(model).complete
 }
 
 /// A verified portion in one written file. Separate include segments never

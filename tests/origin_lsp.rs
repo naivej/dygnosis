@@ -784,7 +784,9 @@ async fn evaluated_include_path_updates_lsp_child_owner_and_model_facts() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(info["n_equations"], 1, "{info}");
+    assert_eq!(info["complete"], false, "{info}");
+    assert_eq!(info["equations"], serde_json::json!([]), "{info}");
+    assert_eq!(info["incomplete_reasons"][0]["code"], "PARSE_REFUSED");
     backend
         .did_open(open(uri(&flags), "@#define P=\"other\"\n"))
         .await;

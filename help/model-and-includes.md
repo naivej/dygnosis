@@ -78,6 +78,11 @@ row to open the line in your model file.
 These clickable labels above code are called **CodeLens** in VS Code. To show
 them, enable **Editor: Code Lens** in Settings and the relevant Dygnosis setting.
 
+Trend declarations retain their TeX label as name metadata. When a declared
+trend or named VAR/PAC model is selected, its accepted uses can be followed
+through the model. PAC and VAR expectation references open the named model
+chosen for that operation.
+
 Equation numbers are assigned before Dynare's equation transformations and can
 differ from numbers in MATLAB or Octave results. Model locals, static-only
 replacement rows and removed equations have no counted number. Repeated macro

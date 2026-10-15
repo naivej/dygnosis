@@ -9,11 +9,33 @@ use crate::engine::language::model::{Decl, Equation, Model};
 use crate::engine::language::span::Span;
 
 pub fn check_e020(model: &Model) -> Vec<Diagnostic> {
-    let mut out = check_e023(model);
-    out.extend(check_e024(model));
-    out.extend(check_e025(model));
-    out.extend(check_undeclared_equations(model));
-    out
+    parse_refusals(model)
+        .into_iter()
+        .map(|(diagnostic, _)| diagnostic)
+        .collect()
+}
+
+/// Parse-only diagnostic owners retain execution order beside each refusal.
+pub(crate) fn parse_refusals(model: &Model) -> Vec<(Diagnostic, usize)> {
+    let mut orders = Vec::new();
+    let mut out = check_e023(model, &mut orders);
+    out.extend(check_e024(model, &mut orders));
+    out.extend(check_e025(model, &mut orders));
+    out.extend(check_undeclared_equations(model, &mut orders));
+    out.into_iter().zip(orders).collect()
+}
+
+fn equation_callback_order(model: &Model, equation: &Equation, flush_unknowns: bool) -> usize {
+    if flush_unknowns
+        && let Some(row) = model
+            .written_equations
+            .iter()
+            .find(|row| row.equation.parse_order == equation.parse_order)
+        && let Some(statement) = model.statements.get(row.statement_id)
+    {
+        return statement.token_range.end;
+    }
+    equation.active_tokens.end
 }
 
 /// Aggregate-written equations plus every per-dimension heterogeneous body, in
@@ -91,7 +113,7 @@ fn earliest_local_defs(model: &Model, trees: &[Vec<&Equation>]) -> HashMap<Name,
     earliest
 }
 
-fn check_e023(model: &Model) -> Vec<Diagnostic> {
+fn check_e023(model: &Model, orders: &mut Vec<usize>) -> Vec<Diagnostic> {
     let mut seen = HashSet::new();
     let mut diagnostics = Vec::new();
     for decl in &model.predetermined {
@@ -109,6 +131,7 @@ fn check_e023(model: &Model) -> Vec<Diagnostic> {
             continue;
         }
         let name = model.name(decl.name);
+        orders.push(decl.parse_order);
         diagnostics.push(Diagnostic {
             span: decl.span,
             severity: Severity::Error,
@@ -127,7 +150,7 @@ fn check_e023(model: &Model) -> Vec<Diagnostic> {
     diagnostics
 }
 
-fn check_e024(model: &Model) -> Vec<Diagnostic> {
+fn check_e024(model: &Model, orders: &mut Vec<usize>) -> Vec<Diagnostic> {
     let mut seen = HashSet::new();
     let mut diagnostics = Vec::new();
     for usage in &model.model_expression_uses {
@@ -141,6 +164,7 @@ fn check_e024(model: &Model) -> Vec<Diagnostic> {
             continue;
         }
         let name = model.name(usage.name);
+        orders.push(usage.parse_order);
         diagnostics.push(Diagnostic {
             span: usage.full_span,
             severity: Severity::Error,
@@ -159,7 +183,7 @@ fn check_e024(model: &Model) -> Vec<Diagnostic> {
     diagnostics
 }
 
-fn check_e025(model: &Model) -> Vec<Diagnostic> {
+fn check_e025(model: &Model, orders: &mut Vec<usize>) -> Vec<Diagnostic> {
     let declared = declared_symbol_names(model);
     let mut eqs = all_model_equations(model);
     eqs.sort_by_key(|eq| eq.parse_order);
@@ -191,6 +215,7 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
                 .and_then(|target| model.model_local_target_contexts.get(&target))
                 .is_some_and(|&context| model.symbol_kind_in_context(name, context).is_none());
         if (wrong_type || self_use) && seen_shadowing.insert(name) {
+            orders.push(equation_callback_order(model, eq, false));
             diagnostics.push(shadowing_diag(model, name, span));
         }
     }
@@ -244,6 +269,7 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
                 }
                 seen_early.insert(r.name);
                 let name = model.name(r.name);
+                orders.push(equation_callback_order(model, eq, false));
                 diagnostics.push(Diagnostic {
                     span: r.span,
                     severity: Severity::Error,
@@ -275,6 +301,7 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
         if !declared.contains(&name) || !seen_shadowing.insert(name) {
             continue;
         }
+        orders.push(equation_callback_order(model, eq, false));
         diagnostics.push(shadowing_diag(model, name, span));
     }
     diagnostics
@@ -298,7 +325,7 @@ fn shadowing_diag(model: &Model, name: Name, span: Span) -> Diagnostic {
     }
 }
 
-fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
+fn check_undeclared_equations(model: &Model, orders: &mut Vec<usize>) -> Vec<Diagnostic> {
     let refused_roots: HashSet<_> = model
         .written_equations
         .iter()
@@ -422,6 +449,7 @@ fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
             if !seen.insert(r.name) {
                 continue;
             }
+            orders.push(equation_callback_order(model, eq, true));
             diagnostics.push(undeclared_diag(
                 eq,
                 r.span,
@@ -577,6 +605,20 @@ fn visible_names(model: &Model, eq: &Equation) -> HashSet<Name> {
             .is_some_and(|block| nested_or_equal(block, decl.span))
     };
     let mut visible = HashSet::new();
+    // Semantic endogenous tags can declare a symbol without a separate Decl.
+    // The exact expression read captures whether that declaration was live.
+    visible.extend(
+        model
+            .model_expression_uses
+            .iter()
+            .filter(|usage| {
+                eq.active_tokens.contains(&usage.parse_order)
+                    && model
+                        .symbol_kind_in_context(usage.name, usage.context)
+                        .is_some()
+            })
+            .map(|usage| usage.name),
+    );
     for decl in visibility_decls(model) {
         if crate::engine::control::cancelled() {
             return Default::default();

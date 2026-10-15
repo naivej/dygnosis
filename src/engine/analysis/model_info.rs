@@ -250,7 +250,11 @@ pub fn model_info_json(model: &Model) -> Value {
 /// Parsed model-local declarations and definitions shared by MCP and LSP.
 /// Source origins are attached by the transport that owns the source map.
 pub(crate) fn model_locals_json(model: &Model) -> Value {
-    let facts = ModelLocals::collect(model);
+    let facts = ModelLocals::collect_before(
+        model,
+        crate::engine::diagnostics::parse_preflight::first_refusal(model)
+            .map(|refusal| refusal.order),
+    );
     let declarations: Vec<Value> = facts
         .declarations
         .iter()
@@ -400,7 +404,7 @@ pub fn incomplete_reason_records(
         && !records.unresolved.is_empty()
     {
         let mut reasons = incomplete_reason_records(model, None);
-        reasons.retain(|(_, code, _)| !matches!(*code, "E001" | "E063" | "I211"));
+        reasons.retain(|(_, code, _)| !matches!(*code, "E001" | "E063" | "I211" | "PARSE_REFUSED"));
         reasons.extend(e061_reasons(records));
         return reasons;
     }
@@ -478,6 +482,13 @@ pub fn incomplete_reason_records(
                 )
             }),
     );
+    if let Some(refusal) = crate::engine::diagnostics::parse_preflight::first_refusal(model)
+        && !reasons
+            .iter()
+            .any(|(_, _, message)| message == &refusal.cause)
+    {
+        reasons.insert(0, (refusal.span, "PARSE_REFUSED", refusal.cause));
+    }
     reasons
 }
 
