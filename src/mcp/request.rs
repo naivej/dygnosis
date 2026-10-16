@@ -1,9 +1,8 @@
 //! MCP request contracts and adapters over one explicitly acquired source snapshot.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 
-use rmcp::model::{CallToolResult, ContentBlock};
+use rmcp::model::CallToolResult;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -60,7 +59,9 @@ pub(crate) struct ScopedEquation {
 pub(crate) struct Params {
     #[serde(skip)]
     #[schemars(skip)]
-    pub canonical: bool,
+    /// Agent projections use selected sections and shared page allowances.
+    /// Direct Rust library queries retain their established data projections.
+    pub agent_output: bool,
     #[serde(flatten)]
     pub source_args: SourceArgs,
     #[serde(flatten)]
@@ -71,11 +72,11 @@ pub(crate) struct Params {
     pub symbol: Option<String>,
     /// Snapshot-bound symbol identity returned by an earlier query.
     pub binding_id: Option<String>,
-    /// Legacy Rename name selector. Use exactly one of old_name, target or binding_id.
+    /// Internal Rename name selector. Use exactly one of old_name, target or binding_id.
     pub old_name: Option<String>,
     /// Legal, non-reserved replacement identifier. Rename returns a proposal and never writes files.
     pub new_name: Option<String>,
-    /// Include declarations in References. Omitted values include them for legacy compatibility.
+    /// Include declarations in References. Omitted values include them.
     pub include_declaration: Option<bool>,
     /// Return separate expanded occurrences beside deduplicated written locations.
     pub occurrences: Option<bool>,
@@ -196,51 +197,6 @@ fn fields(tool: &str) -> Vec<&'static str> {
     fields
 }
 
-pub(crate) fn input_schema(tool: &str) -> Arc<serde_json::Map<String, Value>> {
-    let mut schema = super::mcp_input_schema::<Params>().as_ref().clone();
-    let allowed = fields(tool);
-    schema
-        .get_mut("properties")
-        .and_then(Value::as_object_mut)
-        .expect("parameter properties")
-        .retain(|key, _| allowed.contains(&key.as_str()));
-    schema.insert("additionalProperties".into(), json!(false));
-    if allowed.contains(&"source") {
-        schema.insert("anyOf".into(), json!([
-            {"required":["source"],"properties":{"source":{"type":"object"}}},
-            {"required":["file_content"],"properties":{"file_content":{"type":"string"}}},
-            {"required":["files","active_file"],"properties":{"files":{"type":"object","minProperties":1},"active_file":{"type":"string","minLength":1}}}
-        ]));
-        schema.insert("not".into(), json!({"allOf":[{"required":["source"]},{"anyOf":SOURCE_FIELDS.iter().filter(|&&k| k != "source" && k != "expected_revision").map(|k| json!({"required":[k]})).collect::<Vec<_>>()}]}));
-    }
-    let required = match tool {
-        "dynare_rename" => vec!["new_name"],
-        "dynare_explain" => vec!["code"],
-        _ => Vec::new(),
-    };
-    if !required.is_empty() {
-        schema.insert("required".into(), json!(required));
-    }
-    if matches!(
-        tool,
-        "dynare_symbol_info" | "dynare_find_references" | "dynare_rename"
-    ) {
-        let name = if tool == "dynare_rename" {
-            "old_name"
-        } else {
-            "symbol"
-        };
-        let selectors = [name, "target", "binding_id"];
-        schema.insert("oneOf".into(),json!(selectors.iter().map(|selected|json!({
-            "required":[selected],"properties":{*selected:{"not":{"type":"null"}}},
-            "not":{"anyOf":selectors.iter().filter(|other|*other!=selected).map(|other|json!({"required":[other],"properties":{*other:{"not":{"type":"null"}}}})).collect::<Vec<_>>()}
-        })).collect::<Vec<_>>()));
-    }
-    prune_definitions(&mut schema);
-    Arc::new(schema)
-}
-
-/// Keep only definitions referenced by this tool's projected fields.
 pub(crate) fn prune_definitions(schema: &mut serde_json::Map<String, Value>) {
     fn references(value: &Value, found: &mut std::collections::BTreeSet<String>) {
         match value {
@@ -383,10 +339,6 @@ pub(crate) fn byte_position(text: &str, line: u32, column: u32) -> Result<u32, r
     Ok((start + bytes) as u32)
 }
 
-pub(crate) fn legacy_json(data: &Value) -> Vec<ContentBlock> {
-    vec![ContentBlock::text(data.to_string())]
-}
-
 // The request worker below uses the same source snapshot for its model query,
 // coverage and proposal guards. It never constructs an editor server.
 
@@ -395,24 +347,32 @@ pub(crate) fn dispatch(
     arguments: Value,
     control: RequestControl,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
-    dispatch_mode(tool, arguments, control, false)
+    dispatch_query(tool, arguments, control, false)
 }
 
-pub(crate) fn dispatch_mode(
+pub(super) fn dispatch_agent(
+    tool: &str,
+    arguments: Value,
+    control: RequestControl,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    dispatch_query(tool, arguments, control, true)
+}
+
+fn dispatch_query(
     tool: &str,
     arguments: Value,
     mut control: RequestControl,
-    canonical: bool,
+    agent_output: bool,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let mut decoded_arguments = arguments.clone();
-    let diagnostic_ids = if canonical {
+    let diagnostic_ids = if agent_output {
         decoded_arguments
             .as_object_mut()
             .and_then(|object| object.remove("diagnostic_ids"))
     } else {
         None
     };
-    let decoder = if canonical && tool == "dynare_symbol_info" {
+    let decoder = if agent_output && tool == "dynare_symbol_info" {
         "dynare_find_references"
     } else {
         tool
@@ -422,7 +382,7 @@ pub(crate) fn dispatch_mode(
         params.diagnostic_ids =
             serde_json::from_value(ids).map_err(|error| invalid(error.to_string()))?;
     }
-    params.canonical = canonical;
+    params.agent_output = agent_output;
     if !params.diagnostic_ids.is_empty() && params.expected_revision.is_none() {
         return Err(invalid(
             "Reusing diagnostic identities requires expected_revision from the original input",
@@ -448,7 +408,7 @@ pub(crate) fn dispatch_mode(
             if matches!(error.code, "SOURCE_LIMIT" | "ROOT_LIMIT") {
                 result.limits.push(json!({"code":error.code,"ceilings":control.limits,"affected_work":"source acquisition","omitted":"model analysis and edit proposals"}));
             }
-            return Ok(result.wire(Vec::new(), params.output.detail));
+            return Ok(result.wire());
         }
     };
     control
@@ -551,9 +511,9 @@ pub(crate) fn dispatch_mode(
         .iter()
         .any(|root| !snapshot.workspace.input_snapshot_is_current(root))
     {
-        return Ok(ToolResult::refused("INPUT_CHANGED","Source inputs changed before the result was returned. No stale facts or edits were returned.").wire(Vec::new(),params.output.detail));
+        return Ok(ToolResult::refused("INPUT_CHANGED","Source inputs changed before the result was returned. No stale facts or edits were returned.").wire());
     }
-    if canonical {
+    if agent_output {
         result.schema_version = 3;
         if matches!(
             tool,
@@ -565,13 +525,8 @@ pub(crate) fn dispatch_mode(
             object.remove("formatted_text");
         }
     }
-    let legacy = if canonical {
-        Vec::new()
-    } else {
-        legacy_result(tool, &result, &snapshot, &params)
-    };
     control.complete_phase("Return model result");
-    Ok(result.wire(legacy, params.output.detail))
+    Ok(result.wire())
 }
 
 fn unit(snapshot: &SourceSnapshot) -> super::McpUnit<'_> {
@@ -643,7 +598,7 @@ fn model_info(snapshot: &mut SourceSnapshot, params: &Params) -> Result<Value, r
         "structure",
     ];
     validate_sections(&params.output.sections, &valid)?;
-    let mut data = if params.canonical {
+    let mut data = if params.agent_output {
         json!({})
     } else if snapshot.coverage["complete"] == true {
         super::model_info_with_unit(&unit(snapshot))
@@ -651,10 +606,10 @@ fn model_info(snapshot: &mut SourceSnapshot, params: &Params) -> Result<Value, r
         json!({"status":"incomplete","incomplete_reasons":snapshot.coverage["reasons"]})
     };
     let want = |name: &str| params.output.sections.iter().any(|section| section == name);
-    if params.canonical && want("structure") && snapshot.coverage["complete"] == true {
+    if params.agent_output && want("structure") && snapshot.coverage["complete"] == true {
         data["structure"] = super::model_info_with_unit(&unit(snapshot));
     }
-    if params.canonical && want("summary") {
+    if params.agent_output && want("summary") {
         data["summary"] = json!({"complete":snapshot.coverage["complete"],
             "model_kind":if snapshot.model.heterogeneity_dimensions.is_empty(){"aggregate"}else{"heterogeneous"},
             "declaration_count":snapshot.model.written_declarations.len(),
@@ -663,7 +618,7 @@ fn model_info(snapshot: &mut SourceSnapshot, params: &Params) -> Result<Value, r
             "dimension_count":snapshot.model.heterogeneity_dimensions.len(),
             "assignment_count":snapshot.model.param_assignments.len()+snapshot.model.helper_assignments.len()});
     }
-    if params.canonical && want("model_locals") && snapshot.coverage["complete"] == true {
+    if params.agent_output && want("model_locals") && snapshot.coverage["complete"] == true {
         data["model_locals"] = super::model_info_with_unit(&unit(snapshot))["model_locals"].clone();
     }
     if want("declarations") {
@@ -1190,7 +1145,7 @@ fn symbols(
     };
     let mut metadata = None;
     if tool == "dynare_symbol_info"
-        && (!params.canonical
+        && (!params.agent_output
             || !params
                 .output
                 .sections
@@ -1235,7 +1190,7 @@ fn symbols(
         // Assignment traces keep their execution positions. A trace value is
         // not a claim that later native code retained that final value.
         let values = if binding.is_ordinary()
-            && (!params.canonical
+            && (!params.agent_output
                 || params
                     .output
                     .sections
@@ -1258,7 +1213,7 @@ fn symbols(
         if binding.is_local() {
             data["expression"] = json!(model.local_expression(&binding));
         }
-        if !params.canonical {
+        if !params.agent_output {
             return Ok(ToolResult::new(data));
         }
         metadata = Some(data);
@@ -1350,7 +1305,7 @@ fn symbols(
         }
         result.data["binding"] = data;
     }
-    if params.canonical
+    if params.agent_output
         && !params
             .output
             .sections
@@ -1522,14 +1477,7 @@ fn catalog(
         env!("CARGO_PKG_VERSION"),
         &mut result,
     )?;
-    let legacy = if tool == "dynare_explain" {
-        vec![ContentBlock::text(
-            result.data["explanation"].as_str().unwrap_or_default(),
-        )]
-    } else {
-        legacy_json(&result.data)
-    };
-    Ok(result.wire(legacy, params.output.detail))
+    Ok(result.wire())
 }
 
 fn project_and_page(
@@ -1544,7 +1492,7 @@ fn project_and_page(
     }
     let canonical_tool = format!("v3:{tool}");
     let mut pages = match Pages::new(
-        if params.canonical {
+        if params.agent_output {
             &canonical_tool
         } else {
             tool
@@ -1560,7 +1508,7 @@ fn project_and_page(
         }
         Err(message) => return Err(invalid(message)),
     };
-    if params.canonical {
+    if params.agent_output {
         pages.share_budget();
     }
     let complete = result.coverage.as_ref().is_none_or(|coverage| {
@@ -1568,7 +1516,7 @@ fn project_and_page(
             .as_array()
             .is_none_or(|roots| roots.iter().all(|root| root["complete"] == true))
     });
-    if params.canonical {
+    if params.agent_output {
         super::canonical::page_collections("", &mut result.data, &mut pages, complete);
     } else if let Some(rows) = result.data.as_array_mut() {
         pages.collection_with_coverage("rows", rows, complete);
@@ -1619,57 +1567,6 @@ fn remove_prose(data: &mut Value) {
     }
 }
 
-fn legacy_result(
-    tool: &str,
-    result: &ToolResult,
-    snapshot: &SourceSnapshot,
-    params: &Params,
-) -> Vec<ContentBlock> {
-    if tool == "dynare_format" {
-        let unsupported = result
-            .outcome
-            .reasons
-            .iter()
-            .find(|reason| reason.code == "FORMAT_UNSUPPORTED");
-        let status = unsupported.map_or_else(
-            || {
-                result.data["status"]
-                    .as_str()
-                    .unwrap_or(&result.outcome.status)
-            },
-            |_| "unsupported",
-        );
-        return legacy_json(
-            &json!({"status":status,"formatted_text":if status=="changed"{result.data["formatted_text"].clone()}else{Value::Null},
-            "reason":unsupported.map(|reason|reason.message.as_str())}),
-        );
-    }
-    if matches!(tool, "dynare_symbol_info" | "dynare_code_actions") {
-        return Vec::new();
-    }
-    if tool == "dynare_rename" && result.outcome.status != "refused" {
-        return if snapshot.root_file.is_none() {
-            vec![ContentBlock::text(
-                result.data["text"].as_str().unwrap_or(&snapshot.raw),
-            )]
-        } else {
-            legacy_json(&result.data["files"])
-        };
-    }
-    if tool == "dynare_find_references" && result.outcome.status != "refused" {
-        let rows=result.data["references"].as_array().cloned().unwrap_or_default().into_iter().map(|row| {
-            let range=&row["range"];let mut legacy=json!({"line":range["line"],"column":range["column"],"end_column":range["end_column"]});
-            if snapshot.root_file.is_some(){legacy["file"]=row["file"].clone();}legacy
-        }).collect::<Vec<_>>();
-        return legacy_json(&json!(rows));
-    }
-    if tool == "dynare_auto_fix" {
-        return vec![ContentBlock::text(result.data["text"].as_str().unwrap_or(&snapshot.raw)),ContentBlock::text(json!({"status":result.outcome.status,"message":result.outcome.reasons.first().map(|r|r.message.as_str()),"remaining_diagnostics":result.data["remaining_diagnostics"]}).to_string())];
-    }
-    let _ = params;
-    legacy_json(&result.data)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1681,25 +1578,23 @@ mod tests {
     }
     const MODEL: &str = "var y;\nmodel;\ny=1;\nend;\n";
     #[test]
-    fn default_format_content_preserves_the_legacy_json_contract() {
-        // Guards unchanged text becoming an apparent formatted replacement,
-        // and unsupported formatting losing its existing status/reason fields.
-        for text in [MODEL, "   \n", "model;\ny=1;\n"] {
-            let expected = super::super::dynare_format(text, None).unwrap();
-            let wire = dispatch(
-                "dynare_format",
-                json!({"file_content":text}),
-                RequestControl::default(),
-            )
-            .unwrap();
-            let ContentBlock::Text(first) = &wire.content[0] else {
-                panic!("legacy JSON");
-            };
-            assert_eq!(
-                serde_json::from_str::<Value>(&first.text).unwrap(),
-                expected
-            );
-            assert!(wire.structured_content.unwrap()["outcome"].is_object());
+    fn formatting_distinguishes_changes_unchanged_and_partial_input() {
+        // Guards proposed formatting on incomplete source being reported as complete.
+        for (text, status, reason) in [
+            (MODEL, "changed", None),
+            ("   \n", "unchanged", Some("NO_CHANGE")),
+            ("model;\ny=1;\n", "partial", Some("INCOMPLETE_INPUT")),
+        ] {
+            let result = call("dynare_format", json!({"file_content":text}));
+            assert_eq!(result["outcome"]["status"], status);
+            if let Some(reason) = reason {
+                assert!(result["outcome"]["reasons"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|row| row["code"] == reason));
+            }
+            assert_eq!(result["proposal"].is_object(), status != "unchanged");
         }
     }
     #[test]

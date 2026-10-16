@@ -12,7 +12,7 @@ pub(crate) const OUTPUT_BYTES: usize = 8 * 1024 * 1024;
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ResultOptions {
-    /// Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain.
+    /// Compact omits optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain.
     #[serde(default)]
     pub detail: Detail,
     /// Selected result sections. Omitted sections use the tool's default projection.
@@ -62,7 +62,7 @@ pub(crate) struct ToolResult {
 impl ToolResult {
     pub fn new(data: Value) -> Self {
         Self {
-            schema_version: 2,
+            schema_version: 3,
             outcome: Outcome {
                 status: "ok".into(),
                 reasons: Vec::new(),
@@ -90,26 +90,18 @@ impl ToolResult {
         result
     }
 
-    pub fn wire(mut self, legacy: Vec<ContentBlock>, detail: Detail) -> CallToolResult {
+    pub fn wire(mut self) -> CallToolResult {
         if let Some(coverage) = &self.coverage {
             collect_work_limits(coverage, None, &mut self.limits);
         }
         let mut value = serde_json::to_value(&self).expect("result object");
-        let mirrors = if detail == Detail::Full {
-            legacy
-        } else {
-            Vec::new()
-        };
-        let mut content = mirrors;
-        let build = |content: Vec<ContentBlock>, value: Value, status: &str| {
-            let mut content = content;
-            content.push(ContentBlock::text(value.to_string()));
-            let mut result = CallToolResult::success(content);
+        let build = |value: Value, status: &str| {
+            let mut result = CallToolResult::success(vec![ContentBlock::text(value.to_string())]);
             result.structured_content = Some(value);
             result.is_error = Some(status == "refused");
             result
         };
-        let full = build(content.clone(), value.clone(), &self.outcome.status);
+        let full = build(value.clone(), &self.outcome.status);
         let size = serde_json::to_vec(&full)
             .expect("complete wire result")
             .len()
@@ -129,9 +121,8 @@ impl ToolResult {
                 else { "The requested detail exceeds the output limit. No result rows were returned. Request compact detail, selected sections or a bounded page." });
             self.limits.push(json!({"code":"OUTPUT_LIMIT","ceiling_bytes":OUTPUT_BYTES,"requested_bytes":size,"omitted":"result detail"}));
             value = serde_json::to_value(&self).expect("limited result object");
-            content.clear();
         }
-        let limited = build(content, value, &self.outcome.status);
+        let limited = build(value, &self.outcome.status);
         if serde_json::to_vec(&limited)
             .expect("limited wire result")
             .len()
@@ -152,7 +143,6 @@ impl ToolResult {
             self.limits = vec![json!({"code":"OUTPUT_LIMIT","ceiling_bytes":OUTPUT_BYTES,
                 "omitted":"result rows, extended outcome text, input guards and coverage", "original_outcome_codes":original_codes})];
             return build(
-                Vec::new(),
                 serde_json::to_value(&self).expect("minimal result"),
                 &self.outcome.status,
             );
@@ -233,7 +223,7 @@ pub(crate) fn output_schema() -> std::sync::Arc<serde_json::Map<String, Value>> 
             .as_object()
             .expect("result properties")
             .clone();
-        properties.insert("schema_version".into(), json!({"const":2}));
+        properties.insert("schema_version".into(), json!({"const":3}));
         Value::Object(properties)
     });
     std::sync::Arc::new(object)
@@ -379,7 +369,7 @@ mod tests {
             "MISSING_INCLUDE",
             "The include was not supplied.",
         );
-        let wire = result.wire(vec![ContentBlock::text("legacy rows")], Detail::Full);
+        let wire = result.wire();
         let ContentBlock::Text(last) = wire.content.last().unwrap() else {
             panic!("JSON text");
         };
@@ -427,7 +417,7 @@ mod tests {
     fn output_limit_never_returns_an_executable_subset_of_a_proposal() {
         let mut result = ToolResult::new(json!({"changed_text":"x".repeat(OUTPUT_BYTES)}));
         result.proposal = Some(json!({"edits":[{"new_text":"replacement"}]}));
-        let wire = result.wire(Vec::new(), Detail::Compact);
+        let wire = result.wire();
         let value = wire.structured_content.unwrap();
         assert_eq!(value["outcome"]["status"], "refused");
         assert!(value["proposal"].is_null());
@@ -441,7 +431,7 @@ mod tests {
         // metadata fallback and exceeding the advertised response ceiling.
         let mut result = ToolResult::refused("UNKNOWN_COMMAND", "x".repeat(OUTPUT_BYTES));
         result.inputs.push(json!({"root":"x".repeat(OUTPUT_BYTES)}));
-        let wire = result.wire(Vec::new(), Detail::Compact);
+        let wire = result.wire();
         assert!(serde_json::to_vec(&wire).unwrap().len() + 512 <= OUTPUT_BYTES);
         assert_eq!(wire.is_error, Some(true));
         let canonical = wire.structured_content.unwrap();
@@ -477,10 +467,7 @@ mod tests {
             json!({"before":{"work_limits":[{"code":"MACRO_LIMIT","limit":"iteration work","ceiling":1000000}]},
             "after":{"reasons":[{"code":"I211","message":"Valid macro expression needs unavailable evaluation"}]}}),
         );
-        let result = result
-            .wire(Vec::new(), Detail::Compact)
-            .structured_content
-            .unwrap();
+        let result = result.wire().structured_content.unwrap();
         assert_eq!(result["limits"].as_array().unwrap().len(), 1);
         assert_eq!(result["limits"][0]["side"], "before");
     }

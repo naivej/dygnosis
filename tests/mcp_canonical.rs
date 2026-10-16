@@ -11,12 +11,9 @@ struct Wire {
     id: u64,
 }
 impl Wire {
-    fn new(profile: Option<&str>, edition: &str) -> Self {
+    fn new(edition: &str) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_dygnosis"));
         command.arg("mcp");
-        if let Some(profile) = profile {
-            command.args(["--profile", profile]);
-        }
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -86,8 +83,8 @@ fn source() -> Value {
 // Guards a server advertising consolidation but still accepting old wrappers
 // or silently returning old/new defaults under the same negotiated protocol.
 #[test]
-fn profiles_separate_discovery_defaults_and_results_over_stdio() {
-    let mut current = Wire::new(None, "2025-06-18");
+fn current_contract_rejects_retired_tools_and_arguments_over_stdio() {
+    let mut current = Wire::new("2025-06-18");
     let listed = current.request("tools/list", json!({}));
     let tools = listed["result"]["tools"].as_array().unwrap();
     assert_eq!(
@@ -115,33 +112,30 @@ fn profiles_separate_discovery_defaults_and_results_over_stdio() {
     let result = current.data("dynare_model_info", json!({"source":source()}));
     assert!(result["data"]["summary"].is_object());
     assert!(result["data"].get("endogenous").is_none());
-    let mut legacy = Wire::new(Some("legacy-v2"), "2025-06-18");
-    let legacy_list = legacy.request("tools/list", json!({}));
-    assert!(legacy_list["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|tool| tool["name"] == "dynare_list_options"));
-    assert_eq!(
-        legacy.call("dynare_syntax", json!({}))["error"]["code"],
-        -32602
-    );
-    let legacy_result = legacy.result("dynare_model_info", json!({"file_content":MODEL}));
-    assert_eq!(legacy_result["structuredContent"]["schema_version"], 2);
-    assert!(legacy_result["structuredContent"]["data"]["endogenous"].is_array());
-    assert!(legacy_result["content"].as_array().unwrap().len() > 1);
-    eprintln!(
-        "Discovery serialized bytes: canonical={}, legacy={}",
-        serde_json::to_vec(&listed["result"]).unwrap().len(),
-        serde_json::to_vec(&legacy_list["result"]).unwrap().len()
-    );
+    for retired in [
+        "dynare_find_references",
+        "dynare_auto_fix",
+        "dynare_explain",
+        "dynare_list_diagnostic_codes",
+        "dynare_list_options",
+        "dynare_related_files",
+        "dynare_workspace_diagnose",
+        "dynare_code_actions",
+    ] {
+        let reply = current.call(retired, json!({}));
+        assert_eq!(reply["error"]["code"], -32602);
+        assert!(reply["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("tools/list"));
+    }
 }
 
 // Guards the actual discovery/call adapter dropping useful merged facts or
 // making the caller obtain unrelated identities before a known query or edit.
 #[test]
 fn direct_agent_reference_inspection_and_edit_workflows_run_over_stdio() {
-    let mut wire = Wire::new(None, "2025-06-18");
+    let mut wire = Wire::new("2025-06-18");
     for name in ["pac_model", "var_model", "diff", "log"] {
         let result = wire.data("dynare_syntax", json!({"name":name}));
         assert!(
@@ -199,7 +193,7 @@ fn direct_agent_reference_inspection_and_edit_workflows_run_over_stdio() {
 // Guards protocol edition being treated as the tool-contract selector.
 #[test]
 fn old_protocol_editions_still_receive_canonical_contract_json() {
-    let mut wire = Wire::new(None, "2024-11-05");
+    let mut wire = Wire::new("2024-11-05");
     let listed = wire.request("tools/list", json!({}));
     assert!(listed["result"]["tools"]
         .as_array()
@@ -220,7 +214,7 @@ fn old_protocol_editions_still_receive_canonical_contract_json() {
 fn typed_bindings_keep_metadata_in_their_own_namespace_over_stdio() {
     let text = "heterogeneity_dimension h;parameters h $H$;h=.5;var y;model;[name='Y']y=h*y(-1);end;var_model(model_name=y,eqtags=['Y']);";
     let source = json!({"kind":"text","text":text});
-    let mut wire = Wire::new(None, "2025-06-18");
+    let mut wire = Wire::new("2025-06-18");
     for (name, named_kind, ordinary_kind) in [
         ("h", "heterogeneity_dimension", "parameters"),
         ("y", "var_model", "var"),
@@ -261,7 +255,7 @@ fn typed_bindings_keep_metadata_in_their_own_namespace_over_stdio() {
 fn copied_subsamples_keep_namespaces_and_complete_rename_over_stdio() {
     let text = "parameters a b;a=.5;b=.5;a.subsamples(short=2000Q1:2001Q1);a.short.options(init=.4);b.subsamples=a.subsamples;b.short.options(init=.6);";
     let source = json!({"kind":"text","text":text});
-    let mut wire = Wire::new(None, "2025-06-18");
+    let mut wire = Wire::new("2025-06-18");
     let ambiguous = wire.data(
         "dynare_symbol_info",
         json!({"source":source,"symbol":{"kind":"name","name":"short"}}),
@@ -294,7 +288,7 @@ fn copied_subsamples_keep_namespaces_and_complete_rename_over_stdio() {
 // and a visible-only name edit being proposed without its external effect.
 #[test]
 fn external_names_expose_metadata_and_specific_refusals_over_stdio() {
-    let mut wire = Wire::new(None, "2025-06-18");
+    let mut wire = Wire::new("2025-06-18");
     let text = "external_function(name='pkg.helper',nargs=1,first_deriv_provided='pkg.deriv');var y;model;y=pkg.helper(y);end;database db;";
     let source = json!({"kind":"text","text":text});
     for (name, kind, count, refusal) in [
@@ -342,7 +336,7 @@ fn external_names_expose_metadata_and_specific_refusals_over_stdio() {
 // its grammar callback, while completed earlier callbacks remain queryable.
 #[test]
 fn partial_named_grammar_does_not_publish_false_bindings_over_stdio() {
-    let mut wire = Wire::new(None, "2025-06-18");
+    let mut wire = Wire::new("2025-06-18");
     for text in [
         "heterogeneity_dimension ghost",
         "database ghost",
@@ -396,7 +390,7 @@ fn partial_named_grammar_does_not_publish_false_bindings_over_stdio() {
 // through an ordinary model variable. Refusal must return no partial edits.
 #[test]
 fn ordinary_symbol_with_explicit_database_field_refuses_rename_over_stdio() {
-    let mut wire = Wire::new(None, "2025-06-18");
+    let mut wire = Wire::new("2025-06-18");
     let base = "var y;varexo e;database db;model;y=.5*y(-1)+e;end;";
     let symbol = json!({"kind":"name","name":"y"});
     let safe = wire.data(
@@ -432,7 +426,7 @@ fn ordinary_symbol_with_explicit_database_field_refuses_rename_over_stdio() {
 // The canonical query must withhold both the false binding and full coverage.
 #[test]
 fn refused_semantic_callbacks_withhold_named_bindings_and_full_coverage_over_stdio() {
-    let mut wire = Wire::new(None, "2025-06-18");
+    let mut wire = Wire::new("2025-06-18");
     let base = "var y;parameters p;p=.9;model;[name='Y']y=0;end;";
     for command in ["var_model(model_name=ghost);", "trend_component_model(model_name=ghost,eqtags=['Y']);", "var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1,time_shift=1);", "pac_model(model_name=ghost,discount=y);"] {
         let text = format!("{base}{command}");
@@ -468,7 +462,7 @@ fn refused_semantic_callbacks_withhold_named_bindings_and_full_coverage_over_std
 // boundary is immediately followed by a statement in the root file.
 #[test]
 fn semantic_parse_refusal_causes_keep_their_own_source_over_stdio() {
-    let mut wire = Wire::new(None, "2025-06-18");
+    let mut wire = Wire::new("2025-06-18");
     for (text, needle) in [
         ("var y;y=1;database later;", "not a parameter"),
         ("var y;model;y=absent;end;database later;", "absent"),
@@ -520,7 +514,7 @@ fn semantic_parse_refusal_causes_keep_their_own_source_over_stdio() {
 // but their label/head operands are not accepted References before callback.
 #[test]
 fn incomplete_subsample_operands_do_not_add_references_over_stdio() {
-    let mut wire = Wire::new(None, "2025-06-18");
+    let mut wire = Wire::new("2025-06-18");
     let base = "parameters a b;a.subsamples(short=2000Q1:2001Q1);";
     for tail in [
         "a.short.options(",

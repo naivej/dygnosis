@@ -2,7 +2,7 @@
 
 Read this for MCP tool choice, source inputs, result coverage and proposed edits.
 If the tools are unavailable, use `dygnosis-setup.md` first. Runtime tool schemas
-own exact arguments. The default server uses tool contract 3.
+own exact arguments. The server uses tool contract 3.
 
 ## Choose the task
 
@@ -201,10 +201,3 @@ both source captures are complete.
 Name the tools used, roots and includes, codes, coverage and omitted work.
 Keep static findings separate from numerical results. If tools were
 unavailable, say that the Dygnosis checks were not run.
-
-## Existing clients
-
-For 0.11.27 only, `dygnosis mcp --profile legacy-v2` preserves the previous 17
-tools, arguments, default mirrors and result schema 2. It is removed in
-0.11.28. New connections use `dygnosis mcp` and the canonical tools above.
-The MCP protocol edition does not choose the tool contract.

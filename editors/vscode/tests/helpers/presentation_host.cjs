@@ -44,16 +44,15 @@ async function checkPresentation(service, workspaceRoot, evidence, helpers) {
   };
   const input = await open("presentation.mod", "var y;\nparameters rho;\nrho=.9;\nhelper=1;\nmodel;\ny=rho*y(-1);\nend;\n");
   const symbols = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", input.document.uri);
-  const run = symbols.find(symbol => symbol.name === "MATLAB expressions");
-  assert.ok(run, "mixed assignments have a native Outline parent");
-  assert.deepEqual(run.children.map(symbol => symbol.name), ["rho", "helper"]);
-  assert.ok(run.children.every(child => run.range.contains(child.range)));
-  assert.deepEqual(run.selectionRange, run.children[0].selectionRange);
+  assert.deepEqual(symbols.map(symbol => symbol.name), ["var", "parameters", "model"]);
+  const parameter = symbols.find(symbol => symbol.name === "parameters").children.find(symbol => symbol.name === "rho");
+  assert.ok(parameter, "parameter declarations remain available without assignment rows");
+  assert.equal(parameter.selectionRange.start.line, 1);
   assert.equal(symbols.find(symbol => symbol.name === "model").detail, "");
   const commands = await vscode.commands.getCommands(true);
   assert.ok(commands.includes("dygnosis.chooseModelOwner"));
   assert.ok(commands.includes("dygnosis.openChanges"));
-  evidence.checks.push("native Outline groups mixed assignments with valid child/parent ranges; complete model has no detail; owner and Changes actions remain registered");
+  evidence.checks.push("native Outline keeps parameter declarations and model equations without assignment rows; complete model has no detail; owner and Changes actions remain registered");
 
   const pick = async (environment, command, args, cancel = false) => {
     const labels = environment.info.equations.map(row => `${row.number} · ${row.name || "Unnamed equation"}`);

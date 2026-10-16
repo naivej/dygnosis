@@ -532,73 +532,24 @@ fn crate_path_key(uri: &Url) -> String {
 }
 
 #[tokio::test]
-async fn expression_runs_mix_assignments_keep_locations_and_respect_hidden_boundaries() {
-    // Guards parameter exclusion, native-flag boundaries, source reordering,
-    // and parents that swallow hidden declarations, commands or blocks.
-    let root = url("expressions.mod");
-    let text = "parameters rho theta;\nrho=0.9;\nhelper=2;\n// Same run\n\ntheta=0.8;\nvar y;\nrho=0.7;\nhelper=3;\nsteady;\nrho=0.6;\nhelper=4;\nmodel; [name='equation'] y=rho; end;\nrho=0.5;\nhelper=5;\ninitval; y=0; end;\nendval; y=1; end;\nsteady_state_model; y=2; end;\n";
+async fn outline_omits_assignments_and_keeps_declared_names_and_model_structure() {
+    // Guards assignment groups and lone assignment rows returning, or their
+    // removal also hiding parameter declarations, commands or model equations.
+    let root = url("assignments.mod");
+    let text = "parameters rho;\nrho=0.9;\nhelper=2;\nvar y;\nsteady;\nmodel;\n[name='equation'] y=rho;\nend;\n";
     let (service, _socket) = new_service();
     let server = service.inner();
     open(server, &root, text).await;
-    let mapped = info(server, &root, None).await;
     let rows = symbols(server, &root).await;
     assert_local_tree(&rows, text, None);
-    let runs: Vec<_> = rows
-        .iter()
-        .filter(|row| row.name == "MATLAB expressions")
-        .collect();
-    assert_eq!(runs.len(), 4);
-    for (run, lines) in runs
-        .iter()
-        .zip([vec![1, 2, 5], vec![7, 8], vec![10, 11], vec![13, 14]])
-    {
-        let children = run.children.as_ref().unwrap();
-        assert_eq!(run.kind, SymbolKind::NAMESPACE);
-        assert_eq!(run.range.start, children.first().unwrap().range.start);
-        assert_eq!(run.range.end, children.last().unwrap().range.end);
-        assert_eq!(run.selection_range, children[0].selection_range);
-        assert_eq!(
-            children
-                .iter()
-                .map(|row| row.range.start.line)
-                .collect::<Vec<_>>(),
-            lines
-        );
-        for child in children {
-            let statement = mapped["statements"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|row| {
-                    row["kind"] == "assignment"
-                        && row["location"]["range"]["start"]["line"] == child.range.start.line
-                })
-                .unwrap();
-            assert_eq!(child.name, statement["name"].as_str().unwrap());
-            assert_eq!(
-                serde_json::to_value(child.range).unwrap(),
-                statement["location"]["range"]
-            );
-            assert_eq!(
-                serde_json::to_value(child.selection_range).unwrap(),
-                statement["anchor"]["range"]
-            );
-            assert!(child.detail.is_none());
-        }
-    }
     assert_eq!(
-        runs[0]
-            .children
-            .as_ref()
-            .unwrap()
-            .iter()
-            .map(|row| row.name.as_str())
-            .collect::<Vec<_>>(),
-        ["rho", "helper", "theta"]
+        rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
+        ["parameters", "var", "steady", "model"]
     );
-    for block in ["model", "initval", "endval", "steady_state_model"] {
-        assert!(rows.iter().any(|row| row.name == block));
-    }
+    let parameter = &rows[0].children.as_ref().unwrap()[0];
+    assert_eq!(parameter.name, "rho");
+    assert_eq!(parameter.selection_range.start, Position::new(0, 11));
+    assert_eq!(rows[3].children.as_ref().unwrap()[0].name, "1 · equation");
     server
         .did_change_configuration(DidChangeConfigurationParams {
             settings: json!({"outline":{"sections":["commands"]}}),
@@ -608,151 +559,77 @@ async fn expression_runs_mix_assignments_keep_locations_and_respect_hidden_bound
     assert_eq!(
         commands
             .iter()
-            .filter(|row| row.name == "MATLAB expressions")
-            .map(|row| row.range)
+            .map(|row| row.name.as_str())
             .collect::<Vec<_>>(),
-        runs.iter().map(|row| row.range).collect::<Vec<_>>()
+        ["steady"]
     );
+
     server
         .did_change_configuration(DidChangeConfigurationParams {
-            settings: json!({"outline":{"sections":["declarations","blocks","equations"]}}),
+            settings: json!({"outline":{"sections":["declarations","blocks","commands","dimensions","equations"]}}),
         })
         .await;
-    assert!(symbols(server, &root)
-        .await
-        .iter()
-        .all(|row| row.name != "MATLAB expressions" && row.kind != SymbolKind::VARIABLE));
-}
-
-#[tokio::test]
-async fn expression_runs_group_pure_assignments_and_leave_single_rows() {
-    // Guards both native-only and Dynare-only runs, and the unnecessary parent
-    // that would hide a lone assignment behind another click.
-    let (service, _socket) = new_service();
-    let server = service.inner();
-    for (file, text, expected) in [
-        (
-            "dynare-run.mod",
-            "parameters rho theta;\nrho=0.9;\ntheta=0.8;\n",
-            vec!["rho", "theta"],
-        ),
-        (
-            "native-run.mod",
-            "first=1;\nsecond=2;\n",
-            vec!["first", "second"],
-        ),
-    ] {
-        let root = url(file);
+    for text in ["helper=1;\n", "first=1;\nsecond=2;\n"] {
         open(server, &root, text).await;
-        let rows = symbols(server, &root).await;
-        let run = rows
-            .iter()
-            .find(|row| row.name == "MATLAB expressions")
-            .unwrap();
-        assert_eq!(
-            run.children
-                .as_ref()
-                .unwrap()
-                .iter()
-                .map(|row| row.name.as_str())
-                .collect::<Vec<_>>(),
-            expected
-        );
-        assert_local_tree(&rows, text, None);
+        assert!(symbols(server, &root).await.is_empty());
     }
-    for text in ["parameters rho;\nrho=0.9;\n", "helper=1;\n"] {
-        let root = url("lone-expression.mod");
-        open(server, &root, text).await;
-        let rows = symbols(server, &root).await;
-        assert!(rows.iter().all(|row| row.name != "MATLAB expressions"));
-        assert!(rows
-            .iter()
-            .any(|row| row.kind == SymbolKind::VARIABLE && row.children.is_none()));
-    }
-}
-
-#[tokio::test]
-async fn expression_runs_deduplicate_macro_copies_and_keep_recovered_and_file_local_rows() {
-    // Guards duplicate macro children, loss of a valid run during recovery,
-    // and combining assignments from an included file into the root's range.
-    let root = url("macro-expressions.mod");
-    let child = url("expression-body.inc");
-    let child_text = "included_first=1;\nincluded_second=2;\n";
-    let text = "parameters rho;\n@#for k in 1:2\nrho=@{k};\nhelper=@{k};\n@#endfor\n@#include \"expression-body.inc\"\nmodel;\n";
-    let (service, _socket) = new_service();
-    let server = service.inner();
-    open(server, &child, child_text).await;
-    open(server, &root, text).await;
-    assert_eq!(info(server, &root, None).await["complete"], false);
+    open(server, &root, "parameters rho;\nrho=0.9;\n").await;
     let rows = symbols(server, &root).await;
-    assert_local_tree(&rows, text, None);
-    let run = rows
-        .iter()
-        .find(|row| row.name == "MATLAB expressions")
-        .unwrap();
     assert_eq!(
-        run.children
-            .as_ref()
-            .unwrap()
-            .iter()
-            .map(|row| row.name.as_str())
-            .collect::<Vec<_>>(),
-        ["rho", "helper"]
-    );
-    assert_eq!(run.range.start.line, 2);
-    assert_eq!(run.range.end.line, 3);
-    let included = symbols(server, &child).await;
-    assert_local_tree(&included, child_text, None);
-    let run = included
-        .iter()
-        .find(|row| row.name == "MATLAB expressions")
-        .unwrap();
-    assert_eq!(
-        run.children
-            .as_ref()
-            .unwrap()
-            .iter()
-            .map(|row| row.name.as_str())
-            .collect::<Vec<_>>(),
-        ["included_first", "included_second"]
+        rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
+        ["parameters"]
     );
 }
 
 #[tokio::test]
-async fn expression_runs_keep_namespace_detail_on_shared_include_leaves() {
-    // Guards the shared-owner flattening path dropping namespace detail or
-    // changing the workspace symbol's written location.
-    let child = url("shared-expressions.inc");
-    let a = url("expressions-owner-a.mod");
-    let b = url("expressions-owner-b.mod");
-    let child_text = "helper=1;\nother=2;\n";
-    let text = "@#include \"shared-expressions.inc\"\nvar y; model; y=0; end;\n";
+async fn outline_omits_macro_and_included_assignments_in_recovered_and_shared_views() {
+    // Guards fallback and shared-owner views restoring hidden assignment rows.
+    // Declared names must still point at the include's declaration in both views.
+    let a = url("assignments-owner-a.mod");
+    let b = url("assignments-owner-b.mod");
+    let child = url("shared-assignments.inc");
+    let child_text = "parameters shared;\nshared=1;\nhelper=2;\n";
+    let text = "parameters rho;\n@#for k in 1:2\nrho=@{k};\nhelper=@{k};\n@#endfor\n@#include \"shared-assignments.inc\"\nvar y;\nmodel;\ny=rho;\n";
     let (service, _socket) = new_service();
     let server = service.inner();
     open(server, &child, child_text).await;
     open(server, &a, text).await;
+    assert_eq!(info(server, &a, None).await["complete"], false);
+    let rows = symbols(server, &a).await;
+    assert_local_tree(&rows, text, None);
+    assert_eq!(
+        rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
+        ["parameters", "var", "model"]
+    );
     let owned = symbols(server, &child).await;
-    let helper = owned
-        .iter()
-        .find(|row| row.name == "MATLAB expressions")
-        .unwrap()
-        .children
-        .as_ref()
-        .unwrap()
-        .iter()
-        .find(|row| row.name == "helper")
-        .unwrap()
-        .clone();
+    assert_local_tree(&owned, child_text, None);
+    assert_eq!(
+        owned
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
+        ["parameters"]
+    );
+    let parameter = owned[0].children.as_ref().unwrap()[0].clone();
+    assert_eq!(parameter.name, "shared");
+    assert_eq!(parameter.selection_range.start, Position::new(0, 11));
     open(server, &b, text).await;
     let shared = symbols(server, &child).await;
     assert_local_tree(&shared, child_text, None);
-    let leaf = shared.iter().find(|row| row.name == "helper").unwrap();
-    assert_eq!(leaf.detail.as_deref(), Some("MATLAB expressions"));
-    assert_eq!(leaf.range, helper.range);
-    assert_eq!(leaf.selection_range, helper.selection_range);
+    let mut leaves = Vec::new();
+    all(&shared, &mut leaves);
+    let locations = |name| {
+        leaves
+            .iter()
+            .filter(|row| row.name == name)
+            .map(|row| row.selection_range)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(locations("shared"), [parameter.selection_range]);
+    assert!(locations("helper").is_empty());
     let workspace = server
         .symbol(WorkspaceSymbolParams {
-            query: "helper".to_string(),
+            query: "shared".to_string(),
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         })
@@ -761,8 +638,18 @@ async fn expression_runs_keep_namespace_detail_on_shared_include_leaves() {
         .unwrap();
     assert!(workspace
         .iter()
-        .any(|row| row.name == "helper"
-            && row.location == Location::new(child.clone(), helper.range)));
+        .all(|row| row.location.range == parameter.range));
+    assert!(workspace.iter().any(|row| row.location.uri == child));
+    let helpers = server
+        .symbol(WorkspaceSymbolParams {
+            query: "helper".to_string(),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(helpers.is_empty());
 }
 
 #[tokio::test]

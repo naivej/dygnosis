@@ -93,26 +93,6 @@ fn range_key(range: Range) -> (u32, u32, u32, u32) {
     )
 }
 
-fn append_expression_run(output: &mut Vec<DocumentSymbol>, run: &mut Vec<DocumentSymbol>) {
-    if run.len() < 2 {
-        output.append(run);
-        return;
-    }
-    let range = Range::new(
-        run.first().unwrap().range.start,
-        run.last().unwrap().range.end,
-    );
-    let selection = run[0].selection_range;
-    output.push(symbol(
-        "MATLAB expressions".to_string(),
-        None,
-        SymbolKind::NAMESPACE,
-        range,
-        selection,
-        std::mem::take(run),
-    ));
-}
-
 impl<'a> WrittenView<'a> {
     pub fn new(
         uri: &'a Url,
@@ -417,6 +397,9 @@ impl<'a> WrittenView<'a> {
         // openers must carry every expansion's number, not the first one.
         let mut groups: BTreeMap<_, StatementGroup> = BTreeMap::new();
         for (statement, source) in self.model.statements.iter().zip(&self.map.statements) {
+            if statement.kind == StatementKind::Assignment {
+                continue;
+            }
             for location in self.local_locations(source) {
                 let anchor = source
                     .anchor
@@ -444,14 +427,7 @@ impl<'a> WrittenView<'a> {
         let mut groups: Vec<_> = groups.into_iter().collect();
         groups.sort_by_key(|(_, group)| range_key(group.range));
         let mut output = Vec::new();
-        let mut expressions = Vec::new();
         for ((kind, name, _), StatementGroup { ids, range, anchor }) in groups {
-            // Retained assignments are top-level rows. A hidden declaration,
-            // command or block is still a boundary in the written source.
-            let expression = kind == "assignment";
-            if !expression {
-                append_expression_run(&mut output, &mut expressions);
-            }
             let mut children = Vec::new();
             if (kind == "declaration" && enabled("declarations"))
                 || (kind == "dimension" && enabled("dimensions"))
@@ -627,7 +603,6 @@ impl<'a> WrittenView<'a> {
                     "declaration" => SymbolKind::NAMESPACE,
                     "dimension" => SymbolKind::NAMESPACE,
                     "block" => SymbolKind::MODULE,
-                    "assignment" => SymbolKind::VARIABLE,
                     _ => SymbolKind::EVENT,
                 };
                 let row = symbol(
@@ -640,16 +615,11 @@ impl<'a> WrittenView<'a> {
                         .unwrap_or(Range::new(range.start, range.start)),
                     children,
                 );
-                if expression {
-                    expressions.push(row);
-                } else {
-                    output.push(row);
-                }
+                output.push(row);
             } else {
                 output.extend(children);
             }
         }
-        append_expression_run(&mut output, &mut expressions);
         if enabled("declarations") {
             for (name, target, span, function) in
                 crate::lsp::syntax_intel::macro_definitions(self.text)

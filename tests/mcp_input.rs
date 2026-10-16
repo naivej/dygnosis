@@ -14,7 +14,6 @@ impl McpWire {
     fn new() -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_dygnosis"))
             .arg("mcp")
-            .args(["--profile", "legacy-v2"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -72,6 +71,19 @@ impl Drop for McpWire {
     }
 }
 
+fn diagnostic_rows(reply: &Value) -> Vec<Value> {
+    assert!(reply.get("error").is_none(), "{reply}");
+    let result: Value =
+        serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(result["schema_version"], 3);
+    result["data"]["roots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|root| root["diagnostics"].as_array().unwrap().iter().cloned())
+        .collect()
+}
+
 #[test]
 fn partial_model_tools_keep_the_actual_macro_cause_and_written_source_over_stdio() {
     // Guards generic I211 replacements, missing source ownership and invented
@@ -116,8 +128,17 @@ fn partial_model_tools_keep_the_actual_macro_cause_and_written_source_over_stdio
                     .unwrap(),
             )
             .unwrap();
-            assert_eq!(result["outcome"]["status"], "partial", "{tool}: {result}");
-            let reason = &result["coverage"][0]["reasons"][0];
+            let status = if tool == "dynare_diagnose" && code == "E061" {
+                "refused"
+            } else {
+                "partial"
+            };
+            assert_eq!(result["outcome"]["status"], status, "{tool}: {result}");
+            let reason = if tool == "dynare_diagnose" {
+                &result["coverage"]["roots"][0]["reasons"][0]
+            } else {
+                &result["coverage"][0]["reasons"][0]
+            };
             assert_eq!(reason["code"], code, "{tool}: {result}");
             assert!(
                 reason["message"].as_str().unwrap().contains(message),
@@ -226,27 +247,33 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
         .unwrap();
     let description = tool["description"].as_str().unwrap();
     for phrase in [
-        "Before to After",
+        "two model snapshots",
         "server host",
-        "saved server-host files",
+        "saved Working",
         "no fetch",
-        "INPUT_CHANGED",
+        "editor-buffer",
     ] {
         assert!(
             description.contains(phrase),
             "Missing discovery policy {phrase}: {tool}"
         );
     }
-    assert_eq!(tool["inputSchema"]["oneOf"].as_array().unwrap().len(), 2);
+    assert!(tool["inputSchema"]["properties"]["comparison"].is_object());
     let decode = |reply: Value| {
         assert!(reply.get("error").is_none(), "{reply}");
-        serde_json::from_str::<Value>(reply["result"]["content"][0]["text"].as_str().unwrap())
-            .unwrap()
+        let result =
+            serde_json::from_str::<Value>(reply["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(result["schema_version"], 3);
+        if result["data"].is_null() {
+            result
+        } else {
+            result["data"].clone()
+        }
     };
-    let mut arguments = json!({"repository_path":directory.to_str().unwrap(),
-        "macro_work_limit":100000,
+    let mut arguments = json!({"comparison":{"kind":"repository","repository_path":directory.to_str().unwrap(),
         "before":{"kind":"git", "root_file":"main.mod", "ref":before},
-        "after":{"kind":"git", "root_file":"main.mod", "ref":after}});
+        "after":{"kind":"git", "root_file":"main.mod", "ref":after}},"macro_work_limit":100000,"detail":"full"});
     let historical = decode(wire.call("dynare_compare_models", arguments.clone()));
     assert_eq!(historical["state"], "result", "{historical}");
     assert_eq!(historical["inputs"]["before"]["commit"], before);
@@ -272,8 +299,8 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
         "[name='eq'] y=2;\n"
     );
     assert!(!historical.to_string().contains("y = 3"));
-    arguments["before"]["ref"] = json!("HEAD");
-    arguments["after"] = json!({"kind":"working", "root_file":"main.mod"});
+    arguments["comparison"]["before"]["ref"] = json!("HEAD");
+    arguments["comparison"]["after"] = json!({"kind":"working", "root_file":"main.mod"});
     let saved = decode(wire.call("dynare_compare_models", arguments.clone()));
     assert_eq!(saved["state"], "result", "{saved}");
     assert_eq!(saved["inputs"]["after"]["source_policy"], "saved_files");
@@ -288,21 +315,20 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
     let invalid = wire.call("dynare_compare_models", mixed);
     assert_eq!(invalid["error"]["code"], -32602, "{invalid}");
     let mut missing = arguments.clone();
-    missing["before"]["root_file"] = json!("absent.mod");
+    missing["comparison"]["before"]["root_file"] = json!("absent.mod");
     let failure = decode(wire.call("dynare_compare_models", missing));
     assert_eq!(failure["code"], "ROOT_NOT_FOUND");
     assert_eq!(failure["side"], "before");
     assert!(failure.get("changed_equations").is_none());
-    let text = decode(wire.call("dynare_compare_models", json!({"file_content_a":"var y; model; y=1; end;", "file_content_b":"var y; model; y=2; end;"})));
+    let text = decode(wire.call("dynare_compare_models", json!({"comparison":{"kind":"sources","before":{"kind":"text","text":"var y; model; y=1; end;"},"after":{"kind":"text","text":"var y; model; y=2; end;"}},"detail":"full"})));
     assert!(text.get("changed_equations").is_some());
     assert!(text.get("inputs").is_none());
     let supplied_root = "@#include \"body\"\n@#include \"empty\"\n";
     let supplied_old = "parameters p; estimated_params; p,normal_pdf,.5,.1; end;";
     let supplied_new = supplied_old.replace("normal_pdf,.5", "normal_pdf,.6");
-    let supplied = decode(wire.call("dynare_compare_models", json!({"file_content_a":supplied_root,"file_content_b":supplied_root,
-        "active_file_a":"root.mod","active_file_b":"root.mod",
-        "files_a":{"root.mod":supplied_root,"body":supplied_old,"empty":"","unused":"not executed"},
-        "files_b":{"root.mod":supplied_root,"body":supplied_new,"empty":"","unused":"not executed"}})));
+    let supplied = decode(wire.call("dynare_compare_models", json!({"comparison":{"kind":"sources",
+        "before":{"kind":"map","root":"root.mod","files":{"root.mod":supplied_root,"body":supplied_old,"empty":"","unused":"not executed"}},
+        "after":{"kind":"map","root":"root.mod","files":{"root.mod":supplied_root,"body":supplied_new,"empty":"","unused":"not executed"}}},"detail":"full"})));
     assert_eq!(supplied["sources"]["before"]["empty"], "");
     assert!(supplied["sources"]["before"].get("unused").is_none());
     assert_eq!(
@@ -358,16 +384,17 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    let mut sibling_arguments = json!({"repository_path":project.to_str().unwrap(),
+    let mut sibling_arguments = json!({"comparison":{"kind":"repository","repository_path":project.to_str().unwrap(),
         "before":{"kind":"working", "root_file":"main.mod"},
-        "after":{"kind":"working", "root_file":"main.mod"}, "search_paths":["../common"]});
+        "after":{"kind":"working", "root_file":"main.mod"}, "search_paths":["../common"]},"detail":"full"});
     let sibling_saved = decode(wire.call("dynare_compare_models", sibling_arguments.clone()));
     assert_eq!(sibling_saved["state"], "result", "{sibling_saved}");
     assert_eq!(
         sibling_saved["inputs"]["before"]["search_paths"],
         json!(["../common"])
     );
-    sibling_arguments["before"] = json!({"kind":"git", "root_file":"main.mod", "ref":"HEAD"});
+    sibling_arguments["comparison"]["before"] =
+        json!({"kind":"git", "root_file":"main.mod", "ref":"HEAD"});
     let sibling_history = decode(wire.call("dynare_compare_models", sibling_arguments));
     assert_eq!(
         sibling_history["code"], "UNSUPPORTED_SOURCE",
@@ -387,11 +414,10 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
 fn constructor_refusals_use_unsaved_include_text_and_clear_on_decimal_denominators() {
     let mut wire = McpWire::new();
     let root = "var y; varexo e; parameters p; p=1; model;\n@#include \"body.inc\"\nend;";
-    let mut args = json!({"active_file": "main.mod", "file_content": root,
-        "files": {"main.mod": "", "body.inc": "y=e+0*(1/(p^0-1));"}});
+    let mut args = json!({"source":{"kind":"map","root":"main.mod","root_text":root,"files":{"main.mod":"","body.inc":"y=e+0*(1/(p^0-1));"}}});
     let decode = |reply: Value| -> Vec<Value> {
         assert!(reply.get("error").is_none(), "{reply}");
-        serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+        diagnostic_rows(&reply)
     };
     let rows = decode(wire.call("dynare_diagnose", args.clone()));
     let errors: Vec<_> = rows.iter().filter(|row| row["code"] == "E278").collect();
@@ -407,7 +433,7 @@ fn constructor_refusals_use_unsaved_include_text_and_clear_on_decimal_denominato
             .all(|row| !matches!(row["code"].as_str(), Some("E021" | "W022" | "W042"))),
         "{rows:?}"
     );
-    args["files"]["body.inc"] = json!("y=e+1/0.0;");
+    args["source"]["files"]["body.inc"] = json!("y=e+1/0.0;");
     let rows = decode(wire.call("dynare_diagnose", args));
     assert!(rows.iter().all(|row| row["code"] != "E278"), "{rows:?}");
     assert!(rows.iter().any(|row| row["code"] == "W022"), "{rows:?}");
@@ -415,8 +441,8 @@ fn constructor_refusals_use_unsaved_include_text_and_clear_on_decimal_denominato
 
 fn arguments(name: &str) -> Value {
     match name {
-        "dynare_find_references" => json!({"symbol": "y"}),
-        "dynare_rename" => json!({"old_name": "y", "new_name": "output"}),
+        "dynare_symbol_info" => json!({"symbol":{"kind":"name","name":"y"}}),
+        "dynare_rename" => json!({"symbol":{"kind":"name","name":"y"},"new_name":"output"}),
         _ => json!({}),
     }
 }
@@ -425,11 +451,10 @@ fn arguments(name: &str) -> Value {
 fn empty_steady_state_and_verbatim_boundaries_keep_unsaved_owners_on_the_wire() {
     let mut wire = McpWire::new();
     let root = "var y; varexo e; model; y=e; end;\n@#include \"body.inc\"\n";
-    let mut args = json!({"active_file": "main.mod", "file_content": root,
-        "files": {"main.mod": "old disk contents", "body.inc": "steady_state_model; end;"}});
+    let mut args = json!({"source":{"kind":"map","root":"main.mod","root_text":root,"files":{"main.mod":"old disk contents","body.inc":"steady_state_model; end;"}}});
     let decode = |reply: Value| -> Vec<Value> {
         assert!(reply.get("error").is_none(), "{reply}");
-        serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+        diagnostic_rows(&reply)
     };
     let rows = decode(wire.call("dynare_diagnose", args.clone()));
     let errors: Vec<_> = rows.iter().filter(|row| row["code"] == "E001").collect();
@@ -445,34 +470,36 @@ fn empty_steady_state_and_verbatim_boundaries_keep_unsaved_owners_on_the_wire() 
         ),
         (Some(1), Some(21), Some(24))
     );
-    args["files"]["body.inc"] = json!("steady_state_model; y=0; end;");
+    args["source"]["files"]["body.inc"] = json!("steady_state_model; y=0; end;");
     let rows = decode(wire.call("dynare_diagnose", args.clone()));
     assert!(
         rows.iter().all(|row| row["severity"] != "ERROR"),
         "{rows:?}"
     );
 
-    args["files"]["body.inc"] =
+    args["source"]["files"]["body.inc"] =
         json!("verbatim;\nparameters phantom;\nmodel;\ny={1};\nend\nend;\n");
-    args["file_content"] = json!(format!("{root}shocks; var e=1; end;"));
+    args["source"]["root_text"] = json!(format!("{root}shocks; var e=1; end;"));
     let rows = decode(wire.call("dynare_diagnose", args.clone()));
     assert!(
         rows.iter().all(|row| row["severity"] != "ERROR"),
         "{rows:?}"
     );
-    let reply = wire.call("dynare_model_info", args.clone());
+    let mut info_args = args.clone();
+    info_args["sections"] = json!(["structure"]);
+    let reply = wire.call("dynare_model_info", info_args);
     assert!(reply.get("error").is_none(), "{reply}");
     let info: Value =
         serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(
-        info["n_parameters"], 0,
+        info["data"]["structure"]["n_parameters"], 0,
         "raw text must not declare phantom: {info}"
     );
     assert_eq!(
-        info["n_equations"], 1,
+        info["data"]["structure"]["n_equations"], 1,
         "raw text must not create an equation: {info}"
     );
-    args["file_content"] = json!(format!("{root}shocks; var e; end;"));
+    args["source"]["root_text"] = json!(format!("{root}shocks; var e; end;"));
     let rows = decode(wire.call("dynare_diagnose", args));
     let error = rows.iter().find(|row| row["code"] == "E001").unwrap();
     assert_eq!(
@@ -486,7 +513,8 @@ fn empty_steady_state_and_verbatim_boundaries_keep_unsaved_owners_on_the_wire() 
 }
 
 #[test]
-fn seven_tools_validate_nonempty_maps_on_the_wire() {
+fn model_tools_validate_exact_map_roots_and_preserve_empty_overlays() {
+    // Guards implicit root selection and empty overlays falling back to stale file text.
     let mut wire = McpWire::new();
     let text = "var y; model; y=1; end;";
     for name in [
@@ -494,64 +522,53 @@ fn seven_tools_validate_nonempty_maps_on_the_wire() {
         "dynare_model_info",
         "dynare_equations",
         "dynare_expand",
-        "dynare_related_files",
-        "dynare_find_references",
+        "dynare_actions",
+        "dynare_symbol_info",
         "dynare_rename",
     ] {
         for key in [None, Some("missing.mod"), Some("MAIN.mod")] {
-            for content in [None, Some(text)] {
+            for overlay in [None, Some(text)] {
                 let mut args = arguments(name);
-                args["files"] = json!({"main.mod": text});
+                args["source"] = json!({"kind":"map","files":{"main.mod":text}});
                 if let Some(key) = key {
-                    args["active_file"] = json!(key);
+                    args["source"]["root"] = json!(key);
                 }
-                if let Some(content) = content {
-                    args["file_content"] = json!(content);
+                if let Some(overlay) = overlay {
+                    args["source"]["root_text"] = json!(overlay);
                 }
                 let reply = wire.call(name, args);
                 assert_eq!(reply["error"]["code"], -32602, "{name}: {reply}");
-                let message = key.map_or_else(
-                    || "active_file is required with a nonempty files map".to_string(),
-                    |key| format!("\"{key}\" is not in the file map"),
-                );
-                assert_eq!(reply["error"]["message"], message, "{name}: {reply}");
-                assert!(reply.get("result").is_none(), "{name}: {reply}");
+                let message = reply["error"]["message"].as_str().unwrap();
+                assert!(!message.is_empty());
+                assert!(message.contains("root"), "{message}");
             }
         }
-
         let mut mapped = arguments(name);
-        mapped["files"] = json!({"main.mod": text});
-        mapped["active_file"] = json!("main.mod");
+        mapped["source"] = json!({"kind":"map","root":"main.mod","files":{"main.mod":text}});
         let omitted = wire.call(name, mapped.clone());
         assert!(omitted.get("error").is_none(), "{name}: {omitted}");
-        mapped["file_content"] = json!(text);
+        mapped["source"]["root_text"] = json!(text);
         let explicit = wire.call(name, mapped.clone());
         assert_eq!(omitted["result"], explicit["result"], "{name}");
-        mapped["file_content"] = json!("");
+        mapped["source"]["root_text"] = json!("");
         let empty_overlay = wire.call(name, mapped.clone());
         assert!(
             empty_overlay.get("error").is_none(),
             "{name}: {empty_overlay}"
         );
-        mapped["files"] = json!({"main.mod": ""});
-        mapped.as_object_mut().unwrap().remove("file_content");
-        let empty_map_text = wire.call(name, mapped);
-        assert_eq!(empty_overlay["result"], empty_map_text["result"], "{name}");
-
+        mapped["source"]["files"] = json!({"main.mod":""});
+        mapped["source"]
+            .as_object_mut()
+            .unwrap()
+            .remove("root_text");
+        let empty_text = wire.call(name, mapped.clone());
+        assert_eq!(empty_overlay["result"], empty_text["result"], "{name}");
+        mapped["source"]["files"] = json!({});
+        assert_eq!(wire.call(name, mapped)["error"]["code"], -32602);
         let mut single = arguments(name);
-        single["file_content"] = json!(text);
-        let without_map = wire.call(name, single.clone());
-        single["files"] = json!({});
-        single["active_file"] = json!("ignored.mod");
-        let empty_map = wire.call(name, single);
-        if name == "dynare_related_files" {
-            assert_eq!(without_map["error"]["code"], -32602, "{without_map}");
-            assert_eq!(empty_map["error"]["code"], -32602, "{empty_map}");
-        } else {
-            assert!(without_map.get("error").is_none(), "{name}: {without_map}");
-            assert!(empty_map.get("error").is_none(), "{name}: {empty_map}");
-        }
-        assert_eq!(without_map["result"], empty_map["result"], "{name}");
+        single["source"] = json!({"kind":"text","text":text});
+        let result = wire.call(name, single);
+        assert!(result.get("error").is_none(), "{name}: {result}");
     }
 }
 
@@ -559,15 +576,11 @@ fn seven_tools_validate_nonempty_maps_on_the_wire() {
 fn slice21_checks_use_unsaved_root_and_include_text_on_the_wire() {
     let mut wire = McpWire::new();
     let root = "var y r; varexo e; parameters p; p=.5;\n@#include \"body.inc\"\nsteady_state_model; y=0; end;\nplanner_objective y^2; ramsey_model(instruments=(r));\n";
-    let mut args = json!({
-        "active_file": "main.mod",
-        "file_content": root,
-        "files": {"main.mod": "", "body.inc": "model; y=0*p+e; end;"}
-    });
+    let mut args = json!({"source":{"kind":"map","root":"main.mod","root_text":root,"files":{"main.mod":"","body.inc":"model; y=0*p+e; end;"}}});
     let reply = wire.call("dynare_diagnose", args.clone());
     let decode = |reply: &Value| -> Vec<Value> {
         assert!(reply.get("error").is_none(), "{reply}");
-        serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+        diagnostic_rows(reply)
     };
     let diagnostics = decode(&reply);
     let p = diagnostics
@@ -587,7 +600,7 @@ fn slice21_checks_use_unsaved_root_and_include_text_on_the_wire() {
         "{diagnostics:?}"
     );
 
-    args["files"]["body.inc"] = json!("model; y=p+0*e; end;");
+    args["source"]["files"]["body.inc"] = json!("model; y=p+0*e; end;");
     let diagnostics = decode(&wire.call("dynare_diagnose", args.clone()));
     assert!(
         diagnostics
@@ -596,8 +609,8 @@ fn slice21_checks_use_unsaved_root_and_include_text_on_the_wire() {
         "{diagnostics:?}"
     );
 
-    args["files"]["body.inc"] = json!("model; y=p+e; end;");
-    args["file_content"] = json!(format!("{root}resid(1);"));
+    args["source"]["files"]["body.inc"] = json!("model; y=p+e; end;");
+    args["source"]["root_text"] = json!(format!("{root}resid(1);"));
     let diagnostics = decode(&wire.call("dynare_diagnose", args.clone()));
     assert!(
         diagnostics.iter().any(|d| d["code"] == "E001"
@@ -609,7 +622,7 @@ fn slice21_checks_use_unsaved_root_and_include_text_on_the_wire() {
         "{diagnostics:?}"
     );
 
-    args["file_content"] = json!(format!("{root}resid(non_zero);"));
+    args["source"]["root_text"] = json!(format!("{root}resid(non_zero);"));
     let diagnostics = decode(&wire.call("dynare_diagnose", args));
     assert!(
         !diagnostics
@@ -653,19 +666,19 @@ fn macro_work_configuration_is_isolated_and_revision_bound_over_stdio() {
     );
     let large = canonical(wire.call(
         "dynare_model_info",
-        json!({"file_content":source,"macro_work_limit":100000,"detail":"compact"}),
+        json!({"source":{"kind":"text","text":source},"macro_work_limit":100000,"detail":"compact"}),
     ));
     assert_eq!(large["coverage"][0]["complete"], true, "{large}");
-    assert_eq!(large["data"]["n_equations"], 100, "{large}");
+    assert_eq!(large["data"]["summary"]["equation_count"], 100, "{large}");
     assert_ne!(
         large["inputs"][0]["revision"],
         small["inputs"][0]["revision"]
     );
-    let stale = canonical(wire.call("dynare_model_info", json!({"file_content":source,"macro_work_limit":1000,"expected_revision":large["inputs"][0]["revision"],"detail":"compact"})));
+    let stale = canonical(wire.call("dynare_model_info", json!({"source":{"kind":"text","text":source},"macro_work_limit":1000,"expected_revision":large["inputs"][0]["revision"],"detail":"compact"})));
     assert_eq!(stale["outcome"]["reasons"][0]["code"], "INPUT_CHANGED");
     let ordinary = canonical(wire.call(
         "dynare_model_info",
-        json!({"file_content":source,"detail":"compact"}),
+        json!({"source":{"kind":"text","text":source},"detail":"compact"}),
     ));
     assert_eq!(ordinary["coverage"][0]["complete"], true);
     assert_eq!(
@@ -682,7 +695,7 @@ fn macro_work_configuration_is_isolated_and_revision_bound_over_stdio() {
     ] {
         let reply = wire.call(
             "dynare_model_info",
-            json!({"file_content":source,"macro_work_limit":invalid}),
+            json!({"source":{"kind":"text","text":source},"macro_work_limit":invalid}),
         );
         assert_eq!(reply["error"]["code"], -32602, "{reply}");
     }
@@ -707,8 +720,8 @@ fn batch_and_comparison_apply_work_per_root_and_per_side_over_stdio() {
         .unwrap()
     };
     let mut wire = McpWire::new();
-    let batch_args = json!({"files":{"a.mod":source,"b.mod":source},"roots":["a.mod","b.mod"],"macro_work_limit":50000,"detail":"compact"});
-    let large = canonical(wire.call("dynare_workspace_diagnose", batch_args.clone()));
+    let batch_args = json!({"batch":{"kind":"map","files":{"a.mod":source,"b.mod":source},"roots":["a.mod","b.mod"]},"macro_work_limit":50000,"detail":"compact"});
+    let large = canonical(wire.call("dynare_diagnose", batch_args.clone()));
     assert_eq!(large["data"]["summary"]["checked"], 2, "{large}");
     assert!(large["inputs"]
         .as_array()
@@ -717,7 +730,7 @@ fn batch_and_comparison_apply_work_per_root_and_per_side_over_stdio() {
         .all(|input| input["macro_work_limit"] == 50000));
     let mut small_args = batch_args.clone();
     small_args["macro_work_limit"] = json!(1000);
-    let small = canonical(wire.call("dynare_workspace_diagnose", small_args.clone()));
+    let small = canonical(wire.call("dynare_diagnose", small_args.clone()));
     assert!(
         small["limits"]
             .as_array()
@@ -727,7 +740,7 @@ fn batch_and_comparison_apply_work_per_root_and_per_side_over_stdio() {
         "{small}"
     );
     small_args["expected_revisions"] = large["data"]["root_revisions"].clone();
-    let stale = canonical(wire.call("dynare_workspace_diagnose", small_args));
+    let stale = canonical(wire.call("dynare_diagnose", small_args));
     assert!(
         stale["data"]["roots"]
             .as_array()
@@ -736,7 +749,7 @@ fn batch_and_comparison_apply_work_per_root_and_per_side_over_stdio() {
             .all(|row| row["code"] == "INPUT_CHANGED"),
         "{stale}"
     );
-    let compare_args = json!({"file_content_a":source,"file_content_b":source,"macro_work_limit":50000,"detail":"compact"});
+    let compare_args = json!({"comparison":{"kind":"sources","before":{"kind":"text","text":source},"after":{"kind":"text","text":source}},"macro_work_limit":50000,"detail":"compact"});
     let large = canonical(wire.call("dynare_compare_models", compare_args.clone()));
     assert_eq!(large["coverage"]["inputs"]["before"]["complete"], true);
     assert_eq!(large["coverage"]["inputs"]["after"]["complete"], true);
@@ -776,7 +789,7 @@ fn batch_and_comparison_apply_work_per_root_and_per_side_over_stdio() {
         "{stale}"
     );
     for (tool, mut args) in [
-        ("dynare_workspace_diagnose", batch_args),
+        ("dynare_diagnose", batch_args),
         ("dynare_compare_models", compare_args),
     ] {
         args["macro_work_limit"] = json!(0);
@@ -788,7 +801,7 @@ fn batch_and_comparison_apply_work_per_root_and_per_side_over_stdio() {
 #[test]
 fn configured_work_reaches_auxiliary_checks_and_edit_reparses_over_stdio() {
     // Guards a complete configured model gaining a false E001 from a default
-    // replay, losing a late E304, or withholding an Auto Fix after default reparsing.
+    // replay, losing a late E304, or dropping a verified fix for unnamed text.
     let prefix = format!(
         "@#define big=\"{}\"\n@#for i in 1:400\n@#define scratch=big\n@#endfor\n",
         "a".repeat(5_000)
@@ -811,28 +824,27 @@ fn configured_work_reaches_auxiliary_checks_and_edit_reparses_over_stdio() {
     let reply = wire.call(
         "dynare_diagnose",
         json!({
-            "files":{"main.mod":source},"active_file":"main.mod","macro_work_limit":10000000
+            "source":{"kind":"map","root":"main.mod","files":{"main.mod":source}},"macro_work_limit":10000000
         }),
     );
-    let diagnostics: Vec<Value> =
-        serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let diagnostics = diagnostic_rows(&reply);
     assert!(
         !diagnostics.iter().any(|row| row["code"] == "E001"),
         "{reply}"
     );
     let result = canonical(&reply);
-    assert_eq!(result["coverage"][0]["complete"], true, "{result}");
+    assert_eq!(result["coverage"]["roots"][0]["complete"], true, "{result}");
     assert!(result["limits"].as_array().unwrap().is_empty(), "{result}");
 
     let source = format!("{prefix}@#includepath \"missing-directory\"\nvar y; model; y=0; end;\n");
     let result = canonical(&wire.call(
         "dynare_diagnose",
         json!({
-            "files":{"main.mod":source},"active_file":"main.mod","macro_work_limit":10000000
+            "source":{"kind":"map","root":"main.mod","files":{"main.mod":source}},"macro_work_limit":10000000
         }),
     ));
     assert!(
-        result["data"]
+        result["data"]["roots"][0]["diagnostics"]
             .as_array()
             .unwrap()
             .iter()
@@ -846,27 +858,35 @@ fn configured_work_reaches_auxiliary_checks_and_edit_reparses_over_stdio() {
     let formatted = canonical(&wire.call(
         "dynare_format",
         json!({
-            "file_content":source,"macro_work_limit":10000000
+            "source":{"kind":"text","text":source},"macro_work_limit":10000000
         }),
     ));
     assert!(
-        formatted["data"]["formatted_text"]
-            .as_str()
+        formatted["proposal"]["edits"]
+            .as_array()
             .unwrap()
-            .contains("model;\n    y=2;\nend;"),
+            .iter()
+            .any(|edit| edit["new_text"]
+                .as_str()
+                .unwrap()
+                .contains("model;\n    y=2;\nend;")),
         "{formatted}"
     );
 
     let source = format!("{prefix}var y; parameters p;\np=.5\nmodel; y=p; end;\n");
     let fixed = canonical(&wire.call(
-        "dynare_auto_fix",
+        "dynare_actions",
         json!({
-            "file_content":source,"macro_work_limit":10000000
+            "fixes":true,"source":{"kind":"text","text":source},"macro_work_limit":10000000
         }),
     ));
-    assert!(!fixed["proposal"].is_null(), "{}", fixed["outcome"]);
+    assert!(!fixed["proposal"].is_null(), "{fixed}");
     assert!(
-        fixed["data"]["text"].as_str().unwrap().contains("p=.5;\n"),
+        fixed["proposal"]["edits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|edit| edit["new_text"].as_str().unwrap().contains("p=.5;")),
         "{}",
         fixed["outcome"]
     );

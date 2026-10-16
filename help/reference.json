@@ -1,6 +1,6 @@
 {
-  "version": "0.11.27",
-  "fingerprint": "0c6798c574fcc7efc4c155853195c8d173da57bb47776aed1741ff29c7b71497",
+  "version": "0.11.28",
+  "fingerprint": "b6633c5fcf1fa71234caf356e225afd45ada478422f1340b49bc24e44e93563d",
   "tools": [
     {
       "name": "dynare_syntax",

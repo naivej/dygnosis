@@ -404,9 +404,7 @@ pub(super) fn dispatch(
             .as_object_mut()
             .unwrap()
             .extend(batch.as_object().unwrap().clone());
-        return canonical_wire(super::multi_request::dispatch_batch(
-            arguments, control, true,
-        )?);
+        return super::multi_request::dispatch_batch(arguments, control);
     }
     if tool == "dynare_compare_models" {
         arguments.as_object_mut().unwrap().remove("comparison");
@@ -415,9 +413,7 @@ pub(super) fn dispatch(
             .ok_or_else(|| invalid("comparison is required"))?
         {
             ComparisonInput::Sources { before, after } => {
-                return canonical_wire(super::multi_request::comparison_sources(
-                    arguments, control, before, after,
-                )?)
+                return super::multi_request::comparison_sources(arguments, control, before, after)
             }
             ComparisonInput::Repository {
                 repository_path,
@@ -441,9 +437,7 @@ pub(super) fn dispatch(
                 original.insert("before".into(), selector(before));
                 original.insert("after".into(), selector(after));
                 original.insert("search_paths".into(), json!(search_paths));
-                return canonical_wire(super::multi_request::comparison_canonical(
-                    arguments, control,
-                )?);
+                return super::multi_request::comparison_canonical(arguments, control);
             }
         }
     }
@@ -535,19 +529,7 @@ pub(super) fn dispatch(
     } else {
         tool
     };
-    canonical_wire(super::request::dispatch_mode(
-        actual, arguments, control, true,
-    )?)
-}
-
-fn canonical_wire(wire: CallToolResult) -> Result<CallToolResult, rmcp::ErrorData> {
-    let mut result: ToolResult = serde_json::from_value(
-        wire.structured_content
-            .ok_or_else(|| rmcp::ErrorData::internal_error("Missing tool result", None))?,
-    )
-    .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-    result.schema_version = 3;
-    Ok(result.wire(Vec::new(), Detail::Compact))
+    super::request::dispatch_agent(actual, arguments, control)
 }
 
 fn output(params: &Params) -> ResultOptions {
@@ -574,17 +556,14 @@ fn reference_result(
     ) {
         Ok(pages) => pages,
         Err(message) if message.starts_with("INPUT_CHANGED") => {
-            return canonical_wire(
-                ToolResult::refused("INPUT_CHANGED", message).wire(Vec::new(), Detail::Compact),
-            )
+            return Ok(ToolResult::refused("INPUT_CHANGED", message).wire())
         }
         Err(message) => return Err(invalid(message)),
     };
     pages.share_budget();
     page_collections("", &mut result.data, &mut pages, true);
     result.selection = pages.finish(&options);
-    result.schema_version = 3;
-    Ok(result.wire(Vec::new(), Detail::Compact))
+    Ok(result.wire())
 }
 
 fn syntax(params: &Params, arguments: &Value) -> Result<CallToolResult, rmcp::ErrorData> {
@@ -916,45 +895,27 @@ mod tests {
     }
 
     // Guards unchanged/no-match edit outcomes returning the entire input as a
-    // replacement mirror, while preserving the explicit legacy contract.
+    // replacement mirror.
     #[test]
-    fn no_change_edit_results_omit_canonical_mirrors_and_keep_legacy_data() {
+    fn no_change_edit_results_omit_source_mirrors() {
         let formatted = "var y;\nmodel;\n\ty = 0;\nend;\n";
         for named in [false, true] {
             for full in [false, true] {
-                for (tool, legacy_tool, text, current_selector, legacy_selector, reason) in [
+                for (tool, text, current_selector, reason) in [
                     (
-                        "dynare_rename",
                         "dynare_rename",
                         MODEL,
                         json!({"symbol":{"kind":"name","name":"a"},"new_name":"a"}),
-                        json!({"old_name":"a","new_name":"a"}),
                         "SAME_NAME",
                     ),
                     (
                         "dynare_rename",
-                        "dynare_rename",
                         MODEL,
                         json!({"symbol":{"kind":"name","name":"absent_binding"},"new_name":"rho"}),
-                        json!({"old_name":"absent_binding","new_name":"rho"}),
                         "NO_MATCH",
                     ),
-                    (
-                        "dynare_format",
-                        "dynare_format",
-                        formatted,
-                        json!({}),
-                        json!({}),
-                        "NO_CHANGE",
-                    ),
-                    (
-                        "dynare_actions",
-                        "dynare_auto_fix",
-                        MODEL,
-                        json!({"fixes":true}),
-                        json!({}),
-                        "NO_CHANGE",
-                    ),
+                    ("dynare_format", formatted, json!({}), "NO_CHANGE"),
+                    ("dynare_actions", MODEL, json!({"fixes":true}), "NO_CHANGE"),
                 ] {
                     let input = if named {
                         json!({"kind":"map","root":"root.mod","files":{"root.mod":text}})
@@ -966,14 +927,8 @@ mod tests {
                         .as_object_mut()
                         .unwrap()
                         .extend(current_selector.as_object().unwrap().clone());
-                    let mut legacy = json!({"source":input});
-                    legacy
-                        .as_object_mut()
-                        .unwrap()
-                        .extend(legacy_selector.as_object().unwrap().clone());
                     if full {
                         current["detail"] = json!("full");
-                        legacy["detail"] = json!("full");
                     }
                     let result = call(tool, current);
                     assert_eq!(
@@ -993,24 +948,6 @@ mod tests {
                             "{tool}, named={named}, full={full}: {field}"
                         );
                     }
-                    let legacy = crate::mcp::request::dispatch(
-                        legacy_tool,
-                        legacy,
-                        RequestControl::default(),
-                    )
-                    .unwrap();
-                    let data = &legacy.structured_content.as_ref().unwrap()["data"];
-                    assert!(
-                        data.get("text").is_some() || data.get("files").is_some(),
-                        "legacy {legacy_tool} lost its data mirror"
-                    );
-                    if !named {
-                        assert_eq!(data["text"], text);
-                    }
-                    assert!(
-                        legacy.content.len() > 1,
-                        "legacy default/full leading content was removed"
-                    );
                 }
             }
         }
@@ -1086,25 +1023,6 @@ mod tests {
 
     // Guards a same-name tool accepting a continuation from another contract
     // after defaults and collection semantics changed.
-    #[test]
-    fn canonical_pages_refuse_legacy_continuations() {
-        let query = json!({"source":source(MODEL),"sections":["declarations"],"page_size":1,"detail":"compact"});
-        let legacy = crate::mcp::request::dispatch(
-            "dynare_model_info",
-            query.clone(),
-            RequestControl::default(),
-        )
-        .unwrap()
-        .structured_content
-        .unwrap();
-        let mut next = query;
-        next["continuation"] = legacy["selection"]["continuation"].clone();
-        next["expected_revision"] = legacy["inputs"][0]["revision"].clone();
-        let refused = call("dynare_model_info", next);
-        assert_eq!(refused["outcome"]["reasons"][0]["code"], "INPUT_CHANGED");
-        assert!(refused["data"].is_null());
-    }
-
     // Guards two typed comparison sources silently losing virtual include
     // folders, or returning full source text by default.
     #[test]

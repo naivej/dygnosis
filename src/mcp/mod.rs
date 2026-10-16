@@ -1,7 +1,6 @@
-//! MCP tool handlers (waves a–c) and stdio transport.
+//! MCP contract 3, stdio transport and direct Rust query functions.
 //!
-//! Tests call these functions directly. Stdio is a thin wrap around the same
-//! handlers.
+//! The transport and Rust functions share source acquisition and analysis.
 
 mod canonical;
 mod edits;
@@ -16,12 +15,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::Path;
 
-#[cfg(test)]
-use rmcp::handler::server::wrapper::Parameters;
-#[cfg(test)]
-use rmcp::model::{CallToolResult, ContentBlock};
-#[cfg(test)]
-use rmcp::{tool, tool_router};
 use rmcp::{tool_handler, ServerHandler, ServiceExt};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -39,8 +32,6 @@ use crate::engine::comparison::{compare_models_with_sources, CompareSource};
 use crate::engine::diagnostics::explain;
 use crate::engine::diagnostics::{analyze, Diagnostic, Severity};
 use crate::engine::editing::auto_fix::auto_fix;
-#[cfg(test)]
-use crate::engine::editing::auto_fix::auto_fix_outcome;
 use crate::engine::editing::extract::{
     extract, EquationDomain, EquationRole, ExtractError, ExtractRequest, ExtractResult,
     ExtractStatus,
@@ -63,26 +54,6 @@ use crate::mcp::workspace_diagnose::{
 
 const OUT_CODES: &[&str] = &[
     "E040", "W040", "W041", "I041", "W071", "I070", "I071", "W080", "W081", "DYNR",
-];
-
-const TOOL_NAMES: &[&str] = &[
-    "dynare_diagnose",
-    "dynare_model_info",
-    "dynare_compare_models",
-    "dynare_find_references",
-    "dynare_rename",
-    "dynare_auto_fix",
-    "dynare_explain",
-    "dynare_list_diagnostic_codes",
-    "dynare_list_options",
-    "dynare_equations",
-    "dynare_related_files",
-    "dynare_expand",
-    "dynare_format",
-    "dynare_extract",
-    "dynare_workspace_diagnose",
-    "dynare_symbol_info",
-    "dynare_code_actions",
 ];
 
 /// One diagnostic as MCP JSON: 1-based line/column, severity `ERROR`/`WARNING`/`INFORMATION`/`HINT`.
@@ -1100,7 +1071,7 @@ pub fn dynare_find_references(
         return json!([]);
     }
     let arguments = json!({"file_content":file_content,"symbol":symbol,"active_file":active_file,"files":files});
-    legacy_library_query("dynare_find_references", arguments, json!([]))
+    library_query("dynare_find_references", arguments, json!([]))
 }
 
 /// Rename one unique binding with the shared safety decision; never spelling replacement.
@@ -1127,21 +1098,43 @@ pub fn dynare_rename(
         return unchanged;
     }
     let arguments = json!({"file_content":file_content,"old_name":old_name,"new_name":new_name,"active_file":active_file,"files":files});
-    legacy_library_query("dynare_rename", arguments, unchanged)
+    library_query("dynare_rename", arguments, unchanged)
 }
 
-fn legacy_library_query(tool: &str, arguments: Value, fallback: Value) -> Value {
-    match request::dispatch(tool, arguments, source::RequestControl::default()) {
+fn library_query(tool: &str, arguments: Value, fallback: Value) -> Value {
+    match request::dispatch(tool, arguments.clone(), source::RequestControl::default()) {
         Ok(result) => {
             if result.is_error == Some(true) {
                 return result.structured_content.expect("canonical refusal");
             }
-            result
-                .content
-                .first()
-                .and_then(|block| block.as_text())
-                .map(|text| serde_json::from_str(&text.text).unwrap_or_else(|_| json!(text.text)))
-                .unwrap_or(fallback)
+            let value = result.structured_content.expect("library query result");
+            let data = &value["data"];
+            match tool {
+                "dynare_rename" => {
+                    if arguments
+                        .get("files")
+                        .and_then(Value::as_object)
+                        .is_some_and(|files| !files.is_empty())
+                    {
+                        data["files"].clone()
+                    } else {
+                        data["text"].clone()
+                    }
+                }
+                "dynare_find_references" => {
+                    let named = arguments
+                        .get("files")
+                        .and_then(Value::as_object)
+                        .is_some_and(|files| !files.is_empty());
+                    json!(data["references"].as_array().into_iter().flatten().map(|row| {
+                        let range = &row["range"];
+                        let mut location = json!({"line":range["line"],"column":range["column"],"end_column":range["end_column"]});
+                        if named { location["file"] = row["file"].clone(); }
+                        location
+                    }).collect::<Vec<_>>())
+                }
+                _ => fallback,
+            }
         }
         Err(error) => json!({"status":"refused","message":error.message}),
     }
@@ -1200,13 +1193,8 @@ fn related_file_path(resolved: &Path, files: &HashMap<String, String>) -> String
 
 /// MCP stdio entry. Wired from `dygnosis mcp`.
 pub async fn run_stdio() {
-    run_stdio_with_profile(McpProfile::Canonical).await;
-}
-
-/// Explicit tool-contract selection; independent of the MCP protocol edition.
-pub async fn run_stdio_with_profile(profile: McpProfile) {
     use rmcp::transport::stdio;
-    let service = match (DygnosisMcp { profile }).serve(stdio()).await {
+    let service = match DygnosisMcp.serve(stdio()).await {
         Ok(s) => s,
         Err(err) => {
             tracing::error!("MCP stdio failed: {err}");
@@ -1676,123 +1664,8 @@ fn workspace_diag_json(diag: &WorkspaceDiagnostic) -> Value {
     row
 }
 
-#[cfg(test)]
-fn tool_json(value: Value) -> CallToolResult {
-    CallToolResult::structured(value)
-}
-
-#[cfg(test)]
-fn tool_text(text: String) -> CallToolResult {
-    CallToolResult::success(vec![ContentBlock::text(text)])
-}
-
-/// Keep the original payload first; clients must also read the coverage notice.
-#[cfg(test)]
-fn tool_notice(mut result: CallToolResult, notice: Value) -> CallToolResult {
-    result.content.push(ContentBlock::text(notice.to_string()));
-    result
-}
-
-#[cfg(test)]
-fn tool_coverage(result: CallToolResult, src: &MappedSource<'_>) -> CallToolResult {
-    let unit = mcp_unit(src.content, src.active, src.files);
-    if unit.complete {
-        result
-    } else {
-        tool_notice(
-            result,
-            json!({"status":"partial", "message":"Only available written source was inspected; unresolved includes, parsing, or macro expansion prevent complete model coverage.", "incomplete_reasons":unit.incomplete_reasons()}),
-        )
-    }
-}
-
-/// Map args for diagnose / model_info: optional `file_content` overlay.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[cfg(test)]
-struct IncludeMapParams {
-    /// Full root text. Supply this when files is absent or empty. With a nonempty map, it replaces the active_file entry for this request.
-    #[serde(default)]
-    file_content: Option<String>,
-    /// Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). A map supplies text, not permission to read disk.
-    #[serde(default)]
-    active_file: Option<String>,
-    /// Map of file keys to complete text, including executed includes. Use active_file to choose the root. An absent or empty map uses file_content only.
-    #[serde(default)]
-    files: Option<HashMap<String, String>>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
-pub enum McpProfile {
-    #[default]
-    Canonical,
-    /// Temporary version-2 tool contract; removed in 0.11.28.
-    LegacyV2,
-}
-
 #[derive(Clone)]
-struct DygnosisMcp {
-    profile: McpProfile,
-}
-
-// Existing adapter tests exercise the temporary version-2 contract explicitly.
-#[cfg(test)]
-#[allow(non_upper_case_globals)]
-const DygnosisMcp: DygnosisMcp = DygnosisMcp {
-    profile: McpProfile::LegacyV2,
-};
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[cfg(test)]
-struct FileContentParams {
-    /// Complete .mod text to process. The tool returns text; it does not write a file.
-    file_content: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[cfg(test)]
-struct FormatParams {
-    /// Complete .mod text. Formatting does not write to disk.
-    file_content: String,
-    /// Indentation: "tab" or an integer from 1 to 8 spaces. Omitted values use a tab.
-    #[serde(default, rename = "formatIndent")]
-    format_indent: Option<Value>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[cfg(test)]
-struct ExtractParams {
-    /// Complete root .mod text. With a nonempty files map, it overlays the active_file entry. Without a map, only this supplied text is used.
-    file_content: String,
-    /// Root key in the supplied files map. For nonempty maps it must match a key exactly; it is not a disk path to load.
-    #[serde(default)]
-    active_file: Option<String>,
-    /// File-key to complete-text map, including executed includes. No disk files are read in map mode. A nonempty map needs an active_file root key.
-    #[serde(default)]
-    files: Option<HashMap<String, String>>,
-    /// Equation names to select. Supply at least one name or tag filter.
-    #[serde(default)]
-    names: Vec<String>,
-    /// Equation tag names and required values to select. Supply at least one name or tag filter.
-    #[serde(default)]
-    tags: HashMap<String, String>,
-    /// Optional heterogeneity dimension name for equation selection.
-    #[serde(default)]
-    dimension: Option<String>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[cfg(test)]
-struct WorkspaceDiagnoseParams {
-    /// Nonempty supplied file-key to text map. Combine with nonempty roots; do not combine with paths.
-    #[serde(default)]
-    files: Option<HashMap<String, String>>,
-    /// Nonempty list of root .mod keys in files. Required for workspace map mode; omit when using paths.
-    #[serde(default)]
-    roots: Option<Vec<String>>,
-    /// Nonempty file or directory paths on this server host. Path mode reads disk, walks directories and skips generated + directories. Do not combine with files or roots.
-    #[serde(default)]
-    paths: Option<Vec<String>>,
-}
+struct DygnosisMcp;
 
 #[derive(Debug, JsonSchema)]
 struct CompareModelsParams {
@@ -1957,151 +1830,6 @@ impl CompareModelsParams {
     }
 }
 
-#[cfg(test)]
-fn compare_models_input_schema() -> std::sync::Arc<serde_json::Map<String, Value>> {
-    let mut schema = mcp_input_schema::<CompareModelsParams>().as_ref().clone();
-    let absent = |keys: &[&str]| json!({"not": {"anyOf": keys.iter().map(|key| json!({"required": [key]})).collect::<Vec<_>>()}});
-    let mut text = absent(COMPARE_REPOSITORY_KEYS);
-    text["required"] = json!(["file_content_a", "file_content_b"]);
-    text["properties"] =
-        json!({"file_content_a": {"type": "string"}, "file_content_b": {"type": "string"}});
-    let mut repository = absent(COMPARE_TEXT_KEYS);
-    repository["required"] = json!(["repository_path", "before", "after"]);
-    repository["properties"] = json!({"repository_path": {"type": "string", "minLength": 1}, "before": {"type": "object"}, "after": {"type": "object"}});
-    schema.insert("oneOf".into(), json!([text, repository]));
-    std::sync::Arc::new(schema)
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[cfg(test)]
-struct ExplainParams {
-    /// Diagnostic code, such as E020 or W013. Use dynare_list_diagnostic_codes to find documented codes and their classification.
-    code: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[cfg(test)]
-struct ListOptionsParams {
-    /// Dynare command name. Omit it to list known commands; an unknown name returns known=false rather than inventing options.
-    #[serde(default)]
-    command: Option<String>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[cfg(test)]
-struct EquationsParams {
-    /// Complete root .mod text. With a nonempty files map, it overlays the active_file entry. Without a map, only this supplied text is used.
-    #[serde(default)]
-    file_content: Option<String>,
-    /// Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). It is not a disk path to load.
-    #[serde(default)]
-    active_file: Option<String>,
-    /// File-key to complete-text map, including executed includes. No disk files are read in map mode. A nonempty map needs an active_file root key.
-    #[serde(default)]
-    files: Option<HashMap<String, String>>,
-    /// Optional equation-name filter. Searches aggregate and heterogeneous equations.
-    #[serde(default)]
-    name: Option<String>,
-    /// Optional aggregate equation index, starting at zero. The index filter applies to aggregate equations.
-    #[serde(default)]
-    index: Option<u32>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[cfg(test)]
-struct FindReferencesParams {
-    /// Complete root .mod text. With a nonempty files map, it overlays the active_file entry. Without a map, only this supplied text is used.
-    #[serde(default)]
-    file_content: Option<String>,
-    /// Exact name to find. Results skip comments and use one-based Unicode-scalar source coordinates.
-    symbol: String,
-    /// Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). It is not a disk path to load.
-    #[serde(default)]
-    active_file: Option<String>,
-    /// File-key to complete-text map, including executed includes. No disk files are read in map mode. A nonempty map needs an active_file root key.
-    #[serde(default)]
-    files: Option<HashMap<String, String>>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[cfg(test)]
-struct RenameParams {
-    /// Complete root .mod text. With a nonempty files map, it overlays the active_file entry. Without a map, only this supplied text is used.
-    #[serde(default)]
-    file_content: Option<String>,
-    /// Exact identifier to rename. Comments are excluded; the tool returns text and does not write files.
-    old_name: String,
-    /// Replacement identifier. Illegal or reserved identifiers return an input error.
-    new_name: String,
-    /// Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). It is not a disk path to load.
-    #[serde(default)]
-    active_file: Option<String>,
-    /// File-key to complete-text map, including executed includes. No disk files are read in map mode. A nonempty map needs an active_file root key.
-    #[serde(default)]
-    files: Option<HashMap<String, String>>,
-}
-
-/// Source text plus map args after overlay.
-#[cfg(test)]
-struct MappedSource<'a> {
-    content: &'a str,
-    active: Option<&'a str>,
-    files: Option<&'a HashMap<String, String>>,
-}
-
-/// `None` means missing `file_content` on the single-file path. A nonempty
-/// map requires an exact root key and never falls back to single-file input.
-#[cfg(test)]
-fn resolve_mapped<'a>(
-    file_content: Option<&'a str>,
-    active_file: Option<&'a str>,
-    files: Option<&'a HashMap<String, String>>,
-) -> Result<MappedSource<'a>, rmcp::ErrorData> {
-    match nonempty_map(files) {
-        None => file_content
-            .map(|content| MappedSource {
-                content,
-                active: None,
-                files: None,
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::invalid_params(
-                    "file_content is required without a nonempty files map; no source was supplied",
-                    None,
-                )
-            }),
-        Some(files) => {
-            let active = active_file.ok_or_else(|| {
-                rmcp::ErrorData::invalid_params(
-                    "active_file is required with a nonempty files map",
-                    None,
-                )
-            })?;
-            if active.is_empty() {
-                return Err(rmcp::ErrorData::invalid_params(
-                    "active_file must name a file; an empty file location is unavailable",
-                    None,
-                ));
-            }
-            if !files.contains_key(active) {
-                return Err(rmcp::ErrorData::invalid_params(
-                    format!("\"{active}\" is not in the file map"),
-                    None,
-                ));
-            }
-            let content = file_content.unwrap_or_else(|| files[active].as_str());
-            Ok(MappedSource {
-                content,
-                active: Some(active),
-                files: Some(files),
-            })
-        }
-    }
-}
-
-/// VS Code's minimum host has draft-07 metadata built in. Generate that
-/// dialect rather than making tool discovery load the SDK's 2020-12 metadata,
-/// whose dynamic references that host cannot validate.
 fn mcp_input_schema<T: JsonSchema>() -> std::sync::Arc<rmcp::model::JsonObject> {
     let schema = schemars::generate::SchemaSettings::draft07()
         .into_generator()
@@ -2116,326 +1844,6 @@ fn mcp_input_schema<T: JsonSchema>() -> std::sync::Arc<rmcp::model::JsonObject> 
     object.remove("title");
     object.remove("description");
     std::sync::Arc::new(object)
-}
-
-#[cfg(test)]
-#[tool_router]
-impl DygnosisMcp {
-    #[tool(
-        name = "dynare_diagnose",
-        input_schema = mcp_input_schema::<IncludeMapParams>(),
-        description = "Check supplied model text and return code, severity, message and written source range. Lines and Unicode-scalar columns are one-based. A files map supplies includes; this mode does not read disk. Read all content items: incomplete coverage adds a notice with its causes."
-    )]
-    fn diagnose_tool(
-        &self,
-        Parameters(params): Parameters<IncludeMapParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let src = resolve_mapped(
-            params.file_content.as_deref(),
-            params.active_file.as_deref(),
-            params.files.as_ref(),
-        )?;
-        let diags = dynare_diagnose(src.content, src.active, src.files);
-        Ok(tool_coverage(
-            tool_json(serde_json::to_value(diags).expect("diagnose json")),
-            &src,
-        ))
-    }
-
-    #[tool(
-        name = "dynare_model_info",
-        input_schema = mcp_input_schema::<IncludeMapParams>(),
-        description = "Return aggregate and per-dimension names, counts, timing classes and block flags, plus model-local declarations and definitions with verified written origins when available. Classes and timing counts use offsets after the predetermined-variable convention conversion, without other equation transformations or numerical results. Incomplete expansion withholds authoritative counts and the local inventory."
-    )]
-    fn model_info_tool(
-        &self,
-        Parameters(params): Parameters<IncludeMapParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let src = resolve_mapped(
-            params.file_content.as_deref(),
-            params.active_file.as_deref(),
-            params.files.as_ref(),
-        )?;
-        let info = dynare_model_info(src.content, src.active, src.files);
-        Ok(tool_json(info))
-    }
-
-    #[tool(
-        name = "dynare_compare_models",
-        input_schema = compare_models_input_schema(),
-        description = "Compare Before to After model facts: symbols, parameters, equations and timing, shock setup, model locals, state assignments, priors, accepted commands, and other retained family settings. Results keep structural arrays and Markdown and add versioned semantic fields, expression tokens, direct equation references, captured Source changes, coverage and field limits. Each fact has one owning model row; references and Source hunks have separate counts. Read coverage even when model rows are empty. Choose exactly one mode: supplied text uses both file_content_a/file_content_b and each side's own include maps, including supplied unsaved text; only caller text can be read. Repository mode uses absolute repository_path on this server host, explicit before/after Git or Working selectors, and optional search_paths. Git refs resolve once to full local commits; no fetch or checkout occurs. Working reads saved server-host files, including active includes and untracked files. Omitted search_paths means no extra configured folders; written @#includepath still applies. Source captures roots and executed includes; unexecuted children, external functions and data contents are outside capture. Missing facts, ambiguous matches and work/output limits are explicit; retained exact file text remains available when hunks are limited. Use returned row/reference targets, never token offsets or hunk lines, for source navigation. Incomplete or failed inputs return no authoritative change arrays; changed saved input returns INPUT_CHANGED. Source lines and Unicode-scalar columns are one-based. No algebraic equivalence, solved state, posterior or simulation result is inferred."
-    )]
-    async fn compare_models_tool(
-        &self,
-        Parameters(arguments): Parameters<Value>,
-        context: rmcp::service::RequestContext<rmcp::RoleServer>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        // The SDK reports extractor deserialization errors as tool-result
-        // errors. Decode here so invalid mode/selector combinations retain
-        // this tool's JSON-RPC invalid-parameters contract.
-        let params: CompareModelsParams = serde_json::from_value(arguments)
-            .map_err(|error| rmcp::ErrorData::invalid_params(error.to_string(), None))?;
-        params
-            .validate()
-            .map_err(|message| rmcp::ErrorData::invalid_params(message, None))?;
-        let cancellation = context.ct;
-        let value =
-            tokio::task::spawn_blocking(move || params.compare(&|| cancellation.is_cancelled()))
-                .await
-                .map_err(|error| {
-                    rmcp::ErrorData::internal_error(
-                        format!("Comparison worker failed: {error}"),
-                        None,
-                    )
-                })?;
-        Ok(tool_json(value))
-    }
-
-    #[tool(
-        name = "dynare_find_references",
-        input_schema = mcp_input_schema::<FindReferencesParams>(),
-        description = "Find whole-word occurrences of a name by identifier spelling, including declarations, and skip comments. This tool does not resolve model-local bindings. Source lines and Unicode-scalar columns are one-based. A files map returns file keys; without a map, positions refer to file_content. Read all content items: partial source coverage adds a notice with its causes."
-    )]
-    fn find_references_tool(
-        &self,
-        Parameters(params): Parameters<FindReferencesParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let src = resolve_mapped(
-            params.file_content.as_deref(),
-            params.active_file.as_deref(),
-            params.files.as_ref(),
-        )?;
-        let value = dynare_find_references(src.content, &params.symbol, src.active, src.files);
-        Ok(tool_coverage(tool_json(value), &src))
-    }
-
-    #[tool(
-        name = "dynare_rename",
-        input_schema = mcp_input_schema::<RenameParams>(),
-        description = "Rename occurrences by identifier spelling, skipping comments. This tool does not resolve model-local bindings. Without a files map, the first content item is rewritten text; with a map, it is the changed-file map. Invalid or reserved identifiers are input errors. Incomplete source coverage withholds the whole rename with a reason. An unchanged result adds a notice explaining why. Read all content items."
-    )]
-    fn rename_tool(
-        &self,
-        Parameters(params): Parameters<RenameParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        if !is_legal_ident(&params.old_name) || !is_legal_ident(&params.new_name) {
-            return Err(rmcp::ErrorData::invalid_params(
-                "old_name and new_name must be legal, non-reserved Dynare identifiers",
-                None,
-            ));
-        }
-        let src = resolve_mapped(
-            params.file_content.as_deref(),
-            params.active_file.as_deref(),
-            params.files.as_ref(),
-        )?;
-        {
-            let unit = mcp_unit(src.content, src.active, src.files);
-            if !unit.complete {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(json!({"status":"refused", "message":"Rename was withheld because source coverage is incomplete; supply all required includes and resolve parsing or macro expansion first.", "incomplete_reasons":unit.incomplete_reasons()}).to_string())]));
-            }
-            let result = dynare_rename(
-                src.content,
-                &params.old_name,
-                &params.new_name,
-                src.active,
-                src.files,
-            );
-            let unchanged = params.old_name == params.new_name
-                || result.as_str() == Some(src.content)
-                || result.as_object().is_some_and(|map| map.is_empty());
-            let result = match result {
-                Value::String(text) => tool_text(text),
-                other => tool_json(other),
-            };
-            Ok(if unchanged {
-                tool_notice(
-                    result,
-                    json!({"status":"unchanged", "message": if params.old_name == params.new_name { "The requested name is already the current name." } else { "No matching identifier was found in the inspected written source." }}),
-                )
-            } else {
-                result
-            })
-        }
-    }
-
-    #[tool(
-        name = "dynare_auto_fix",
-        input_schema = mcp_input_schema::<FileContentParams>(),
-        description = "Apply safe stored diagnostic fixes to supplied .mod text. The first content item is the resulting file text. A second item reports status, the reason for withheld or partial fixes, and remaining diagnostics. Macros can prevent all fixes. This tool cannot repair every diagnostic. Read both content items."
-    )]
-    fn auto_fix_tool(&self, Parameters(params): Parameters<FileContentParams>) -> CallToolResult {
-        let (text, refusal) = match auto_fix_outcome(&params.file_content) {
-            Ok(text) => (text, None),
-            Err(reason) => (params.file_content.clone(), Some(reason)),
-        };
-        let remaining = dynare_diagnose(&text, None, None);
-        let partial = remaining
-            .iter()
-            .any(|diagnostic| matches!(diagnostic.severity.as_str(), "ERROR" | "WARNING"));
-        let status = if refusal.is_some() {
-            "refused"
-        } else if partial {
-            "partial"
-        } else if text == params.file_content {
-            "unchanged"
-        } else {
-            "changed"
-        };
-        let reason = refusal.unwrap_or(if partial { "Only safe stored fixes were applied. Remaining diagnostics need manual changes or have no applicable automatic fix." } else if text == params.file_content { "No applicable automatic fixes were found." } else { "Safe stored fixes were applied." });
-        let mut result = tool_notice(
-            tool_text(text),
-            json!({"status":status, "message":reason, "remaining_diagnostics":remaining}),
-        );
-        if refusal.is_some() {
-            result.is_error = Some(true);
-        }
-        result
-    }
-
-    #[tool(
-        name = "dynare_explain",
-        input_schema = mcp_input_schema::<ExplainParams>(),
-        description = "Return the Markdown explanation for a diagnostic code. An unknown code returns the known code list."
-    )]
-    fn explain_tool(&self, Parameters(params): Parameters<ExplainParams>) -> String {
-        dynare_explain(&params.code)
-    }
-
-    #[tool(
-        name = "dynare_list_diagnostic_codes",
-        description = "List all diagnostic codes, classified as shared, skipped, or added relative to Dynare."
-    )]
-    fn list_diagnostic_codes_tool(&self) -> CallToolResult {
-        tool_json(serde_json::to_value(dynare_list_diagnostic_codes()).expect("list codes json"))
-    }
-
-    #[tool(
-        name = "dynare_list_options",
-        input_schema = mcp_input_schema::<ListOptionsParams>(),
-        description = "List valid options for a Dynare command, or list known commands when omitted."
-    )]
-    fn list_options_tool(
-        &self,
-        Parameters(params): Parameters<ListOptionsParams>,
-    ) -> CallToolResult {
-        tool_json(dynare_list_options(params.command.as_deref()))
-    }
-
-    #[tool(
-        name = "dynare_equations",
-        input_schema = mcp_input_schema::<EquationsParams>(),
-        description = "List aggregate and per-dimension written equations, identifiers and verified source locations. Recognized model-local identifiers use class model_local and have no endogenous timing class. Identifier timing is the written offset; dynare_timing is the offset after the predetermined-variable convention conversion, not full Transform output. Use timing_class and model-info counts for classification. Older engines omit dynare_timing; do not infer it. Lines and Unicode-scalar columns are one-based. Count gap and index filter apply to aggregate equations; name searches both kinds. Equation numbers are before transformation. Incomplete required includes, parsing, or macro expansion return incomplete with no equations and a null count gap."
-    )]
-    fn equations_tool(
-        &self,
-        Parameters(params): Parameters<EquationsParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let index = params.index.map(|i| i as usize);
-        let name = params.name.as_deref();
-        let src = resolve_mapped(
-            params.file_content.as_deref(),
-            params.active_file.as_deref(),
-            params.files.as_ref(),
-        )?;
-        let payload = dynare_equations(src.content, src.active, src.files, name, index);
-        Ok(tool_json(payload))
-    }
-
-    #[tool(
-        name = "dynare_related_files",
-        input_schema = mcp_input_schema::<IncludeMapParams>(),
-        description = "List include targets and companion files for the active .mod (kind, filename, resolved, path). Requires a nonempty files map and active_file. Read all content items: incomplete discovery adds a notice with its causes."
-    )]
-    fn related_files_tool(
-        &self,
-        Parameters(params): Parameters<IncludeMapParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let src = resolve_mapped(
-            params.file_content.as_deref(),
-            params.active_file.as_deref(),
-            params.files.as_ref(),
-        )?;
-        if src.files.is_none() {
-            return Err(rmcp::ErrorData::invalid_params("Related files requires a nonempty files map and its active_file root key; free text has no file location", None));
-        }
-        let value = dynare_related_files(src.content, src.active, src.files);
-        Ok(tool_coverage(tool_json(value), &src))
-    }
-
-    #[tool(
-        name = "dynare_expand",
-        input_schema = mcp_input_schema::<IncludeMapParams>(),
-        description = "Return model text after include and macro expansion, before equation transformation, with verified written source and macro locations. macro_messages lists executed @#echo and @#echomacrovars output in order; @#echomacrovars(save) is generated assignment text in effective_text, not a message. Lines and Unicode-scalar columns are one-based. complete=false means expansion is incomplete and authoritative equation counts or source jumps are withheld."
-    )]
-    fn expand_tool(
-        &self,
-        Parameters(params): Parameters<IncludeMapParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let src = resolve_mapped(
-            params.file_content.as_deref(),
-            params.active_file.as_deref(),
-            params.files.as_ref(),
-        )?;
-        let value = dynare_expand(src.content, src.active, src.files);
-        Ok(tool_json(value))
-    }
-
-    #[tool(
-        name = "dynare_format",
-        input_schema = mcp_input_schema::<FormatParams>(),
-        description = "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it. Empty or whitespace-only input is unchanged."
-    )]
-    fn format_tool(
-        &self,
-        Parameters(params): Parameters<FormatParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        match dynare_format(&params.file_content, params.format_indent.as_ref()) {
-            Ok(value) => Ok(tool_json(value)),
-            Err(message) => Err(rmcp::ErrorData::invalid_params(message, None)),
-        }
-    }
-
-    #[tool(
-        name = "dynare_extract",
-        input_schema = mcp_input_schema::<ExtractParams>(),
-        description = "Extract equations by names and tags, with required declarations, model locals and heterogeneity dimensions. Names match any supplied name; all supplied tags must match, and names and tags combine. The result is a model fragment that needs completion before running Dynare."
-    )]
-    fn extract_tool(
-        &self,
-        Parameters(params): Parameters<ExtractParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        match dynare_extract(
-            &params.file_content,
-            params.active_file.as_deref(),
-            params.files.as_ref(),
-            &params.names,
-            &params.tags,
-            params.dimension.as_deref(),
-        ) {
-            Ok(value) => Ok(tool_json(value)),
-            Err(message) => Err(rmcp::ErrorData::invalid_params(message, None)),
-        }
-    }
-
-    #[tool(
-        name = "dynare_workspace_diagnose",
-        input_schema = mcp_input_schema::<WorkspaceDiagnoseParams>(),
-        description = "Diagnose model roots from a files map and roots, or from file and directory paths. Directory discovery includes .mod and .dyn files. Each root is reported on its own, with a summary; one failed root does not drop the others."
-    )]
-    fn workspace_diagnose_tool(
-        &self,
-        Parameters(params): Parameters<WorkspaceDiagnoseParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        match dynare_workspace_diagnose(
-            params.files.as_ref(),
-            params.roots.as_deref(),
-            params.paths.as_deref(),
-        ) {
-            Ok(value) => Ok(tool_json(value)),
-            Err(message) => Err(rmcp::ErrorData::invalid_params(message, None)),
-        }
-    }
 }
 
 #[tool_handler(name = "dygnosis")]
@@ -2461,15 +1869,9 @@ impl ServerHandler for DygnosisMcp {
             .protocol_version()
             .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2025_06_18);
         let name = request.name.to_string();
-        let profile = self.profile;
-        let names = if profile == McpProfile::Canonical {
-            canonical::TOOL_NAMES
-        } else {
-            TOOL_NAMES
-        };
-        if !names.contains(&name.as_str()) {
+        if !canonical::TOOL_NAMES.contains(&name.as_str()) {
             return Err(rmcp::ErrorData::invalid_params(
-                format!("Tool {name} is not available in the {profile:?} profile. Read tools/list for this profile's tool contract."),
+                format!("Tool {name} is not available. Read tools/list for the supported tool names and arguments."),
                 None,
             ));
         }
@@ -2482,16 +1884,7 @@ impl ServerHandler for DygnosisMcp {
         let progress_token = context.meta.get_progress_token();
         let mut worker = tokio::task::spawn_blocking(move || {
             crate::engine::control::run(Some(Arc::clone(&control.cancelled)), || {
-                if profile == McpProfile::Canonical {
-                    canonical::dispatch(&name, arguments, control)
-                } else if matches!(
-                    name.as_str(),
-                    "dynare_compare_models" | "dynare_workspace_diagnose"
-                ) {
-                    multi_request::dispatch(&name, arguments, control)
-                } else {
-                    request::dispatch(&name, arguments, control)
-                }
+                canonical::dispatch(&name, arguments, control)
             })
             .map_err(|_| rmcp::ErrorData::internal_error("Request cancelled", None))?
         });
@@ -2533,209 +1926,20 @@ impl ServerHandler for DygnosisMcp {
             .protocol_version()
             .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2025_06_18);
         Ok(rmcp::model::ListToolsResult::with_all_items(
-            if self.profile == McpProfile::Canonical {
-                canonical::advertised_tools(structured)
-            } else {
-                advertised_tools(structured)
-            },
+            canonical::advertised_tools(structured),
         ))
     }
 
     fn get_tool(&self, name: &str) -> Option<rmcp::model::Tool> {
-        (if self.profile == McpProfile::Canonical {
-            canonical::advertised_tools(true)
-        } else {
-            advertised_tools(true)
-        })
-        .into_iter()
-        .find(|tool| tool.name == name)
+        canonical::advertised_tools(true)
+            .into_iter()
+            .find(|tool| tool.name == name)
     }
-}
-
-fn advertised_tools(structured: bool) -> Vec<rmcp::model::Tool> {
-    use rmcp::model::{Tool, ToolAnnotations};
-    TOOL_NAMES.iter().map(|&name| {
-        let description=match name {
-            "dynare_diagnose"=>"Check the selected model and return diagnostics with one-based Unicode-scalar ranges. Filter by code, severity or written file. Model errors are diagnostic data. Missing includes or incomplete parsing/expansion produce partial coverage.",
-            "dynare_model_info"=>"Inspect model names, counts, timing and local definitions. Select summary, declarations, assignments, model_locals, statements, blocks, includes or scope sections. For large saved models use source.kind=disk, detail=compact, selected sections and an explicit page_size, for example 10. Compact detail alone does not limit rows. Read selection.collections counts and request selection.continuation only when more rows are needed. Assignment values are proven at their execution positions; unknown values stay null. Counts describe written equations before Dynare transformations.",
-            "dynare_equations"=>"Inspect aggregate and dimension equations, tags, identifiers, timing and verified source locations. Combine name, aggregate index, scope/dimension, tags and resolved-symbol filters with AND. index starts at zero; equation_id identifies this expanded row and input revision. Written timing and convention-converted dynare_timing remain distinct. Incomplete models withhold authoritative rows/count gaps.",
-            "dynare_find_references"=>"Find accepted uses of one semantic symbol binding. Select exactly one symbol name, written target or returned binding_id. Ambiguous names return scoped candidates. Return deduplicated written locations, roles and optionally separate expanded occurrences. Comments, unrelated strings and native MATLAB lookalikes are excluded; supported literal tag references and built-in calls are classified.",
-            "dynare_symbol_info"=>"Inspect one semantic symbol's declaration/definition, scope, type, labels, timing, verified written targets and assignment values with execution provenance. Select exactly one symbol name, target or binding_id; ambiguous selections return candidates. Model-local expressions have no computed value.",
-            "dynare_rename"=>"Propose a complete semantic Rename without writing files. Select exactly one old_name, target or binding_id. Collisions, incomplete inputs, generated names and incompatible checked owners refuse the whole proposal. Literal endogenous/mcp tag names retain surrounding quotes and text. Default leading content is rewritten text or a changed-file map; the canonical object includes complete edits and guards. changed means proposed text changed.",
-            "dynare_auto_fix"=>"Propose proven stored diagnostic fixes, optionally selected by code, diagnostic_id or written target. Each fix must repair its owning diagnostic. The result states applied and skipped work and diagnostics remaining in proposed source. No files are written. Default leading items retain resulting text and outcome details.",
-            "dynare_code_actions"=>"List available diagnostic fixes, equation tags, long names and commented shock templates at a written target. Each action is a separate complete proposal. Select action_id with expected_revision to return that action's top-level proposal; alternatives are not combined. No files are written.",
-            "dynare_expand"=>"Inspect include/macro-expanded text, verified written origins, macro frames/messages and navigation. Select inclusive one-based line_range, exclusive-end expanded_range or equation_id for focused text/origins. Navigation ranges refer to the returned fragment. Rows cut by a range omit their origins and explain that omission. Partial expansion retains its causes and withholds authoritative counts or source jumps.",
-            "dynare_related_files"=>"Discover includes and companions of the selected map or saved disk root. Supplied maps consult only supplied keys. Returns resolved/missing source relationships and model coverage. Unnamed text has no file identity for discovery.",
-            "dynare_format"=>"Propose whitespace formatting for the root or selected source file. line_range selects whole lines, one-based and inclusive; reversed/out-of-file ranges are input errors. Preserves native MATLAB, verbatim layout and source outside the selected lines. formatIndent is tab or one to eight spaces. No file is written.",
-            "dynare_extract"=>"Extract a model fragment selected by equation names/tags, equation_id or explicit scoped index, including unnamed equations. Names combine with OR; tags combine with AND. Keeps required declarations, locals, static partners and OccBin context in execution order. Omitted setup remains explicit; no runnable model or numerical result is guessed.",
-            "dynare_explain"=>"Read the canonical Markdown explanation for a diagnostic code. An unknown code is refused with its cause and known-code guidance.",
-            "dynare_list_diagnostic_codes"=>"List the diagnostic catalog, with code, kind, severity or text filters. shared, added and skipped classify relation to official Dynare; this inventory is not the diagnostics fired on a model.",
-            "dynare_list_options"=>"Read the pinned Dynare command/option catalog. Omit command to list commands; select option or search text to focus a known command. Unknown commands return their cause and suggestions.",
-            "dynare_compare_models"=>"Compare Before to After retained model facts and captured Source. Supplied inputs cannot read disk. Repository mode uses absolute repository_path on this server host and explicit Git or Working selectors; Git resolves local immutable commits with no fetch, and Working reads saved server-host files. INPUT_CHANGED refuses stale input. Preserve matching/count rules, side coverage and source navigation; select families/kinds and bounded detail without inferring algebraic equivalence or numerical results.",
-            "dynare_workspace_diagnose"=>"Check supplied-map roots or saved server-host paths, with explicit include settings, root/path exclusions and diagnostic filters. Each root retains complete, partial, failed or unfinished status. Work/output limits explain completed and omitted work; one failed root does not drop the others.",
-            _=>unreachable!(),
-        };
-        let schema=if matches!(name,"dynare_compare_models"|"dynare_workspace_diagnose") {multi_request::input_schema(name)} else {request::input_schema(name)};
-        let mut tool=Tool::new(name,format!("{description} Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. {}",match name {
-            "dynare_model_info"=>"Single-model tools accept source text/map/disk or legacy supplied inputs. Maps use exact keys and no disk fallback. Coordinates are one-based Unicode scalars, with exclusive ends. Limits: 1,000,000 bytes per file, 8 MiB source/expansion/output, 256 files or lookup candidates per request, 64 owners, 1–1000 rows per page. macro_work_limit selects a finite allowance per checked root; other bounds remain separate. No numerical execution.",
-            "dynare_rename"|"dynare_auto_fix"|"dynare_format"|"dynare_code_actions"=>"proposal.inputs contains guards for every checked file and missing lookup candidate; text_sha256 hashes original UTF-8 text, and missing candidates have exists=false with null hashes. proposal.edits contains original-source ranges, expected_text and new_text. proposal.revision binds these inputs, source_policy, checked_owners, include_dirs and macro_work_limit. Recheck saved disk inputs with expected_revision, verify all guards and expected text, then apply the complete proposal with external file tools. Proposals are atomic and do not reserve files. Identities require their original expected_revision.",
-            "dynare_explain"|"dynare_list_options"|"dynare_list_diagnostic_codes"=>"Catalog queries need no model source.",
-            "dynare_compare_models"|"dynare_workspace_diagnose"=>"Use this tool's source selectors and expected revisions. Continuations require unchanged inputs and filters.",
-            _=>"Use explicit source text/map/disk or legacy supplied inputs. Reused identities and continuations require their original expected_revision; changed inputs return INPUT_CHANGED."
-        }),schema)
-            .with_annotations(ToolAnnotations::new().read_only(true).destructive(false).idempotent(true).open_world(false));
-        if structured {tool.output_schema=Some(result::output_schema());}
-        tool
-    }).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn content_json(result: &CallToolResult, index: usize) -> Value {
-        let value = serde_json::to_value(result).unwrap();
-        serde_json::from_str(value["content"][index]["text"].as_str().unwrap()).unwrap()
-    }
-
-    // Guards a missing source being reported as a successful empty model/search.
-    #[test]
-    fn mapped_tools_require_source_but_accept_explicit_empty_text() {
-        let params = || Parameters(serde_json::from_value(json!({})).unwrap());
-        for error in [
-            DygnosisMcp.diagnose_tool(params()).unwrap_err(),
-            DygnosisMcp.model_info_tool(params()).unwrap_err(),
-            DygnosisMcp.expand_tool(params()).unwrap_err(),
-        ] {
-            assert!(error.message.contains("no source was supplied"));
-        }
-        let empty = DygnosisMcp
-            .diagnose_tool(Parameters(
-                serde_json::from_value(json!({"file_content":""})).unwrap(),
-            ))
-            .unwrap();
-        assert!(content_json(&empty, 0).is_array());
-        let related = DygnosisMcp
-            .related_files_tool(Parameters(
-                serde_json::from_value(json!({"file_content":"var y;"})).unwrap(),
-            ))
-            .unwrap_err();
-        assert!(related.message.contains("file location"));
-        // A map with an empty root key cannot supply the file location needed by discovery.
-        let empty_location = DygnosisMcp
-            .related_files_tool(Parameters(
-                serde_json::from_value(json!({"active_file":"", "files":{"":"var y;"}})).unwrap(),
-            ))
-            .unwrap_err();
-        assert!(empty_location.message.contains("empty file location"));
-    }
-
-    // Guards successful-looking partial search/diagnostics and unexplained expansion.
-    #[test]
-    fn incomplete_tools_keep_results_and_explain_missing_include() {
-        let text = "var y;\n@#include \"missing.inc\"\nmodel;y=0;end;\n";
-        let args = json!({"active_file":"root.mod", "files":{"root.mod":text}});
-        let diagnose = DygnosisMcp
-            .diagnose_tool(Parameters(serde_json::from_value(args.clone()).unwrap()))
-            .unwrap();
-        assert!(content_json(&diagnose, 0).is_array());
-        let notice = content_json(&diagnose, 1);
-        assert_eq!(notice["status"], "partial");
-        assert!(notice["incomplete_reasons"]
-            .to_string()
-            .contains("missing.inc"));
-        let mut args = args;
-        args["symbol"] = json!("y");
-        let references = DygnosisMcp
-            .find_references_tool(Parameters(serde_json::from_value(args).unwrap()))
-            .unwrap();
-        assert!(!content_json(&references, 0).as_array().unwrap().is_empty());
-        assert_eq!(content_json(&references, 1)["status"], "partial");
-        let expansion = dynare_expand(text, None, None);
-        assert_eq!(expansion["complete"], false);
-        assert!(!expansion["message"].as_str().unwrap().is_empty());
-        assert!(!expansion["incomplete_reasons"]
-            .as_array()
-            .unwrap()
-            .is_empty());
-    }
-
-    // Guards a real macro cause being replaced by generic incomplete guidance.
-    #[test]
-    fn incomplete_results_retain_macro_type_errors_and_builtin_reference_searches() {
-        let info = dynare_model_info("@#define x = \"s\" + 1\nvar y;model;y=0;end;", None, None);
-        assert!(
-            info["incomplete_reasons"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|reason| reason["code"] == "E285"),
-            "{info}"
-        );
-        let references = DygnosisMcp
-            .find_references_tool(Parameters(
-                serde_json::from_value(
-                    json!({"file_content":"var y;model;y=sin(y);end;", "symbol":"sin"}),
-                )
-                .unwrap(),
-            ))
-            .unwrap();
-        assert_eq!(content_json(&references, 0).as_array().unwrap().len(), 1);
-    }
-
-    // Guards illegal Rename and incomplete file maps silently returning unchanged text.
-    #[test]
-    fn rename_tool_explains_refusal_and_no_match() {
-        let args = |new_name: &str| json!({"file_content":"var y; model;y=0;end;", "old_name":"absent", "new_name":new_name});
-        let error = DygnosisMcp
-            .rename_tool(Parameters(serde_json::from_value(args("var")).unwrap()))
-            .unwrap_err();
-        assert!(error.message.contains("non-reserved"));
-        let unchanged = DygnosisMcp
-            .rename_tool(Parameters(serde_json::from_value(args("z")).unwrap()))
-            .unwrap();
-        assert_eq!(content_json(&unchanged, 1)["status"], "unchanged");
-        assert!(content_json(&unchanged, 1)["message"]
-            .as_str()
-            .unwrap()
-            .contains("No matching identifier"));
-        let refused = DygnosisMcp.rename_tool(Parameters(serde_json::from_value(json!({"file_content":"var y;\n@#include \"missing.inc\"\nmodel;y=0;end;", "old_name":"y", "new_name":"z"})).unwrap())).unwrap();
-        assert_eq!(refused.is_error, Some(true));
-        assert_eq!(content_json(&refused, 0)["status"], "refused");
-    }
-
-    // Guards a macro refusal and remaining unfixed warnings looking like full repair.
-    #[test]
-    fn auto_fix_reports_refused_and_partial_repairs() {
-        let text = "@#define p=1\nparameters a; a=@{p};";
-        let refused = DygnosisMcp.auto_fix_tool(Parameters(FileContentParams {
-            file_content: text.into(),
-        }));
-        assert_eq!(refused.is_error, Some(true));
-        assert_eq!(content_json(&refused, 1)["status"], "refused");
-        assert!(content_json(&refused, 1)["message"]
-            .as_str()
-            .unwrap()
-            .contains("interpolation"));
-        let partial = DygnosisMcp.auto_fix_tool(Parameters(FileContentParams {
-            file_content: "var y;
-model;
-y=1/0
-end;
-"
-            .into(),
-        }));
-        assert_eq!(content_json(&partial, 1)["status"], "partial");
-        assert!(!content_json(&partial, 1)["remaining_diagnostics"]
-            .as_array()
-            .unwrap()
-            .is_empty());
-        let value = serde_json::to_value(&partial).unwrap();
-        assert!(value["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("y=1/0;"));
-    }
 
     #[test]
     fn compare_modes_are_exclusive_and_require_explicit_inputs() {
@@ -2785,254 +1989,47 @@ end;
             params.compare(&|| false),
             dynare_compare_models(old, new, None, None, None, None, None)
         );
-        let schema = compare_models_input_schema();
-        assert_eq!(
-            schema["oneOf"][0]["required"],
-            json!(["file_content_a", "file_content_b"])
-        );
-        assert_eq!(
-            schema["oneOf"][1]["required"],
-            json!(["repository_path", "before", "after"])
-        );
     }
 
+    // Guards source validation and unknown coverage becoming successful empty facts.
     #[test]
-    fn equation_index_schema_starts_at_zero() {
-        let schema = mcp_input_schema::<EquationsParams>();
-        assert!(schema["properties"]["index"]["description"]
-            .as_str()
+    fn model_requests_require_source_and_explain_incomplete_inputs() {
+        let control = source::RequestControl::default;
+        assert!(canonical::dispatch("dynare_model_info", json!({}), control()).is_err());
+        let empty = canonical::dispatch(
+            "dynare_diagnose",
+            json!({"source":{"kind":"text","text":""}}),
+            control(),
+        )
+        .unwrap()
+        .structured_content
+        .unwrap();
+        assert!(empty["data"]["roots"][0]["diagnostics"].is_array());
+        let incomplete = canonical::dispatch("dynare_model_info", json!({"source":{"kind":"map","root":"root.mod","files":{"root.mod":"var y;\n@#include \"missing.inc\"\nmodel;y=0;end;"}}}), control()).unwrap().structured_content.unwrap();
+        assert_eq!(incomplete["outcome"]["status"], "partial");
+        assert!(incomplete["coverage"].to_string().contains("missing.inc"));
+    }
+
+    // Guards malformed macro causes and built-in uses disappearing from library queries.
+    #[test]
+    fn library_queries_keep_macro_causes_and_builtin_references() {
+        let info = dynare_model_info("@#define x = \"s\" + 1\nvar y;model;y=0;end;", None, None);
+        assert!(info["incomplete_reasons"]
+            .as_array()
             .unwrap()
-            .contains("starting at zero"));
+            .iter()
+            .any(|reason| reason["code"] == "E285"));
+        let references = dynare_find_references("var y;model;y=sin(y);end;", "sin", None, None);
+        assert_eq!(references.as_array().unwrap().len(), 1);
     }
 
     #[test]
     fn input_schemas_use_the_offline_compatible_draft() {
-        for tool in DygnosisMcp::tool_router().list_all() {
-            assert_eq!(tool.input_schema["type"], "object", "{}", tool.name);
-            if tool.name == "dynare_list_diagnostic_codes" {
-                assert_eq!(tool.input_schema["properties"], json!({}));
-            } else {
-                assert_eq!(
-                    tool.input_schema.get("$schema"),
-                    Some(&json!("http://json-schema.org/draft-07/schema#")),
-                    "{} must use the schema built into the minimum VS Code host",
-                    tool.name
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn input_schema_compatibility_preserves_every_tool_argument() {
-        fn assert_same<T: JsonSchema + 'static>(names: &[&str]) {
-            let mut previous = rmcp::handler::server::common::schema_for_input::<T>()
-                .expect("SDK input schema")
-                .as_ref()
-                .clone();
-            previous.remove("$schema");
-            let tools = DygnosisMcp::tool_router().list_all();
-            for name in names {
-                let mut current = tools
-                    .iter()
-                    .find(|tool| tool.name == *name)
-                    .expect("registered tool")
-                    .input_schema
-                    .as_ref()
-                    .clone();
-                current.remove("$schema");
-                // Compare the whole shape, including required fields, nullable
-                // types, maps, arrays, numeric limits, and serde defaults.
-                assert_eq!(current, previous, "{name}");
-            }
-        }
-        assert_same::<IncludeMapParams>(&[
-            "dynare_diagnose",
-            "dynare_model_info",
-            "dynare_related_files",
-            "dynare_expand",
-        ]);
-        assert_eq!(
-            DygnosisMcp::tool_router()
-                .list_all()
-                .iter()
-                .find(|tool| tool.name == "dynare_compare_models")
-                .unwrap()
-                .input_schema,
-            compare_models_input_schema()
-        );
-        assert_same::<FindReferencesParams>(&["dynare_find_references"]);
-        assert_same::<RenameParams>(&["dynare_rename"]);
-        assert_same::<FileContentParams>(&["dynare_auto_fix"]);
-        assert_same::<ExplainParams>(&["dynare_explain"]);
-        assert_same::<ListOptionsParams>(&["dynare_list_options"]);
-        assert_same::<EquationsParams>(&["dynare_equations"]);
-        assert_same::<FormatParams>(&["dynare_format"]);
-        assert_same::<ExtractParams>(&["dynare_extract"]);
-        assert_same::<WorkspaceDiagnoseParams>(&["dynare_workspace_diagnose"]);
-    }
-
-    #[test]
-    fn legacy_registration_preserves_version_two_tools() {
-        let listed = advertised_tools(true);
-        let mut got: Vec<String> = listed.iter().map(|t| t.name.to_string()).collect();
-        got.sort_unstable();
-        let mut want: Vec<String> = TOOL_NAMES
-            .to_vec()
-            .into_iter()
-            .map(str::to_string)
-            .collect();
-        want.sort_unstable();
-        assert_eq!(got, want);
-
-        let blob = serde_json::to_string(&listed).expect("tools json");
-        for phrase in [
-            "Compute Steady State",
-            "Gauss-Seidel",
-            "trust-region",
-            "homotopy",
-            "python_dynare_lsp",
-            "dynare_compute_steady_state",
-            "dynare_run_dynare",
-        ] {
-            assert!(
-                !blob.contains(phrase),
-                "stdio tools/list must not contain {phrase}: {blob}"
+        for tool in canonical::advertised_tools(true) {
+            assert_eq!(
+                tool.input_schema.get("$schema"),
+                Some(&json!("http://json-schema.org/draft-07/schema#"))
             );
         }
-
-        let info = DygnosisMcp.get_info();
-        assert_eq!(info.server_info.name, "dygnosis");
-
-        let format_tool = listed
-            .iter()
-            .find(|tool| tool.name == "dynare_format")
-            .unwrap();
-        let schema = serde_json::to_string(&format_tool.input_schema).expect("format schema");
-        assert!(schema.contains("file_content"), "{schema}");
-        assert!(schema.contains("formatIndent"), "{schema}");
-        let extract_tool = listed
-            .iter()
-            .find(|tool| tool.name == "dynare_extract")
-            .unwrap();
-        let extract_schema =
-            serde_json::to_string(&extract_tool.input_schema).expect("extract schema");
-        for field in [
-            "file_content",
-            "active_file",
-            "files",
-            "names",
-            "tags",
-            "dimension",
-        ] {
-            assert!(
-                extract_schema.contains(field),
-                "missing {field}: {extract_schema}"
-            );
-        }
-        let batch = listed
-            .iter()
-            .find(|tool| tool.name == "dynare_workspace_diagnose")
-            .unwrap();
-        let batch_schema = serde_json::to_string(&batch.input_schema).expect("batch schema");
-        for field in ["files", "roots", "paths"] {
-            assert!(
-                batch_schema.contains(field),
-                "workspace diagnose schema missing {field}: {batch_schema}"
-            );
-        }
-    }
-
-    #[test]
-    fn extract_tool_rejects_an_empty_selector() {
-        let server = DygnosisMcp;
-        let err = server
-            .extract_tool(Parameters(ExtractParams {
-                file_content: "var y;\nmodel;\n[name='eq']\ny = 0;\nend;\n".into(),
-                active_file: None,
-                files: None,
-                names: Vec::new(),
-                tags: HashMap::new(),
-                dimension: None,
-            }))
-            .expect_err("empty selector");
-        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
-        assert!(err.message.contains("names or tags"));
-    }
-
-    #[test]
-    fn extract_origin_uses_the_replacement_for_the_active_file() {
-        let mut files = HashMap::new();
-        files.insert(
-            "root.mod".into(),
-            "var y;\nmodel;\n[name='old']\ny = 0;\nend;\n".into(),
-        );
-        let fresh = "var y;\nmodel;\n[name='eq']\ny = 1;\nend;\n";
-        let value = dynare_extract(
-            fresh,
-            Some("root.mod"),
-            Some(&files),
-            &["eq".into()],
-            &HashMap::new(),
-            None,
-        )
-        .expect("extract");
-        assert_eq!(value["status"], "ok");
-        assert!(value["fragment"].as_str().unwrap().contains("name='eq'"));
-        let origin = &value["origins"][0];
-        assert_eq!(origin["file"], "root.mod");
-        assert!(origin["line"].as_u64().is_some(), "{origin}");
-        let index = LineIndex::new(fresh);
-        let start = index.offset(
-            fresh,
-            crate::engine::language::span::Position {
-                line: origin["line"].as_u64().unwrap() as u32 - 1,
-                character: origin["column"].as_u64().unwrap() as u32 - 1,
-            },
-        ) as usize;
-        assert!(fresh[start..].starts_with('['), "{origin} in {fresh}");
-    }
-
-    #[test]
-    fn format_tool_changed_and_bad_indent() {
-        let server = DygnosisMcp;
-        let changed = server
-            .format_tool(Parameters(FormatParams {
-                file_content: "var y;\nmodel;\ny=1;\nend;\n".into(),
-                format_indent: None,
-            }))
-            .expect("format");
-        let body = changed.structured_content.expect("structured");
-        assert_eq!(body["status"], "changed");
-        assert!(body["formatted_text"]
-            .as_str()
-            .unwrap()
-            .contains("\ty = 1;"));
-        assert!(body["reason"].is_null());
-        for key in ["line", "column", "range", "cursor"] {
-            assert!(body.get(key).is_none(), "{key}");
-        }
-
-        let err = server
-            .format_tool(Parameters(FormatParams {
-                file_content: "var y;\n".into(),
-                format_indent: Some(json!(0)),
-            }))
-            .expect_err("bad indent");
-        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
-        assert!(err.message.contains("formatIndent"));
-    }
-
-    #[test]
-    fn workspace_diagnose_tool_rejects_empty() {
-        let server = DygnosisMcp;
-        let err = server
-            .workspace_diagnose_tool(Parameters(WorkspaceDiagnoseParams {
-                files: None,
-                roots: None,
-                paths: None,
-            }))
-            .expect_err("empty");
-        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
-        assert_eq!(err.message, WORKSPACE_DIAGNOSE_NEITHER);
     }
 }

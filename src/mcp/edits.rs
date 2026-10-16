@@ -480,7 +480,7 @@ fn remaining_json(snapshot: &SourceSnapshot, set: &DiagnosticSet, edits: &[Edit]
 }
 
 fn fix_request(params: &Params, snapshot: &mut SourceSnapshot) -> Result<ToolResult, ErrorData> {
-    if !params.canonical
+    if !params.agent_output
         && snapshot.root_file.is_none()
         && params.target.is_none()
         && params.code.is_none()
@@ -678,11 +678,17 @@ fn mapped_bulk_fix(snapshot: &mut SourceSnapshot) -> Result<ToolResult, ErrorDat
         if let Some(rows) = result.data["omitted_actions"].as_array() {
             omitted.extend(rows.iter().cloned());
         }
-        let edits = result.data["files"]
+        let changed_text = result.data["files"]
             .as_object()
             .into_iter()
             .flat_map(|files| files.iter())
             .filter_map(|(file, text)| text.as_str().map(|text| (file, text)))
+            .chain(
+                result.data["text"]
+                    .as_str()
+                    .map(|text| (&current.root, text)),
+            );
+        let edits = changed_text
             .map(|(file, text)| {
                 source_edit(
                     &current,
@@ -996,7 +1002,7 @@ fn actions_request(
         .map(|action| action.kind)
         .collect();
     for action in actions {
-        if params.canonical {
+        if params.agent_output {
             wire.push(json!({"action_id":action.id,"kind":action.kind,"title":action.title,"diagnostic_id":action.diagnostic_id,"changed_items":action.edits.len(),"skipped_items":action.skipped,"skipped":action.skipped_rows,"has_alternatives":alternative_kinds.contains(&action.kind)}));
             continue;
         }

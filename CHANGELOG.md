@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.11.28
+
+- MCP uses the 12-tool contract 3. The `legacy-v2` launch profile is removed.
+  Existing callers must use the current tool names and typed source/selection
+  inputs advertised by `tools/list`.
+- Outline, breadcrumbs and Go to Symbol omit top-level parameter and MATLAB
+  assignments, including the former **MATLAB expressions** group. Parameters
+  remain available under their declarations.
+
 ## v0.11.27
 
 - Syntax help, completion and highlighting cover Dynare commands, options,

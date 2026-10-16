@@ -41,11 +41,8 @@ Numbers](settings:dynare.outline.equationNumbers).
 
 Under declarations, each variable row shows its timing class, `long_name` and
 `$TeX$` label beside the name. Heterogeneous blocks and declarations include
-their dimension (such as `model(heterogeneity=households)`), and consecutive
-top-level parameter assignments and MATLAB statements collapse into a **MATLAB
-expressions** group (controlled by `commands` in [Dynare › Outline:
-Sections](settings:dynare.outline.sections)). Named `@#define` macros also
-appear as entries.
+their dimension (such as `model(heterogeneity=households)`). Named `@#define`
+macros also appear as entries.
 
 ## Model-local variables
 
