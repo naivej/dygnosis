@@ -3,8 +3,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const { productRoot, extensionRoot, rpc } = require('./common.cjs');
-const { readVersion, checkVersion } = require('../../../scripts/version.cjs');
+const common = require('./common.cjs');
+const { productRoot, extensionRoot } = common;
+const { readVersion, syncMetadata, syncVersion } = require('../../../scripts/version.cjs');
+const { buildEngine } = require('../../../scripts/build-engine.cjs');
 const source = path.join(productRoot, 'help');
 
 /** Marketplace listing and Help About. Both omit the logo: the listing already shows the extension icon, and Help only packs images under help/assets. */
@@ -31,7 +33,7 @@ async function copyHelpAssets(topics, sourceRoot, targetRoot) {
 }
 
 async function engineFingerprint(root = productRoot) {
-  const files = ['src/engine/diagnostics/explain.rs', 'src/mcp/mod.rs', 'Cargo.toml', 'Cargo.lock'];
+  const files = ['src/engine/diagnostics/explain.rs', 'src/mcp/mod.rs', 'Cargo.toml', 'Cargo.lock', 'editors/vscode/scripts/help.cjs'];
   // The catalog consumes generated JSON as well as Rust. Include both so a
   // changed syntax fact cannot leave an apparently current snapshot behind.
   async function walk(dir) {
@@ -45,6 +47,33 @@ async function engineFingerprint(root = productRoot) {
   const hash = createHash('sha256');
   for (const file of [...new Set(files)].sort()) hash.update(file).update((await fs.readFile(path.join(root, file), 'utf8')).replaceAll('\r\n', '\n'));
   return hash.digest('hex');
+}
+
+async function optionalText(file) {
+  return fs.readFile(file, 'utf8').catch(error => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+}
+
+function savedObject(text) {
+  try { return text == null ? null : JSON.parse(text); }
+  catch (error) { if (error instanceof SyntaxError) return null; throw error; }
+}
+
+const referenceHash = text => createHash('sha256').update(text).digest('hex');
+const stateFile = root => path.join(root, 'editors/vscode/out/help-reference-state.json');
+
+/** Verify both source and reference bytes; refresh from a workspace build only when needed. */
+async function ensureReference({ root = productRoot, force = false, executable } = {}) {
+  const fingerprint = await engineFingerprint(root);
+  const text = await optionalText(path.join(root, 'help/reference.json'));
+  const reference = savedObject(text);
+  const state = savedObject(await optionalText(stateFile(root)));
+  if (!force && reference?.version === await readVersion(root)
+      && state?.fingerprint === fingerprint && state.reference_sha256 === referenceHash(text)) return;
+  console.log('Refreshing Help reference.');
+  await generate(executable ?? buildEngine(root), { root, fingerprint });
 }
 
 function resultEnvelope(result) {
@@ -124,12 +153,13 @@ async function referenceData(call, pageSize = 1000) {
   return { codes, options };
 }
 
-async function generate(executable) {
-  const session = rpc(executable, ['mcp'], false);
+async function generate(executable, { root = productRoot, fingerprint } = {}) {
+  fingerprint ??= await engineFingerprint(root);
+  const session = common.rpc(executable, ['mcp'], false);
   try {
     const init = await session.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dygnosis-help-build', version: '1' } });
-    const manifest = JSON.parse(await fs.readFile(path.join(extensionRoot, 'package.json'), 'utf8'));
-    const version = await readVersion();
+    const manifest = JSON.parse(await fs.readFile(path.join(root, 'editors/vscode/package.json'), 'utf8'));
+    const version = await readVersion(root);
     assert.equal(manifest.version, version, 'Synchronize the extension version before generating Help');
     assert.equal(init.serverInfo.version, version, 'Help must use the matching engine');
     session.notify('notifications/initialized', {});
@@ -140,17 +170,21 @@ async function generate(executable) {
       return result;
     }
     const { codes, options } = await referenceData(call);
-    await fs.writeFile(path.join(source, 'reference.json'), JSON.stringify({ version: init.serverInfo.version, fingerprint: await engineFingerprint(), tools, codes, options }, null, 2) + '\n');
+    assert.equal(await engineFingerprint(root), fingerprint, 'Engine source changed during Help generation. Rerun the command; the previous reference was kept.');
+    const referencePath = path.join(root, 'help/reference.json');
+    const text = JSON.stringify({ version: init.serverInfo.version, tools, codes, options }, null, 2) + '\n';
+    if (await optionalText(referencePath) !== text) await fs.writeFile(referencePath, text);
+    await fs.mkdir(path.dirname(stateFile(root)), { recursive: true });
+    await fs.writeFile(stateFile(root), JSON.stringify({ fingerprint, reference_sha256: referenceHash(text) }) + '\n');
   } finally { session.close(); }
 }
 
 async function build() {
-  await checkVersion();
+  await syncVersion();
   const manifest = JSON.parse(await fs.readFile(path.join(extensionRoot, 'package.json'), 'utf8'));
   const registry = JSON.parse(await fs.readFile(path.join(source, 'topics.json'), 'utf8'));
   const reference = JSON.parse(await fs.readFile(path.join(source, 'reference.json'), 'utf8'));
   assert.equal(reference.version, manifest.version, 'Regenerate Help from the matching engine');
-  assert.equal(reference.fingerprint, await engineFingerprint(), 'Engine source changed. Press F5 so the launch task rebuilds the engine and refreshes Help.');
   const ids = new Set(registry.map(topic => topic.id));
   assert.equal(ids.size, registry.length);
   const introduction = productIntroduction(await fs.readFile(path.join(productRoot, 'README.md'), 'utf8'));
@@ -189,7 +223,12 @@ async function build() {
 }
 
 if (require.main === module) (async () => {
-  if (process.argv[2] === '--generate') await generate(path.resolve(process.argv[3] ?? path.join(extensionRoot, 'bin', process.platform === 'win32' ? 'dygnosis.exe' : 'dygnosis')));
+  const [mode, executable, ...extra] = process.argv.slice(2);
+  assert.ok(mode === undefined || (mode === '--generate' && !extra.length), 'Usage: node scripts/help.cjs [--generate [executable]]');
+  if (mode === '--generate') {
+    await syncMetadata();
+    await ensureReference({ force: true, executable: executable ? path.resolve(executable) : undefined });
+  }
   await build();
 })().catch(error => { console.error(error); process.exitCode = 1; });
-module.exports = { build, generate, engineFingerprint, copyHelpAssets, resultData, collectPages, referenceData };
+module.exports = { build, generate, ensureReference, engineFingerprint, copyHelpAssets, resultData, collectPages, referenceData };

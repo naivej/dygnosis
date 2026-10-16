@@ -1,6 +1,5 @@
 // Read the product version from Cargo.toml; synchronize or check required copies.
 const assert = require("node:assert/strict");
-const { execFileSync } = require("node:child_process");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
@@ -57,23 +56,9 @@ async function checkVersion(root = productRoot) {
 }
 
 async function syncVersion(root = productRoot) {
-  const version = await syncMetadata(root);
+  await syncMetadata(root);
   const help = require(path.join(root, "editors/vscode/scripts/help.cjs"));
-  const reference = await fs.readFile(path.join(root, "help/reference.json"), "utf8").then(JSON.parse).catch(error => {
-    if (error.code === "ENOENT") return null;
-    throw error;
-  });
-  if (reference?.version !== version || reference.fingerprint !== await help.engineFingerprint()) {
-    // Rebuild before exporting Help so its source fingerprint cannot bless stale metadata.
-    const output = execFileSync("cargo", ["build", "--locked", "--bin", "dygnosis", "--message-format=json"], {
-      cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], windowsHide: true,
-      timeout: 20 * 60 * 1000, maxBuffer: 32 * 1024 * 1024,
-    });
-    const artifacts = output.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
-    const executable = artifacts.find(item => item.reason === "compiler-artifact" && item.target.name === "dygnosis" && item.target.kind.includes("bin"))?.executable;
-    assert.ok(executable, "Cargo did not report the dygnosis executable");
-    await help.generate(executable);
-  }
+  await help.ensureReference({ root });
   return checkVersion(root);
 }
 

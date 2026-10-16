@@ -76,17 +76,20 @@ test('Help projects every paged canonical code and option into the existing read
   assert.ok(calls.some(call => call.args.parent === 'stoch_simul' && call.args.continuation === '2'));
 });
 
-test('Help fingerprint changes when consumed syntax JSON changes', async () => {
+test('Help fingerprint changes when consumed syntax JSON or the exporter changes', async () => {
   const base = path.resolve(os.tmpdir());
   const root = await fs.mkdtemp(path.join(base, 'dygnosis-help-fingerprint-'));
   try {
-    for (const folder of ['src/engine/diagnostics', 'src/engine/catalog', 'src/mcp']) await fs.mkdir(path.join(root, folder), { recursive: true });
-    for (const file of ['src/engine/diagnostics/explain.rs', 'src/mcp/mod.rs', 'Cargo.toml', 'Cargo.lock']) await fs.writeFile(path.join(root, file), 'unchanged\n');
+    for (const folder of ['src/engine/diagnostics', 'src/engine/catalog', 'src/mcp', 'editors/vscode/scripts']) await fs.mkdir(path.join(root, folder), { recursive: true });
+    for (const file of ['src/engine/diagnostics/explain.rs', 'src/mcp/mod.rs', 'Cargo.toml', 'Cargo.lock', 'editors/vscode/scripts/help.cjs']) await fs.writeFile(path.join(root, file), 'unchanged\n');
     const syntax = path.join(root, 'src/engine/catalog/syntax_data.json');
     await fs.writeFile(syntax, '{"name":"diff"}\n');
     const before = await engineFingerprint(root);
     await fs.writeFile(syntax, '{"name":"log"}\n');
     assert.notEqual(await engineFingerprint(root), before);
+    const syntaxChanged = await engineFingerprint(root);
+    await fs.appendFile(path.join(root, 'editors/vscode/scripts/help.cjs'), '// Export changed\n');
+    assert.notEqual(await engineFingerprint(root), syntaxChanged);
   } finally {
     assert.equal(path.dirname(path.resolve(root)), base);
     await fs.rm(root, { recursive: true, force: true });
