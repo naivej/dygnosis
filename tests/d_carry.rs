@@ -198,7 +198,9 @@ fn named_std_corr_heads_use_declarations_available_at_the_statement() {
             "{statement}: {got:?}"
         );
     }
-    let declared_first = errors("var y; varexo e u; model; y=e+u; end; std(u).subsamples(s=2000Q1:2000Q2); std(u).s.options(jscale=0.2);");
+    let declared_first = errors(
+        "var y; varexo e u; model; y=e+u; end; std(u).subsamples(s=2000Q1:2000Q2); std(u).s.options(jscale=0.2);",
+    );
     assert!(
         !declared_first.iter().any(|(code, _)| code == "E058"),
         "{declared_first:?}"
@@ -343,7 +345,10 @@ fn date_consumers_keep_72_accept_and_refuse_boundary() {
         "plot_shock_decomposition(plot_init_date=2000Q1+1,plot_end_date=2001Q1) y;",
     ] {
         let got = errors(&format!("{base} {statement}"));
-        assert!(!got.iter().any(|(c,_)| c == "E001"), "{statement}: {got:?}");
+        assert!(
+            !got.iter().any(|(c, _)| c == "E001"),
+            "{statement}: {got:?}"
+        );
     }
     for statement in [
         "set_time(4);",

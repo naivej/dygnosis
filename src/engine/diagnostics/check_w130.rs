@@ -230,8 +230,7 @@ fn ss_lhs_ident(model: &Model, eq: &Equation) -> Option<Name> {
     }
 }
 
-const E208_MSG: &str =
-    "the number of equations marked [static] must be equal to the number of equations marked [dynamic]";
+const E208_MSG: &str = "the number of equations marked [static] must be equal to the number of equations marked [dynamic]";
 const E209_MSG: &str = "marking equations as [static] or [dynamic] is not possible with ramsey_model, ramsey_policy or discretionary_policy";
 const W200_MSG: &str = r#"you are using a function (max, min, abs, sign) or an operator (<, >, <=, >=, ==, !=) which is unsuitable for a stochastic context; see the reference manual, section about "Expressions", for more details."#;
 const E210_MSG: &str = "you have declared your model 'linear' but you are using a function (max, min, abs, sign) or an operator (<, >, <=, >=, ==, !=) on an endogenous variable.";

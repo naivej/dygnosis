@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use dygnosis::server::diagnostics_for;
 use dygnosis::{
-    analyze, dynare_diagnose, find_preprocessor, parse, run_preprocessor, Diagnostic, JsonStage,
+    Diagnostic, JsonStage, analyze, dynare_diagnose, find_preprocessor, parse, run_preprocessor,
 };
 use tower_lsp::lsp_types::NumberOrString;
 
@@ -221,10 +221,12 @@ optimal_policy_discount_factor = pp.rho;
         .intern
         .lookup("optimal_policy_discount_factor")
         .unwrap();
-    assert!(model
-        .param_assignments
-        .iter()
-        .any(|row| row.name == name && !row.native));
+    assert!(
+        model
+            .param_assignments
+            .iter()
+            .any(|row| row.name == name && !row.native)
+    );
 }
 
 #[test]
@@ -262,10 +264,12 @@ fn reach_codes_are_quiet_on_a_native_rhs_and_still_fire_on_a_declared_head() {
 fn a_pre_block_native_assignment_still_records_w012() {
     let source = "foo = 1;\nvar y;\nmodel;\ny = 1;\nend;\n";
     assert!(has(&diags(source), "W012"), "{:?}", diags(source));
-    assert!(parse(source)
-        .helper_assignments
-        .iter()
-        .any(|row| row.native));
+    assert!(
+        parse(source)
+            .helper_assignments
+            .iter()
+            .any(|row| row.native)
+    );
 }
 
 #[test]
@@ -313,9 +317,11 @@ fn native_boundaries_follow_macro_output_in_execution_order() {
     quiet(continued, "E275");
     agree(continued, "E275");
     assert_eq!(parse(continued).param_assignments.len(), 1);
-    assert!(parse(continued).helper_assignments[0]
-        .expression
-        .contains("pp.rho"));
+    assert!(
+        parse(continued).helper_assignments[0]
+            .expression
+            .contains("pp.rho")
+    );
 
     if let Some(pp) = find_preprocessor(None) {
         let check = run_preprocessor(looped, &pp, None, Duration::from_secs(30), JsonStage::Check);
@@ -336,11 +342,13 @@ fn native_boundaries_follow_macro_output_in_execution_order() {
 fn full_archive_is_quiet_for_native_assignment_claims_on_all_transports() {
     let source =
         include_str!("../.agents/skills/use-dynare/references/examples/NK_FNL23_rep_trans.mod");
-    assert!(source
-        .lines()
-        .nth(310)
-        .unwrap()
-        .contains("oo_.steady_state(8)"));
+    assert!(
+        source
+            .lines()
+            .nth(310)
+            .unwrap()
+            .contains("oo_.steady_state(8)")
+    );
     for code in ["E001", "E275"] {
         quiet(source, code);
         agree(source, code);

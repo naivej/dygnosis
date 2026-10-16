@@ -5,7 +5,7 @@ use dygnosis::model::{
     NamedModelOperatorKind, PacTargetComponentRow, PacTargetInfoRow, SemiStructuralKind,
     SemiStructuralValue,
 };
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage};
+use dygnosis::{JsonStage, analyze, find_preprocessor, parse, run_preprocessor};
 
 fn fixture(name: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))

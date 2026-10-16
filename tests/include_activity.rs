@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use dygnosis::{dynare_model_info, Workspace};
+use dygnosis::{Workspace, dynare_model_info};
 
 fn workspace(text: &str, files: &[(&str, &str)]) -> (Workspace, String, HashMap<String, String>) {
     let root = "C:/dygnosis-include-activity/root.mod".to_string();

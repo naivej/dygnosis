@@ -6,7 +6,7 @@ use std::sync::Arc;
 use dygnosis::include_resolver::normalize_uri;
 use dygnosis::mcp::{dynare_diagnose, dynare_workspace_diagnose};
 use dygnosis::span::Span;
-use dygnosis::{check_file_with_origins, Severity};
+use dygnosis::{Severity, check_file_with_origins};
 
 fn scratch(label: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -176,7 +176,11 @@ fn empty_aggregate_model_refusal_points_at_included_end() {
 #[test]
 fn mcp_maps_each_audited_check_error_to_its_child() {
     let cases = [
-        ("E001", "@#include \"child.inc\"\n", "var y; model; y=dsge_prior_weight; end;\n"),
+        (
+            "E001",
+            "@#include \"child.inc\"\n",
+            "var y; model; y=dsge_prior_weight; end;\n",
+        ),
         (
             "E020",
             "@#include \"child.inc\"\n",

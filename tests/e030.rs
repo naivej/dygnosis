@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use dygnosis::expr::ExprKind;
 use dygnosis::span::LineIndex;
-use dygnosis::{analyze, check_e030, parse, Severity};
+use dygnosis::{Severity, analyze, check_e030, parse};
 
 const ARCHIVES: &[&str] = &[
     "trend_rbc_gov_inv",
@@ -186,9 +186,10 @@ fn e030_same_kind_var_third_compares_to_first() {
     let got = rust_e030(&text);
     assert_eq!(got.len(), 2);
     assert!(got.iter().all(|d| d.code == "W031" && d.severity == 2));
-    assert!(got
-        .iter()
-        .all(|d| d.message.contains("Symbol y declared twice")));
+    assert!(
+        got.iter()
+            .all(|d| d.message.contains("Symbol y declared twice"))
+    );
     assert_last_ident(&text, &got[0], "var y;\nvar y;", "y");
     assert_span_in(&text, &got[1], "var y c;", "y");
 }
@@ -237,9 +238,11 @@ fn e030_var_varexo_timed() {
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].code, "E030");
     assert_eq!(got[0].severity, 1);
-    assert!(got[0]
-        .message
-        .contains("Symbol c declared twice with different types"));
+    assert!(
+        got[0]
+            .message
+            .contains("Symbol c declared twice with different types")
+    );
     assert_span_in(&text, &got[0], "varexo e c;", "c");
 }
 
@@ -249,9 +252,11 @@ fn e030_var_varexo_lhs() {
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].code, "E030");
-    assert!(got[0]
-        .message
-        .contains("Symbol y declared twice with different types"));
+    assert!(
+        got[0]
+            .message
+            .contains("Symbol y declared twice with different types")
+    );
     assert_span_in(&text, &got[0], "varexo e y;", "y");
 }
 
@@ -261,9 +266,11 @@ fn e030_var_varexo_shock() {
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].code, "E030");
-    assert!(got[0]
-        .message
-        .contains("Symbol e declared twice with different types"));
+    assert!(
+        got[0]
+            .message
+            .contains("Symbol e declared twice with different types")
+    );
     assert_last_ident(&text, &got[0], "varexo e;", "e");
 }
 
@@ -273,9 +280,11 @@ fn e030_varexo_param_assigned() {
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].code, "E030");
-    assert!(got[0]
-        .message
-        .contains("Symbol betta declared twice with different types"));
+    assert!(
+        got[0]
+            .message
+            .contains("Symbol betta declared twice with different types")
+    );
     assert_span_in(&text, &got[0], "parameters rho betta;", "betta");
 }
 
@@ -285,9 +294,11 @@ fn e030_varexo_det() {
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].code, "E030");
-    assert!(got[0]
-        .message
-        .contains("Symbol e declared twice with different types"));
+    assert!(
+        got[0]
+            .message
+            .contains("Symbol e declared twice with different types")
+    );
     assert_last_ident(&text, &got[0], "varexo e;", "e");
 }
 
@@ -297,9 +308,11 @@ fn e030_model_local_dup() {
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].code, "E030");
-    assert!(got[0]
-        .message
-        .contains("Local model variable foo declared twice"));
+    assert!(
+        got[0]
+            .message
+            .contains("Local model variable foo declared twice")
+    );
     assert_span_in(&text, &got[0], "# foo = 2;", "foo");
 }
 

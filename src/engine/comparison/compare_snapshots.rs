@@ -5,15 +5,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::engine::comparison::compare_navigation::{
-    navigation_json, ComparisonInput, Coordinates,
+    ComparisonInput, Coordinates, navigation_json,
 };
 use crate::engine::comparison::semantic_diff::{
     CaptureBoundary, SourceFilePair, SourceIdentityProof,
 };
-use crate::engine::comparison::{compare_models_with_sources, CompareSource};
+use crate::engine::comparison::{CompareSource, compare_models_with_sources};
 use crate::engine::language::model::Model;
 use crate::engine::workspace::Workspace;
 
@@ -390,7 +390,9 @@ pub(crate) fn capture_git_snapshot_with_limit(
                 && entry.object_id.bytes().all(|byte| byte.is_ascii_hexdigit())
         })
     {
-        return invalid("Snapshot manifest and source keys must be exact repository-relative paths with valid Git modes and object IDs");
+        return invalid(
+            "Snapshot manifest and source keys must be exact repository-relative paths with valid Git modes and object IDs",
+        );
     }
     let Some(root_entry) = input.manifest.get(&input.root_file) else {
         return SnapshotCapture::Failure(SnapshotFailure::new(
@@ -420,7 +422,7 @@ pub(crate) fn capture_git_snapshot_with_limit(
                 code,
                 message,
                 Some(input.root_file.clone()),
-            ))
+            ));
         }
         _ => {}
     }

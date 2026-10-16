@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, Diagnostic, JsonStage};
+use dygnosis::{Diagnostic, JsonStage, analyze, find_preprocessor, parse, run_preprocessor};
 
 fn fixture(rel: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

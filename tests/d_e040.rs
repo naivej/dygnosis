@@ -209,9 +209,11 @@ fn shape_e050_duplicate_equation() {
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].code, "W054");
     assert_eq!(got[0].severity, 2);
-    assert!(got[0]
-        .message
-        .contains("Duplicate equation (same as line 9)."));
+    assert!(
+        got[0]
+            .message
+            .contains("Duplicate equation (same as line 9).")
+    );
     assert_span_in(
         &text,
         &got[0],
@@ -249,9 +251,11 @@ fn shape_e052_duplicate_param() {
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].code, "W056");
     assert_eq!(got[0].severity, 2);
-    assert!(got[0]
-        .message
-        .contains("Duplicate parameter assignment 'betta = 0.99'"));
+    assert!(
+        got[0]
+            .message
+            .contains("Duplicate parameter assignment 'betta = 0.99'")
+    );
     assert_span_in(&text, &got[0], "betta = 0.99;\n\nmodel;", "betta = 0.99;");
 }
 
@@ -262,9 +266,11 @@ fn shape_e053_stray_top_level() {
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].code, "W057");
     assert_eq!(got[0].severity, 2);
-    assert!(got[0]
-        .message
-        .contains("Stray equation '0 = 1' outside model block"));
+    assert!(
+        got[0]
+            .message
+            .contains("Stray equation '0 = 1' outside model block")
+    );
     assert_span(&text, &got[0], "0 = 1;");
 }
 
@@ -285,9 +291,11 @@ fn shape_w042_missing_ss_coverage() {
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].code, "W042");
     assert_eq!(got[0].severity, 2);
-    assert!(got[0]
-        .message
-        .contains("variable 'c' is not assigned a value"));
+    assert!(
+        got[0]
+            .message
+            .contains("variable 'c' is not assigned a value")
+    );
     assert_span_in(
         &text,
         &got[0],
@@ -303,15 +311,17 @@ fn shape_w050_undeclared_initval() {
     assert_eq!(got.len(), 2, "{got:?}");
     let e058 = find_code(&got, "E058");
     assert_eq!(e058.severity, 1);
-    assert!(e058
-        .message
-        .contains("Variable 'undeclared_zzz' in initval is not declared."));
+    assert!(
+        e058.message
+            .contains("Variable 'undeclared_zzz' in initval is not declared.")
+    );
     assert_span(&text, e058, "undeclared_zzz = 1;");
     let w052 = find_code(&got, "W052");
     assert_eq!(w052.severity, 2);
-    assert!(w052
-        .message
-        .contains("2 endogenous variable(s) missing from initval"));
+    assert!(
+        w052.message
+            .contains("2 endogenous variable(s) missing from initval")
+    );
     assert!(w052.message.contains("c, y"));
     assert_span_in(&text, w052, "initval; undeclared_zzz = 1; end;", "initval");
 }
@@ -323,15 +333,17 @@ fn shape_w051_varexo_in_initval() {
     assert_eq!(got.len(), 2, "{got:?}");
     let w051 = find_code(&got, "W051");
     assert_eq!(w051.severity, 2);
-    assert!(w051
-        .message
-        .contains("Exogenous variable 'e' is assigned in initval."));
+    assert!(
+        w051.message
+            .contains("Exogenous variable 'e' is assigned in initval.")
+    );
     assert_span(&text, w051, "e = 0.1;");
     let w052 = find_code(&got, "W052");
     assert_eq!(w052.severity, 2);
-    assert!(w052
-        .message
-        .contains("2 endogenous variable(s) missing from initval"));
+    assert!(
+        w052.message
+            .contains("2 endogenous variable(s) missing from initval")
+    );
     assert!(w052.message.contains("c, y"));
     assert_span_in(&text, w052, "initval; e = 0.1; end;", "initval");
 }
@@ -371,7 +383,10 @@ fn perfect_foresight_commands_keep_exogenous_initial_values_without_w051() {
         let ours = analyze(&parse(&text));
         let warnings: Vec<_> = ours.iter().filter(|d| d.code == "W051").collect();
         assert_eq!(warnings.len(), 1, "{text}: {ours:?}");
-        assert_eq!(warnings[0].message, "Exogenous variable 'e' is assigned in initval. Check that this initial value is intended for your simulation.");
+        assert_eq!(
+            warnings[0].message,
+            "Exogenous variable 'e' is assigned in initval. Check that this initial value is intended for your simulation."
+        );
     }
 }
 
@@ -409,9 +424,11 @@ fn shape_w052_missing_initval() {
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].code, "W052");
     assert_eq!(got[0].severity, 2);
-    assert!(got[0]
-        .message
-        .contains("1 endogenous variable(s) missing from initval"));
+    assert!(
+        got[0]
+            .message
+            .contains("1 endogenous variable(s) missing from initval")
+    );
     assert!(got[0].message.contains(": c"));
     assert_span_in(&text, &got[0], "initval; y = 1; end;", "initval");
 }
@@ -423,15 +440,17 @@ fn shape_w053_param_in_initval() {
     assert_eq!(got.len(), 2, "{got:?}");
     let e059 = find_code(&got, "E059");
     assert_eq!(e059.severity, 1);
-    assert!(e059
-        .message
-        .contains("betta is neither endogenous or exogenous"));
+    assert!(
+        e059.message
+            .contains("betta is neither endogenous or exogenous")
+    );
     assert_span(&text, e059, "betta = 0.5;");
     let w052 = find_code(&got, "W052");
     assert_eq!(w052.severity, 2);
-    assert!(w052
-        .message
-        .contains("2 endogenous variable(s) missing from initval"));
+    assert!(
+        w052.message
+            .contains("2 endogenous variable(s) missing from initval")
+    );
     assert!(w052.message.contains("c, y"));
     assert_span_in(&text, w052, "initval; betta = 0.5; end;", "initval");
 }
@@ -460,9 +479,11 @@ fn shape_w050_undeclared_endval() {
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].code, "E058");
     assert_eq!(got[0].severity, 1);
-    assert!(got[0]
-        .message
-        .contains("Variable 'undeclared_zzz' in endval is not declared."));
+    assert!(
+        got[0]
+            .message
+            .contains("Variable 'undeclared_zzz' in endval is not declared.")
+    );
     assert_span(&text, &got[0], "undeclared_zzz = 1;");
 }
 
@@ -473,9 +494,11 @@ fn shape_w053_param_in_endval() {
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].code, "E059");
     assert_eq!(got[0].severity, 1);
-    assert!(got[0]
-        .message
-        .contains("betta is neither endogenous or exogenous"));
+    assert!(
+        got[0]
+            .message
+            .contains("betta is neither endogenous or exogenous")
+    );
     assert_span(&text, &got[0], "betta = 0.5;");
 }
 

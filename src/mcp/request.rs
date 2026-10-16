@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use rmcp::model::CallToolResult;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::result::{Detail, Pages, ResultOptions, ToolResult};
 use super::source::{RequestControl, SourceArgs, SourceSnapshot};
@@ -301,7 +301,9 @@ pub(crate) fn decode(tool: &str, value: &Value) -> Result<Params, rmcp::ErrorDat
     .any(|v| v)
         && params.expected_revision.is_none()
     {
-        return Err(invalid("Reusing an identity or continuation requires expected_revision from the original input"));
+        return Err(invalid(
+            "Reusing an identity or continuation requires expected_revision from the original input",
+        ));
     }
     Ok(params)
 }
@@ -492,11 +494,13 @@ fn dispatch_query(
         _ => return Err(invalid(format!("Unknown tool: {tool}"))),
     };
     result.inputs = vec![snapshot.inputs.clone()];
-    result.coverage = Some(json!(snapshot
-        .analyses
-        .values()
-        .map(|analysis| analysis.coverage.clone())
-        .collect::<Vec<_>>()));
+    result.coverage = Some(json!(
+        snapshot
+            .analyses
+            .values()
+            .map(|analysis| analysis.coverage.clone())
+            .collect::<Vec<_>>()
+    ));
     if snapshot
         .analyses
         .values()
@@ -622,29 +626,33 @@ fn model_info(snapshot: &mut SourceSnapshot, params: &Params) -> Result<Value, r
         data["model_locals"] = super::model_info_with_unit(&unit(snapshot))["model_locals"].clone();
     }
     if want("declarations") {
-        data["declarations"] = json!(snapshot
-            .model
-            .written_declarations
-            .iter()
-            .zip(&snapshot.report.model_map.declarations)
-            .map(|(written, source)| {
-                let declaration = &written.declaration;
-                let mut row = source_json(snapshot, source);
-                row["name"] = json!(snapshot.model.name(declaration.name));
-                row["written_kind"] = json!(written.written_kind);
-                row["final_kind"] = if snapshot.coverage["complete"] == true {
-                    json!(snapshot.model.final_symbol_kind(declaration.name))
-                } else {
-                    Value::Null
-                };
-                row["long_name"] = json!(declaration.long_name);
-                row["tex_name"] = json!(declaration.tex_name);
-                row["dimension"] = json!(declaration
-                    .heterogeneity
-                    .map(|(name, _)| snapshot.model.name(name)));
-                row
-            })
-            .collect::<Vec<_>>());
+        data["declarations"] = json!(
+            snapshot
+                .model
+                .written_declarations
+                .iter()
+                .zip(&snapshot.report.model_map.declarations)
+                .map(|(written, source)| {
+                    let declaration = &written.declaration;
+                    let mut row = source_json(snapshot, source);
+                    row["name"] = json!(snapshot.model.name(declaration.name));
+                    row["written_kind"] = json!(written.written_kind);
+                    row["final_kind"] = if snapshot.coverage["complete"] == true {
+                        json!(snapshot.model.final_symbol_kind(declaration.name))
+                    } else {
+                        Value::Null
+                    };
+                    row["long_name"] = json!(declaration.long_name);
+                    row["tex_name"] = json!(declaration.tex_name);
+                    row["dimension"] = json!(
+                        declaration
+                            .heterogeneity
+                            .map(|(name, _)| snapshot.model.name(name))
+                    );
+                    row
+                })
+                .collect::<Vec<_>>()
+        );
     }
     if want("assignments") {
         let values = crate::engine::analysis::assignment_values::assignment_values(&snapshot.model);
@@ -846,21 +854,23 @@ fn expand_query(snapshot: &SourceSnapshot, params: &Params) -> Result<ToolResult
         }
     }
     data["navigation"] = json!(retained);
-    data["origins"] = json!(snapshot
-        .report
-        .origins
-        .iter()
-        .zip(data["origins"].as_array().into_iter().flatten())
-        .filter(|(origin, _)| {
-            snapshot.report.navigation.iter().any(|row| {
-                row.equation.dimension == origin.dimension
-                    && row.equation.number == Some(origin.scope_index + 1)
-                    && span.start <= row.effective_span.start
-                    && row.effective_span.end <= span.end
+    data["origins"] = json!(
+        snapshot
+            .report
+            .origins
+            .iter()
+            .zip(data["origins"].as_array().into_iter().flatten())
+            .filter(|(origin, _)| {
+                snapshot.report.navigation.iter().any(|row| {
+                    row.equation.dimension == origin.dimension
+                        && row.equation.number == Some(origin.scope_index + 1)
+                        && span.start <= row.effective_span.start
+                        && row.effective_span.end <= span.end
+                })
             })
-        })
-        .map(|(_, value)| value.clone())
-        .collect::<Vec<_>>());
+            .map(|(_, value)| value.clone())
+            .collect::<Vec<_>>()
+    );
     let mut result = ToolResult::new(data);
     if omitted > 0 {
         result.data["omitted_navigation_count"] = json!(omitted);
@@ -1588,11 +1598,13 @@ mod tests {
             let result = call("dynare_format", json!({"file_content":text}));
             assert_eq!(result["outcome"]["status"], status);
             if let Some(reason) = reason {
-                assert!(result["outcome"]["reasons"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|row| row["code"] == reason));
+                assert!(
+                    result["outcome"]["reasons"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|row| row["code"] == reason)
+                );
             }
             assert_eq!(result["proposal"].is_object(), status != "unchanged");
         }
@@ -1634,10 +1646,12 @@ mod tests {
             assert!(end > start);
             assert!(text.get(start as usize..end as usize).is_some());
         }
-        assert!(!selected["data"]["navigation"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            !selected["data"]["navigation"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
     #[test]
     fn partial_expanded_row_withholds_its_written_jump_and_names_the_omission() {
@@ -1700,10 +1714,12 @@ mod tests {
         assert_eq!(result["outcome"]["reasons"][0]["code"], "UNKNOWN_COMMAND");
         let result = call("dynare_list_options", json!({"search":"steady"}));
         assert!(!result["data"]["commands"].as_array().unwrap().is_empty());
-        assert!(result["data"]["commands"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|row| row.as_str().unwrap().contains("steady")));
+        assert!(
+            result["data"]["commands"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row.as_str().unwrap().contains("steady"))
+        );
     }
 }

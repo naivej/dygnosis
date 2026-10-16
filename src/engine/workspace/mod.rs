@@ -23,7 +23,7 @@ const INPUT_FILE_BYTE_CAP: usize = 1_000_000;
 
 use self::companion::{CompanionKind, CompanionRecord};
 use crate::engine::language::expand::{
-    expand_report_from_spliced_controlled, ExpandReport, NavigationSource, SpliceSegment,
+    ExpandReport, NavigationSource, SpliceSegment, expand_report_from_spliced_controlled,
 };
 use crate::engine::language::macro_expand::{IncompleteReason, MacroEvalError};
 use crate::engine::language::macro_expr::MacroBudget;
@@ -2065,12 +2065,12 @@ impl Workspace {
                     Err(MacroEvalError::Limit(limit)) => {
                         return Some(crate::engine::language::macro_expand::MacroFileLoad::Limit(
                             limit,
-                        ))
+                        ));
                     }
                     Err(_) => {
                         return Some(crate::engine::language::macro_expand::MacroFileLoad::Limit(
                             "iteration work",
-                        ))
+                        ));
                     }
                 };
                 Some(
@@ -3687,10 +3687,12 @@ mod include_load_budget_tests {
         assert!(model.macro_type_errors.is_empty());
         assert_eq!(model.endogenous.len(), 1);
         let standalone = workspace.get_model(&child).unwrap();
-        assert!(standalone
-            .macro_type_errors
-            .iter()
-            .any(|(_, code, message)| *code == "E063" && message.contains("flag")));
+        assert!(
+            standalone
+                .macro_type_errors
+                .iter()
+                .any(|(_, code, message)| *code == "E063" && message.contains("flag"))
+        );
         for _ in 0..2 {
             let mut snapshot = workspace.snapshot_with_root_settings(&root);
             let model = snapshot.get_effective_model(&root).unwrap();
@@ -3700,10 +3702,11 @@ mod include_load_budget_tests {
         }
         workspace.update_document(&root, format!("@#define flag=true\n{body}"));
         let model = workspace.get_effective_model(&root).unwrap();
-        assert!(model
-            .macro_type_errors
-            .iter()
-            .any(|(_, code, message)| *code == "E285" && message == "You cannot index a boolean"));
+        assert!(
+            model.macro_type_errors.iter().any(
+                |(_, code, message)| *code == "E285" && message == "You cannot index a boolean"
+            )
+        );
         let temporary = std::env::temp_dir().canonicalize().unwrap();
         let resolved = folder.canonicalize().unwrap();
         assert!(resolved.starts_with(&temporary) && resolved != temporary);
@@ -3735,11 +3738,13 @@ mod include_load_budget_tests {
             let mut interrupted = workspace.snapshot_with_root_settings(&key);
             let flag = Arc::new(AtomicBool::new(false));
             if mode == "inherited before" {
-                assert!(crate::engine::control::run(Some(Arc::clone(&flag)), || {
-                    flag.store(true, Ordering::Relaxed);
-                    assert!(interrupted.get_model(&key).is_none());
-                })
-                .is_err());
+                assert!(
+                    crate::engine::control::run(Some(Arc::clone(&flag)), || {
+                        flag.store(true, Ordering::Relaxed);
+                        assert!(interrupted.get_model(&key).is_none());
+                    })
+                    .is_err()
+                );
             } else {
                 interrupted.cancellation = Some(Arc::clone(&flag));
                 if mode == "during parse" {

@@ -8,7 +8,7 @@
 //! shape is `E322`'s (probed 7.1 prints the missing-name Error there, not the
 //! Jacobian sentence).
 
-use dygnosis::{analyze, check_file, parse, Diagnostic};
+use dygnosis::{Diagnostic, analyze, check_file, parse};
 
 fn fixture(rel: &str) -> String {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

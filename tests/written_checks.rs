@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use dygnosis::preprocessor::find_preprocessor;
-use dygnosis::{analyze, check_file, parse, run_preprocessor, JsonStage};
+use dygnosis::{JsonStage, analyze, check_file, parse, run_preprocessor};
 
 struct Pair {
     code: &'static str,
@@ -84,7 +84,10 @@ fn complete_no_model_roots_keep_check_before_transform_and_writing_information()
         if has_exogenous {
             assert_eq!(errors.len(), 1, "{diagnostics:?}");
             assert_eq!(errors[0].code, "E021");
-            assert_eq!(errors[0].message, "eps_z not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior.");
+            assert_eq!(
+                errors[0].message,
+                "eps_z not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior."
+            );
             assert_eq!(
                 &source[errors[0].span.start as usize..errors[0].span.end as usize],
                 "eps_z"
@@ -297,7 +300,9 @@ fn rewrite_and_local_boundaries_remain_quiet() {
     let lead = own("var y; model; y=y(-1); y=y(-2); end;");
     assert!(lead.iter().all(|diag| diag.code != "E188"), "{lead:?}");
 
-    let local = own("var y; varexo e; model; # a = y+e; y=EXPECTATION(0)(a); end; stoch_simul(partial_information) y;");
+    let local = own(
+        "var y; varexo e; model; # a = y+e; y=EXPECTATION(0)(a); end; stoch_simul(partial_information) y;",
+    );
     assert!(local.iter().all(|diag| diag.code != "E190"), "{local:?}");
 }
 
@@ -496,8 +501,10 @@ fn constant_zero_precedes_unused_name_and_count() {
             JsonStage::Transform,
         );
         assert!(!result.success);
-        assert!(format!("{}{}", result.raw_stdout, result.raw_stderr)
-            .contains("Division by zero when substituting constants in equation 2"));
+        assert!(
+            format!("{}{}", result.raw_stdout, result.raw_stderr)
+                .contains("Division by zero when substituting constants in equation 2")
+        );
     }
 }
 
@@ -652,15 +659,19 @@ fn heterogeneous_count_waits_for_direct_unused_aggregate_name() {
             JsonStage::Transform,
         );
         assert!(!transform.success);
-        assert!(format!("{}{}", transform.raw_stdout, transform.raw_stderr)
-            .contains("z not used in the model block"));
+        assert!(
+            format!("{}{}", transform.raw_stdout, transform.raw_stderr)
+                .contains("z not used in the model block")
+        );
     }
 }
 
 #[test]
 fn expectation_arguments_changed_by_other_equations_stay_outside_e190() {
     for (definition, accepted) in [("0+0", true), ("y-y", true), ("0*y", true), ("y^0", false)] {
-        let text = format!("var y z; model; z={definition}; y=EXPECTATION(0)(y+z); end; stoch_simul(partial_information) y;");
+        let text = format!(
+            "var y z; model; z={definition}; y=EXPECTATION(0)(y+z); end; stoch_simul(partial_information) y;"
+        );
         let ours = own(&text);
         assert!(
             ours.iter().all(|d| d.code != "E190"),

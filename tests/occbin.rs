@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use dygnosis::explain::known_codes;
-use dygnosis::lexer::{tokenize, TokenKind};
+use dygnosis::lexer::{TokenKind, tokenize};
 use dygnosis::{
     analyze, check_e010, check_file, check_parse, count_gap, equations, has_structural_error, parse,
 };

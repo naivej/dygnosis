@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use dygnosis::{dynare_diagnose, dynare_model_info, Workspace};
+use dygnosis::{Workspace, dynare_diagnose, dynare_model_info};
 
 const ROOT: &str = "C:/dygnosis-active-includes/root.mod";
 const MODEL: &str = "var y; model; y=0; end;\n";
@@ -195,16 +195,20 @@ fn executed_invalid_directory_is_a_revision_input_until_it_is_created() {
     let mut workspace = Workspace::new();
     workspace.update_document(&root, &source);
     let before = workspace.input_revision(&root).unwrap();
-    assert!(dygnosis::check_file(&source, &root)
-        .iter()
-        .any(|d| d.code == "E304"));
+    assert!(
+        dygnosis::check_file(&source, &root)
+            .iter()
+            .any(|d| d.code == "E304")
+    );
     assert!(!workspace.expand_report(&root).unwrap().navigation_complete);
     std::fs::create_dir(directory.0.join("created")).unwrap();
     let after = workspace.input_revision(&root).unwrap();
     assert_ne!(after, before);
-    assert!(!dygnosis::check_file(&source, &root)
-        .iter()
-        .any(|d| d.code == "E304"));
+    assert!(
+        !dygnosis::check_file(&source, &root)
+            .iter()
+            .any(|d| d.code == "E304")
+    );
     assert!(workspace.expand_report(&root).unwrap().navigation_complete);
 }
 
@@ -217,14 +221,28 @@ fn loop_bindings_remain_after_execution_and_empty_loops_preserve_prior_values() 
         "@#for k in [1]\n@#define k=0\n@#endfor\n",
         "@#define k=0\n@#for k in []\n@#define k=1\n@#endfor\n",
     ] {
-        let source = format!("{prefix}@#if k\n@#include \"absent.inc\"\n@#endif\nvar y; model; y=@{{k}}; end;\n");
+        let source = format!(
+            "{prefix}@#if k\n@#include \"absent.inc\"\n@#endif\nvar y; model; y=@{{k}}; end;\n"
+        );
         let files = supplied(&source);
         let diagnostics = dynare_diagnose(&source, Some(ROOT), Some(&files));
-        assert!(!diagnostics.iter().any(|d| d.severity == "ERROR"), "{source}: {diagnostics:?}");
+        assert!(
+            !diagnostics.iter().any(|d| d.severity == "ERROR"),
+            "{source}: {diagnostics:?}"
+        );
         let preview = dygnosis::mcp::dynare_expand(&source, Some(ROOT), Some(&files));
         assert_eq!(preview["complete"], true, "{preview}");
-        assert!(preview["effective_text"].as_str().unwrap().contains("y = 0"), "{preview}");
-        assert_eq!(dynare_model_info(&source, Some(ROOT), Some(&files))["n_equations"], 1);
+        assert!(
+            preview["effective_text"]
+                .as_str()
+                .unwrap()
+                .contains("y = 0"),
+            "{preview}"
+        );
+        assert_eq!(
+            dynare_model_info(&source, Some(ROOT), Some(&files))["n_equations"],
+            1
+        );
         let directory = Scratch::new();
         write_files(&directory.0, &source);
         assert_pinned(&directory.0, &source, None);
@@ -236,9 +254,11 @@ fn loop_bindings_remain_after_execution_and_empty_loops_preserve_prior_values() 
     ] {
         let source = format!("{prefix}@#if k\n@#include \"absent.inc\"\n@#endif\n{MODEL}");
         let files = supplied(&source);
-        assert!(dynare_diagnose(&source, Some(ROOT), Some(&files))
-            .iter()
-            .any(|d| d.code == "E061"));
+        assert!(
+            dynare_diagnose(&source, Some(ROOT), Some(&files))
+                .iter()
+                .any(|d| d.code == "E061")
+        );
         let directory = Scratch::new();
         write_files(&directory.0, &source);
         assert_pinned(&directory.0, &source, Some("Could not open absent.inc"));
@@ -248,16 +268,43 @@ fn loop_bindings_remain_after_execution_and_empty_loops_preserve_prior_values() 
 #[test]
 fn e063_uses_executed_evaluator_errors_in_every_macro_context() {
     let cases = [
-        ("var y; model; y=@{missing}; end;\n", Some("Unknown variable missing")),
-        ("var y; model; y=@{missing_function(0)}; end;\n", Some("Unknown function missing_function")),
-        ("@#define f(x)=x+missing\nvar y; model; y=@{f(0)}; end;\n", Some("Unknown variable missing")),
-        ("@#define v=missing\nvar y; model; y=0; end;\n", Some("Unknown variable missing")),
-        ("var y; model;\n@#for k in [0]\ny=@{missing};\n@#endfor\nend;\n", Some("Unknown variable missing")),
-        ("@#for k in []\n@#define seen=k\n@#endfor\nvar y; model; y=@{k}; end;\n", Some("Unknown variable k")),
-        ("@#include \"macro_unknown.inc\"\n", Some("Unknown variable missing")),
-        ("@#if 0\n@#define v=missing\n@#include \"macro_unknown.inc\"\nvar z; model; z=@{missing_function(0)}; end;\n@#endif\nvar y; model; y=0; end;\n", None),
+        (
+            "var y; model; y=@{missing}; end;\n",
+            Some("Unknown variable missing"),
+        ),
+        (
+            "var y; model; y=@{missing_function(0)}; end;\n",
+            Some("Unknown function missing_function"),
+        ),
+        (
+            "@#define f(x)=x+missing\nvar y; model; y=@{f(0)}; end;\n",
+            Some("Unknown variable missing"),
+        ),
+        (
+            "@#define v=missing\nvar y; model; y=0; end;\n",
+            Some("Unknown variable missing"),
+        ),
+        (
+            "var y; model;\n@#for k in [0]\ny=@{missing};\n@#endfor\nend;\n",
+            Some("Unknown variable missing"),
+        ),
+        (
+            "@#for k in []\n@#define seen=k\n@#endfor\nvar y; model; y=@{k}; end;\n",
+            Some("Unknown variable k"),
+        ),
+        (
+            "@#include \"macro_unknown.inc\"\n",
+            Some("Unknown variable missing"),
+        ),
+        (
+            "@#if 0\n@#define v=missing\n@#include \"macro_unknown.inc\"\nvar z; model; z=@{missing_function(0)}; end;\n@#endif\nvar y; model; y=0; end;\n",
+            None,
+        ),
         ("@#define f(x)=x+missing\nvar y; model; y=0; end;\n", None),
-        ("@#include \"functions.inc\"\nvar y; model; y=@{f(0)}; end;\n", None),
+        (
+            "@#include \"functions.inc\"\nvar y; model; y=@{f(0)}; end;\n",
+            None,
+        ),
     ];
     for (source, message) in cases {
         let mut files = supplied(source);
@@ -439,11 +486,13 @@ fn executed_definitions_follow_nested_branch_and_loop_order() {
             dynare_model_info(&source, Some(ROOT), Some(&files))["n_equations"],
             equations
         );
-        assert!(workspace
-            .include_records(ROOT)
-            .unwrap()
-            .unresolved
-            .is_empty());
+        assert!(
+            workspace
+                .include_records(ROOT)
+                .unwrap()
+                .unresolved
+                .is_empty()
+        );
     }
 }
 
@@ -492,20 +541,33 @@ fn only_executed_search_paths_choose_files_and_uncertain_paths_stay_incomplete()
         let source = format!("{prefix}@#includepath \"visible\"\n@#include \"chosen.inc\"\n");
         let files = files_for(&source);
         let diagnostics = dynare_diagnose(&source, Some(&root), Some(&files));
-        assert!(!diagnostics.iter().any(|d| d.severity == "ERROR"), "{diagnostics:?}");
-        assert_eq!(dynare_model_info(&source, Some(&root), Some(&files))["n_equations"], 1);
+        assert!(
+            !diagnostics.iter().any(|d| d.severity == "ERROR"),
+            "{diagnostics:?}"
+        );
+        assert_eq!(
+            dynare_model_info(&source, Some(&root), Some(&files))["n_equations"],
+            1
+        );
         let binary = PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
         if binary.is_file() {
-            let official = dygnosis::run_preprocessor(&source, &binary, Some(&directory.0),
-                Duration::from_secs(30), dygnosis::JsonStage::Check);
+            let official = dygnosis::run_preprocessor(
+                &source,
+                &binary,
+                Some(&directory.0),
+                Duration::from_secs(30),
+                dygnosis::JsonStage::Check,
+            );
             assert!(official.success, "{source}: {official:?}");
         }
     }
     let source = "@#if length([1])\n@#includepath \"visible\"\n@#endif\n@#include \"chosen.inc\"\n";
     let files = files_for(source);
-    assert!(!dynare_diagnose(source, Some(&root), Some(&files))
-        .iter()
-        .any(|d| d.code == "E061"));
+    assert!(
+        !dynare_diagnose(source, Some(&root), Some(&files))
+            .iter()
+            .any(|d| d.code == "E061")
+    );
     let info = dynare_model_info(source, Some(&root), Some(&files));
     assert_eq!(info["n_equations"], 1, "{info}");
     assert!(info.get("status").is_none(), "{info}");
@@ -594,11 +656,13 @@ fn dormant_disk_files_are_not_loaded_or_registered_as_dependencies() {
         workspace.get_source(&child).is_none(),
         "dormant file was read"
     );
-    assert!(workspace
-        .include_records(&root)
-        .unwrap()
-        .resolved
-        .is_empty());
+    assert!(
+        workspace
+            .include_records(&root)
+            .unwrap()
+            .resolved
+            .is_empty()
+    );
     assert!(workspace.owner_roots(&child).is_empty());
     let revision = workspace.input_revision(&root).unwrap();
     std::fs::write(

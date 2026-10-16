@@ -2,16 +2,16 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use dygnosis::JsonStage;
 use dygnosis::diagnostic::analyze;
 use dygnosis::expand::expand_report;
-use dygnosis::lexer::{tokenize, Token, TokenKind};
+use dygnosis::lexer::{Token, TokenKind, tokenize};
 use dygnosis::macro_expand::expand_macros;
 use dygnosis::parse;
 use dygnosis::span::{LineIndex, Position};
-use dygnosis::JsonStage;
-use serde_json::{json, Value};
-use tower_lsp::lsp_types::*;
+use serde_json::{Value, json};
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 fn kinds(src: &str) -> Vec<TokenKind> {
     tokenize(src).into_iter().map(|t| t.kind).collect()
@@ -201,9 +201,11 @@ fn interpolation_respects_operator_and_identifier_boundaries() {
         "{}",
         report.effective_text
     );
-    assert!(!analyze(&parse(&expression))
-        .iter()
-        .any(|diag| diag.code == "E020"));
+    assert!(
+        !analyze(&parse(&expression))
+            .iter()
+            .any(|diag| diag.code == "E020")
+    );
 
     let right = action_fixture("expression_right_boundary");
     let right_report = expand_report(&right);
@@ -213,23 +215,29 @@ fn interpolation_respects_operator_and_identifier_boundaries() {
         "{}",
         right_report.effective_text
     );
-    assert!(!analyze(&parse(&right))
-        .iter()
-        .any(|diag| diag.code == "E020"));
+    assert!(
+        !analyze(&parse(&right))
+            .iter()
+            .any(|diag| diag.code == "E020")
+    );
 
     let names = action_fixture("identifier_whitespace");
     let model = parse(&names);
     assert_eq!(model.endogenous.len(), 4, "{:?}", model.endogenous);
     for name in ["x", "y", "z"] {
-        assert!(model
+        assert!(
+            model
+                .endogenous
+                .iter()
+                .any(|decl| model.name(decl.name) == name)
+        );
+    }
+    assert!(
+        !model
             .endogenous
             .iter()
-            .any(|decl| model.name(decl.name) == name));
-    }
-    assert!(!model
-        .endogenous
-        .iter()
-        .any(|decl| matches!(model.name(decl.name), "xy" | "xz")));
+            .any(|decl| matches!(model.name(decl.name), "xy" | "xz"))
+    );
     assert!(!analyze(&model).iter().any(|diag| diag.code == "E020"));
 }
 
@@ -244,9 +252,11 @@ fn context_sensitive_replacement_keeps_comments_as_trivia() {
         "{}",
         report.effective_text
     );
-    assert!(!analyze(&parse(source))
-        .iter()
-        .any(|diag| diag.code == "I211"));
+    assert!(
+        !analyze(&parse(source))
+            .iter()
+            .any(|diag| diag.code == "I211")
+    );
 }
 
 #[test]
@@ -422,9 +432,11 @@ fn incomplete_macro_with_load_file_withholds_untrusted_workspace_facts() {
             .any(|(code, message)| code == "W204" && message.contains("Unknown symbol ghost")),
         "{ghost_codes:?}"
     );
-    assert!(mapped(complete, Some("ghost 0.5\n"))
-        .iter()
-        .any(|item| item.code == "W204"));
+    assert!(
+        mapped(complete, Some("ghost 0.5\n"))
+            .iter()
+            .any(|item| item.code == "W204")
+    );
 
     let missing = complete.replace("values.txt", "missing_values.txt");
     let (_missing_errors, missing_codes) = disk_codes(&missing);
@@ -434,9 +446,11 @@ fn incomplete_macro_with_load_file_withholds_untrusted_workspace_facts() {
         }),
         "{missing_codes:?}"
     );
-    assert!(mapped(&missing, None)
-        .iter()
-        .any(|item| item.code == "E306"));
+    assert!(
+        mapped(&missing, None)
+            .iter()
+            .any(|item| item.code == "E306")
+    );
     std::fs::remove_dir_all(dir).expect("remove temporary workspace");
 }
 
@@ -507,9 +521,11 @@ fn recognized_unevaluated_builtins_and_casts_do_not_claim_unknown_function() {
     ] {
         let report = expand_report(&src);
         assert!(report.complete, "{}", report.effective_text);
-        assert!(!analyze(&parse(&src))
-            .iter()
-            .any(|diag| diag.code == "I211" || diag.code == "E063"));
+        assert!(
+            !analyze(&parse(&src))
+                .iter()
+                .any(|diag| diag.code == "I211" || diag.code == "E063")
+        );
     }
 }
 
@@ -519,9 +535,11 @@ fn valid_array_and_string_operators_stay_incomplete_without_type_errors() {
         let source = format!("@#define x={expression}\nvar y; model; y=1; end;");
         let report = expand_report(&source);
         assert!(report.complete, "{expression}: {}", report.effective_text);
-        assert!(!analyze(&parse(&source))
-            .iter()
-            .any(|diag| diag.code == "I211" || diag.code == "E285"));
+        assert!(
+            !analyze(&parse(&source))
+                .iter()
+                .any(|diag| diag.code == "I211" || diag.code == "E285")
+        );
     }
 }
 
@@ -660,9 +678,11 @@ a=0;
 @#endif
 ";
     let tokens = expanded(src);
-    assert!(!tokens
-        .iter()
-        .any(|t| matches!(t.kind, TokenKind::MacroDir | TokenKind::MacroInterp)));
+    assert!(
+        !tokens
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::MacroDir | TokenKind::MacroInterp))
+    );
     assert_eq!(
         tokens.iter().map(|t| t.kind).collect::<Vec<_>>(),
         [
@@ -685,9 +705,11 @@ fn for_unrolls_expectation_lags_one_through_sixteen() {
 @#endfor
 ";
     let tokens = expanded(src);
-    assert!(!tokens
-        .iter()
-        .any(|t| matches!(t.kind, TokenKind::MacroDir | TokenKind::MacroInterp)));
+    assert!(
+        !tokens
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::MacroDir | TokenKind::MacroInterp))
+    );
     let expectation_count = tokens
         .iter()
         .filter(|t| t.kind == TokenKind::Ident && t.text(src).eq_ignore_ascii_case("EXPECTATION"))
@@ -716,19 +738,23 @@ fn identifier_at_end_of_file_keeps_the_eof_token() {
         tokens.iter().map(|tok| tok.kind).collect::<Vec<_>>()
     );
     let model = parse(src);
-    assert!(model
-        .endogenous
-        .iter()
-        .any(|decl| model.name(decl.name) == "y"));
+    assert!(
+        model
+            .endogenous
+            .iter()
+            .any(|decl| model.name(decl.name) == "y")
+    );
 
     let glued = "\
 @#define i = 1
 var x@{i}";
     let model = parse(glued);
-    assert!(model
-        .endogenous
-        .iter()
-        .any(|decl| model.name(decl.name) == "x1"));
+    assert!(
+        model
+            .endogenous
+            .iter()
+            .any(|decl| model.name(decl.name) == "x1")
+    );
 }
 
 #[test]
@@ -765,9 +791,11 @@ fn empty_and_plain_source_are_identity() {
 
     let plain = "var y;\nmodel;\ny = 0;\nend;\n";
     assert_eq!(kinds(plain), expanded_kinds(plain));
-    assert!(!expanded(plain)
-        .iter()
-        .any(|t| matches!(t.kind, TokenKind::MacroDir | TokenKind::MacroInterp)));
+    assert!(
+        !expanded(plain)
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::MacroDir | TokenKind::MacroInterp))
+    );
 }
 
 #[test]
@@ -1104,12 +1132,36 @@ fn quoted_consumer_reach_audit_keeps_shipped_fire_and_quiet_cases() {
         eprintln!("quoted reach FIRE {label}: {code} at {stage:?}");
     }
     let quiets = [
-        ("tags/long_name/partition", "var y(long_name='Unknown label',sector='missing'); model; [name='eq1',mcp='y > 0',label='missing'] y=y(-1); end;", JsonStage::Transform),
-        ("quoted eqtags", "var y; varexo e; model; [name='Y'] y=y(-1)+e; end; var_model(model_name=v,eqtags=['Y']);", JsonStage::Transform),
-        ("surgery selector", "var y z; model; [name='Y'] y=y(-1); [name='Z'] z=z(-1); end; model_remove('Y');", JsonStage::Transform),
-        ("filename option", "var y; varexo e; model; y=y(-1)+e; end; varobs y; estimation(datafile='d.csv');", JsonStage::Check),
-        ("shock label", "var y; varexo e; model; y=y(-1)+e; end; shock_groups; 'missing' = e; end;", JsonStage::Write),
-        ("OccBin names", "var y; model; [name='Y',bind='ELB'] y=0; [name='Y',relax='ELB'] y=y(-1); end; occbin_constraints; name 'ELB'; bind y<0; relax y>0; end;", JsonStage::Check),
+        (
+            "tags/long_name/partition",
+            "var y(long_name='Unknown label',sector='missing'); model; [name='eq1',mcp='y > 0',label='missing'] y=y(-1); end;",
+            JsonStage::Transform,
+        ),
+        (
+            "quoted eqtags",
+            "var y; varexo e; model; [name='Y'] y=y(-1)+e; end; var_model(model_name=v,eqtags=['Y']);",
+            JsonStage::Transform,
+        ),
+        (
+            "surgery selector",
+            "var y z; model; [name='Y'] y=y(-1); [name='Z'] z=z(-1); end; model_remove('Y');",
+            JsonStage::Transform,
+        ),
+        (
+            "filename option",
+            "var y; varexo e; model; y=y(-1)+e; end; varobs y; estimation(datafile='d.csv');",
+            JsonStage::Check,
+        ),
+        (
+            "shock label",
+            "var y; varexo e; model; y=y(-1)+e; end; shock_groups; 'missing' = e; end;",
+            JsonStage::Write,
+        ),
+        (
+            "OccBin names",
+            "var y; model; [name='Y',bind='ELB'] y=0; [name='Y',relax='ELB'] y=y(-1); end; occbin_constraints; name 'ELB'; bind y<0; relax y>0; end;",
+            JsonStage::Check,
+        ),
     ];
     for (label, source, stage) in quiets {
         let quoted = quoted_copy(source);
@@ -1202,9 +1254,11 @@ fn quoted_substitution_keeps_delimiters_empty_values_and_literal_generated_macro
     assert!(report.effective_text.contains("disp(\"v2\")"));
     assert!(!analyze(&model).iter().any(|row| row.code == "E063"));
     let source = "@#define n=2\nvar y(long_name='@{empty}'); model; [name='eq@{n}'] y=1; end;";
-    assert!(analyze(&parse(source))
-        .iter()
-        .any(|row| row.code == "E063" && row.message == "Unknown variable empty"));
+    assert!(
+        analyze(&parse(source))
+            .iter()
+            .any(|row| row.code == "E063" && row.message == "Unknown variable empty")
+    );
 }
 
 #[test]
@@ -1252,9 +1306,11 @@ fn quoted_failures_keep_proven_macro_errors_and_unsafe_valid_values_incomplete()
     ] {
         let report = expand_report(source);
         assert!(report.complete, "{source}: {}", report.effective_text);
-        assert!(!analyze(&parse(source))
-            .iter()
-            .any(|row| row.code == "I211" || row.code.starts_with('E')));
+        assert!(
+            !analyze(&parse(source))
+                .iter()
+                .any(|row| row.code == "I211" || row.code.starts_with('E'))
+        );
         assert!(
             dygnosis::dynare_equations(source, None, None, None, None)
                 .get("status")
@@ -1275,9 +1331,11 @@ fn quoted_failures_keep_proven_macro_errors_and_unsafe_valid_values_incomplete()
     );
     let inactive = "@#if 0\nvar z(long_name='@{missing}');\n@#endif\nvar y; model; y=1; end;";
     assert!(expand_report(inactive).complete);
-    assert!(!analyze(&parse(inactive))
-        .iter()
-        .any(|row| row.code == "E063"));
+    assert!(
+        !analyze(&parse(inactive))
+            .iter()
+            .any(|row| row.code == "E063")
+    );
 
     let unsafe_valid =
         "@#define v=\"left',sector='right\"\nvar y(long_name='@{v}'); model; y=1; end;";
@@ -1293,9 +1351,11 @@ fn quoted_failures_keep_proven_macro_errors_and_unsafe_valid_values_incomplete()
     }
     let unsafe_then_unknown =
         "@#define v=\"left',sector='right\"\nvar y(long_name='@{v}@{missing}'); model; y=1; end;";
-    assert!(analyze(&parse(unsafe_then_unknown))
-        .iter()
-        .any(|row| row.code == "E063"));
+    assert!(
+        analyze(&parse(unsafe_then_unknown))
+            .iter()
+            .any(|row| row.code == "E063")
+    );
 }
 
 fn lsp_slice<'a>(text: &'a str, range: &Value) -> &'a str {
@@ -1352,10 +1412,12 @@ async fn quoted_include_copies_keep_readable_ranges_frames_and_written_source_ow
         .unwrap()
         .unwrap();
     assert_eq!(readable["complete"], true, "{readable}");
-    assert!(readable["effective_text"]
-        .as_str()
-        .unwrap()
-        .contains("\n    [name = 'eq2', label = '😀2'] y2 = 1 ;"));
+    assert!(
+        readable["effective_text"]
+            .as_str()
+            .unwrap()
+            .contains("\n    [name = 'eq2', label = '😀2'] y2 = 1 ;")
+    );
     let rows = readable["navigation"].as_array().unwrap();
     assert_eq!(rows.len(), 2);
     for (number, row) in rows.iter().enumerate() {
@@ -1406,9 +1468,11 @@ async fn quoted_include_copies_keep_readable_ranges_frames_and_written_source_ow
         (include.to_string(), broken_body),
     ]);
     let diagnostics = dygnosis::dynare_diagnose(source, Some(root.as_str()), Some(&files));
-    assert!(diagnostics
-        .iter()
-        .any(|row| row.code == "E063" && row.file.as_deref() == Some(include.as_str())));
+    assert!(
+        diagnostics
+            .iter()
+            .any(|row| row.code == "E063" && row.file.as_deref() == Some(include.as_str()))
+    );
 }
 
 fn membership_branch(condition: &str) -> String {
@@ -1497,9 +1561,11 @@ fn macro_membership_in_define_interpolation_function_and_for_collection() {
     assert!(report.complete, "{}", report.effective_text);
     assert!(report.effective_text.contains("y1 = 1"));
     assert!(report.effective_text.contains("y2 = 1"));
-    assert!(!analyze(&parse(plain_for))
-        .iter()
-        .any(|row| matches!(row.code.as_str(), "I211" | "E062" | "E285")));
+    assert!(
+        !analyze(&parse(plain_for))
+            .iter()
+            .any(|row| matches!(row.code.as_str(), "I211" | "E062" | "E285"))
+    );
 }
 
 #[test]
@@ -1909,9 +1975,11 @@ fn incomplete_reasons_dedupe_loops_keep_independent_failures_and_skip_dormant() 
 
     let dormant = "@#if 0\ny=@{missing};\n@#endif\nvar y; model; y=0; end;\n";
     assert!(!parse(dormant).macro_incomplete());
-    assert!(!analyze(&parse(dormant))
-        .iter()
-        .any(|d| matches!(d.code.as_str(), "E063" | "I211")));
+    assert!(
+        !analyze(&parse(dormant))
+            .iter()
+            .any(|d| matches!(d.code.as_str(), "E063" | "I211"))
+    );
 
     let dir = (0..1024)
         .map(|n| {
@@ -1970,9 +2038,11 @@ fn incomplete_reason_records_match_diagnostics_for_hover() {
     assert_eq!(reasons.len(), 1);
     assert_eq!(reasons[0].1, "I211");
     assert_eq!(reasons[0].2, diags[0].message);
-    assert!(!reasons
-        .iter()
-        .any(|(_, code, _)| *code == "E062" || *code == "E064"));
+    assert!(
+        !reasons
+            .iter()
+            .any(|(_, code, _)| *code == "E062" || *code == "E064")
+    );
 
     let undef = "var y; model; y=@{missing}; end;\n";
     let model = parse(undef);
@@ -2027,9 +2097,11 @@ fn macro_membership_accepts_punctuation_boundaries_and_refuses_missing_operands(
                 .any(|diagnostic| diagnostic.code == "E062" && diagnostic.message == message),
             "{condition}: {diagnostics:?}"
         );
-        assert!(!diagnostics
-            .iter()
-            .any(|diagnostic| matches!(diagnostic.code.as_str(), "I211" | "E063")));
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|diagnostic| matches!(diagnostic.code.as_str(), "I211" | "E063"))
+        );
     }
 }
 
@@ -2058,9 +2130,11 @@ fn incomplete_reason_records_prefer_e062_and_e064_over_i211() {
     assert_eq!(reasons.len(), 1, "{reasons:?}");
     assert_eq!(reasons[0].1, "E062");
     assert_eq!(reasons[0].2, diags[0].message);
-    assert!(!reasons
-        .iter()
-        .any(|(_, code, _)| *code == "I211" || *code == "E063"));
+    assert!(
+        !reasons
+            .iter()
+            .any(|(_, code, _)| *code == "I211" || *code == "E063")
+    );
 
     let with_error = "@#define n = length([1])\n@#error \"boom\"\nvar y; model; y=@{n}; end;\n";
     let model = parse(with_error);

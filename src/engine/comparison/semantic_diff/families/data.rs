@@ -218,7 +218,12 @@ pub(super) fn collect(
             FieldState::present(options(model, &row.data_options)),
             ChangeFacet::Options,
         );
-        gap(&mut value, "estimation_other_options_context", "Named fields describe retained options and variable lists. Other accepted estimation settings retain statement context.", "parser_command_option_retention");
+        gap(
+            &mut value,
+            "estimation_other_options_context",
+            "Named fields describe retained options and variable lists. Other accepted estimation settings retain statement context.",
+            "parser_command_option_retention",
+        );
         value.claims.extend(
             row.data_options
                 .iter()
@@ -263,7 +268,12 @@ pub(super) fn collect(
             FieldState::boolean(row.calibrated.is_some()),
             ChangeFacet::Options,
         );
-        gap(&mut value, "dsge_var_calibration_value_context", "The record retains bare versus calibrated form, but not the calibrated value. Accepted statement context owns that value.", "parser_estimation_dsge_var_retention");
+        gap(
+            &mut value,
+            "dsge_var_calibration_value_context",
+            "The record retains bare versus calibrated form, but not the calibrated value. Accepted statement context owns that value.",
+            "parser_estimation_dsge_var_retention",
+        );
         facts.push(value);
     }
     let mut value = CapturedFact::new(
@@ -288,7 +298,12 @@ pub(super) fn collect(
         ),
         ChangeFacet::Options,
     );
-    gap(&mut value, "load_params_history_first_only", "Only the first nonempty load filename is retained. All accepted load occurrences remain in statement context; loaded data is not captured.", "parser_load_params_retention");
+    gap(
+        &mut value,
+        "load_params_history_first_only",
+        "Only the first nonempty load filename is retained. All accepted load occurrences remain in statement context; loaded data is not captured.",
+        "parser_load_params_retention",
+    );
     facts.push(value);
     command_fields(model, facts);
 }
@@ -353,7 +368,12 @@ fn command_fields(model: &Model, facts: &mut Vec<CapturedFact>) {
             FieldState::present(names(model, list.iter().map(|row| row.name))),
             ChangeFacet::Target,
         );
-        gap(&mut value, "command_list_empty_occurrences_not_retained", "These retained written list records include repeats and identify their per-command grouping. Empty lists have no named-list record and remain accepted statement context. No effective duplicate-removed list is inferred.", "parser_command_list_retention");
+        gap(
+            &mut value,
+            "command_list_empty_occurrences_not_retained",
+            "These retained written list records include repeats and identify their per-command grouping. Empty lists have no named-list record and remain accepted statement context. No effective duplicate-removed list is inferred.",
+            "parser_command_list_retention",
+        );
         if let Some(parent) = parent_id(&value).and_then(|id| model.statements.get(id)) {
             let start = list[0].parse_order;
             let end = list.last().unwrap().parse_order + 1;

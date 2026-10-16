@@ -8,7 +8,7 @@
 //! character for character (see `honesty.rs` for the run against the installed
 //! preprocessor). The walk's own table is locked here, shape by shape.
 
-use dygnosis::{analyze, parse, Diagnostic};
+use dygnosis::{Diagnostic, analyze, parse};
 
 fn fixture(rel: &str) -> String {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -992,12 +992,7 @@ fn the_syntax_s061_held_is_their_sentence() {
             "syntax error, unexpected IDENTIFIER",
             "y",
         ),
-        (
-            "fmom_bad_mm",
-            "E001",
-            "syntax error, unexpected EQUAL",
-            "=",
-        ),
+        ("fmom_bad_mm", "E001", "syntax error, unexpected EQUAL", "="),
         (
             "fmom_bad_mirf",
             "E001",

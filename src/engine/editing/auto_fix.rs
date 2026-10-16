@@ -1,10 +1,10 @@
 //! Apply stored `Diagnostic.fix` edits. Family modules stay pure.
 
 use crate::engine::diagnostics::check_parse::check_parse;
-use crate::engine::diagnostics::{analyze, Diagnostic, TextEdit};
-use crate::engine::language::lexer::{tokenize, TokenKind};
+use crate::engine::diagnostics::{Diagnostic, TextEdit, analyze};
+use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::macro_work::MacroWorkLimit;
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::{Arc, atomic::AtomicBool};
 
 const PASS2_CODES: &[&str] = &["E020", "E030", "W013", "W054", "W055", "W056", "W057"];
 
@@ -99,7 +99,9 @@ fn auto_fix_worker(
     cancelled: Option<&Arc<AtomicBool>>,
 ) -> Result<String, AutoFixFailure> {
     if refuse_macro_rewrite(text) {
-        return Err(AutoFixFailure::Refused("Automatic fixes were withheld because macro definitions or loops with identifier interpolation can change the written edit targets."));
+        return Err(AutoFixFailure::Refused(
+            "Automatic fixes were withheld because macro definitions or loops with identifier interpolation can change the written edit targets.",
+        ));
     }
     let parsed = |text: &str| {
         crate::engine::language::parser::parse_with_budget(

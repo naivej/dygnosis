@@ -2,7 +2,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 struct Wire {
     child: Child,
@@ -124,10 +124,12 @@ fn current_contract_rejects_retired_tools_and_arguments_over_stdio() {
     ] {
         let reply = current.call(retired, json!({}));
         assert_eq!(reply["error"]["code"], -32602);
-        assert!(reply["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("tools/list"));
+        assert!(
+            reply["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("tools/list")
+        );
     }
 }
 
@@ -147,15 +149,19 @@ fn direct_agent_reference_inspection_and_edit_workflows_run_over_stdio() {
         "dynare_syntax",
         json!({"name":"irf","parent":"stoch_simul","kind":"option"}),
     );
-    assert!(!options["data"]["forms"][0]["signatures"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !options["data"]["forms"][0]["signatures"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     let explanation = wire.data("dynare_diagnostic_info", json!({"code":"W010"}));
-    assert!(explanation["data"]["diagnostics"][0]["explanation"]
-        .as_str()
-        .unwrap()
-        .contains("W010"));
+    assert!(
+        explanation["data"]["diagnostics"][0]["explanation"]
+            .as_str()
+            .unwrap()
+            .contains("W010")
+    );
     let binding = wire.data(
         "dynare_symbol_info",
         json!({"source":source(),"symbol":{"kind":"name","name":"a"}}),
@@ -195,11 +201,13 @@ fn direct_agent_reference_inspection_and_edit_workflows_run_over_stdio() {
 fn old_protocol_editions_still_receive_canonical_contract_json() {
     let mut wire = Wire::new("2024-11-05");
     let listed = wire.request("tools/list", json!({}));
-    assert!(listed["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|tool| tool.get("outputSchema").is_none()));
+    assert!(
+        listed["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool.get("outputSchema").is_none())
+    );
     let result = wire.result("dynare_diagnostic_info", json!({"code":"W010"}));
     assert!(result.get("structuredContent").is_none());
     assert_eq!(result["content"].as_array().unwrap().len(), 1);
@@ -265,9 +273,11 @@ fn copied_subsamples_keep_namespaces_and_complete_rename_over_stdio() {
         .iter()
         .find(|row| row["namespace"] == "subsamples(b)")
         .unwrap();
-    assert!(candidates
-        .iter()
-        .any(|row| row["namespace"] == "subsamples(a)"));
+    assert!(
+        candidates
+            .iter()
+            .any(|row| row["namespace"] == "subsamples(a)")
+    );
     let selector = json!({"kind":"binding","binding_id":copied["binding_id"]});
     let revision = &ambiguous["inputs"][0]["revision"];
     let selected = wire.data(
@@ -415,10 +425,12 @@ fn ordinary_symbol_with_explicit_database_field_refuses_rename_over_stdio() {
         refused["outcome"]["reasons"][0]["code"],
         "EXTERNAL_DATABASE_MEMBER"
     );
-    assert!(refused["outcome"]["reasons"][0]["message"]
-        .as_str()
-        .unwrap()
-        .contains("column"));
+    assert!(
+        refused["outcome"]["reasons"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("column")
+    );
     assert!(refused["proposal"].is_null());
 }
 
@@ -428,13 +440,30 @@ fn ordinary_symbol_with_explicit_database_field_refuses_rename_over_stdio() {
 fn refused_semantic_callbacks_withhold_named_bindings_and_full_coverage_over_stdio() {
     let mut wire = Wire::new("2025-06-18");
     let base = "var y;parameters p;p=.9;model;[name='Y']y=0;end;";
-    for command in ["var_model(model_name=ghost);", "trend_component_model(model_name=ghost,eqtags=['Y']);", "var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1,time_shift=1);", "pac_model(model_name=ghost,discount=y);"] {
+    for command in [
+        "var_model(model_name=ghost);",
+        "trend_component_model(model_name=ghost,eqtags=['Y']);",
+        "var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1,time_shift=1);",
+        "pac_model(model_name=ghost,discount=y);",
+    ] {
         let text = format!("{base}{command}");
-        let result = wire.data("dynare_symbol_info", json!({"source":{"kind":"text","text":text},"symbol":{"kind":"name","name":"ghost"}}));
+        let result = wire.data(
+            "dynare_symbol_info",
+            json!({"source":{"kind":"text","text":text},"symbol":{"kind":"name","name":"ghost"}}),
+        );
         assert!(result["data"]["binding"].is_null(), "{command}: {result}");
-        assert_eq!(result["coverage"][0]["complete"], false, "{command}: {result}");
+        assert_eq!(
+            result["coverage"][0]["complete"], false,
+            "{command}: {result}"
+        );
         let reasons = result["coverage"][0]["reasons"].as_array().unwrap();
-        assert!(reasons.iter().any(|row| row["code"] == "PARSE_REFUSED" && row["message"].as_str().is_some_and(|message| !message.is_empty())), "{command}: {result}");
+        assert!(
+            reasons.iter().any(|row| row["code"] == "PARSE_REFUSED"
+                && row["message"]
+                    .as_str()
+                    .is_some_and(|message| !message.is_empty())),
+            "{command}: {result}"
+        );
     }
     for command in [
         "var_model(model_name=ghost,eqtags=['Y']);",

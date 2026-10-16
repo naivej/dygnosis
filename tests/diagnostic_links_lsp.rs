@@ -2,9 +2,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use dygnosis::server::{new_service, Backend};
-use tower_lsp::lsp_types::*;
+use dygnosis::server::{Backend, new_service};
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 struct Scratch(PathBuf);
 impl Scratch {
@@ -139,9 +139,11 @@ async fn related_locations_use_independent_utf16_sources_and_keep_root_merge_set
     assert!(related
         .iter()
         .any(|row| row.location.uri == left && row.location.range.start == Position::new(0, 13)));
-    assert!(related
-        .iter()
-        .any(|row| row.location.uri == right && row.location.range.start == Position::new(0, 12)));
+    assert!(
+        related.iter().any(
+            |row| row.location.uri == right && row.location.range.start == Position::new(0, 12)
+        )
+    );
 }
 
 #[tokio::test]
@@ -158,12 +160,17 @@ async fn recursive_depth_stop_keeps_its_written_site_and_caller_chain() {
     let row = rows.iter().find(|row| is_code(row, "I211")).unwrap();
     assert!(row.message.contains("execution depth"));
     let sites = row.related_information.as_ref().unwrap();
-    assert!(sites
-        .iter()
-        .any(|site| site.location.uri == root && site.location.range.start == Position::new(0, 0)));
-    assert!(sites
-        .iter()
-        .any(|site| site.location.uri == c && site.location.range.start == Position::new(1, 0)));
+    assert!(
+        sites
+            .iter()
+            .any(|site| site.location.uri == root
+                && site.location.range.start == Position::new(0, 0))
+    );
+    assert!(
+        sites
+            .iter()
+            .any(|site| site.location.uri == c && site.location.range.start == Position::new(1, 0))
+    );
     assert!(sites.iter().any(|site| site.location.uri == b));
 }
 
@@ -188,9 +195,11 @@ async fn unopened_include_fix_uses_checked_source_and_rejects_disk_changes() {
     assert_eq!(edits(fix)[0].text_document.uri, child);
     assert_eq!(edits(fix)[0].text_document.version, None);
     fs::write(child.to_file_path().unwrap(), "var other;\n").unwrap();
-    assert!(actions(server, &child, note.range, vec![note])
-        .await
-        .is_empty());
+    assert!(
+        actions(server, &child, note.range, vec![note])
+            .await
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -237,9 +246,11 @@ async fn shared_include_fix_retains_each_root_context_without_duplicate_edits() 
             .as_str()
             .unwrap()
             .to_string();
-        assert!(owned[0].data.as_ref().unwrap()["input_revision"]
-            .as_str()
-            .is_some());
+        assert!(
+            owned[0].data.as_ref().unwrap()["input_revision"]
+                .as_str()
+                .is_some()
+        );
         assert!(!roots.contains(&root), "equal edits must not merge roots");
         roots.push(root);
         assert_eq!(edits(action).len(), 1);
@@ -281,9 +292,11 @@ async fn naming_from_unopened_include_preserves_roots_versions_and_stale_context
         .find(|row| is_code(row, "I208"))
         .unwrap();
     let named = actions(server, &child, current.range, vec![current.clone()]).await;
-    assert!(edits(&named[0])
-        .iter()
-        .any(|edit| edit.text_document.uri == child && edit.text_document.version == Some(9)));
+    assert!(
+        edits(&named[0])
+            .iter()
+            .any(|edit| edit.text_document.uri == child && edit.text_document.version == Some(9))
+    );
     open(
         server,
         &root,
@@ -291,9 +304,11 @@ async fn naming_from_unopened_include_preserves_roots_versions_and_stale_context
         8,
     )
     .await;
-    assert!(actions(server, &child, note.range, vec![note])
-        .await
-        .is_empty());
+    assert!(
+        actions(server, &child, note.range, vec![note])
+            .await
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -310,12 +325,13 @@ async fn unnecessary_tags_are_only_on_unused_warnings_and_macro_context_is_addit
             Some(vec![DiagnosticTag::UNNECESSARY])
         );
     }
-    assert!(rows
-        .iter()
-        .find(|row| is_code(row, "E021"))
-        .unwrap()
-        .tags
-        .is_none());
+    assert!(
+        rows.iter()
+            .find(|row| is_code(row, "E021"))
+            .unwrap()
+            .tags
+            .is_none()
+    );
     let text = "@#for k in 1:2\nvar y;\n@#endfor\nmodel; y=0; end;";
     open(server, &uri, text, 2).await;
     let rows = pull(server, &uri).await;

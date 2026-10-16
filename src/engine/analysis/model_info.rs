@@ -3,17 +3,17 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::engine::analysis::equations::count_gap;
-use crate::engine::analysis::equations::{identifier_class, IdentClass};
+use crate::engine::analysis::equations::{IdentClass, identifier_class};
 use crate::engine::analysis::model_locals::ModelLocals;
 use crate::engine::language::intern::Name;
 use crate::engine::language::model::Model;
 use crate::engine::language::span::Span;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::engine::analysis::timing::classify_aggregate_variable_timing;
 use crate::engine::analysis::timing::TimingAnalysis;
+use crate::engine::analysis::timing::classify_aggregate_variable_timing;
 pub use crate::engine::analysis::timing::{
-    classify_variable_timing, structure_summary, StructureSummary, TimingClass, TimingInfo,
+    StructureSummary, TimingClass, TimingInfo, classify_variable_timing, structure_summary,
 };
 
 /// Hover shows the timing class and the declared convention when applicable.

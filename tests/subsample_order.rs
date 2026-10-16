@@ -1,8 +1,10 @@
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage};
+use dygnosis::{JsonStage, analyze, find_preprocessor, parse, run_preprocessor};
 use std::time::Duration;
 
 fn source(operation: &str, definition: &str) -> String {
-    format!("var y; parameters z a;\n@#for i in 1:2\n@#if i == 2\n{operation}\n@#endif\n@#if i == 1\n{definition}\n@#endif\n@#endfor\nmodel; y=z+a; end;")
+    format!(
+        "var y; parameters z a;\n@#for i in 1:2\n@#if i == 2\n{operation}\n@#endif\n@#if i == 1\n{definition}\n@#endif\n@#endfor\nmodel; y=z+a; end;"
+    )
 }
 
 #[test]

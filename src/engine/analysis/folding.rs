@@ -1,6 +1,6 @@
 //! File-local folding boundaries without executing macros or reading includes.
 
-use crate::engine::language::lexer::{tokenize, TokenKind};
+use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::language::macro_expand::scan_macro_tokens;
 use crate::engine::language::model::{MacroDirective, Model, StatementKind};
 use crate::engine::language::parser::parse_expanded;

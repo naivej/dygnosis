@@ -1,8 +1,8 @@
 //! Typed names must reach real editor requests through accepted source sites.
 
-use dygnosis::server::{new_service, Backend};
-use tower_lsp::lsp_types::*;
+use dygnosis::server::{Backend, new_service};
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 fn uri(name: &str) -> Url {
     Url::from_file_path(
@@ -277,9 +277,11 @@ async fn accepted_typed_names_have_exact_hover_and_negotiated_roles() {
                 .all(|(range, _, _)| range.start.line != native),
             "{tokens:?}"
         );
-        assert!(help(server, position(&document, SOURCE, "h db vm", 0))
-            .await
-            .is_none());
+        assert!(
+            help(server, position(&document, SOURCE, "h db vm", 0))
+                .await
+                .is_none()
+        );
     }
 }
 
@@ -417,14 +419,18 @@ async fn typed_sites_in_includes_keep_written_utf16_ranges_and_omit_generated_na
     let expected = position(&child, body, "dimension h", 10).position;
     assert_eq!(hover.range.unwrap().start, expected);
     let child_tokens = tokens(server, &child, &legend).await;
-    assert!(child_tokens
-        .iter()
-        .any(|(range, kind, _)| range.start == expected && kind == "namespace"));
+    assert!(
+        child_tokens
+            .iter()
+            .any(|(range, kind, _)| range.start == expected && kind == "namespace")
+    );
     let template = position(&root, source, "pm@{i}", 0).position;
-    assert!(tokens(server, &root, &legend)
-        .await
-        .iter()
-        .all(|(range, _, _)| range.start != template));
+    assert!(
+        tokens(server, &root, &legend)
+            .await
+            .iter()
+            .all(|(range, _, _)| range.start != template)
+    );
 }
 
 #[tokio::test]
@@ -447,10 +453,12 @@ async fn quoted_external_declarations_are_exact_inner_name_sites() {
             Position::new(pos.position.line, pos.position.character + 3)
         )
     );
-    assert!(tokens(server, &document, &legend)
-        .await
-        .iter()
-        .any(|(site, kind, decl)| *site == range && kind == "function" && *decl));
+    assert!(
+        tokens(server, &document, &legend)
+            .await
+            .iter()
+            .any(|(site, kind, decl)| *site == range && kind == "function" && *decl)
+    );
 }
 
 #[tokio::test]

@@ -2,8 +2,8 @@
 //! borrowing a delimiter from another file, branch, string, or native line.
 
 use dygnosis::server::new_service;
-use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 fn uri(name: &str) -> Url {
     Url::parse(&format!("file:///C:/dygnosis-folding/{name}")).unwrap()

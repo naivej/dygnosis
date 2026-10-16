@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage};
+use dygnosis::{JsonStage, analyze, find_preprocessor, parse, run_preprocessor};
 
 /// Each pair changes only the type of z, before or after the checked statement.
 /// Check-stage honesty is optional, like the rest of the installed-7.2 suite.
@@ -203,7 +203,10 @@ fn names_retyped_away_from_required_roles_are_refused() {
             "z is not a parameter",
         ),
     ] {
-        let source = format!("var y; varexo e; {declaration} z; change_type({target}) z; {statement} model; y=z+e; {} end;", if target == "var" { "z=.5*z(-1);" } else { "" });
+        let source = format!(
+            "var y; varexo e; {declaration} z; change_type({target}) z; {statement} model; y=z+e; {} end;",
+            if target == "var" { "z=.5*z(-1);" } else { "" }
+        );
         let diagnostics = analyze(&parse(&source));
         assert!(
             diagnostics.iter().any(|row| row.code == code),
@@ -229,7 +232,10 @@ fn names_retyped_away_from_required_roles_are_refused() {
 #[test]
 fn skewness_uses_final_exogenous_types() {
     for (declaration, target, expected) in [("var", "varexo", false), ("varexo", "var", true)] {
-        let source = format!("var y; {declaration} z; change_type({target}) z; model; y=z; {} end; estimated_params; skew z,0; end;", if target == "var" { "z=0;" } else { "" });
+        let source = format!(
+            "var y; {declaration} z; change_type({target}) z; model; y=z; {} end; estimated_params; skew z,0; end;",
+            if target == "var" { "z=0;" } else { "" }
+        );
         let diagnostics = analyze(&parse(&source));
         assert_eq!(
             diagnostics.iter().any(|row| row.code == "E249"),
@@ -280,7 +286,12 @@ fn markov_parameter_option_uses_the_type_when_read() {
         ("parameters", "var", false, false),
     ] {
         let change = format!("change_type({target}) z;");
-        let source = format!("var y; {declaration} z; {} markov_switching(chain=1,number_of_regimes=2,duration=3,parameters=[z]); {} model; y=z; {} end;", if before { &change } else { "" }, if before { "" } else { &change }, if target == "var" { "z=0;" } else { "" });
+        let source = format!(
+            "var y; {declaration} z; {} markov_switching(chain=1,number_of_regimes=2,duration=3,parameters=[z]); {} model; y=z; {} end;",
+            if before { &change } else { "" },
+            if before { "" } else { &change },
+            if target == "var" { "z=0;" } else { "" }
+        );
         let diagnostics = analyze(&parse(&source));
         assert_eq!(
             diagnostics.iter().any(|row| row.code == "E349"),
@@ -412,7 +423,10 @@ fn heterogeneous_parameters_made_ordinary_can_be_used_in_aggregate_equations() {
         ("parameters", "parameters"),
         ("parameters", "var"),
     ] {
-        let source = format!("heterogeneity_dimension h; var y; {declaration}(heterogeneity=h) z; change_type({target}) z; model; y=z; {} end;", if target=="var" { "z=0;" } else { "" });
+        let source = format!(
+            "heterogeneity_dimension h; var y; {declaration}(heterogeneity=h) z; change_type({target}) z; model; y=z; {} end;",
+            if target == "var" { "z=0;" } else { "" }
+        );
         let diagnostics = analyze(&parse(&source));
         assert!(
             !diagnostics
@@ -457,7 +471,7 @@ fn undeclared_name_hints_do_not_call_a_retyped_parameter_exogenous() {
 
 #[test]
 fn sum_role_is_not_changed_by_a_later_removal() {
-    let source="heterogeneity_dimension h; var y; var(heterogeneity=h) x; model; y=SUM(x); end; model(heterogeneity=h); x=0; end; var_remove x;";
+    let source = "heterogeneity_dimension h; var y; var(heterogeneity=h) x; model; y=SUM(x); end; model(heterogeneity=h); x=0; end; var_remove x;";
     let diagnostics = analyze(&parse(source));
     assert!(
         !diagnostics.iter().any(|row| row.code == "E478"),
@@ -477,7 +491,7 @@ fn sum_role_is_not_changed_by_a_later_removal() {
 
 #[test]
 fn generated_policy_parameters_are_parameters_in_shock_values() {
-    let source="var y; varexo e; model; y=e; end; planner_objective y^2; ramsey_model; estimated_params; optimal_policy_discount_factor,.9; end; shocks; var e; stderr optimal_policy_discount_factor; end;";
+    let source = "var y; varexo e; model; y=e; end; planner_objective y^2; ramsey_model; estimated_params; optimal_policy_discount_factor,.9; end; shocks; var e; stderr optimal_policy_discount_factor; end;";
     let diagnostics = analyze(&parse(source));
     let refusal = diagnostics
         .iter()

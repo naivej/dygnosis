@@ -194,27 +194,66 @@ fn e023_requires_an_ordinary_endogenous_at_the_command() {
     // Guard against accepting heterogeneous names, later declarations, and
     // later type changes, or rejecting a name already changed to ordinary var.
     for (source, needle) in [
-        ("heterogeneity_dimension hh; var(heterogeneity=hh) a; predetermined_variables a; model(heterogeneity=hh); a=a(-1); end;", Some("a is not endogenous.")),
-        ("predetermined_variables a; var a; model; a=0; end;", Some("Unknown symbol: a")),
-        ("parameters a; predetermined_variables a; change_type(var) a; model; a=0; end;", Some("a is not endogenous.")),
-        ("var a; predetermined_variables a; change_type(parameters) a; predetermined_variables a;", Some("a is not endogenous.")),
+        (
+            "heterogeneity_dimension hh; var(heterogeneity=hh) a; predetermined_variables a; model(heterogeneity=hh); a=a(-1); end;",
+            Some("a is not endogenous."),
+        ),
+        (
+            "predetermined_variables a; var a; model; a=0; end;",
+            Some("Unknown symbol: a"),
+        ),
+        (
+            "parameters a; predetermined_variables a; change_type(var) a; model; a=0; end;",
+            Some("a is not endogenous."),
+        ),
+        (
+            "var a; predetermined_variables a; change_type(parameters) a; predetermined_variables a;",
+            Some("a is not endogenous."),
+        ),
         ("var a; predetermined_variables a; model; a=0; end;", None),
-        ("parameters a; change_type(var) a; predetermined_variables a; model; a=0; end;", None),
-        ("heterogeneity_dimension hh; var(heterogeneity=hh) a; change_type(var) a; predetermined_variables a; model; a=0; end;", None),
-        ("trend_var(growth_factor=1) a; change_type(var) a; predetermined_variables a; model; a=0; end;", None),
+        (
+            "parameters a; change_type(var) a; predetermined_variables a; model; a=0; end;",
+            None,
+        ),
+        (
+            "heterogeneity_dimension hh; var(heterogeneity=hh) a; change_type(var) a; predetermined_variables a; model; a=0; end;",
+            None,
+        ),
+        (
+            "trend_var(growth_factor=1) a; change_type(var) a; predetermined_variables a; model; a=0; end;",
+            None,
+        ),
     ] {
-        let rows: Vec<_> = rust_e020(source).into_iter().filter(|d| d.code == "E023").collect();
+        let rows: Vec<_> = rust_e020(source)
+            .into_iter()
+            .filter(|d| d.code == "E023")
+            .collect();
         if needle.is_some() {
             assert_eq!(rows.len(), 1, "{source}: {rows:?}");
             let target = source.rfind("predetermined_variables a;").unwrap()
                 + "predetermined_variables ".len();
-            assert_eq!((rows[0].start_line, rows[0].start_char, rows[0].end_line, rows[0].end_char), (0, target as u32, 0, target as u32 + 1), "{source}");
+            assert_eq!(
+                (
+                    rows[0].start_line,
+                    rows[0].start_char,
+                    rows[0].end_line,
+                    rows[0].end_char
+                ),
+                (0, target as u32, 0, target as u32 + 1),
+                "{source}"
+            );
         } else {
             assert!(rows.is_empty(), "{source}: {rows:?}");
         }
         let binary = std::path::Path::new("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
         if binary.is_file() {
-            let result = dygnosis::run_preprocessor(source, binary, None, std::time::Duration::from_secs(30), dygnosis::JsonStage::Check);
+            let result = dygnosis::run_preprocessor(
+                source,
+                binary,
+                None,
+                std::time::Duration::from_secs(30),
+                dygnosis::JsonStage::Check,
+            );
             let report = format!("{} {}", result.raw_stdout, result.raw_stderr);
             assert_eq!(result.success, needle.is_none(), "{source}\n{report}");
             if let Some(needle) = needle {

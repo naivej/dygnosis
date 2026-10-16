@@ -6,7 +6,7 @@
 //! function name an `external_function` statement carries, so the derivative
 //! values collide with a declaration or a repeat like the `name=` value does.
 
-use dygnosis::{analyze, check_file, parse, Diagnostic};
+use dygnosis::{Diagnostic, analyze, check_file, parse};
 
 fn fixture(rel: &str) -> String {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -26,9 +26,11 @@ fn assert_messages(prefix: &str, children: &[(&str, &str)], expected: &[&str]) {
         .map(|message| message["message"].as_str().unwrap())
         .collect();
     assert_eq!(messages, expected, "{expanded:?}");
-    assert!(!dynare_diagnose(&root, Some(ROOT), Some(&files))
-        .iter()
-        .any(|diag| diag.code.starts_with('E') || diag.code == "I211"));
+    assert!(
+        !dynare_diagnose(&root, Some(ROOT), Some(&files))
+            .iter()
+            .any(|diag| diag.code.starts_with('E') || diag.code == "I211")
+    );
 }
 
 #[test]
@@ -55,26 +57,51 @@ fn repeated_child_calls_resolve_their_own_nested_target() {
 
 #[test]
 fn nested_loops_expand_every_include_in_written_order() {
-    assert_messages("@#for i in [1,2]\n@#for j in [1,2]\n@#include (string)i+(string)j+\".inc\"\n@#endfor\n@#endfor\n",
-        &[("11.inc", "@#echo \"11\"\n"), ("12.inc", "@#echo \"12\"\n"), ("21.inc", "@#echo \"21\"\n"), ("22.inc", "@#echo \"22\"\n")], &["11", "12", "21", "22"]);
+    assert_messages(
+        "@#for i in [1,2]\n@#for j in [1,2]\n@#include (string)i+(string)j+\".inc\"\n@#endfor\n@#endfor\n",
+        &[
+            ("11.inc", "@#echo \"11\"\n"),
+            ("12.inc", "@#echo \"12\"\n"),
+            ("21.inc", "@#echo \"21\"\n"),
+            ("22.inc", "@#echo \"22\"\n"),
+        ],
+        &["11", "12", "21", "22"],
+    );
 }
 
 #[test]
 fn an_inner_index_does_not_replace_the_outer_iteration_binding() {
-    assert_messages("@#for i in [1,2]\n@#echo i\n@#for i in [3,4]\n@#include (string)i+\".inc\"\n@#endfor\n@#echo i\n@#endfor\n",
-        &[("3.inc", "@#echo \"three\"\n"), ("4.inc", "@#echo \"four\"\n")], &["1", "three", "four", "4", "2", "three", "four", "4"]);
+    assert_messages(
+        "@#for i in [1,2]\n@#echo i\n@#for i in [3,4]\n@#include (string)i+\".inc\"\n@#endfor\n@#echo i\n@#endfor\n",
+        &[
+            ("3.inc", "@#echo \"three\"\n"),
+            ("4.inc", "@#echo \"four\"\n"),
+        ],
+        &["1", "three", "four", "4", "2", "three", "four", "4"],
+    );
 }
 
 #[test]
 fn partially_executed_sites_keep_the_first_iteration_first() {
-    assert_messages("@#for i in [1,2,3]\n@#if i>=2\n@#include \"a\"+(string)i+\".inc\"\n@#endif\n@#if i<=2\n@#include \"b\"+(string)i+\".inc\"\n@#endif\n@#endfor\n",
-        &[("a2.inc", "@#echo \"a2\"\n"), ("a3.inc", "@#echo \"a3\"\n"), ("b1.inc", "@#echo \"b1\"\n"), ("b2.inc", "@#echo \"b2\"\n")], &["b1", "a2", "b2", "a3"]);
+    assert_messages(
+        "@#for i in [1,2,3]\n@#if i>=2\n@#include \"a\"+(string)i+\".inc\"\n@#endif\n@#if i<=2\n@#include \"b\"+(string)i+\".inc\"\n@#endif\n@#endfor\n",
+        &[
+            ("a2.inc", "@#echo \"a2\"\n"),
+            ("a3.inc", "@#echo \"a3\"\n"),
+            ("b1.inc", "@#echo \"b1\"\n"),
+            ("b2.inc", "@#echo \"b2\"\n"),
+        ],
+        &["b1", "a2", "b2", "a3"],
+    );
 }
 
 #[test]
 fn empty_tuple_indices_do_not_create_an_internal_name() {
-    assert_messages("@#define n=0\n@#for () in [(),()]\n@#define n=n+1\n@#include (string)n+\".inc\"\n@#echo defined(_i)\n@#endfor\n",
-        &[("1.inc", "@#echo \"one\"\n"), ("2.inc", "@#echo \"two\"\n")], &["one", "false", "two", "false"]);
+    assert_messages(
+        "@#define n=0\n@#for () in [(),()]\n@#define n=n+1\n@#include (string)n+\".inc\"\n@#echo defined(_i)\n@#endfor\n",
+        &[("1.inc", "@#echo \"one\"\n"), ("2.inc", "@#echo \"two\"\n")],
+        &["one", "false", "two", "false"],
+    );
 }
 
 struct Composition {
@@ -111,7 +138,12 @@ const COMPOSITIONS: &[Composition] = &[
     },
     Composition {
         prefix: "@#for i in [1,2]\n@#for j in [1,2,3]\n@#echo (i,j)\n@#if j<=2\n@#include (string)i+(string)j+\".inc\"\n@#endif\n@#endfor\n@#endfor\n",
-        children: &[("11.inc", ""), ("12.inc", ""), ("21.inc", ""), ("22.inc", "")],
+        children: &[
+            ("11.inc", ""),
+            ("12.inc", ""),
+            ("21.inc", ""),
+            ("22.inc", ""),
+        ],
         messages: &["(1, 1)", "(1, 2)", "(1, 3)", "(2, 1)", "(2, 2)", "(2, 3)"],
     },
     Composition {
@@ -146,7 +178,13 @@ const COMPOSITIONS: &[Composition] = &[
     },
     Composition {
         prefix: "@#define k=0\n@#include \"middle.inc\"\n@#echo k\n",
-        children: &[("middle.inc", "@#include (string)((real)[k+1 for k in [k+1]])+\".inc\"\n@#echo k\n"), ("2.inc", "@#echo k\n")],
+        children: &[
+            (
+                "middle.inc",
+                "@#include (string)((real)[k+1 for k in [k+1]])+\".inc\"\n@#echo k\n",
+            ),
+            ("2.inc", "@#echo k\n"),
+        ],
         messages: &["1", "1", "1"],
     },
     Composition {

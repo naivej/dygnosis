@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use dygnosis::server::new_service;
 use dygnosis::span::LineIndex;
-use dygnosis::{auto_fix, check_parse, dynare_auto_fix, parse, ExprId, ExprKind, Model};
+use dygnosis::{ExprId, ExprKind, Model, auto_fix, check_parse, dynare_auto_fix, parse};
 use serde_json::json;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService};
@@ -245,31 +245,35 @@ async fn selected_i050_does_not_receive_equation_tags() {
         code_of(&discovered[0].diagnostics.as_ref().unwrap()[0]),
         "I208"
     );
-    assert!(tags(
-        actions(
-            &service,
-            &uri,
-            unnamed.range,
-            vec![stripped(&unnamed)],
-            None
+    assert!(
+        tags(
+            actions(
+                &service,
+                &uri,
+                unnamed.range,
+                vec![stripped(&unnamed)],
+                None
+            )
+            .await
         )
-        .await
-    )
-    .is_empty());
+        .is_empty()
+    );
     assert!(
         tags(actions(&service, &uri, unnamed.range, vec![stale(&unnamed)], None).await).is_empty()
     );
-    assert!(tags(
-        actions(
-            &service,
-            &uri,
-            unnamed.range,
-            vec![unnamed.clone()],
-            Some(vec![CodeActionKind::REFACTOR]),
+    assert!(
+        tags(
+            actions(
+                &service,
+                &uri,
+                unnamed.range,
+                vec![unnamed.clone()],
+                Some(vec![CodeActionKind::REFACTOR]),
+            )
+            .await
         )
-        .await
-    )
-    .is_empty());
+        .is_empty()
+    );
     assert_eq!(
         tags(
             actions(
@@ -382,17 +386,19 @@ async fn two_roots_do_not_share_one_tag_action() {
     assert_eq!(notes.len(), 2, "{published:?}");
     let steady = published.iter().find(|diag| code_of(diag) == "I050");
     if let Some(steady) = steady {
-        assert!(tags(
-            actions(
-                &service,
-                &child_uri,
-                steady.range,
-                vec![steady.clone()],
-                None
+        assert!(
+            tags(
+                actions(
+                    &service,
+                    &child_uri,
+                    steady.range,
+                    vec![steady.clone()],
+                    None
+                )
+                .await
             )
-            .await
-        )
-        .is_empty());
+            .is_empty()
+        );
     }
     for note in &notes {
         let owned = tags(actions(&service, &child_uri, note.range, vec![note.clone()], None).await);
@@ -405,15 +411,19 @@ async fn two_roots_do_not_share_one_tag_action() {
         } else {
             &a_uri
         };
-        assert!(action_edits(&owned[0])
-            .iter()
-            .all(|(uri, _, _)| uri != other));
+        assert!(
+            action_edits(&owned[0])
+                .iter()
+                .all(|(uri, _, _)| uri != other)
+        );
     }
     let discovered = tags(actions(&service, &child_uri, notes[0].range, vec![], None).await);
     assert_eq!(discovered.len(), 2);
-    assert!(discovered
-        .iter()
-        .all(|action| action.diagnostics.as_ref().unwrap().len() == 1));
+    assert!(
+        discovered
+            .iter()
+            .all(|action| action.diagnostics.as_ref().unwrap().len() == 1)
+    );
     let roots: Vec<_> = discovered
         .iter()
         .map(|action| root_of(&action.diagnostics.as_ref().unwrap()[0]))
@@ -456,17 +466,19 @@ async fn semicolon_fix_follows_its_owner_and_applies() {
     let mut other = error.clone();
     other.code = Some(NumberOrString::String("I209".into()));
     assert!(semicolons(actions(&service, &uri, error.range, vec![other], None).await).is_empty());
-    assert!(semicolons(
-        actions(
-            &service,
-            &uri,
-            error.range,
-            vec![error.clone()],
-            Some(vec![CodeActionKind::REFACTOR]),
+    assert!(
+        semicolons(
+            actions(
+                &service,
+                &uri,
+                error.range,
+                vec![error.clone()],
+                Some(vec![CodeActionKind::REFACTOR]),
+            )
+            .await
         )
-        .await
-    )
-    .is_empty());
+        .is_empty()
+    );
     let false_semi = "var y;\nmodel;\n[name='law']\n@#if 0\ny=0;\n@#else\ny=0;\n@#endif\nend;\n";
     assert_eq!(auto_fix(false_semi), false_semi);
     let false_uri = Url::parse("file:///tmp/fix-binding-false-semi.mod").unwrap();
@@ -508,9 +520,11 @@ async fn two_roots_do_not_merge_equal_semicolon_edits() {
         discovered.len() >= 2,
         "each root keeps its own edit: {discovered:?}"
     );
-    assert!(discovered
-        .iter()
-        .all(|action| action.diagnostics.as_ref().unwrap().len() == 1));
+    assert!(
+        discovered
+            .iter()
+            .all(|action| action.diagnostics.as_ref().unwrap().len() == 1)
+    );
     let roots: std::collections::BTreeSet<_> = discovered
         .iter()
         .map(|action| root_of(&action.diagnostics.as_ref().unwrap()[0]))
@@ -558,9 +572,11 @@ async fn refactor_template_carries_the_open_version_and_stays_separate() {
     let edits = action_edits(template);
     assert_eq!(edits.len(), 1);
     assert_eq!(edits[0].1, Some(1));
-    assert!(refactor
-        .iter()
-        .all(|action| action.kind.as_ref() == Some(&CodeActionKind::REFACTOR)));
+    assert!(
+        refactor
+            .iter()
+            .all(|action| action.kind.as_ref() == Some(&CodeActionKind::REFACTOR))
+    );
     let quick = actions(
         &service,
         &uri,
@@ -569,9 +585,11 @@ async fn refactor_template_carries_the_open_version_and_stays_separate() {
         Some(vec![CodeActionKind::QUICKFIX]),
     )
     .await;
-    assert!(quick
-        .iter()
-        .all(|action| action.title != "Insert stochastic shocks template"));
+    assert!(
+        quick
+            .iter()
+            .all(|action| action.title != "Insert stochastic shocks template")
+    );
 }
 
 #[tokio::test]
@@ -695,17 +713,19 @@ async fn same_range_e001_rows_keep_their_own_fixes() {
         "{}",
         open_merged.message
     );
-    assert!(semicolons(
-        actions(
-            &service,
-            &open_uri,
-            open_merged.range,
-            vec![open_merged.clone()],
-            None,
+    assert!(
+        semicolons(
+            actions(
+                &service,
+                &open_uri,
+                open_merged.range,
+                vec![open_merged.clone()],
+                None,
+            )
+            .await
         )
-        .await
-    )
-    .is_empty());
+        .is_empty()
+    );
     assert!(
         semicolons(actions(&service, &open_uri, open_merged.range, vec![], None).await).is_empty()
     );

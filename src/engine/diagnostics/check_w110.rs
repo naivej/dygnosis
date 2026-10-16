@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::engine::diagnostics::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::engine::language::intern::Name;
-use crate::engine::language::lexer::{tokenize, TokenKind};
+use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::language::model::{
     Decl, EstimatedParamKind, Model, PeriodPoint, ShockBlock, ShockBlockKind, ShockKind,
 };
@@ -537,11 +537,7 @@ fn sorted_names(model: &Model, names: &[Name]) -> Vec<Name> {
 }
 
 fn nonempty(span: Span) -> Span {
-    if span.is_empty() {
-        FALLBACK
-    } else {
-        span
-    }
+    if span.is_empty() { FALLBACK } else { span }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]

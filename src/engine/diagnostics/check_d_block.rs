@@ -456,12 +456,36 @@ pub(crate) fn model_expression_refusals(model: &Model) -> Vec<(Diagnostic, usize
         let name = model.name(usage.name);
         let kind = model.symbol_kind_in_context(usage.name, usage.context);
         let refusal = match kind {
-            Some("external_function") => Some(("E280", crate::engine::language::model::external_function_in_model_message(name))),
-            Some("mod_file_local") => Some(("E281", crate::engine::language::model::mod_file_local_in_model_message(name))),
-            Some("epilogue") if usage.command != "epilogue" => Some(("E294", format!("Symbol '{name}' cannot be used outside the epilogue block."))),
-            None if usage.command == "occbin_constraints" => Some(("E182", format!("Exogenous variable {name} cannot be used in 'occbin_constraints'."))),
-            None if matches!(usage.command, "model_replace" | "planner_objective" | "trend_var" | "log_trend_var" | "var")
-                && !model.constructor_refused_statements.contains(&usage.statement_id) => Some(("E020", format!("Undeclared identifier '{name}' in equation. Fix: add '{name}' to a var, varexo, or parameters declaration."))),
+            Some("external_function") => Some((
+                "E280",
+                crate::engine::language::model::external_function_in_model_message(name),
+            )),
+            Some("mod_file_local") => Some((
+                "E281",
+                crate::engine::language::model::mod_file_local_in_model_message(name),
+            )),
+            Some("epilogue") if usage.command != "epilogue" => Some((
+                "E294",
+                format!("Symbol '{name}' cannot be used outside the epilogue block."),
+            )),
+            None if usage.command == "occbin_constraints" => Some((
+                "E182",
+                format!("Exogenous variable {name} cannot be used in 'occbin_constraints'."),
+            )),
+            None if matches!(
+                usage.command,
+                "model_replace" | "planner_objective" | "trend_var" | "log_trend_var" | "var"
+            ) && !model
+                .constructor_refused_statements
+                .contains(&usage.statement_id) =>
+            {
+                Some((
+                    "E020",
+                    format!(
+                        "Undeclared identifier '{name}' in equation. Fix: add '{name}' to a var, varexo, or parameters declaration."
+                    ),
+                ))
+            }
             _ => None,
         };
         if let Some((code, message)) = refusal
@@ -496,16 +520,44 @@ pub(crate) fn outside_expression_role_refusal(
     }
     let spelling = model.name(name);
     let (code, message) = if model.heterogeneous_in_context(name, context) {
-        ("E463", format!("Symbol '{spelling}' cannot be used outside model declaration, because it is heterogeneous."))
+        (
+            "E463",
+            format!(
+                "Symbol '{spelling}' cannot be used outside model declaration, because it is heterogeneous."
+            ),
+        )
     } else {
         match model.symbol_kind_in_context(name, context)? {
-        "model_local_variable" => ("E282", format!("Variable {spelling} not allowed outside model declaration. Its scope is only inside model.")),
-        "external_function" => ("E279", format!("Symbol '{spelling}' is the name of a MATLAB/Octave function, and cannot be used as a variable.")),
-        "epilogue" => ("E294", format!("Symbol '{spelling}' cannot be used outside the epilogue block.")),
-        "trend_var" | "log_trend_var" => ("E310", format!("Variable {spelling} not allowed outside model declaration, because it is a trend variable.")),
-        "excluded" => ("E426", format!("Variable '{spelling}' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement")),
-        _ => return None,
-    }
+            "model_local_variable" => (
+                "E282",
+                format!(
+                    "Variable {spelling} not allowed outside model declaration. Its scope is only inside model."
+                ),
+            ),
+            "external_function" => (
+                "E279",
+                format!(
+                    "Symbol '{spelling}' is the name of a MATLAB/Octave function, and cannot be used as a variable."
+                ),
+            ),
+            "epilogue" => (
+                "E294",
+                format!("Symbol '{spelling}' cannot be used outside the epilogue block."),
+            ),
+            "trend_var" | "log_trend_var" => (
+                "E310",
+                format!(
+                    "Variable {spelling} not allowed outside model declaration, because it is a trend variable."
+                ),
+            ),
+            "excluded" => (
+                "E426",
+                format!(
+                    "Variable '{spelling}' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement"
+                ),
+            ),
+            _ => return None,
+        }
     };
     Some(err(span, code, message))
 }
@@ -541,7 +593,9 @@ mod parse_receipt_tests {
     #[test]
     fn ordinary_constructor_receipts_keep_identity_after_row_rollback() {
         // Guards a later refusal being joined to a discarded accepted-use row.
-        let model = crate::parse("parameters p;trend_var(growth_factor=1) A;var y;observation_trends;y(p) garbage;y(A);end;database after;");
+        let model = crate::parse(
+            "parameters p;trend_var(growth_factor=1) A;var y;observation_trends;y(p) garbage;y(A);end;database after;",
+        );
         let (diagnostic, order) = parse_refusals(&model)
             .into_iter()
             .find(|(row, _)| row.code == "E310")
@@ -559,9 +613,11 @@ mod parse_receipt_tests {
         let model =
             crate::parse("trend_var(growth_factor=1) A;var y;observation_trends;y(A) garbage;end;");
         assert!(model.outside_expression_uses.is_empty());
-        assert!(parse_refusals(&model)
-            .iter()
-            .any(|(row, _)| row.code == "E310"));
+        assert!(
+            parse_refusals(&model)
+                .iter()
+                .any(|(row, _)| row.code == "E310")
+        );
     }
 
     #[test]
@@ -593,13 +649,17 @@ mod parse_receipt_tests {
             "heterogeneity_dimension h;varexo(heterogeneity=h) e;varexobs e;",
         ] {
             let model = crate::parse(source);
-            assert!(parse_refusals(&model)
-                .iter()
-                .any(|(row, _)| row.code == "E260"));
+            assert!(
+                parse_refusals(&model)
+                    .iter()
+                    .any(|(row, _)| row.code == "E260")
+            );
         }
         let model = crate::parse("varexo e;varexobs e;");
         assert!(parse_refusals(&model).is_empty());
-        let model = crate::parse("@#for i in 1:2\n@#if i == 1\nparameters e;\n@#else\nchange_type(varexo)e;\n@#endif\nvarexobs e;\n@#endfor\n");
+        let model = crate::parse(
+            "@#for i in 1:2\n@#if i == 1\nparameters e;\n@#else\nchange_type(varexo)e;\n@#endif\nvarexobs e;\n@#endfor\n",
+        );
         let rows: Vec<_> = parse_refusals(&model)
             .into_iter()
             .filter(|(row, _)| row.code == "E260")

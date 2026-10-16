@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use dygnosis::include_resolver::{normalize_uri, resolve_include_path};
 use dygnosis::workspace::includepath_literal;
-use dygnosis::{analyze, find_workspace_root, parse, Workspace};
+use dygnosis::{Workspace, analyze, find_workspace_root, parse};
 
 fn copilot_mod(archive_dir: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -107,10 +107,12 @@ fn backslash_continued_include_is_recorded() {
     assert_eq!(model.includes.len(), 1);
     assert_eq!(model.includes[0].filename, "helper.inc");
     let single = parse("@#include \\\n\"helper.inc\"\nvar y;\n");
-    assert!(single
-        .includes
-        .iter()
-        .all(|include| include.filename != "helper.inc"));
+    assert!(
+        single
+            .includes
+            .iter()
+            .all(|include| include.filename != "helper.inc")
+    );
 }
 
 #[test]
@@ -230,9 +232,11 @@ fn workspace_swff_zero_cycles_one_resolved() {
     );
     let included = ws.resolve_all_includes(uri);
     assert_eq!(included.len(), 1);
-    assert!(included
-        .keys()
-        .any(|k| k.ends_with("swff_params.inc") || Path::new(k).ends_with("swff_params.inc")));
+    assert!(
+        included
+            .keys()
+            .any(|k| k.ends_with("swff_params.inc") || Path::new(k).ends_with("swff_params.inc"))
+    );
 }
 
 #[test]
@@ -287,10 +291,12 @@ fn recursive_includes_stop_at_a_resource_bound() {
     assert!(ws.find_unresolved_includes(uri).is_empty());
     let effective = ws.get_effective_model(uri).unwrap();
     assert!(effective.macro_incomplete());
-    assert!(effective
-        .incomplete_reasons
-        .iter()
-        .any(|reason| reason.message.contains("limit")));
+    assert!(
+        effective
+            .incomplete_reasons
+            .iter()
+            .any(|reason| reason.message.contains("limit"))
+    );
     assert!(effective.written_equations.is_empty());
 }
 
@@ -325,10 +331,12 @@ fn includepath_resolves_non_sibling() {
     ws.update_document(&main, text);
     let records = ws.include_records(&main).unwrap();
     assert!(records.unresolved.is_empty(), "{:?}", records.unresolved);
-    assert!(records
-        .resolved
-        .iter()
-        .any(|r| r.path.ends_with("swff_params.inc")));
+    assert!(
+        records
+            .resolved
+            .iter()
+            .any(|r| r.path.ends_with("swff_params.inc"))
+    );
     let effective = ws.get_effective_model(&main).unwrap();
     let got: Vec<_> = effective
         .param_assignments
@@ -400,10 +408,12 @@ fn search_paths_mutation_resolves() {
     ws.add_search_path(swff_mod.parent().unwrap().to_path_buf());
     let records = ws.include_records(&main).unwrap();
     assert!(records.unresolved.is_empty());
-    assert!(records
-        .resolved
-        .iter()
-        .any(|r| r.path.ends_with("swff_params.inc")));
+    assert!(
+        records
+            .resolved
+            .iter()
+            .any(|r| r.path.ends_with("swff_params.inc"))
+    );
     let effective = ws.get_effective_model(&main).unwrap();
     let got: Vec<_> = effective
         .param_assignments

@@ -1,6 +1,6 @@
 //! Semantic token/timing/reference facts preserve the existing pairing contract.
 
-use dygnosis::model_diff::{compare_models_with_budgets, ModelDiff};
+use dygnosis::model_diff::{ModelDiff, compare_models_with_budgets};
 use dygnosis::semantic_diff::equations::expression_detail;
 use dygnosis::semantic_diff::*;
 use dygnosis::{compare_models, parse};
@@ -59,13 +59,15 @@ fn tags_remain_separate_and_reorder_creates_no_equation_rows() {
     );
     let row = changed_equation(&diff);
     assert!(row.facets.contains(&ChangeFacet::Tags));
-    assert!(row.expressions[0]
-        .before
-        .as_ref()
-        .unwrap()
-        .runs
-        .iter()
-        .all(|run| run.role == TokenRole::Unchanged));
+    assert!(
+        row.expressions[0]
+            .before
+            .as_ref()
+            .unwrap()
+            .runs
+            .iter()
+            .all(|run| run.role == TokenRole::Unchanged)
+    );
     let diff = compare_models(
         &parse("var y x; model; [name='Y'] y=x; [name='X'] x=1; end;"),
         &parse("var y x; model; [name='X'] x=1; [name='Y'] y=x; end;"),
@@ -81,9 +83,11 @@ fn repeated_uses_pair_only_under_equal_structure_and_counts() {
     );
     let timing = &changed_equation(&diff).timing;
     assert_eq!(timing.len(), 3);
-    assert!(timing
-        .iter()
-        .all(|timing| timing.before.is_some() && timing.after.is_some()));
+    assert!(
+        timing
+            .iter()
+            .all(|timing| timing.before.is_some() && timing.after.is_some())
+    );
     assert_eq!(timing[1].before.as_ref().unwrap().written_offset, -1);
     assert_eq!(timing[1].after.as_ref().unwrap().written_offset, 0);
     assert_eq!(timing[2].before.as_ref().unwrap().written_offset, -2);
@@ -94,9 +98,11 @@ fn repeated_uses_pair_only_under_equal_structure_and_counts() {
     );
     let timing = &changed_equation(&diff).timing;
     assert_eq!(timing.len(), 7);
-    assert!(timing
-        .iter()
-        .all(|timing| timing.before.is_none() || timing.after.is_none()));
+    assert!(
+        timing
+            .iter()
+            .all(|timing| timing.before.is_none() || timing.after.is_none())
+    );
 }
 
 #[test]
@@ -122,20 +128,23 @@ fn convention_only_change_has_symbol_context_and_unchanged_equation_references()
     let after = "var y k; predetermined_variables k; model; [name='Production'] y=k; end;";
     let diff = compare_models(&parse(before), &parse(after));
     assert!(diff.changed_equations.is_empty());
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .all(|row| row.family != SemanticFamily::Equations));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .all(|row| row.family != SemanticFamily::Equations)
+    );
     let convention = diff
         .semantic
         .rows
         .iter()
         .find(|row| row.name == "k")
         .unwrap();
-    assert!(convention
-        .facets
-        .contains(&ChangeFacet::PredeterminedConvention));
+    assert!(
+        convention
+            .facets
+            .contains(&ChangeFacet::PredeterminedConvention)
+    );
     assert_eq!(convention.references.len(), 2);
     for reference in &diff.semantic.references {
         assert_eq!(reference.symbol, "k");
@@ -169,16 +178,24 @@ fn parameter_references_include_each_direct_use_in_unchanged_equations() {
     assert_eq!(row.references.len(), 4);
     assert_eq!(diff.semantic.references[0].occurrence, 1);
     assert_eq!(diff.semantic.references[1].occurrence, 2);
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .all(|row| row.family != SemanticFamily::Equations));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .all(|row| row.family != SemanticFamily::Equations)
+    );
 }
 
 #[test]
 fn unpaired_group_keeps_text_only_unique_fragment_and_no_timing_pairs() {
-    let diff = compare_models(&parse("var y x; parameters tax; model; [name='Repeated'] y=x; [name='Repeated'] x=y; end;"), &parse("var y x; parameters tax; model; [name='Repeated'] y=x+tax; [name='Repeated'] x=y+tax; end;"));
+    let diff = compare_models(
+        &parse(
+            "var y x; parameters tax; model; [name='Repeated'] y=x; [name='Repeated'] x=y; end;",
+        ),
+        &parse(
+            "var y x; parameters tax; model; [name='Repeated'] y=x+tax; [name='Repeated'] x=y+tax; end;",
+        ),
+    );
     assert!(diff.changed_equations.is_empty());
     let rows: Vec<_> = diff
         .semantic
@@ -226,12 +243,14 @@ fn unpaired_repetition_count_cannot_highlight_an_inserted_occurrence() {
                 ChangeKind::Added
             }
         );
-        assert!(expression
-            .before
-            .iter()
-            .chain(&expression.after)
-            .flat_map(|side| &side.runs)
-            .all(|run| run.role == TokenRole::Unchanged));
+        assert!(
+            expression
+                .before
+                .iter()
+                .chain(&expression.after)
+                .flat_map(|side| &side.runs)
+                .all(|run| run.role == TokenRole::Unchanged)
+        );
     }
 }
 
@@ -263,12 +282,14 @@ fn heterogeneous_scopes_keep_timing_and_reference_occurrences_separate() {
         .filter(|reference| reference.symbol == "p")
         .collect();
     assert_eq!(refs.len(), 4);
-    assert!(refs
-        .iter()
-        .any(|reference| reference.scope.dimension.as_deref() == Some("h")));
-    assert!(refs
-        .iter()
-        .any(|reference| reference.scope.dimension.is_none()));
+    assert!(
+        refs.iter()
+            .any(|reference| reference.scope.dimension.as_deref() == Some("h"))
+    );
+    assert!(
+        refs.iter()
+            .any(|reference| reference.scope.dimension.is_none())
+    );
 }
 
 #[test]
@@ -352,16 +373,18 @@ fn reference_limit_reports_exact_omissions_without_change_row_inflation() {
     );
     assert_eq!(diff.semantic.rows.len(), 1);
     assert_eq!(diff.semantic.references.len(), 2);
-    assert!(diff
-        .semantic
-        .references
-        .iter()
-        .all(|reference| reference.label == "Equation 1" && reference.equation_index == 0));
-    assert!(diff
-        .semantic
-        .limits
-        .iter()
-        .any(|limit| limit.code == "reference_limit" && limit.omitted == Some(4)));
+    assert!(
+        diff.semantic
+            .references
+            .iter()
+            .all(|reference| reference.label == "Equation 1" && reference.equation_index == 0)
+    );
+    assert!(
+        diff.semantic
+            .limits
+            .iter()
+            .any(|limit| limit.code == "reference_limit" && limit.omitted == Some(4))
+    );
     assert_eq!(diff.coverage.availability, Availability::Partial);
 }
 
@@ -512,11 +535,12 @@ fn later_reference_cap_repairs_self_context_and_preserves_legacy_equation_pointe
     diff.semantic.budgets.references_per_side = 1;
     enforce_output_budget(&mut diff);
     assert_eq!(diff.semantic.references.len(), 2);
-    assert!(diff
-        .semantic
-        .references
-        .iter()
-        .all(|reference| reference.equation_pointer == "/changed_equations/0"));
+    assert!(
+        diff.semantic
+            .references
+            .iter()
+            .all(|reference| reference.equation_pointer == "/changed_equations/0")
+    );
 }
 
 #[test]
@@ -537,13 +561,16 @@ fn repeated_use_literal_reorder_cannot_manufacture_timing_transitions() {
         })
         .collect();
     assert_eq!(k_uses.len(), 4);
-    assert!(k_uses
-        .iter()
-        .all(|timing| timing.before.is_none() || timing.after.is_none()));
-    assert!(row
-        .limits
-        .iter()
-        .any(|limit| limit.code == "identifier_correspondence_unpaired"));
+    assert!(
+        k_uses
+            .iter()
+            .all(|timing| timing.before.is_none() || timing.after.is_none())
+    );
+    assert!(
+        row.limits
+            .iter()
+            .any(|limit| limit.code == "identifier_correspondence_unpaired")
+    );
 }
 
 #[test]
@@ -569,10 +596,11 @@ fn full_named_equation_large_sum_uses_iterative_bounded_timing_correspondence() 
     );
     let row = changed_equation(&diff);
     assert_eq!(row.expressions[0].availability, Availability::LimitExceeded);
-    assert!(row
-        .limits
-        .iter()
-        .any(|limit| limit.code == "timing_correspondence_limit"));
+    assert!(
+        row.limits
+            .iter()
+            .any(|limit| limit.code == "timing_correspondence_limit")
+    );
     let uses: Vec<_> = row
         .timing
         .iter()
@@ -585,9 +613,10 @@ fn full_named_equation_large_sum_uses_iterative_bounded_timing_correspondence() 
         })
         .collect();
     assert_eq!(uses.len(), 1_202);
-    assert!(uses
-        .iter()
-        .all(|timing| timing.before.is_none() || timing.after.is_none()));
+    assert!(
+        uses.iter()
+            .all(|timing| timing.before.is_none() || timing.after.is_none())
+    );
     assert!(start.elapsed().as_secs() < 5);
 }
 
@@ -671,10 +700,11 @@ fn unmatched_condition_text_keeps_unknown_bounds_and_an_explicit_limit() {
         assert_eq!(field.before, FieldState::unknown());
         assert_eq!(field.after, FieldState::unknown());
     }
-    assert!(row
-        .limits
-        .iter()
-        .any(|limit| limit.code == "complementarity_unmatched"));
+    assert!(
+        row.limits
+            .iter()
+            .any(|limit| limit.code == "complementarity_unmatched")
+    );
     let equation_coverage = diff
         .coverage
         .families
@@ -682,15 +712,18 @@ fn unmatched_condition_text_keeps_unknown_bounds_and_an_explicit_limit() {
         .find(|family| family.family == SemanticFamily::Equations)
         .unwrap();
     assert_eq!(equation_coverage.availability, Availability::Partial);
-    assert!(equation_coverage
-        .limits
-        .iter()
-        .any(|limit| limit.code == "complementarity_unmatched"));
-    assert!(diff
-        .coverage
-        .limits
-        .iter()
-        .any(|limit| limit.code == "complementarity_unmatched"));
+    assert!(
+        equation_coverage
+            .limits
+            .iter()
+            .any(|limit| limit.code == "complementarity_unmatched")
+    );
+    assert!(
+        diff.coverage
+            .limits
+            .iter()
+            .any(|limit| limit.code == "complementarity_unmatched")
+    );
     let absent = compare_models(
         &parse("var y; model; [name='Bounded'] y=0; end;"),
         &parse("var y; model; [name='Bounded'] y=0 _|_ y+1 > 0; end;"),
@@ -734,14 +767,16 @@ fn repeated_condition_candidates_stay_separate_without_inferred_pairing() {
             );
             assert!(row.before.is_none() || row.after.is_none());
             assert!(row.timing.is_empty());
-            assert!(row
-                .expressions
-                .iter()
-                .all(|detail| detail.highlight_basis == HighlightBasis::None));
-            assert!(row
-                .limits
-                .iter()
-                .any(|limit| limit.code == "condition_correspondence_unpaired"));
+            assert!(
+                row.expressions
+                    .iter()
+                    .all(|detail| detail.highlight_basis == HighlightBasis::None)
+            );
+            assert!(
+                row.limits
+                    .iter()
+                    .any(|limit| limit.code == "condition_correspondence_unpaired")
+            );
         }
     }
 }
@@ -757,15 +792,16 @@ fn heterogeneous_condition_only_row_keeps_dimension_and_exact_source_proof() {
         Some("h")
     );
     assert_eq!(row.after.as_ref().unwrap().scope.domain, "heterogeneous");
-    assert!(row
-        .after
-        .as_ref()
-        .unwrap()
-        .provenance
-        .as_ref()
-        .unwrap()
-        .equation_id
-        .is_some());
+    assert!(
+        row.after
+            .as_ref()
+            .unwrap()
+            .provenance
+            .as_ref()
+            .unwrap()
+            .equation_id
+            .is_some()
+    );
 }
 
 #[test]
@@ -778,11 +814,12 @@ fn removing_a_duplicate_candidate_cannot_create_new_condition_correspondence() {
     assert!(diff.changed_equations.is_empty());
     assert_eq!(diff.added_equations.len(), 1);
     assert_eq!(diff.removed_equations.len(), 1);
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .all(|row| row.before.is_none() || row.after.is_none()));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .all(|row| row.before.is_none() || row.after.is_none())
+    );
     let condition_rows: Vec<_> = diff
         .semantic
         .rows
@@ -796,11 +833,12 @@ fn removing_a_duplicate_candidate_cannot_create_new_condition_correspondence() {
         } else {
             ChangeKind::Added
         }));
-    assert!(diff
-        .coverage
-        .limits
-        .iter()
-        .any(|limit| limit.code == "condition_correspondence_unpaired"));
+    assert!(
+        diff.coverage
+            .limits
+            .iter()
+            .any(|limit| limit.code == "condition_correspondence_unpaired")
+    );
 }
 
 #[test]
@@ -822,14 +860,16 @@ fn unchanged_unmatched_condition_has_no_change_row_but_retains_field_coverage_li
         .collect();
     assert_eq!(limits.len(), 1);
     assert_eq!(limits[0].omitted, Some(2));
-    assert!(diff
-        .semantic
-        .limits
-        .iter()
-        .any(|limit| limit.code == "complementarity_unmatched" && limit.omitted == Some(2)));
-    assert!(diff
-        .coverage
-        .limits
-        .iter()
-        .any(|limit| limit.code == "complementarity_unmatched" && limit.omitted == Some(2)));
+    assert!(
+        diff.semantic
+            .limits
+            .iter()
+            .any(|limit| limit.code == "complementarity_unmatched" && limit.omitted == Some(2))
+    );
+    assert!(
+        diff.coverage
+            .limits
+            .iter()
+            .any(|limit| limit.code == "complementarity_unmatched" && limit.omitted == Some(2))
+    );
 }

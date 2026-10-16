@@ -43,8 +43,8 @@ use crate::engine::language::parser::parse;
 use crate::engine::language::span::{LineIndex, Span};
 use crate::engine::workspace::Workspace;
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 pub use crate::engine::diagnostics::check_writing::{WritingContext, WritingRows};
 pub use crate::engine::diagnostics::diagnostic_links::{

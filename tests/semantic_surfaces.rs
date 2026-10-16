@@ -1,4 +1,4 @@
-use dygnosis::model_diff::{compare_models_with_budgets, ModelDiff};
+use dygnosis::model_diff::{ModelDiff, compare_models_with_budgets};
 use dygnosis::semantic_diff::*;
 use dygnosis::{compare_models, parse};
 
@@ -33,10 +33,12 @@ fn added_predetermined_symbol_keeps_one_owning_symbol_row() {
         1,
         "predetermined declaration duplicated the primary symbol: {rows:?}"
     );
-    assert!(rows[0]
-        .fields
-        .iter()
-        .any(|field| field.name == "predetermined" && field.after == FieldState::boolean(true)));
+    assert!(
+        rows[0]
+            .fields
+            .iter()
+            .any(|field| field.name == "predetermined" && field.after == FieldState::boolean(true))
+    );
     assert!(!rows[0].references.is_empty());
     assert!(commands(&diff).is_empty());
 }
@@ -99,20 +101,22 @@ fn shock_cards_retain_each_instruction_and_its_block_options() {
         "shocks(overwrite);\nvar e; stderr 2;\nend;"
     );
     assert!(!text.after.as_ref().unwrap().text.contains("var u"));
-    assert!(text
-        .after
-        .as_ref()
-        .unwrap()
-        .runs
-        .iter()
-        .any(|run| run.role == TokenRole::Added && run.text.contains('2')));
-    assert!(text
-        .after
-        .as_ref()
-        .unwrap()
-        .runs
-        .iter()
-        .any(|run| run.role == TokenRole::Added && run.text.contains("overwrite")));
+    assert!(
+        text.after
+            .as_ref()
+            .unwrap()
+            .runs
+            .iter()
+            .any(|run| run.role == TokenRole::Added && run.text.contains('2'))
+    );
+    assert!(
+        text.after
+            .as_ref()
+            .unwrap()
+            .runs
+            .iter()
+            .any(|run| run.role == TokenRole::Added && run.text.contains("overwrite"))
+    );
 }
 
 #[test]
@@ -128,12 +132,14 @@ fn local_only_edit_has_one_owner_and_direct_unchanged_equation_references() {
     assert!(commands(&diff).is_empty());
     for reference in &diff.semantic.references {
         assert_eq!(reference.symbol, "a");
-        assert!(reference
-            .provenance
-            .as_ref()
-            .unwrap()
-            .statement_id
-            .is_some());
+        assert!(
+            reference
+                .provenance
+                .as_ref()
+                .unwrap()
+                .statement_id
+                .is_some()
+        );
     }
 }
 
@@ -156,15 +162,17 @@ fn named_static_alternative_keeps_counted_arrays_unchanged() {
     let rows = role(&diff, "static_alternative");
     assert_eq!(rows.len(), 1);
     assert!(rows[0].after.as_ref().unwrap().equation_index.is_none());
-    assert!(rows[0]
-        .after
-        .as_ref()
-        .unwrap()
-        .provenance
-        .as_ref()
-        .unwrap()
-        .equation_id
-        .is_some());
+    assert!(
+        rows[0]
+            .after
+            .as_ref()
+            .unwrap()
+            .provenance
+            .as_ref()
+            .unwrap()
+            .equation_id
+            .is_some()
+    );
 }
 
 #[test]
@@ -208,15 +216,17 @@ fn initial_and_history_fields_compare_with_proven_parent() {
         let rows = role(&diff, expected);
         assert_eq!(rows.len(), 1, "{expected}");
         assert_eq!(rows[0].change, ChangeKind::Changed);
-        assert!(rows[0]
-            .before
-            .as_ref()
-            .unwrap()
-            .provenance
-            .as_ref()
-            .unwrap()
-            .statement_id
-            .is_some());
+        assert!(
+            rows[0]
+                .before
+                .as_ref()
+                .unwrap()
+                .provenance
+                .as_ref()
+                .unwrap()
+                .statement_id
+                .is_some()
+        );
         assert!(commands(&diff).is_empty());
     }
     let diff = compare(
@@ -225,9 +235,10 @@ fn initial_and_history_fields_compare_with_proven_parent() {
     );
     let rows = role(&diff, "histval_assignment");
     assert_eq!(rows.len(), 2);
-    assert!(rows
-        .iter()
-        .all(|row| row.change == ChangeKind::Added || row.change == ChangeKind::Removed));
+    assert!(
+        rows.iter()
+            .all(|row| row.change == ChangeKind::Added || row.change == ChangeKind::Removed)
+    );
 }
 
 #[test]
@@ -239,13 +250,15 @@ fn command_options_and_block_flags_use_complete_accepted_ranges() {
     let rows = commands(&diff);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].change, ChangeKind::Changed);
-    assert!(rows[0].expressions.iter().any(|detail| detail
-        .after
-        .as_ref()
-        .unwrap()
-        .runs
-        .iter()
-        .any(|run| run.role == TokenRole::Added)));
+    assert!(rows[0].expressions.iter().any(|detail| {
+        detail
+            .after
+            .as_ref()
+            .unwrap()
+            .runs
+            .iter()
+            .any(|run| run.role == TokenRole::Added)
+    }));
     let diff = compare("var y; model; y=0; end;", "var y; model(linear); y=0; end;");
     assert!(commands(&diff).is_empty());
     let owner = diff
@@ -254,10 +267,12 @@ fn command_options_and_block_flags_use_complete_accepted_ranges() {
         .iter()
         .find(|row| row.fields.iter().any(|field| field.name == "is_linear"))
         .expect("linear field owner");
-    assert!(owner
-        .fields
-        .iter()
-        .any(|field| field.name == "is_linear" && field.changed));
+    assert!(
+        owner
+            .fields
+            .iter()
+            .any(|field| field.name == "is_linear" && field.changed)
+    );
 }
 
 #[test]
@@ -330,10 +345,12 @@ fn local_references_share_comparison_wide_cap_and_exact_fallback() {
     assert_eq!(diff.semantic.references.len(), 2);
     let rows = role(&diff, "model_local_definition");
     assert_eq!(rows.len(), 1);
-    assert!(rows[0]
-        .limits
-        .iter()
-        .any(|limit| limit.code == "references_partial"));
+    assert!(
+        rows[0]
+            .limits
+            .iter()
+            .any(|limit| limit.code == "references_partial")
+    );
     assert_eq!(
         rows[0].expressions[0].availability,
         Availability::LimitExceeded
@@ -355,8 +372,8 @@ fn local_references_share_comparison_wide_cap_and_exact_fallback() {
 fn many_local_bindings_keep_exact_reference_omissions_after_indexing() {
     let source = |suffix: &str| {
         format!(
-        "var y;\nmodel;\n@#for i in 1:128\n# lc@{{i}} = @{{i}}{suffix};\n@#endfor\n@#for i in 1:128\ny = lc@{{i}} + lc@{{i}} + lc@{{i}} + lc@{{i}};\n@#endfor\nend;\n"
-    )
+            "var y;\nmodel;\n@#for i in 1:128\n# lc@{{i}} = @{{i}}{suffix};\n@#endfor\n@#for i in 1:128\ny = lc@{{i}} + lc@{{i}} + lc@{{i}} + lc@{{i}};\n@#endfor\nend;\n"
+        )
     };
     let diff = compare_models_with_budgets(
         &parse(&source("")),
@@ -370,11 +387,12 @@ fn many_local_bindings_keep_exact_reference_omissions_after_indexing() {
     );
     assert_eq!(role(&diff, "model_local_definition").len(), 128);
     assert_eq!(diff.semantic.references.len(), 64);
-    assert!(diff
-        .semantic
-        .references
-        .iter()
-        .all(|reference| reference.occurrence < 4));
+    assert!(
+        diff.semantic
+            .references
+            .iter()
+            .all(|reference| reference.occurrence < 4)
+    );
     let limit = diff
         .semantic
         .limits
@@ -387,7 +405,7 @@ fn many_local_bindings_keep_exact_reference_omissions_after_indexing() {
 
 #[test]
 fn selected_shock_baseline_assignment_has_one_existing_owner() {
-    let before="var y; varexo e; model; y=e; end; initval; e=1; end; shock_paths; var e; periods 1; values initval.e; end;";
+    let before = "var y; varexo e; model; y=e; end; initval; e=1; end; shock_paths; var e; periods 1; values initval.e; end;";
     let diff = compare(before, &before.replace("e=1", "e=2"));
     assert!(!diff.shock_setup_changes.is_empty());
     assert!(role(&diff, "initval").is_empty());
@@ -411,22 +429,27 @@ fn relative_order_is_separate_from_insertion_shifts_and_repeated_pairing() {
     );
     let rows = role(&diff, "initval");
     assert_eq!(rows.len(), 2);
-    assert!(rows
-        .iter()
-        .all(|row| row.facets == vec![ChangeFacet::Order]));
+    assert!(
+        rows.iter()
+            .all(|row| row.facets == vec![ChangeFacet::Order])
+    );
     assert_eq!(rows[0].name, "z");
     let diff = compare(
         "var y z; initval; y=1; z=2; end;",
         "var y z; initval; y=0; y=1; z=2; end;",
     );
-    assert!(role(&diff, "initval")
-        .iter()
-        .all(|row| !row.facets.contains(&ChangeFacet::Order)));
+    assert!(
+        role(&diff, "initval")
+            .iter()
+            .all(|row| !row.facets.contains(&ChangeFacet::Order))
+    );
     let diff = compare("var y; steady; check;", "var y; check; steady;");
     assert_eq!(commands(&diff).len(), 2);
-    assert!(commands(&diff)
-        .iter()
-        .all(|row| row.facets == vec![ChangeFacet::Order]));
+    assert!(
+        commands(&diff)
+            .iter()
+            .all(|row| row.facets == vec![ChangeFacet::Order])
+    );
     let diff = compare(
         "var y; initval; y=1; y=2; end;",
         "var y; initval; y=2; y=1; end;",
@@ -444,7 +467,7 @@ fn relative_order_is_separate_from_insertion_shifts_and_repeated_pairing() {
 
 #[test]
 fn aggregate_and_heterogeneous_locals_keep_separate_direct_bindings() {
-    let before="heterogeneity_dimension h; var y; var(heterogeneity=h) yh; model_local_variable a; model; #a=1; y=a; end; model(heterogeneity=h); #a=2; yh=a(-1); end;";
+    let before = "heterogeneity_dimension h; var y; var(heterogeneity=h) yh; model_local_variable a; model; #a=1; y=a; end; model(heterogeneity=h); #a=2; yh=a(-1); end;";
     let diff = compare(before, &before.replace("#a=2", "#a=3"));
     let rows = role(&diff, "model_local_definition");
     assert_eq!(rows.len(), 1);
@@ -453,14 +476,15 @@ fn aggregate_and_heterogeneous_locals_keep_separate_direct_bindings() {
         Some("h")
     );
     assert_eq!(rows[0].references.len(), 2);
-    assert!(diff
-        .semantic
-        .references
-        .iter()
-        .all(
-            |reference| reference.scope.dimension.as_deref() == Some("h")
-                && reference.timing.written_offset == -1
-        ));
+    assert!(
+        diff.semantic
+            .references
+            .iter()
+            .all(
+                |reference| reference.scope.dimension.as_deref() == Some("h")
+                    && reference.timing.written_offset == -1
+            )
+    );
 }
 
 #[test]
@@ -490,10 +514,12 @@ fn retained_observation_trends_and_equations_have_no_duplicate_command_context()
     let rows = role(&diff, "observation_trends");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].name, "y");
-    assert!(rows[0]
-        .fields
-        .iter()
-        .any(|field| field.name == "trend_expression" && field.changed));
+    assert!(
+        rows[0]
+            .fields
+            .iter()
+            .any(|field| field.name == "trend_expression" && field.changed)
+    );
     assert!(commands(&diff).is_empty());
     let before = "var y; model; [name='Output'] y=1; end;";
     let diff = compare(before, &before.replace("y=1", "y=2"));
@@ -544,7 +570,9 @@ fn histval_retention_preserves_diagnostic_control() {
             .collect::<Vec<_>>()
     };
     assert_eq!(codes(a), codes(b));
-    assert!(dygnosis::analyze(&parse(before))
-        .iter()
-        .any(|diagnostic| diagnostic.code == "E242"));
+    assert!(
+        dygnosis::analyze(&parse(before))
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E242")
+    );
 }

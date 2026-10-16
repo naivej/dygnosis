@@ -488,13 +488,17 @@ mod parse_receipt_tests {
         );
         assert_eq!(model.expanded_tokens[order - 1].text(&model.source), "p");
         let model = parse("var y;estimated_params;y,.5;end;");
-        assert!(parse_refusals(&model)
-            .iter()
-            .any(|(row, _)| row.code == "E093"));
+        assert!(
+            parse_refusals(&model)
+                .iter()
+                .any(|(row, _)| row.code == "E093")
+        );
         let model = parse("var y;parameters p;observation_trends;y(p);y(p);end;");
-        assert!(parse_refusals(&model)
-            .iter()
-            .any(|(row, _)| row.code == "E261"));
+        assert!(
+            parse_refusals(&model)
+                .iter()
+                .any(|(row, _)| row.code == "E261")
+        );
         let model = parse("var y;parameters p;observation_trends;y(p);end;");
         assert!(check_w090(&model).iter().any(|row| row.code == "E095"));
         assert!(parse_refusals(&model).is_empty());

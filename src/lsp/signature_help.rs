@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::engine::catalog::syntax;
-use crate::engine::catalog::{is_known_command, option_doc, HET_SHOCKS_OVERWRITE};
+use crate::engine::catalog::{HET_SHOCKS_OVERWRITE, is_known_command, option_doc};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -82,11 +82,7 @@ fn describe(name: &str, doc: &'static str, heterogeneous: bool) -> &'static str 
         return doc;
     }
     let fallback = option_doc(name);
-    if fallback.is_empty() {
-        doc
-    } else {
-        fallback
-    }
+    if fallback.is_empty() { doc } else { fallback }
 }
 
 fn active_index(options: &[(&str, &str)], typed: &str) -> Option<u32> {

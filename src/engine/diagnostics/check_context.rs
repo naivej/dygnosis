@@ -189,7 +189,9 @@ mod parse_receipt_tests {
     fn identification_constructor_keeps_each_execution_and_check_order_separate() {
         // Guards the first-option summary from hiding a later constructor
         // refusal, and an order Check error from stopping the Parse prefix.
-        let model = crate::parse("identification(max_dim_cova_group=1);identification(max_dim_cova_group=0);database later;");
+        let model = crate::parse(
+            "identification(max_dim_cova_group=1);identification(max_dim_cova_group=0);database later;",
+        );
         let (diagnostic, order) = parse_refusals(&model).into_iter().next().unwrap();
         assert_eq!(diagnostic.code, "E237");
         assert_eq!(model.expanded_tokens[order].text(&model.source), "database");
@@ -200,13 +202,17 @@ mod parse_receipt_tests {
         let model = crate::parse(
             "identification(max_dim_cova_group=0);identification(max_dim_cova_group=1);",
         );
-        assert!(check_context(&model)
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E237"));
+        assert!(
+            check_context(&model)
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E237")
+        );
         let model = crate::parse("identification(order=0);database kept;");
         assert!(parse_refusals(&model).is_empty());
-        assert!(check_context(&model)
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E236"));
+        assert!(
+            check_context(&model)
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E236")
+        );
     }
 }

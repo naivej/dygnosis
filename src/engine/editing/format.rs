@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use crate::engine::language::lexer::{tokenize, TokenKind};
+use crate::engine::language::lexer::{TokenKind, tokenize};
 
 const UNSAFE_CHARS: &[char] = &['\'', '"', '[', ']', '{', '}', '@', '#', '%', ':', '\\', '!'];
 
@@ -843,11 +843,7 @@ fn match_interp_groups(chars: &[char], mut i: usize) -> Option<usize> {
         }
         n += 1;
     }
-    if n > 0 {
-        Some(i)
-    } else {
-        None
-    }
+    if n > 0 { Some(i) } else { None }
 }
 
 fn is_word(c: char) -> bool {

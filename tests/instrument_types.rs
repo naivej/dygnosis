@@ -1,4 +1,4 @@
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage};
+use dygnosis::{JsonStage, analyze, find_preprocessor, parse, run_preprocessor};
 use std::time::Duration;
 
 fn instrument_errors(source: &str) -> Vec<dygnosis::Diagnostic> {
@@ -22,7 +22,9 @@ fn model_locals_and_the_policy_created_parameter_are_declared_wrong_types() {
                 None,
             ),
         ] {
-            let source = format!("var y; {decl} model(linear); {local} y=0; end; planner_objective y^2; {command}(instruments=({name}));");
+            let source = format!(
+                "var y; {decl} model(linear); {local} y=0; end; planner_objective y^2; {command}(instruments=({name}));"
+            );
             let errors = instrument_errors(&source);
             if let Some(code) = expected {
                 assert_eq!(errors.len(), 1, "{source}: {errors:?}");
@@ -84,7 +86,9 @@ fn policy_instruments_use_the_type_when_each_command_is_parsed() {
             ("var pol;", "change_type(parameters) pol;", "", Some("E317")),
             ("var pol;", "", "change_type(parameters) pol;", None),
         ] {
-            let source = format!("var y; {decl} model(linear); y=0; end; planner_objective y^2; {before} {command}(instruments=(pol)); {after}");
+            let source = format!(
+                "var y; {decl} model(linear); y=0; end; planner_objective y^2; {before} {command}(instruments=(pol)); {after}"
+            );
             let errors = instrument_errors(&source);
             if let Some(code) = expected {
                 assert_eq!(errors.len(), 1, "{source}: {errors:?}");
@@ -125,7 +129,11 @@ fn heterogeneous_model_locals_are_known_only_after_their_block() {
     let block = "model(heterogeneity=h); #pol=1; x=pol; end;";
     for command in ["ramsey_model", "ramsey_policy", "discretionary_policy"] {
         for earlier in [true, false] {
-            let source = format!("heterogeneity_dimension h; var y; var(heterogeneity=h) x; model(linear); y=0; end; {} planner_objective y^2; {command}(instruments=(pol)); {}", if earlier { block } else { "" }, if earlier { "" } else { block });
+            let source = format!(
+                "heterogeneity_dimension h; var y; var(heterogeneity=h) x; model(linear); y=0; end; {} planner_objective y^2; {command}(instruments=(pol)); {}",
+                if earlier { block } else { "" },
+                if earlier { "" } else { block }
+            );
             let errors = instrument_errors(&source);
             let code = if earlier { "E317" } else { "E101" };
             assert_eq!(errors.len(), 1, "{errors:?}");
@@ -171,7 +179,9 @@ fn retyped_heterogeneous_instrument_passes_the_type_gate_before_the_policy_limit
 #[test]
 fn instrument_diagnostics_match_lsp_and_mcp_messages_and_ranges() {
     for (decl, code) in [("parameters pol;", "E317"), ("", "E101")] {
-        let source = format!("var y; {decl}\nmodel; y=0; end;\nplanner_objective y^2;\nramsey_model(instruments=(pol));");
+        let source = format!(
+            "var y; {decl}\nmodel; y=0; end;\nplanner_objective y^2;\nramsey_model(instruments=(pol));"
+        );
         let mcp = dygnosis::dynare_diagnose(&source, None, None);
         let mcp = mcp.iter().find(|row| row.code == code).unwrap();
         let lsp = dygnosis::server::diagnostics_for("file:///instrument_types.mod", &source);

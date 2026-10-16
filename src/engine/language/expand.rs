@@ -1,13 +1,13 @@
 //! Expand view plus origin map (`expand_report`).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::{Arc, atomic::AtomicBool};
 
 use crate::engine::analysis::equations::equations;
-use crate::engine::language::lexer::{tokenize, Token};
+use crate::engine::language::lexer::{Token, tokenize};
 use crate::engine::language::macro_expand::{
-    expand_macros_traced_with_lines_and_evaluations_budget, FrameRec, MacroMessage, MacroReplay,
-    TokenTrace,
+    FrameRec, MacroMessage, MacroReplay, TokenTrace,
+    expand_macros_traced_with_lines_and_evaluations_budget,
 };
 use crate::engine::language::parser::{
     join_lexemes_recorded, normalize_newlines, parse_expanded_controlled,

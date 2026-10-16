@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
-use dygnosis::model_locals::{scope_at_order, ModelLocals};
-use dygnosis::{analyze, parse, run_preprocessor, JsonStage, Severity, Workspace};
+use dygnosis::model_locals::{ModelLocals, scope_at_order};
+use dygnosis::{JsonStage, Severity, Workspace, analyze, parse, run_preprocessor};
 
 fn official(source: &str, accepted: bool, needle: Option<&str>) {
     let binary = Path::new("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
@@ -129,7 +129,10 @@ fn accepted_shifted_and_explicit_forward_uses_bind_in_one_scope() {
         assert_eq!(facts.definitions.len(), 1);
         assert!(!facts.uses.is_empty());
         assert!(facts.uses.iter().all(|read| read.definition == Some(0)));
-        assert_eq!((facts.definitions[0].target_span.end - facts.definitions[0].target_span.start), 1);
+        assert_eq!(
+            (facts.definitions[0].target_span.end - facts.definitions[0].target_span.start),
+            1
+        );
     }
 }
 
@@ -140,12 +143,28 @@ fn duplicate_definitions_share_dimension_scope_across_blocks() {
         "heterogeneity_dimension h; var(heterogeneity=h) y; model(heterogeneity=h); #z=1; y=z; end; model(heterogeneity=h); #z=2; end;",
         "var y; model;\n@#for j in 1:2\n#z=1;\n@#endfor\ny=z; end;",
     ] {
-        official(source, false, Some("Local model variable z declared twice."));
+        official(
+            source,
+            false,
+            Some("Local model variable z declared twice."),
+        );
         let model = parse(source);
         let rows = analyze(&model);
-        assert!(rows.iter().any(|row| row.code == "E030" && row.message == "Local model variable z declared twice."), "{source}: {rows:?}");
+        assert!(
+            rows.iter()
+                .any(|row| row.code == "E030"
+                    && row.message == "Local model variable z declared twice."),
+            "{source}: {rows:?}"
+        );
         assert_eq!(ModelLocals::collect(&model).definitions.len(), 1);
-        assert_eq!(model.write_targets.iter().filter(|write| model.name(write.name) == "z").count(), 1);
+        assert_eq!(
+            model
+                .write_targets
+                .iter()
+                .filter(|write| model.name(write.name) == "z")
+                .count(),
+            1
+        );
     }
 }
 
@@ -212,10 +231,12 @@ fn rejected_types_and_early_uses_do_not_create_valid_bindings() {
             analyze(&model)
         );
         assert!(ModelLocals::collect(&model).definitions.is_empty());
-        assert!(model
-            .write_targets
-            .iter()
-            .all(|write| model.name(write.name) != "z"));
+        assert!(
+            model
+                .write_targets
+                .iter()
+                .all(|write| model.name(write.name) != "z")
+        );
     }
 }
 
@@ -256,14 +277,16 @@ fn included_definitions_use_the_same_binding_and_written_origin() {
     assert_eq!(facts.uses[0].definition, Some(0));
     let map = &workspace.expand_report("root.mod").unwrap().model_map;
     let source = &map.equations[facts.definitions[0].equation_index].source;
-    assert!(source
-        .anchor
-        .as_ref()
-        .unwrap()
-        .file
-        .as_ref()
-        .unwrap()
-        .ends_with("locals.inc"));
+    assert!(
+        source
+            .anchor
+            .as_ref()
+            .unwrap()
+            .file
+            .as_ref()
+            .unwrap()
+            .ends_with("locals.inc")
+    );
 }
 
 #[test]
@@ -276,33 +299,99 @@ fn native_top_level_hash_and_cross_tree_crash_stay_quiet() {
     assert!(errors(source).is_empty());
     let facts = ModelLocals::collect(&model);
     assert_eq!(facts.definitions.len(), 1);
-    assert!(facts
-        .uses
-        .iter()
-        .any(|read| read.dimension.is_none() && read.definition.is_none()));
+    assert!(
+        facts
+            .uses
+            .iter()
+            .any(|read| read.dimension.is_none() && read.definition.is_none())
+    );
 }
 
 #[test]
 fn generic_name_and_type_codes_reach_both_local_forms_at_check() {
     for (code, source, needle) in [
-        ("E020", "var y; model; #z=missing; y=z; end;", "Unknown symbol: missing"),
-        ("E024", "var y; varexo_det e; model; #z=e(-1); y=z; end;", "Exogenous deterministic variable e cannot be given a lead or a lag."),
-        ("E030", "var z y; model_local_variable z; model; y=0; z=0; end;", "Symbol z declared twice with different types!"),
-        ("W031", "model_local_variable z; model_local_variable z; var y; model; y=0; end;", "Symbol z declared twice."),
-        ("E240", "var y; model_local_variable z; model; y=0; end; forecast z;", "Variable z is not one of"),
-        ("E240", "var y; model; #z=1; y=z; end; forecast z;", "Variable z is not one of"),
-        ("E253", "var y; model_local_variable z; model; #z=1; y=0; end; ramsey_model; planner_objective z;", "Model local variable z cannot be used in 'planner_objective'."),
-        ("E282", "var y; parameters p; model_local_variable z; p=z; model; y=0; end;", "Variable z not allowed outside model declaration."),
-        ("E282", "var y; parameters p; model; #z=1; y=z; end; p=z;", "Variable z not allowed outside model declaration."),
-        ("E280", "var y; external_function(name=f,nargs=1); model; #z=f; y=0; end;", "cannot be used like a variable"),
-        ("E281", "var y; parameters q; q=p; model; #z=p; y=0; end;", "not allowed inside model declaration"),
-        ("E294", "var y; epilogue; q=y; end; model; #z=q; y=0; end;", "Symbol 'q' cannot be used outside the epilogue block."),
-        ("E426", "var y gone; var_remove gone; model; #z=gone; y=0; end;", "Variable 'gone' can no longer be used since it has been excluded"),
-        ("E481", "var y; model_local_variable z; model; y=0; end; steady_state_model; z=1; end;", "z has incorrect type"),
-        ("E317", "var y; model_local_variable z; model; y=0; end; ramsey_model(instruments=(z));", "z is not endogenous."),
+        (
+            "E020",
+            "var y; model; #z=missing; y=z; end;",
+            "Unknown symbol: missing",
+        ),
+        (
+            "E024",
+            "var y; varexo_det e; model; #z=e(-1); y=z; end;",
+            "Exogenous deterministic variable e cannot be given a lead or a lag.",
+        ),
+        (
+            "E030",
+            "var z y; model_local_variable z; model; y=0; z=0; end;",
+            "Symbol z declared twice with different types!",
+        ),
+        (
+            "W031",
+            "model_local_variable z; model_local_variable z; var y; model; y=0; end;",
+            "Symbol z declared twice.",
+        ),
+        (
+            "E240",
+            "var y; model_local_variable z; model; y=0; end; forecast z;",
+            "Variable z is not one of",
+        ),
+        (
+            "E240",
+            "var y; model; #z=1; y=z; end; forecast z;",
+            "Variable z is not one of",
+        ),
+        (
+            "E253",
+            "var y; model_local_variable z; model; #z=1; y=0; end; ramsey_model; planner_objective z;",
+            "Model local variable z cannot be used in 'planner_objective'.",
+        ),
+        (
+            "E282",
+            "var y; parameters p; model_local_variable z; p=z; model; y=0; end;",
+            "Variable z not allowed outside model declaration.",
+        ),
+        (
+            "E282",
+            "var y; parameters p; model; #z=1; y=z; end; p=z;",
+            "Variable z not allowed outside model declaration.",
+        ),
+        (
+            "E280",
+            "var y; external_function(name=f,nargs=1); model; #z=f; y=0; end;",
+            "cannot be used like a variable",
+        ),
+        (
+            "E281",
+            "var y; parameters q; q=p; model; #z=p; y=0; end;",
+            "not allowed inside model declaration",
+        ),
+        (
+            "E294",
+            "var y; epilogue; q=y; end; model; #z=q; y=0; end;",
+            "Symbol 'q' cannot be used outside the epilogue block.",
+        ),
+        (
+            "E426",
+            "var y gone; var_remove gone; model; #z=gone; y=0; end;",
+            "Variable 'gone' can no longer be used since it has been excluded",
+        ),
+        (
+            "E481",
+            "var y; model_local_variable z; model; y=0; end; steady_state_model; z=1; end;",
+            "z has incorrect type",
+        ),
+        (
+            "E317",
+            "var y; model_local_variable z; model; y=0; end; ramsey_model(instruments=(z));",
+            "z is not endogenous.",
+        ),
     ] {
         official(source, code.starts_with('W'), Some(needle));
-        assert!(analyze(&parse(source)).iter().any(|row| row.code == code), "{code}: {source}: {:?}", analyze(&parse(source)));
+        assert!(
+            analyze(&parse(source)).iter().any(|row| row.code == code),
+            "{code}: {source}: {:?}",
+            analyze(&parse(source))
+        );
     }
 }
 
@@ -358,9 +447,11 @@ fn later_explicit_metadata_keeps_the_definition_and_use_in_one_binding() {
     assert_eq!(facts.uses[0].declaration, Some(0));
     assert_eq!(facts.uses[0].definition, Some(0));
     assert_eq!(facts.declarations[0].tex_name.as_deref(), Some("Z"));
-    assert!(facts
-        .available(None, facts.definitions[0].parse_order)
-        .is_empty());
+    assert!(
+        facts
+            .available(None, facts.definitions[0].parse_order)
+            .is_empty()
+    );
     let available = facts.available(None, facts.uses[0].parse_order);
     assert_eq!(available.len(), 1);
     assert_eq!(available[0].declaration, Some(0));

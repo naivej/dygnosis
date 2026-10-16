@@ -5,9 +5,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use dygnosis::diagnostic::{analyze, Severity};
+use dygnosis::diagnostic::{Severity, analyze};
 use dygnosis::expand::expand_report;
-use dygnosis::{dynare_diagnose, dynare_expand, parse, JsonStage};
+use dygnosis::{JsonStage, dynare_diagnose, dynare_expand, parse};
 
 const MODEL: &str = "var y;\nmodel; y=0; end;\n";
 
@@ -681,9 +681,11 @@ fn nested_if_origins_spend_the_root_work_budget_before_cloning() {
     let report = expand_report(&bounded);
     assert!(!report.complete);
     assert_eq!(report.n_equations, 0);
-    assert!(analyze(&parse(&bounded))
-        .iter()
-        .any(|row| row.code == "I211" && row.message.contains("iteration work")));
+    assert!(
+        analyze(&parse(&bounded))
+            .iter()
+            .any(|row| row.code == "I211" && row.message.contains("iteration work"))
+    );
 }
 
 #[test]

@@ -2,12 +2,12 @@
 
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 
-use dygnosis::server::{new_service, Backend};
+use dygnosis::server::{Backend, new_service};
 use dygnosis::{
-    analyze, dynare_diagnose, find_preprocessor, parse, run_preprocessor, Diagnostic, JsonStage,
-    Severity,
+    Diagnostic, JsonStage, Severity, analyze, dynare_diagnose, find_preprocessor, parse,
+    run_preprocessor,
 };
-use tower_lsp::{lsp_types::*, LanguageServer};
+use tower_lsp::{LanguageServer, lsp_types::*};
 
 const BASE: &str = "var y; varexo e; model; y=e; end;\n";
 
@@ -173,7 +173,9 @@ fn terminator_has_the_pinned_substring_quote_and_comment_rules() {
 
 #[test]
 fn macro_execution_selects_raw_blocks_and_keeps_written_following_statements() {
-    let source = format!("{BASE}@#for j in 1:2\nverbatim;\nend\n{{ \"raw\" }}\nend;\n@#endfor\n@#if 0\nverbatim;\nvar hidden;\nend;\n@#else\nparameters p; p=1;\n@#endif\nshocks; var e=1; end;\n");
+    let source = format!(
+        "{BASE}@#for j in 1:2\nverbatim;\nend\n{{ \"raw\" }}\nend;\n@#endfor\n@#if 0\nverbatim;\nvar hidden;\nend;\n@#else\nparameters p; p=1;\n@#endif\nshocks; var e=1; end;\n"
+    );
     official(&source, true, None);
     no_errors(&source);
     let model = parse(&source);
@@ -191,7 +193,9 @@ fn macro_execution_selects_raw_blocks_and_keeps_written_following_statements() {
 
 #[test]
 fn native_and_real_dynare_boundaries_remain_distinct_after_verbatim() {
-    let source = format!("{BASE}verbatim;\nend\nend;\ndisp('native')\nparameters p; p=1;\nproof=1 ... /*\n*/\np=pp.rho;\nshocks; var e=1; end;\n");
+    let source = format!(
+        "{BASE}verbatim;\nend\nend;\ndisp('native')\nparameters p; p=1;\nproof=1 ... /*\n*/\np=pp.rho;\nshocks; var e=1; end;\n"
+    );
     official(&source, true, None);
     no_errors(&source);
     let model = parse(&source);

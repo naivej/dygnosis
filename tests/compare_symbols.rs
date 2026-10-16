@@ -63,11 +63,13 @@ fn metadata_added_changed_and_removed() {
     assert_eq!(side(z, "after")["long_name"], "z");
     assert!(side(z, "before")["tex_name"].is_null());
 
-    assert!(diff["changed_parameter_values"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|row| row["name"] == "beta"));
+    assert!(
+        diff["changed_parameter_values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["name"] == "beta")
+    );
     let shocks = diff["shock_setup_changes"].as_array().unwrap();
     assert_eq!(shocks.len(), 1, "{diff}");
     assert_eq!(shocks[0]["before"]["values"][0], "0.1");
@@ -115,42 +117,54 @@ fn kind_change_keeps_legacy_add_remove_compatibility() {
 
     assert_eq!(side(&rows[1], "before")["kind"], "varexo");
     assert_eq!(side(&rows[1], "after")["kind"], "varexo_det");
-    assert!(diff["added_exogenous"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|name| name != "u"));
-    assert!(diff["removed_exogenous"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|name| name != "u"));
-    assert!(diff["common_exogenous"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|name| name == "u"));
+    assert!(
+        diff["added_exogenous"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|name| name != "u")
+    );
+    assert!(
+        diff["removed_exogenous"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|name| name != "u")
+    );
+    assert!(
+        diff["common_exogenous"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|name| name == "u")
+    );
 
     assert_eq!(side(&rows[2], "before")["kind"], "var");
     assert_eq!(side(&rows[2], "after")["kind"], "var(heterogeneity=d)");
-    assert!(diff["common_endogenous"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|name| name == "y"));
+    assert!(
+        diff["common_endogenous"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|name| name == "y")
+    );
     assert!(diff["added_endogenous"].as_array().unwrap().is_empty());
     assert_eq!(diff["removed_endogenous"], serde_json::json!(["e"]));
 
-    assert!(diff["changed_parameter_values"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|row| row["name"] == "beta"));
-    assert!(diff["symbols_changed"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|row| row["name"] != "beta"));
+    assert!(
+        diff["changed_parameter_values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["name"] == "beta")
+    );
+    assert!(
+        diff["symbols_changed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["name"] != "beta")
+    );
     assert!(diff["changed_equations"].as_array().unwrap().is_empty());
     assert!(diff["added_equations"].as_array().unwrap().is_empty());
     assert!(diff["removed_equations"].as_array().unwrap().is_empty());

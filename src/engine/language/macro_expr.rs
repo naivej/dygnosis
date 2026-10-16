@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 use crate::engine::language::macro_expand::{MacroEvalError, MacroVal};
@@ -216,11 +216,7 @@ pub(crate) fn format_real(value: f64) -> String {
     } else {
         fixed_significant(&digits, exp)
     };
-    if neg {
-        format!("-{body}")
-    } else {
-        body
-    }
+    if neg { format!("-{body}") } else { body }
 }
 
 /// `(digits, exponent)` from Rust's `d.dddde±exp` scientific form.
@@ -2365,7 +2361,7 @@ fn eval_logic(
             return Err(official(
                 "E285",
                 format!("Operator {symbol} does not exist for this type"),
-            ))
+            ));
         }
     };
     let take_right = if op == BinOp::And { truth } else { !truth };
@@ -2380,7 +2376,7 @@ fn eval_logic(
             return Err(official(
                 "E285",
                 format!("Type mismatch for operands of {symbol} operator"),
-            ))
+            ));
         }
     };
     Ok(MacroVal::Bool(right_truth))
@@ -2881,11 +2877,7 @@ fn lexical_stod(value: &str) -> Option<f64> {
 }
 
 fn apply_sign(sign: f64, number: f64) -> f64 {
-    if sign < 0.0 {
-        -number
-    } else {
-        number
-    }
+    if sign < 0.0 { -number } else { number }
 }
 
 fn is_c_space(byte: u8) -> bool {
@@ -3280,13 +3272,13 @@ fn flatten_index(value: MacroVal, out: &mut Vec<i64>) -> Result<(), MacroEvalErr
                         return Err(official(
                             "E285",
                             "You cannot index a variable with a nested array",
-                        ))
+                        ));
                     }
                     _ => {
                         return Err(official(
                             "E285",
                             "You cannot index a variable with a nested array",
-                        ))
+                        ));
                     }
                 }
             }
@@ -4837,9 +4829,11 @@ mod tests {
             check_macro_syntax_budget(&body, &mut budget),
             Err(MacroEvalError::Limit("iteration work"))
         ));
-        assert!(print_expression_budget(&body, &mut MacroBudget::new())
-            .unwrap()
-            .contains('a'));
+        assert!(
+            print_expression_budget(&body, &mut MacroBudget::new())
+                .unwrap()
+                .contains('a')
+        );
 
         let nested = val("[[1], [2]]");
         let mut budget = MacroBudget::new();

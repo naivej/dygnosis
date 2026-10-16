@@ -146,7 +146,10 @@ fn set_context(inner: &mut Inner, arguments: &[Value]) -> std::result::Result<Va
                 .owner_roots(document.as_str())
                 .contains(&root_key)
         {
-            return Err(refusal("DOCUMENT_NOT_OWNED", "The chosen model does not include this document. Open its model root and choose a current owner."));
+            return Err(refusal(
+                "DOCUMENT_NOT_OWNED",
+                "The chosen model does not include this document. Open its model root and choose a current owner.",
+            ));
         }
         inner.document_contexts.insert(key, root);
     }

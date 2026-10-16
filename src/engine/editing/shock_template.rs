@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::engine::language::lexer::{tokenize, Token, TokenKind};
+use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::model::{Model, ShockBlockKind, SurgeryKind};
 
 /// One name per ordinary aggregate `varexo`, in declaration order.
@@ -586,12 +586,14 @@ mod tests {
 
     #[test]
     fn unclosed_model_does_not_take_the_template() {
-        assert!(insertion(
-            "model;\ny = e;\n",
-            &["e".to_string()],
-            TemplateKind::Stochastic
-        )
-        .is_none());
+        assert!(
+            insertion(
+                "model;\ny = e;\n",
+                &["e".to_string()],
+                TemplateKind::Stochastic
+            )
+            .is_none()
+        );
         let text = "varexo e;\nmodel;\ny = e;\n";
         let edit = insertion(text, &["e".to_string()], TemplateKind::Stochastic).unwrap();
         let edited = apply_at(text, &edit);

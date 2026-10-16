@@ -60,7 +60,12 @@ pub(crate) fn expression(
     const MAX_EXPRESSION_NODES: usize = 10_000;
     while let Some(id) = pending.pop() {
         if nodes.len() >= MAX_EXPRESSION_NODES || pending.len() > MAX_EXPRESSION_NODES {
-            gap(fact, &format!("{name}_tree_node_limit"), "Retained expression tree comparison is limited to 10,000 nodes per field; omitted tree detail has no complete equality claim.", "semantic_family_expression_budget");
+            gap(
+                fact,
+                &format!("{name}_tree_node_limit"),
+                "Retained expression tree comparison is limited to 10,000 nodes per field; omitted tree detail has no complete equality claim.",
+                "semantic_family_expression_budget",
+            );
             return FieldState::unknown();
         }
         let scalar_bytes = match &model.exprs.get(id).kind {
@@ -79,7 +84,12 @@ pub(crate) fn expression(
             _ => 0,
         };
         if !work.charge(scalar_bytes.saturating_add(256)) {
-            gap(fact, &format!("{name}_tree_materialization_limit"), "Retained expression trees share 100,000 nodes and at most min(serialized detail budget, 8 MiB) materialization bytes per comparison, charged before node allocation and scalar cloning. Omitted tree equality is unknown.", "semantic_family_expression_budget");
+            gap(
+                fact,
+                &format!("{name}_tree_materialization_limit"),
+                "Retained expression trees share 100,000 nodes and at most min(serialized detail budget, 8 MiB) materialization bytes per comparison, charged before node allocation and scalar cloning. Omitted tree equality is unknown.",
+                "semantic_family_expression_budget",
+            );
             return FieldState::unknown();
         }
         let mut node = BTreeMap::new();
@@ -117,7 +127,12 @@ pub(crate) fn expression(
                     } else {
                         node.insert("value_known".into(), FieldValue::Boolean(false));
                     }
-                    gap(fact, &format!("{name}_number_spelling_unavailable"), "The numeric node has no retained literal spelling; source spans are not used to reconstruct it.", "parser_numeric_literal_retention");
+                    gap(
+                        fact,
+                        &format!("{name}_number_spelling_unavailable"),
+                        "The numeric node has no retained literal spelling; source spans are not used to reconstruct it.",
+                        "parser_numeric_literal_retention",
+                    );
                 }
             }
             ExprKind::String => {
@@ -196,7 +211,12 @@ pub(crate) fn expression(
                 .any(|name| model.name(*callee).eq_ignore_ascii_case(name))
                 {
                     node.insert("model_name_known".into(), FieldValue::Boolean(false));
-                    gap(fact, &format!("{name}_named_operator_association_unavailable"), "The named model operator has no retained association to this expression node. Its model name is unknown; source spans do not establish that association.", "parser_named_operator_retention");
+                    gap(
+                        fact,
+                        &format!("{name}_named_operator_association_unavailable"),
+                        "The named model operator has no retained association to this expression node. Its model name is unknown; source spans do not establish that association.",
+                        "parser_named_operator_retention",
+                    );
                 }
                 if args.len() > MAX_EXPRESSION_NODES {
                     gap(
@@ -219,11 +239,21 @@ pub(crate) fn expression(
                 children.push(*arg);
             }
             ExprKind::PathNamespace { .. } => {
-                gap(fact, &format!("{name}_path_owner"), "Path namespace values belong to the retained shock/path producer; this family does not reconstruct that field.", "semantic_shock_fields");
+                gap(
+                    fact,
+                    &format!("{name}_path_owner"),
+                    "Path namespace values belong to the retained shock/path producer; this family does not reconstruct that field.",
+                    "semantic_shock_fields",
+                );
                 return FieldState::unknown();
             }
             ExprKind::Error => {
-                gap(fact, &format!("{name}_tree_recovered"), "The expression tree contains a recovery node; accepted context or Source supplies written text without a fabricated parsed expression.", "parser_family_expression_retention");
+                gap(
+                    fact,
+                    &format!("{name}_tree_recovered"),
+                    "The expression tree contains a recovery node; accepted context or Source supplies written text without a fabricated parsed expression.",
+                    "parser_family_expression_retention",
+                );
                 return FieldState::unknown();
             }
         }
@@ -232,7 +262,12 @@ pub(crate) fn expression(
         nodes.push(FieldValue::Record(node));
     }
     if parent_id(fact).is_none() {
-        gap(fact, &format!("{name}_written_text_unavailable"), "The owned retained expression tree is compared. Its exact expanded text and navigation are unavailable without producer occurrence proof.", "parser_family_text_retention");
+        gap(
+            fact,
+            &format!("{name}_written_text_unavailable"),
+            "The owned retained expression tree is compared. Its exact expanded text and navigation are unavailable without producer occurrence proof.",
+            "parser_family_text_retention",
+        );
     }
     FieldState::present(FieldValue::List(nodes))
 }
@@ -267,7 +302,12 @@ fn span_range(
     let statement = model.statements.get(parent_id(fact)?)?;
     let tokens = model.expanded_tokens.get(statement.token_range.clone())?;
     if tokens.len() > work.selector_visits {
-        gap(fact, &format!("{name}_selector_visit_limit"), "Expanded text selectors share 1,000,000 token visits per comparison. Text with no bounded occurrence proof remains unknown; accepted context and Source retain written evidence.", "semantic_family_expression_budget");
+        gap(
+            fact,
+            &format!("{name}_selector_visit_limit"),
+            "Expanded text selectors share 1,000,000 token visits per comparison. Text with no bounded occurrence proof remains unknown; accepted context and Source retain written evidence.",
+            "semantic_family_expression_budget",
+        );
         return None;
     }
     work.selector_visits -= tokens.len();
@@ -290,7 +330,12 @@ fn span_range(
         return None;
     }
     if selected.len() > 10_000 {
-        gap(fact, &format!("{name}_selector_token_limit"), "One written field selector is limited to 10,000 tokens before uniqueness-index allocation.", "semantic_family_expression_budget");
+        gap(
+            fact,
+            &format!("{name}_selector_token_limit"),
+            "One written field selector is limited to 10,000 tokens before uniqueness-index allocation.",
+            "semantic_family_expression_budget",
+        );
         return None;
     }
     let mut spans = BTreeSet::new();
@@ -313,7 +358,14 @@ pub(crate) fn span_text(
     if let Some(range) = span_range(model, fact, name, span, work) {
         return range_text(model, fact, name, range, work);
     }
-    gap(fact, &format!("{name}_text_unavailable"), &format!("The retained {name} span has no unique text slice inside a proven expanded occurrence. Its accepted statement context and captured Source remain available."), "parser_family_text_retention");
+    gap(
+        fact,
+        &format!("{name}_text_unavailable"),
+        &format!(
+            "The retained {name} span has no unique text slice inside a proven expanded occurrence. Its accepted statement context and captured Source remain available."
+        ),
+        "parser_family_text_retention",
+    );
     FieldState::unknown()
 }
 
@@ -338,7 +390,12 @@ pub(crate) fn range_text(
             return FieldState::unknown();
         }
         if tokens.len() > work.selector_visits {
-            gap(fact, &format!("{name}_selector_visit_limit"), "Retained text selectors share 1,000,000 token visits per comparison, charged before selection or joining.", "semantic_family_expression_budget");
+            gap(
+                fact,
+                &format!("{name}_selector_visit_limit"),
+                "Retained text selectors share 1,000,000 token visits per comparison, charged before selection or joining.",
+                "semantic_family_expression_budget",
+            );
             return FieldState::unknown();
         }
         work.selector_visits -= tokens.len();
@@ -348,7 +405,12 @@ pub(crate) fn range_text(
                 .checked_add(1)
         });
         let Some(bytes) = bytes.filter(|bytes| *bytes <= work.bytes) else {
-            gap(fact, &format!("{name}_text_materialization_limit"), "Retained written text shares at most min(serialized detail budget, 8 MiB) materialization charge per comparison; token bytes and separators are charged before joining text.", "semantic_family_expression_budget");
+            gap(
+                fact,
+                &format!("{name}_text_materialization_limit"),
+                "Retained written text shares at most min(serialized detail budget, 8 MiB) materialization charge per comparison; token bytes and separators are charged before joining text.",
+                "semantic_family_expression_budget",
+            );
             return FieldState::unknown();
         };
         work.bytes -= bytes;
@@ -357,7 +419,12 @@ pub(crate) fn range_text(
             return FieldState::text(&value);
         }
     }
-    gap(fact, &format!("{name}_text_unavailable"), "The retained accepted producer token range is unavailable; no source-span reconstruction is used.", "parser_family_text_retention");
+    gap(
+        fact,
+        &format!("{name}_text_unavailable"),
+        "The retained accepted producer token range is unavailable; no source-span reconstruction is used.",
+        "parser_family_text_retention",
+    );
     FieldState::unknown()
 }
 
@@ -426,10 +493,12 @@ mod tests {
         let encoded = serde_json::to_string(&value).unwrap();
         assert!(encoded.contains("model_name_known"));
         assert!(!encoded.contains("foo"));
-        assert!(owner
-            .limits
-            .iter()
-            .any(|limit| { limit.code == "objective_named_operator_association_unavailable" }));
+        assert!(
+            owner
+                .limits
+                .iter()
+                .any(|limit| { limit.code == "objective_named_operator_association_unavailable" })
+        );
     }
 
     #[test]
@@ -467,10 +536,12 @@ mod tests {
         let old = expression(&model, &mut owner, "rhs", Some(one), &mut work);
         let new = expression(&model, &mut owner, "rhs", Some(two), &mut work);
         assert_ne!(old, new);
-        assert!(owner
-            .limits
-            .iter()
-            .any(|limit| limit.code == "rhs_number_spelling_unavailable"));
+        assert!(
+            owner
+                .limits
+                .iter()
+                .any(|limit| limit.code == "rhs_number_spelling_unavailable")
+        );
         assert!(serde_json::to_string(&new).unwrap().contains("2.0"));
     }
 
@@ -495,10 +566,12 @@ mod tests {
         );
         assert_eq!(work.nodes, 100_000);
         assert_eq!(work.bytes, 512);
-        assert!(owner
-            .limits
-            .iter()
-            .any(|limit| limit.code == "rhs_tree_materialization_limit"));
+        assert!(
+            owner
+                .limits
+                .iter()
+                .any(|limit| limit.code == "rhs_tree_materialization_limit")
+        );
     }
 
     #[test]
@@ -542,10 +615,12 @@ mod tests {
             expression(&model, &mut owner, "rhs", Some(id), &mut work).state,
             ValueState::Unknown
         );
-        assert!(owner
-            .limits
-            .iter()
-            .any(|limit| limit.code == "rhs_tree_node_limit"));
+        assert!(
+            owner
+                .limits
+                .iter()
+                .any(|limit| limit.code == "rhs_tree_node_limit")
+        );
     }
 
     #[test]
@@ -560,13 +635,17 @@ mod tests {
             Some(id),
             &mut RetainedExpressionWork::default(),
         );
-        assert!(serde_json::to_string(&value)
-            .unwrap()
-            .contains("text_known"));
-        assert!(owner
-            .limits
-            .iter()
-            .any(|limit| limit.code == "rhs_text_unavailable"));
+        assert!(
+            serde_json::to_string(&value)
+                .unwrap()
+                .contains("text_known")
+        );
+        assert!(
+            owner
+                .limits
+                .iter()
+                .any(|limit| limit.code == "rhs_text_unavailable")
+        );
     }
 
     #[test]
@@ -585,10 +664,12 @@ mod tests {
             ValueState::Unknown
         );
         assert_eq!(work.selector_visits, 1);
-        assert!(owner
-            .limits
-            .iter()
-            .any(|limit| limit.code == "name_selector_visit_limit"));
+        assert!(
+            owner
+                .limits
+                .iter()
+                .any(|limit| limit.code == "name_selector_visit_limit")
+        );
     }
 
     #[test]
@@ -604,9 +685,11 @@ mod tests {
             ValueState::Unknown
         );
         assert_eq!(work.bytes, 1);
-        assert!(owner
-            .limits
-            .iter()
-            .any(|limit| limit.code == "name_text_materialization_limit"));
+        assert!(
+            owner
+                .limits
+                .iter()
+                .any(|limit| limit.code == "name_text_materialization_limit")
+        );
     }
 }

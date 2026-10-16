@@ -241,10 +241,12 @@ mod tests {
             name: Some("diff".into()),
             ..Default::default()
         });
-        assert!(forms
-            .records
-            .iter()
-            .any(|r| r.contexts == ["model_expression"]));
+        assert!(
+            forms
+                .records
+                .iter()
+                .any(|r| r.contexts == ["model_expression"])
+        );
         assert!(
             forms
                 .records
@@ -259,9 +261,11 @@ mod tests {
         });
         assert!(wrong.known_name);
         assert!(wrong.records.is_empty());
-        assert!(wrong
-            .available_contexts
-            .contains(&"model_expression".to_owned()));
+        assert!(
+            wrong
+                .available_contexts
+                .contains(&"model_expression".to_owned())
+        );
         let unknown = query(&SyntaxQuery {
             name: Some("not_a_dynare_function".into()),
             ..Default::default()
@@ -280,10 +284,12 @@ mod tests {
                 parent: Some("endval".into()),
                 ..Default::default()
             });
-            assert!(accepted
-                .records
-                .iter()
-                .any(|r| r.signatures.iter().any(|s| s.contains(name))));
+            assert!(
+                accepted
+                    .records
+                    .iter()
+                    .any(|r| r.signatures.iter().any(|s| s.contains(name)))
+            );
             for context in ["expression", "model_expression", "macro_expression"] {
                 let wrong = query(&SyntaxQuery {
                     name: Some(name.into()),
@@ -295,13 +301,15 @@ mod tests {
                     "{name}: {context}"
                 );
             }
-            assert!(query(&SyntaxQuery {
-                name: Some(name.into()),
-                parent: Some("initval".into()),
-                ..Default::default()
-            })
-            .records
-            .is_empty());
+            assert!(
+                query(&SyntaxQuery {
+                    name: Some(name.into()),
+                    parent: Some("initval".into()),
+                    ..Default::default()
+                })
+                .records
+                .is_empty()
+            );
         }
         for name in ["=", "⟂", ";", "@{"] {
             for context in ["expression", "model_expression", "macro_expression"] {
@@ -317,28 +325,34 @@ mod tests {
                 );
             }
         }
-        assert!(!query(&SyntaxQuery {
-            name: Some("=".into()),
-            context: Some("macro_directive".into()),
-            ..Default::default()
-        })
-        .records
-        .is_empty());
-        assert!(!query(&SyntaxQuery {
-            name: Some("⟂".into()),
-            context: Some("block_body".into()),
-            parent: Some("model".into()),
-            ..Default::default()
-        })
-        .records
-        .is_empty());
-        assert!(!query(&SyntaxQuery {
-            name: Some("@{".into()),
-            context: Some("macro_interpolation".into()),
-            ..Default::default()
-        })
-        .records
-        .is_empty());
+        assert!(
+            !query(&SyntaxQuery {
+                name: Some("=".into()),
+                context: Some("macro_directive".into()),
+                ..Default::default()
+            })
+            .records
+            .is_empty()
+        );
+        assert!(
+            !query(&SyntaxQuery {
+                name: Some("⟂".into()),
+                context: Some("block_body".into()),
+                parent: Some("model".into()),
+                ..Default::default()
+            })
+            .records
+            .is_empty()
+        );
+        assert!(
+            !query(&SyntaxQuery {
+                name: Some("@{".into()),
+                context: Some("macro_interpolation".into()),
+                ..Default::default()
+            })
+            .records
+            .is_empty()
+        );
         for name in ["==", ",", "(", ")"] {
             for context in ["expression", "model_expression", "macro_expression"] {
                 assert!(
@@ -364,23 +378,30 @@ mod tests {
                 parent: Some("sensitivity".into()),
                 ..Default::default()
             });
-            assert!(result
-                .records
-                .iter()
-                .any(|r| r.name == "Nsam" && r.signatures.iter().all(|s| s.starts_with("Nsam ="))));
+            assert!(
+                result
+                    .records
+                    .iter()
+                    .any(|r| r.name == "Nsam"
+                        && r.signatures.iter().all(|s| s.starts_with("Nsam =")))
+            );
         }
         let sensitivity = query(&SyntaxQuery {
             name: Some("sensitivity".into()),
             kind: Some("command".into()),
             ..Default::default()
         });
-        assert!(sensitivity
-            .records
-            .iter()
-            .any(|r| r.options.iter().any(|o| o.name == "Nsam")));
-        assert!(super::super::command_options("sensitivity")
-            .iter()
-            .any(|(name, _)| *name == "Nsam"));
+        assert!(
+            sensitivity
+                .records
+                .iter()
+                .any(|r| r.options.iter().any(|o| o.name == "Nsam"))
+        );
+        assert!(
+            super::super::command_options("sensitivity")
+                .iter()
+                .any(|(name, _)| *name == "Nsam")
+        );
     }
 
     #[test]
@@ -392,32 +413,40 @@ mod tests {
             context: Some("model_expression".into()),
             ..Default::default()
         });
-        assert!(normcdf.records[0]
-            .signatures
-            .iter()
-            .any(|s| s.matches(',').count() == 2));
-        assert!(normcdf.records[0]
-            .signatures
-            .iter()
-            .any(|s| !s.contains(',')));
+        assert!(
+            normcdf.records[0]
+                .signatures
+                .iter()
+                .any(|s| s.matches(',').count() == 2)
+        );
+        assert!(
+            normcdf.records[0]
+                .signatures
+                .iter()
+                .any(|s| !s.contains(','))
+        );
         let cast = query(&SyntaxQuery {
             name: Some("real".into()),
             context: Some("macro_expression".into()),
             ..Default::default()
         });
-        assert!(cast.records[0]
-            .signatures
-            .iter()
-            .any(|s| s.starts_with("(real)")));
+        assert!(
+            cast.records[0]
+                .signatures
+                .iter()
+                .any(|s| s.starts_with("(real)"))
+        );
         let priors = query(&SyntaxQuery {
             name: Some("priors".into()),
             kind: Some("block".into()),
             ..Default::default()
         });
-        assert!(priors
-            .records
-            .iter()
-            .any(|r| r.signatures.iter().any(|s| s.starts_with("priors"))));
+        assert!(
+            priors
+                .records
+                .iter()
+                .any(|r| r.signatures.iter().any(|s| s.starts_with("priors")))
+        );
     }
 
     #[test]
@@ -427,37 +456,48 @@ mod tests {
             name: Some("model".into()),
             ..Default::default()
         });
-        assert!(model.records.iter().any(|r| r
-            .options
+        assert!(model.records.iter().any(|r| {
+            r.options
+                .iter()
+                .any(|o| o.name == "heterogeneity" && !o.signatures.is_empty())
+        }));
+        assert!(
+            query(&SyntaxQuery {
+                parent: Some("shock_decomposition".into()),
+                name: Some("nograph".into()),
+                ..Default::default()
+            })
+            .records
             .iter()
-            .any(|o| o.name == "heterogeneity" && !o.signatures.is_empty())));
-        assert!(query(&SyntaxQuery {
-            parent: Some("shock_decomposition".into()),
-            name: Some("nograph".into()),
-            ..Default::default()
-        })
-        .records
-        .iter()
-        .all(|r| r.signatures == ["nograph"]));
-        assert!(query(&SyntaxQuery {
-            name: Some("shock_decomposition_nograph".into()),
-            ..Default::default()
-        })
-        .records
-        .is_empty());
-        assert!(query(&SyntaxQuery {
-            name: Some("<partition_name>".into()),
-            parent: Some("var".into()),
-            ..Default::default()
-        })
-        .records
-        .iter()
-        .all(|r| r.kind == "open_slot"));
-        assert!(!super::super::command_options("var")
+            .all(|r| r.signatures == ["nograph"])
+        );
+        assert!(
+            query(&SyntaxQuery {
+                name: Some("shock_decomposition_nograph".into()),
+                ..Default::default()
+            })
+            .records
+            .is_empty()
+        );
+        assert!(
+            query(&SyntaxQuery {
+                name: Some("<partition_name>".into()),
+                parent: Some("var".into()),
+                ..Default::default()
+            })
+            .records
             .iter()
-            .any(|(n, _)| *n == "name"));
-        assert!(!super::super::command_options("sbvar")
-            .iter()
-            .any(|(n, _)| *n == "data"));
+            .all(|r| r.kind == "open_slot")
+        );
+        assert!(
+            !super::super::command_options("var")
+                .iter()
+                .any(|(n, _)| *n == "name")
+        );
+        assert!(
+            !super::super::command_options("sbvar")
+                .iter()
+                .any(|(n, _)| *n == "data")
+        );
     }
 }

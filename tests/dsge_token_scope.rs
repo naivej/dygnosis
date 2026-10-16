@@ -1,4 +1,4 @@
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage};
+use dygnosis::{JsonStage, analyze, find_preprocessor, parse, run_preprocessor};
 use std::time::Duration;
 
 #[test]
@@ -9,9 +9,13 @@ fn dsge_weight_is_an_ordinary_name_in_statement_expressions() {
         "@#define name = \"dsge_prior_weight\"\nparameters p; p=@{name}; var y; model; y=0; end;",
     ] {
         let diagnostics = analyze(&parse(source));
-        assert!(!diagnostics.iter().any(|row| row.code == "E001"), "{source}: {diagnostics:?}");
+        assert!(
+            !diagnostics.iter().any(|row| row.code == "E001"),
+            "{source}: {diagnostics:?}"
+        );
         if let Some(pp) = find_preprocessor(None) {
-            let official = run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
+            let official =
+                run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
             assert!(official.success, "{source}: {official:?}");
         }
     }
@@ -32,7 +36,11 @@ fn dsge_weight_remains_reserved_in_block_expressions_and_name_slots() {
     ] {
         let diagnostics = analyze(&parse(source));
         assert!(
-            diagnostics.iter().any(|row| row.code == "E001" && row.message.to_ascii_lowercase().contains("dsge_prior_weight")),
+            diagnostics.iter().any(|row| row.code == "E001"
+                && row
+                    .message
+                    .to_ascii_lowercase()
+                    .contains("dsge_prior_weight")),
             "{source}: {diagnostics:?}"
         );
         if let Some(pp) = find_preprocessor(None) {

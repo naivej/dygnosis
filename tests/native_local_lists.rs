@@ -1,4 +1,4 @@
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage};
+use dygnosis::{JsonStage, analyze, find_preprocessor, parse, run_preprocessor};
 use std::time::Duration;
 
 const BASE: &str = "var y; varexo e; parameters a; a=.5; model; y=a*y(-1)+e; end;\n";

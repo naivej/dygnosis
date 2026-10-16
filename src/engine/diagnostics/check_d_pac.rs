@@ -214,7 +214,15 @@ pub(crate) fn named_callbacks(model: &Model) -> NamedCallbacks {
                         .is_none()
                 {
                     result.complete = false;
-                    refuse_at(&mut result, command.active_tokens.end, format!("The variable '{}' is unknown; the named model callback did not complete.", model.name(name)), variable.map_or(command.span, |(_, span)| span));
+                    refuse_at(
+                        &mut result,
+                        command.active_tokens.end,
+                        format!(
+                            "The variable '{}' is unknown; the named model callback did not complete.",
+                            model.name(name)
+                        ),
+                        variable.map_or(command.span, |(_, span)| span),
+                    );
                     continue;
                 }
                 if variable.is_some()
@@ -467,14 +475,18 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
                 return vec![error(
                     row.span,
                     "E437",
-                    format!("for PAC model '{name}', it is not possible to declare {article} '{field}' option in the 'pac_model' command when there is also a 'pac_target_info' block"),
+                    format!(
+                        "for PAC model '{name}', it is not possible to declare {article} '{field}' option in the 'pac_model' command when there is also a 'pac_target_info' block"
+                    ),
                 )];
             }
             if field == "kind" && option(command, "auxiliary_model_name").is_none() {
                 return vec![error(
                     row.span,
                     "E437",
-                    format!("for PAC model '{name}', it is not possible to declare a 'kind' option in the 'pac_model' command since this is a MCE model"),
+                    format!(
+                        "for PAC model '{name}', it is not possible to declare a 'kind' option in the 'pac_model' command since this is a MCE model"
+                    ),
                 )];
             }
         }
@@ -514,7 +526,9 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
             return vec![error(
                 span,
                 "E438",
-                format!("the block 'pac_target_info({name})' is missing the 'auxname_target_nonstationary' statement"),
+                format!(
+                    "the block 'pac_target_info({name})' is missing the 'auxname_target_nonstationary' statement"
+                ),
             )];
         }
         for component in components {
@@ -551,7 +565,9 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
                 return vec![error(
                     component.span,
                     "E438",
-                    format!("in the block 'pac_target_info({name})', a component of 'kind ll' (i.e. stationary) has a 'growth' option. This is not permitted."),
+                    format!(
+                        "in the block 'pac_target_info({name})', a component of 'kind ll' (i.e. stationary) has a 'growth' option. This is not permitted."
+                    ),
                 )];
             }
             if kind.eq_ignore_ascii_case("dd") || kind.eq_ignore_ascii_case("dl") {
@@ -562,7 +578,9 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
             return vec![error(
                 span,
                 "E438",
-                format!("the block 'pac_target_info({name})' must contain at least one nonstationary component (i.e. of 'kind' equal to either 'dd' or 'dl')."),
+                format!(
+                    "the block 'pac_target_info({name})' must contain at least one nonstationary component (i.e. of 'kind' equal to either 'dd' or 'dl')."
+                ),
             )];
         }
     }
@@ -580,7 +598,9 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
         return vec![error(
             *span,
             "E021",
-            format!("{names} not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior."),
+            format!(
+                "{names} not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior."
+            ),
         )];
     }
     for block in &model.deterministic_trends {
@@ -1358,10 +1378,22 @@ fn generated_pac_variable_clash(
         ("E456", "pac_expectation")
     };
     if let Some(span) = written_declaration(model, name) {
-        return Some(error(span, code, format!("the variable/parameter '{name}' conflicts with a variable that will be generated for a '{operator}' expression. Please rename it.")));
+        return Some(error(
+            span,
+            code,
+            format!(
+                "the variable/parameter '{name}' conflicts with a variable that will be generated for a '{operator}' expression. Please rename it."
+            ),
+        ));
     }
     if !generated_vars.insert(name.to_string()) {
-        return Some(error(written_name_span, code, format!("the variable/parameter '{name}' conflicts with a variable that will be generated for a '{operator}' expression. Please rename it.")));
+        return Some(error(
+            written_name_span,
+            code,
+            format!(
+                "the variable/parameter '{name}' conflicts with a variable that will be generated for a '{operator}' expression. Please rename it."
+            ),
+        ));
     }
     None
 }
@@ -1384,7 +1416,13 @@ fn pac_generated_name_clash(
     if option(command, "growth").is_some() {
         let generated = format!("{pac}_pac_growth_neutrality_correction");
         if let Some(span) = written_declaration(model, &generated) {
-            return Some(error(span, "E453", format!("The variable/parameter '{generated}' conflicts with the auxiliary parameter that will be generated for the growth neutrality correction of the '{pac}' PAC model. Please rename that parameter.")));
+            return Some(error(
+                span,
+                "E453",
+                format!(
+                    "The variable/parameter '{generated}' conflicts with the auxiliary parameter that will be generated for the growth neutrality correction of the '{pac}' PAC model. Please rename that parameter."
+                ),
+            ));
         }
     }
     if target_infos.clone().next().is_none() {
@@ -1404,13 +1442,25 @@ fn pac_generated_name_clash(
             }
             let generated = format!("mce_alpha_{pac}_1");
             if let Some(span) = written_declaration(model, &generated) {
-                return Some(error(span, "E454", format!("The variable/parameter '{generated}' conflicts with a parameter that will be generated for the '{pac}' PAC model. Please rename it.")));
+                return Some(error(
+                    span,
+                    "E454",
+                    format!(
+                        "The variable/parameter '{generated}' conflicts with a parameter that will be generated for the '{pac}' PAC model. Please rename it."
+                    ),
+                ));
             }
         } else {
             if has_var {
                 let generated = format!("h_{pac}_constant");
                 if let Some(span) = written_declaration(model, &generated) {
-                    return Some(error(span, "E455", format!("the variable/parameter '{generated}' conflicts with some auxiliary parameter that will be generated for the '{pac}' PAC model. Please rename that parameter.")));
+                    return Some(error(
+                        span,
+                        "E455",
+                        format!(
+                            "the variable/parameter '{generated}' conflicts with some auxiliary parameter that will be generated for the '{pac}' PAC model. Please rename that parameter."
+                        ),
+                    ));
                 }
             }
             let aux = symbol_option(command, "auxname");
@@ -1433,7 +1483,13 @@ fn pac_generated_name_clash(
     if auxiliary.is_none() {
         let generated = format!("mce_alpha_{pac}_1");
         if let Some(span) = written_declaration(model, &generated) {
-            return Some(error(span, "E454", format!("The variable/parameter '{generated}' conflicts with a parameter that will be generated for the '{pac}' PAC model. Please rename it.")));
+            return Some(error(
+                span,
+                "E454",
+                format!(
+                    "The variable/parameter '{generated}' conflicts with a parameter that will be generated for the '{pac}' PAC model. Please rename it."
+                ),
+            ));
         }
     }
     let mut component_idx = 0;
@@ -1451,7 +1507,13 @@ fn pac_generated_name_clash(
                 if has_var {
                     let generated = format!("h_{name_component}_constant");
                     if let Some(span) = written_declaration(model, &generated) {
-                        return Some(error(span, "E455", format!("the variable/parameter '{generated}' conflicts with some auxiliary parameter that will be generated for the '{pac}' PAC model. Please rename that parameter.")));
+                        return Some(error(
+                            span,
+                            "E455",
+                            format!(
+                                "the variable/parameter '{generated}' conflicts with some auxiliary parameter that will be generated for the '{pac}' PAC model. Please rename that parameter."
+                            ),
+                        ));
                     }
                 }
                 if let Some((aux_name, span)) = component.rows.iter().rev().find_map(|field| {
@@ -1472,7 +1534,13 @@ fn pac_generated_name_clash(
                 {
                     let generated = format!("{name_component}_pac_growth_neutrality_correction");
                     if let Some(span) = written_declaration(model, &generated) {
-                        return Some(error(span, "E455", format!("the variable/parameter '{generated}' conflicts with some auxiliary parameter that will be generated for the '{pac}' PAC model. Please rename that parameter.")));
+                        return Some(error(
+                            span,
+                            "E455",
+                            format!(
+                                "the variable/parameter '{generated}' conflicts with some auxiliary parameter that will be generated for the '{pac}' PAC model. Please rename that parameter."
+                            ),
+                        ));
                     }
                 }
             }
@@ -1630,13 +1698,13 @@ fn direct_target_equation_refusal(model: &Model, block: &PacTargetInfoBlock) -> 
         let terms = stable_direct_terms(direct_rhs_terms(model, rhs)?)?;
         if let Some(extra) = terms.iter().find(|name| !components.contains(name)) {
             format!(
-                    "the model equation defining the 'target' of 'pac_target_info({model_name})' contains a variable ({}) that is not declared as a 'component'",
-                    model.name(*extra)
-                )
+                "the model equation defining the 'target' of 'pac_target_info({model_name})' contains a variable ({}) that is not declared as a 'component'",
+                model.name(*extra)
+            )
         } else if components.iter().any(|name| !terms.contains(name)) {
             format!(
-                    "a 'component' of 'pac_target_info({model_name})' does not appear in the model equation defining the 'target'"
-                )
+                "a 'component' of 'pac_target_info({model_name})' does not appear in the model equation defining the 'target'"
+            )
         } else {
             return None;
         }
@@ -1973,12 +2041,16 @@ fn check_selected_shape(model: &Model, command: &SemiStructuralCommand) -> Optio
                     if reference.timing > 0 {
                         Some("A VAR model may not have leaded endogenous variables on the RHS. ")
                     } else if reference.timing == 0 && !structural {
-                        Some("A non-structural VAR model may not have contemporaneous endogenous variables on the RHS. ")
+                        Some(
+                            "A non-structural VAR model may not have contemporaneous endogenous variables on the RHS. ",
+                        )
                     } else {
                         None
                     }
                 } else if reference.timing >= 0 {
-                    Some("A trend component model may not have leaded or contemporaneous endogenous variables on the RHS. ")
+                    Some(
+                        "A trend component model may not have leaded or contemporaneous endogenous variables on the RHS. ",
+                    )
                 } else {
                     None
                 };
@@ -1993,7 +2065,9 @@ fn check_selected_shape(model: &Model, command: &SemiStructuralCommand) -> Optio
                 return Some(error(
                     reference.span,
                     "E434",
-                    format!("in Equation {tag}. A {family} may not have lagged or leaded exogenous variables on the RHS. "),
+                    format!(
+                        "in Equation {tag}. A {family} may not have lagged or leaded exogenous variables on the RHS. "
+                    ),
                 ));
             }
         }

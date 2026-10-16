@@ -1,8 +1,8 @@
 //! Real LSP consumers of the shared syntax records and written macro targets.
 use dygnosis::server::new_service;
 use dygnosis::span::LineIndex;
-use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 fn position(text: &str, byte: usize) -> Position {
     let position = LineIndex::new(text).position_utf16(text, byte as u32);
@@ -90,18 +90,24 @@ async fn completion_keeps_model_macro_option_and_native_contexts_separate() {
     for source in ["initval; y=|; end;", "steady_state_model; y=|; end;"] {
         let ordinary = completions(source).await;
         assert!(ordinary.iter().any(|item| item == "log"));
-        assert!(!ordinary
-            .iter()
-            .any(|item| matches!(item.as_str(), "diff" | "EXPECTATION" | "STEADY_STATE")));
+        assert!(
+            !ordinary
+                .iter()
+                .any(|item| matches!(item.as_str(), "diff" | "EXPECTATION" | "STEADY_STATE"))
+        );
     }
-    assert!(completions("pac_m|")
-        .await
-        .iter()
-        .any(|item| item == "pac_model"));
-    assert!(completions("var y; planner_objective log(|y);")
-        .await
-        .iter()
-        .any(|item| item == "diff"));
+    assert!(
+        completions("pac_m|")
+            .await
+            .iter()
+            .any(|item| item == "pac_model")
+    );
+    assert!(
+        completions("var y; planner_objective log(|y);")
+            .await
+            .iter()
+            .any(|item| item == "diff")
+    );
 }
 
 #[tokio::test]
@@ -145,25 +151,29 @@ async fn included_expression_uses_its_proven_model_context() {
         panic!("include completions");
     };
     assert!(items.iter().any(|item| item.label == "diff"));
-    assert!(service
-        .inner()
-        .signature_help(SignatureHelpParams {
-            text_document_position_params: target(6),
-            work_done_progress_params: Default::default(),
-            context: None,
-        })
-        .await
-        .unwrap()
-        .is_some());
-    assert!(service
-        .inner()
-        .hover(HoverParams {
-            text_document_position_params: target(3),
-            work_done_progress_params: Default::default(),
-        })
-        .await
-        .unwrap()
-        .is_some());
+    assert!(
+        service
+            .inner()
+            .signature_help(SignatureHelpParams {
+                text_document_position_params: target(6),
+                work_done_progress_params: Default::default(),
+                context: None,
+            })
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        service
+            .inner()
+            .hover(HoverParams {
+                text_document_position_params: target(3),
+                work_done_progress_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .is_some()
+    );
     let quiet = service
         .inner()
         .completion(CompletionParams {
@@ -213,9 +223,11 @@ async fn highlights_and_linked_editing_use_the_selected_binding_only() {
         .map(|byte| position(text, byte))
         .collect();
     assert_eq!(highlights.len(), selected.len());
-    assert!(highlights
-        .iter()
-        .all(|highlight| selected.contains(&highlight.range.start)));
+    assert!(
+        highlights
+            .iter()
+            .all(|highlight| selected.contains(&highlight.range.start))
+    );
     let linked = service
         .inner()
         .linked_editing_range(LinkedEditingRangeParams {
@@ -226,10 +238,12 @@ async fn highlights_and_linked_editing_use_the_selected_binding_only() {
         .unwrap()
         .unwrap();
     assert_eq!(linked.ranges.len(), selected.len());
-    assert!(linked
-        .ranges
-        .iter()
-        .all(|range| selected.contains(&range.start)));
+    assert!(
+        linked
+            .ranges
+            .iter()
+            .all(|range| selected.contains(&range.start))
+    );
 }
 
 #[tokio::test]
@@ -411,14 +425,18 @@ async fn function_signatures_balance_array_groups_and_nested_calls() {
 #[tokio::test]
 async fn function_signature_active_parameters_respect_each_arity() {
     let alternate = function_signature("var y;model;y=normcdf(y,0,|1);end;").await;
-    assert!(alternate.signatures.iter().any(|signature| signature
-        .parameters
-        .as_ref()
-        .is_some_and(|parameters| parameters.len() == 1)));
-    assert!(alternate.signatures.iter().any(|signature| signature
-        .parameters
-        .as_ref()
-        .is_some_and(|parameters| parameters.len() == 3)));
+    assert!(alternate.signatures.iter().any(|signature| {
+        signature
+            .parameters
+            .as_ref()
+            .is_some_and(|parameters| parameters.len() == 1)
+    }));
+    assert!(alternate.signatures.iter().any(|signature| {
+        signature
+            .parameters
+            .as_ref()
+            .is_some_and(|parameters| parameters.len() == 3)
+    }));
     assert_eq!(alternate.active_parameter, Some(2));
     for signature in &alternate.signatures {
         if let Some(active) = signature.active_parameter {
@@ -427,8 +445,10 @@ async fn function_signature_active_parameters_respect_each_arity() {
     }
     let extra = function_signature("@#define v = length([1,2],|3)\n").await;
     assert!(extra.active_parameter.is_none());
-    assert!(extra
-        .signatures
-        .iter()
-        .all(|signature| signature.active_parameter.is_none()));
+    assert!(
+        extra
+            .signatures
+            .iter()
+            .all(|signature| signature.active_parameter.is_none())
+    );
 }

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use dygnosis::span::LineIndex;
-use dygnosis::{check_w100, parse, PolicyCommand};
+use dygnosis::{PolicyCommand, check_w100, parse};
 
 const CLEAN: &[&str] = &[
     "trend_rbc_gov_inv",
@@ -155,9 +155,11 @@ fn w100_ramsey() {
     assert_eq!(rust.len(), 1);
     assert_eq!(rust[0].code, "E100");
     assert_eq!(rust[0].severity, 1);
-    assert!(rust[0]
-        .message
-        .starts_with("A planner_objective statement must be used"));
+    assert!(
+        rust[0]
+            .message
+            .starts_with("A planner_objective statement must be used")
+    );
     assert_policy_span(&src, &rust[0]);
 }
 
@@ -168,9 +170,11 @@ fn w100_planner_objective_alone() {
     assert_eq!(rust.len(), 1);
     assert_eq!(rust[0].code, "E100");
     assert_eq!(rust[0].severity, 1);
-    assert!(rust[0]
-        .message
-        .starts_with("A planner_objective statement must be used"));
+    assert!(
+        rust[0]
+            .message
+            .starts_with("A planner_objective statement must be used")
+    );
 }
 
 #[test]
@@ -193,9 +197,11 @@ fn w100_disc_ok() {
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1, "expected E215 only, got {rust:?}");
     assert_eq!(rust[0].code, "E215");
-    assert!(rust[0]
-        .message
-        .contains("discretionary_policy: the instruments option is required"));
+    assert!(
+        rust[0]
+            .message
+            .contains("discretionary_policy: the instruments option is required")
+    );
 }
 
 #[test]
@@ -303,12 +309,14 @@ fn w100_w103_both() {
     assert_eq!(rust.len(), 2);
     assert!(rust.iter().all(|d| d.code == "E103"));
     assert!(rust.iter().all(|d| d.severity == 1));
-    assert!(rust.iter().any(|d| d
-        .message
-        .contains("The osr statement requires the osr_params statement")));
-    assert!(rust.iter().any(|d| d
-        .message
-        .contains("optim_weights block or a planner_objective")));
+    assert!(rust.iter().any(|d| {
+        d.message
+            .contains("The osr statement requires the osr_params statement")
+    }));
+    assert!(rust.iter().any(|d| {
+        d.message
+            .contains("optim_weights block or a planner_objective")
+    }));
     for d in &rust {
         assert_policy_span(&src, d);
     }
@@ -321,9 +329,11 @@ fn w100_w103_weights() {
     assert_eq!(rust.len(), 1);
     assert_eq!(rust[0].code, "E103");
     assert_eq!(rust[0].severity, 1);
-    assert!(rust[0]
-        .message
-        .contains("optim_weights block or a planner_objective"));
+    assert!(
+        rust[0]
+            .message
+            .contains("optim_weights block or a planner_objective")
+    );
     assert_policy_span(&src, &rust[0]);
 }
 

@@ -149,12 +149,14 @@ fn semi_structural_family_matches_dynare_72_options() {
             "{command} has an option without help"
         );
     }
-    assert!(command_options("var_expectation_model")
-        .iter()
-        .find(|(name, _)| *name == "variable")
-        .unwrap()
-        .1
-        .contains("forecast"));
+    assert!(
+        command_options("var_expectation_model")
+            .iter()
+            .find(|(name, _)| *name == "variable")
+            .unwrap()
+            .1
+            .contains("forecast")
+    );
     assert_ne!(
         command_options("var_expectation_model")
             .iter()
@@ -243,12 +245,14 @@ fn heterogeneity_family_matches_dynare_72_options() {
         .1;
     assert_ne!(variable, option_doc("variable"));
     assert!(variable.contains("workspace"));
-    assert!(command_options("heterogeneity_load_steady_state")
-        .iter()
-        .find(|(name, _)| *name == "filename")
-        .unwrap()
-        .1
-        .contains("MAT file"));
+    assert!(
+        command_options("heterogeneity_load_steady_state")
+            .iter()
+            .find(|(name, _)| *name == "filename")
+            .unwrap()
+            .1
+            .contains("MAT file")
+    );
     let print = command_options("heterogeneity_simulate")
         .iter()
         .find(|(name, _)| *name == "print")
@@ -317,9 +321,11 @@ fn occbin_constraints_is_catalogued_block() {
     let commands = omitted["commands"].as_array().unwrap();
     assert_eq!(omitted["n_commands"], commands.len());
     assert!(commands.iter().any(|c| c == "occbin_constraints"));
-    assert!(commands
-        .windows(2)
-        .all(|pair| pair[0].as_str() < pair[1].as_str()));
+    assert!(
+        commands
+            .windows(2)
+            .all(|pair| pair[0].as_str() < pair[1].as_str())
+    );
 
     assert!(option_doc("name").contains("M-/MEX file"));
     assert_eq!(

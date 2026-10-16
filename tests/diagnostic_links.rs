@@ -107,11 +107,15 @@ fn declaration_taxonomy_retains_the_first_occurrence_through_retyping() {
         );
     }
     let text = "var foo; var foo; var foo;";
-    assert!(check_e030(&parse(text))
-        .iter()
-        .all(|row| row.related[0].span.start == 4));
+    assert!(
+        check_e030(&parse(text))
+            .iter()
+            .all(|row| row.related[0].span.start == 4)
+    );
     for option in ["first_deriv_provided", "second_deriv_provided"] {
-        let text = format!("external_function(name=leftfn,nargs=1,{option}=foo); external_function(name=rightfn,nargs=1,{option}=foo);");
+        let text = format!(
+            "external_function(name=leftfn,nargs=1,{option}=foo); external_function(name=rightfn,nargs=1,{option}=foo);"
+        );
         let rows = check_e030(&parse(&text));
         let row = rows.iter().find(|row| row.code == "W031").unwrap();
         assert_eq!(
@@ -152,7 +156,7 @@ fn equation_local_and_regime_links_keep_the_actual_earlier_row() {
         related.span.start as usize,
         text.find("[name='policy', relax='ELB']").unwrap()
     );
-    let text="var y; model; [name='x',bind='C1'] y=0; [name='x',bind='C1,C2'] y=1; end; occbin_constraints; name 'C1'; bind y<0; relax y>0; name 'C2'; bind y<1; relax y>1; end;";
+    let text = "var y; model; [name='x',bind='C1'] y=0; [name='x',bind='C1,C2'] y=1; end; occbin_constraints; name 'C1'; bind y<0; relax y>0; name 'C2'; bind y<1; relax y>1; end;";
     assert_eq!(
         first_related(text, "E177").span.start as usize,
         text.find("[name='x',bind='C1']").unwrap()
@@ -309,9 +313,9 @@ fn macro_context_and_independent_include_targets_reach_mcp_and_batch() {
         "parameters p;\n@#for k in 1:2\np=foo(1); external_function(name=foo,nargs=1);\n@#endfor\nvar y; model; y=0; end;",
         "@#for k in 1:2\nepilogue; z=1; end;\n@#endfor\nvar y; model; y=0; end;",
     ] {
-        let rows = dynare_diagnose(text,None,None);
+        let rows = dynare_diagnose(text, None, None);
         let row = rows.iter().find(|row| row.code == "W031").unwrap();
-        assert_eq!(row.related[0]["origin_frames"][0]["value"],"1", "{rows:?}");
+        assert_eq!(row.related[0]["origin_frames"][0]["value"], "1", "{rows:?}");
     }
     let set = check_file_with_origins("var y; parameters unused; model; y=y(-1); end;", root);
     assert_eq!(

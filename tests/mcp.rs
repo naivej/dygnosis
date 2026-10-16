@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 use dygnosis::explain::{explain, known_codes, render_markdown};
 use dygnosis::span::{LineIndex, Position};
 use dygnosis::{
-    analyze, auto_fix, check_e061, check_w061, check_w160, count_gap, dynare_auto_fix,
-    dynare_compare_models, dynare_diagnose, dynare_equations, dynare_expand, dynare_explain,
-    dynare_extract, dynare_find_references, dynare_format, dynare_list_diagnostic_codes,
-    dynare_list_options, dynare_model_info, dynare_related_files, dynare_rename, explain_equation,
-    has_structural_error, parse, quiet_i050, registered_tool_names, tools_list_json, Diagnostic,
-    McpReference, McpWorkspaceReference, Workspace,
+    Diagnostic, McpReference, McpWorkspaceReference, Workspace, analyze, auto_fix, check_e061,
+    check_w061, check_w160, count_gap, dynare_auto_fix, dynare_compare_models, dynare_diagnose,
+    dynare_equations, dynare_expand, dynare_explain, dynare_extract, dynare_find_references,
+    dynare_format, dynare_list_diagnostic_codes, dynare_list_options, dynare_model_info,
+    dynare_related_files, dynare_rename, explain_equation, has_structural_error, parse, quiet_i050,
+    registered_tool_names, tools_list_json,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const RUST_TOOLS: &[&str] = &[
     "dynare_syntax",
@@ -504,9 +504,11 @@ fn registered_tools_include_format() {
     let list = tools_list_json();
     let tools = list["tools"].as_array().expect("tools array");
     assert_eq!(tools.len(), RUST_TOOLS.len());
-    assert!(tools.iter().all(|tool| tool["description"]
-        .as_str()
-        .is_some_and(|text| !text.is_empty())));
+    assert!(tools.iter().all(|tool| {
+        tool["description"]
+            .as_str()
+            .is_some_and(|text| !text.is_empty())
+    }));
 
     let blob = serde_json::to_string(&tools_list_json()).expect("tools list json");
     for name in DROPPED_TOOLS {
@@ -691,17 +693,21 @@ end;
     assert_eq!(macro_definitions.len(), 2);
     assert_eq!(macro_definitions[0]["expression"], "1");
     assert_eq!(macro_definitions[1]["expression"], "2");
-    assert!(!macro_definitions[0]["expression"]
-        .as_str()
-        .unwrap()
-        .contains("@{"));
+    assert!(
+        !macro_definitions[0]["expression"]
+            .as_str()
+            .unwrap()
+            .contains("@{")
+    );
     assert_eq!(
         macro_definitions[0]["origin"],
         macro_definitions[1]["origin"]
     );
-    assert!(macro_definitions[0]["origin_frames"]
-        .as_array()
-        .is_some_and(|frames| !frames.is_empty()));
+    assert!(
+        macro_definitions[0]["origin_frames"]
+            .as_array()
+            .is_some_and(|frames| !frames.is_empty())
+    );
 }
 
 fn assert_format_keys(body: &Value) {
@@ -747,11 +753,13 @@ fn dynare_format_patch_workflow_and_settings() {
     assert_eq!(four_text["formatted_text"], four["formatted_text"]);
     let tab = dynare_format(patch, Some(&json!("  tab  "))).expect("tab word");
     assert_eq!(tab["formatted_text"], once["formatted_text"]);
-    assert!(dynare_format(patch, Some(&Value::Null))
-        .unwrap()
-        .get("formatted_text")
-        .unwrap()
-        .eq(&once["formatted_text"]));
+    assert!(
+        dynare_format(patch, Some(&Value::Null))
+            .unwrap()
+            .get("formatted_text")
+            .unwrap()
+            .eq(&once["formatted_text"])
+    );
 
     for bad in [
         json!(0),
@@ -840,10 +848,12 @@ end;
     .expect("unknown dimension");
     assert_eq!(missed["status"], "empty");
     assert_eq!(missed["fragment"], "");
-    assert!(missed["explanation"]
-        .as_str()
-        .unwrap()
-        .contains("dimension `g`"));
+    assert!(
+        missed["explanation"]
+            .as_str()
+            .unwrap()
+            .contains("dimension `g`")
+    );
 
     let macro_src = "\
 var x;
@@ -1367,20 +1377,24 @@ fn rename_workspace_swff_changed_only() {
     assert_eq!(changed.len(), 2);
     assert!(changed["swff.mod"].contains(&new_name));
     assert!(changed["swff_params.inc"].contains(&new_name));
-    assert!(refs_single(dynare_find_references(
-        &changed["swff.mod"],
-        shared,
-        None,
-        None
-    ))
-    .is_empty());
-    assert!(refs_single(dynare_find_references(
-        &changed["swff_params.inc"],
-        shared,
-        None,
-        None
-    ))
-    .is_empty());
+    assert!(
+        refs_single(dynare_find_references(
+            &changed["swff.mod"],
+            shared,
+            None,
+            None
+        ))
+        .is_empty()
+    );
+    assert!(
+        refs_single(dynare_find_references(
+            &changed["swff_params.inc"],
+            shared,
+            None,
+            None
+        ))
+        .is_empty()
+    );
 
     assert_eq!(
         dynare_rename(
@@ -1937,10 +1951,12 @@ fn dynare_equations_trend_rbc_gov_inv() {
     assert_eq!(named_eqs.len(), 1);
     assert_counted_origin(&named_eqs[0]);
     assert_tags_object(&named_eqs[0]);
-    assert!(named_eqs[0]
-        .get("explain")
-        .and_then(|v| v.as_str())
-        .is_some());
+    assert!(
+        named_eqs[0]
+            .get("explain")
+            .and_then(|v| v.as_str())
+            .is_some()
+    );
 
     let expected: Value =
         serde_json::from_str(&expected_mcp("dynare_equations.trend_rbc_gov_inv.json")).unwrap();

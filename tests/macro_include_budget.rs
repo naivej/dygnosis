@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use dygnosis::{dynare_diagnose, dynare_expand, dynare_model_info, Workspace};
+use dygnosis::{Workspace, dynare_diagnose, dynare_expand, dynare_model_info};
 
 const ROOT: &str = "/budget/root.mod";
 
@@ -42,10 +42,12 @@ fn repeated_dormant_includes_spend_the_root_work_before_splicing() {
     }
     let model = workspace.get_effective_model(ROOT).unwrap();
     assert!(model.macro_incomplete());
-    assert!(model
-        .incomplete_reasons
-        .iter()
-        .any(|reason| reason.message.contains("iteration work")));
+    assert!(
+        model
+            .incomplete_reasons
+            .iter()
+            .any(|reason| reason.message.contains("iteration work"))
+    );
 }
 
 #[test]
@@ -55,7 +57,9 @@ fn small_dormant_includes_keep_complete_counts() {
     let expanded = dynare_expand(root, Some(ROOT), Some(&supplied));
     assert_eq!(expanded["complete"], true, "{expanded:?}");
     assert_eq!(expanded["n_equations"], 1);
-    assert!(!dynare_diagnose(root, Some(ROOT), Some(&supplied))
-        .iter()
-        .any(|diag| diag.code == "I211"));
+    assert!(
+        !dynare_diagnose(root, Some(ROOT), Some(&supplied))
+            .iter()
+            .any(|diag| diag.code == "I211")
+    );
 }

@@ -1,4 +1,4 @@
-use dygnosis::model_diff::{compare_models, compare_models_with_budgets, ModelDiff};
+use dygnosis::model_diff::{ModelDiff, compare_models, compare_models_with_budgets};
 use dygnosis::parser::parse;
 use dygnosis::semantic_diff::{
     Availability, ChangeFacet, ChangeKind, ComparisonBudgets, FieldChange, FieldState, FieldValue,
@@ -172,10 +172,11 @@ fn empty_support_slots_keep_proposal_scale_in_its_original_position() {
         field(row, "proposal.scale.value").before.state,
         ValueState::Unknown
     );
-    assert!(row
-        .limits
-        .iter()
-        .any(|limit| limit.code == "proposal_scale_evaluation_unavailable"));
+    assert!(
+        row.limits
+            .iter()
+            .any(|limit| limit.code == "proposal_scale_evaluation_unavailable")
+    );
     assert!(field(row, "optimizer.lower_bound").before.state == ValueState::Absent);
 }
 
@@ -241,10 +242,12 @@ fn prior_function_summary_retains_sticky_flags_with_history_limit() {
         field(rows[0], "prior_function_has_function").after,
         FieldState::boolean(true)
     );
-    assert!(rows[0]
-        .limits
-        .iter()
-        .any(|limit| limit.code == "prior_function_history_unavailable"));
+    assert!(
+        rows[0]
+            .limits
+            .iter()
+            .any(|limit| limit.code == "prior_function_history_unavailable")
+    );
 }
 
 #[test]
@@ -370,12 +373,14 @@ fn removal_is_a_written_operation_without_inferred_effective_prior() {
     );
     let rows = prior_rows(&diff);
     assert_eq!(rows.len(), 2);
-    assert!(rows
-        .iter()
-        .all(|row| row.before.is_none() || row.after.is_none()));
-    assert!(rows
-        .iter()
-        .all(|row| field(row, "distribution").before.state == ValueState::Absent));
+    assert!(
+        rows.iter()
+            .all(|row| row.before.is_none() || row.after.is_none())
+    );
+    assert!(
+        rows.iter()
+            .all(|row| field(row, "distribution").before.state == ValueState::Absent)
+    );
 }
 
 #[test]
@@ -445,10 +450,12 @@ fn copy_and_subsample_context_do_not_resolve_inherited_values() {
         field(rows[0], "copy_source_subsample").after,
         FieldState::text("second")
     );
-    assert!(rows[0]
-        .limits
-        .iter()
-        .any(|limit| limit.code == "prior_copy_effective_unavailable"));
+    assert!(
+        rows[0]
+            .limits
+            .iter()
+            .any(|limit| limit.code == "prior_copy_effective_unavailable")
+    );
 }
 
 #[test]
@@ -524,9 +531,10 @@ fn included_prior_edit_retains_semantic_detail_and_private_proof() {
     );
     let rows = diff["semantic"]["rows"].as_array().unwrap();
     assert!(rows.iter().any(|row| row["family"] == "priors"));
-    assert!(rows
-        .iter()
-        .all(|row| row["after"].get("provenance").is_none()));
+    assert!(
+        rows.iter()
+            .all(|row| row["after"].get("provenance").is_none())
+    );
 }
 
 #[test]
@@ -546,11 +554,12 @@ fn priors_alias_retains_one_named_prior_comparison() {
         field(rows[0], "optimizer.initial").after,
         FieldState::text("0.5")
     );
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .all(|row| row.family != SemanticFamily::Commands));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .all(|row| row.family != SemanticFamily::Commands)
+    );
 }
 
 #[test]
@@ -576,13 +585,17 @@ fn existing_empty_slot_diagnostic_inputs_and_fire_controls_are_unchanged() {
     let model = parse(source);
     assert!(model.estimated_params[0].mean_expr.is_some());
     assert!(model.estimated_params[0].std_expr.is_none());
-    assert!(dygnosis::check_estimated_params(&model)
-        .iter()
-        .any(|diagnostic| diagnostic.code == "E248"));
+    assert!(
+        dygnosis::check_estimated_params(&model)
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E248")
+    );
     let beta = parse(&entry("p,beta_pdf,0.5,0.5;"));
-    assert!(dygnosis::check_estimated_params(&beta)
-        .iter()
-        .any(|diagnostic| diagnostic.code == "E250"));
+    assert!(
+        dygnosis::check_estimated_params(&beta)
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E250")
+    );
 }
 
 #[test]
@@ -620,10 +633,11 @@ fn unsupported_retained_layout_has_a_specific_field_gap() {
         field(row, "optimizer.initial").before.state,
         ValueState::Unknown
     );
-    assert!(row
-        .limits
-        .iter()
-        .any(|limit| limit.code == "prior_positional_fields_unavailable"));
+    assert!(
+        row.limits
+            .iter()
+            .any(|limit| limit.code == "prior_positional_fields_unavailable")
+    );
     assert!(field(row, "written_row").changed);
 }
 
@@ -639,10 +653,12 @@ fn unchanged_unevaluated_support_text_keeps_coverage_gap_without_change_rows() {
         .find(|family| family.family == SemanticFamily::Priors)
         .unwrap();
     assert_eq!(coverage.availability, Availability::Partial);
-    assert!(coverage
-        .limits
-        .iter()
-        .any(|limit| limit.code == "proposal_scale_evaluation_unavailable"));
+    assert!(
+        coverage
+            .limits
+            .iter()
+            .any(|limit| limit.code == "proposal_scale_evaluation_unavailable")
+    );
     for limits in [
         &coverage.limits,
         &diff.semantic.limits,
@@ -696,8 +712,9 @@ fn reordered_unique_entries_preserve_occurrence_order_without_value_edits() {
     let diff = compare(&before, &after);
     let rows = prior_rows(&diff);
     assert_eq!(rows.len(), 2);
-    assert!(rows
-        .iter()
-        .all(|row| row.facets.contains(&ChangeFacet::Order)));
+    assert!(
+        rows.iter()
+            .all(|row| row.facets.contains(&ChangeFacet::Order))
+    );
     assert!(rows.iter().all(|row| !field(row, "prior.mean").changed));
 }

@@ -1,4 +1,4 @@
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage};
+use dygnosis::{JsonStage, analyze, find_preprocessor, parse, run_preprocessor};
 use std::time::Duration;
 
 #[test]
@@ -13,7 +13,9 @@ fn generated_discount_parameter_is_known_to_final_symbol_lists() {
             ("forecast optimal_policy_discount_factor;", true),
             ("osr_params optimal_policy_discount_factor;", false),
         ] {
-            let source = format!("var y pol; parameters p; p=1; model(linear); y=p; end; planner_objective y^2; {earlier} {list}");
+            let source = format!(
+                "var y pol; parameters p; p=1; model(linear); y=p; end; planner_objective y^2; {earlier} {list}"
+            );
             let diagnostics = analyze(&parse(&source));
             assert!(
                 !diagnostics.iter().any(|row| row.code == "E239"),
@@ -125,10 +127,12 @@ fn generated_parameter_retypes_follow_effective_order() {
     }
     let source = "var y pol; model(linear); y=0; end; planner_objective y^2;\n@#for j in 1:2\n@#if j==2\noptimal_policy_discount_factor=.9;\n@#endif\ndiscretionary_policy(instruments=(pol));\n@#endfor";
     let model = parse(source);
-    assert!(model
-        .param_assignments
-        .iter()
-        .any(|row| model.name(row.name) == "optimal_policy_discount_factor"));
+    assert!(
+        model
+            .param_assignments
+            .iter()
+            .any(|row| model.name(row.name) == "optimal_policy_discount_factor")
+    );
     if let Some(pp) = find_preprocessor(None) {
         assert!(
             run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check).success

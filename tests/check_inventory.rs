@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use dygnosis::explain::{explain, known_codes, ExplainKind};
+use dygnosis::explain::{ExplainKind, explain, known_codes};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]

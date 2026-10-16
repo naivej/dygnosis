@@ -1,6 +1,6 @@
 use dygnosis::{compare_models, parse};
 use std::collections::HashMap;
-use tower_lsp::{lsp_types::*, LanguageServer};
+use tower_lsp::{LanguageServer, lsp_types::*};
 
 #[test]
 fn compare_includes_values_of_retyped_parameters() {

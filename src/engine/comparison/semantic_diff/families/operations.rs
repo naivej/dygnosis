@@ -108,7 +108,12 @@ pub(super) fn collect(
             FieldState::unknown(),
             ChangeFacet::Expression,
         );
-        gap(&mut value, "homotopy_endpoints_not_retained", "The target is retained but initial/final expressions are discarded by the parser. Endpoint edits remain accepted statement context and Source.", "parser_homotopy_retention");
+        gap(
+            &mut value,
+            "homotopy_endpoints_not_retained",
+            "The target is retained but initial/final expressions are discarded by the parser. Endpoint edits remain accepted statement context and Source.",
+            "parser_homotopy_retention",
+        );
         facts.push(value);
     }
     for (index, row) in model.change_type_statements.iter().enumerate() {
@@ -377,7 +382,12 @@ pub(super) fn collect(
             FieldState::unknown(),
             ChangeFacet::Expression,
         );
-        gap(&mut value, "pruned_initialization_rhs_not_retained", "The pruned initialization retains target, block and removal operation identity, but not its former RHS. The removed assignment is not a live initialization fact.", "parser_pruned_initialization_retention");
+        gap(
+            &mut value,
+            "pruned_initialization_rhs_not_retained",
+            "The pruned initialization retains target, block and removal operation identity, but not its former RHS. The removed assignment is not a live initialization fact.",
+            "parser_pruned_initialization_retention",
+        );
         facts.push(value);
     }
     let results: Vec<_> = model
@@ -429,7 +439,12 @@ pub(super) fn collect(
         )),
         ChangeFacet::Operation,
     );
-    gap(&mut history, "type_result_history_association", "This ordered success-event history excludes results directly owned by var_remove. Other results have no direct retained operation link, so the history is one supporting operation fact, not one extra counted operation per event. It does not infer event-to-surgery or event-to-change_type correspondence.", "parser_type_result_occurrence_retention");
+    gap(
+        &mut history,
+        "type_result_history_association",
+        "This ordered success-event history excludes results directly owned by var_remove. Other results have no direct retained operation link, so the history is one supporting operation fact, not one extra counted operation per event. It does not infer event-to-surgery or event-to-change_type correspondence.",
+        "parser_type_result_occurrence_retention",
+    );
     facts.push(history);
     macros(model, facts);
     markers(model, facts);
@@ -512,7 +527,12 @@ fn macros(model: &Model, facts: &mut Vec<CapturedFact>) {
         )),
         ChangeFacet::Expression,
     );
-    gap(&mut value, "macro_context_written_boundary", "These pre-expansion records describe retained written root context. They do not prove executed branches, include variable expressions, included-file history, or expanded occurrence correspondence.", "parser_macro_context_retention");
+    gap(
+        &mut value,
+        "macro_context_written_boundary",
+        "These pre-expansion records describe retained written root context. They do not prove executed branches, include variable expressions, included-file history, or expanded occurrence correspondence.",
+        "parser_macro_context_retention",
+    );
     facts.push(value);
 }
 
@@ -735,6 +755,13 @@ fn marker(model: &Model, family: SemanticFamily, name: &str, state: FieldState) 
         }
     }
     field(&mut value, name, state, ChangeFacet::Options);
-    gap(&mut value, &format!("{name}_retained_history"), &format!("The parser retains {name} as a selected setting or presence marker, not every option value and occurrence. Complete accepted statement context retains its written history."), "parser_command_setting_retention");
+    gap(
+        &mut value,
+        &format!("{name}_retained_history"),
+        &format!(
+            "The parser retains {name} as a selected setting or presence marker, not every option value and occurrence. Complete accepted statement context retains its written history."
+        ),
+        "parser_command_setting_retention",
+    );
     value
 }

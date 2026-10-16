@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use dygnosis::compare_snapshots::{
-    capture_git_snapshot, capture_working_snapshot, compare_captured_snapshots, CapturedSnapshot,
-    GitSnapshotInput, ManifestEntry, SnapshotCapture, SnapshotCoordinates, SourceFact,
-};
 use dygnosis::Workspace;
+use dygnosis::compare_snapshots::{
+    CapturedSnapshot, GitSnapshotInput, ManifestEntry, SnapshotCapture, SnapshotCoordinates,
+    SourceFact, capture_git_snapshot, capture_working_snapshot, compare_captured_snapshots,
+};
 use serde_json::Value;
 
 fn input(id: &str, root: &str, files: &[(&str, &str)]) -> GitSnapshotInput {
@@ -67,12 +67,19 @@ fn changed_row(result: &Value) -> &Value {
 
 #[test]
 fn deferred_sources_follow_executed_macros_and_never_request_inactive_bodies() {
-    let mut snapshot = input("before", "root.mod", &[
-        ("root.mod", "@#define pick = \"active\"\n@#include pick\n@#if 0\n@#include \"inactive\"\n@#endif\n"),
-        ("active", "@#include \"nested\"\n"),
-        ("nested", "var y; model; [name='r'] y=1; end;"),
-        ("inactive", "unreadable inactive source"),
-    ]);
+    let mut snapshot = input(
+        "before",
+        "root.mod",
+        &[
+            (
+                "root.mod",
+                "@#define pick = \"active\"\n@#include pick\n@#if 0\n@#include \"inactive\"\n@#endif\n",
+            ),
+            ("active", "@#include \"nested\"\n"),
+            ("nested", "var y; model; [name='r'] y=1; end;"),
+            ("inactive", "unreadable inactive source"),
+        ],
+    );
     let bodies = std::mem::take(&mut snapshot.sources);
     for expected in ["root.mod", "active", "nested"] {
         match capture_git_snapshot(&snapshot) {
@@ -496,9 +503,11 @@ fn git_source_pairing_requires_the_exact_repository_and_keeps_empty_includes() {
         .as_array()
         .unwrap();
     assert_eq!(files.len(), 4, "{unpaired}");
-    assert!(files
-        .iter()
-        .all(|file| file["correspondence"] == "unpaired"));
+    assert!(
+        files
+            .iter()
+            .all(|file| file["correspondence"] == "unpaired")
+    );
 }
 
 #[test]
@@ -540,12 +549,14 @@ fn git_working_source_aliases_pair_repository_relative_includes_lexically() {
     assert_eq!(files.len(), 1, "{result}");
     assert_eq!(files[0]["correspondence"], "proven_file_identity");
     assert_eq!(files[0]["before"]["file_key"], "shared/part");
-    assert!(files[0]["after"]["file_key"]
-        .as_str()
-        .unwrap()
-        .ends_with(if cfg!(windows) {
-            "shared\\part"
-        } else {
-            "shared/part"
-        }));
+    assert!(
+        files[0]["after"]["file_key"]
+            .as_str()
+            .unwrap()
+            .ends_with(if cfg!(windows) {
+                "shared\\part"
+            } else {
+                "shared/part"
+            })
+    );
 }

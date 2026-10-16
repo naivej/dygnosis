@@ -1,6 +1,6 @@
 use super::*;
 use crate::engine::comparison::{
-    compare_models, compare_models_with_budgets, compare_models_with_sources, CompareSource,
+    CompareSource, compare_models, compare_models_with_budgets, compare_models_with_sources,
 };
 use crate::engine::language::parser::parse;
 
@@ -116,9 +116,11 @@ fn log_and_convention_changes_have_independent_rows_without_legacy_changes() {
     assert!(field(detail, "log_transform").changed);
     assert!(field(detail, "predetermined").changed);
     assert_eq!(detail.pointer, "/semantic/rows/0");
-    assert!(detail
-        .facets
-        .contains(&ChangeFacet::PredeterminedConvention));
+    assert!(
+        detail
+            .facets
+            .contains(&ChangeFacet::PredeterminedConvention)
+    );
 }
 
 #[test]
@@ -134,11 +136,13 @@ fn metadata_absence_empty_and_duplicate_selection_follow_legacy() {
         &parse("var y (long_name='First'); var y (long_name='Edited');"),
     );
     assert!(diff.symbols_changed.is_empty());
-    assert!(!diff
-        .semantic
-        .rows
-        .iter()
-        .any(|row| row.pointer.starts_with("/symbols_changed/")));
+    assert!(
+        !diff
+            .semantic
+            .rows
+            .iter()
+            .any(|row| row.pointer.starts_with("/symbols_changed/"))
+    );
     let written = row(&diff, SemanticFamily::Symbols, "y");
     assert_eq!(
         field(written, "long_name").before,
@@ -240,14 +244,16 @@ fn shock_fields_preserve_period_value_order_and_exclude_locations() {
         ]))
     );
     assert!(!field(detail, "periods").changed);
-    assert!(!detail.fields.iter().any(|field| [
-        "location",
-        "group_location",
-        "origin_uri",
-        "source_span",
-        "occurrence_id"
-    ]
-    .contains(&field.name.as_str())));
+    assert!(!detail.fields.iter().any(|field| {
+        [
+            "location",
+            "group_location",
+            "origin_uri",
+            "source_span",
+            "occurrence_id",
+        ]
+        .contains(&field.name.as_str())
+    }));
 
     let same = compare_models_with_sources(
         &old,
@@ -433,11 +439,12 @@ fn reference_caps_reindex_pointers_and_keep_row_links_valid() {
     );
     assert_eq!(diff.semantic.rows[0].limits[0].omitted, Some(2));
     assert_eq!(diff.coverage.availability, Availability::Partial);
-    assert!(diff
-        .coverage
-        .limits
-        .iter()
-        .any(|limit| limit.code == "reference_limit" && limit.omitted == Some(2)));
+    assert!(
+        diff.coverage
+            .limits
+            .iter()
+            .any(|limit| limit.code == "reference_limit" && limit.omitted == Some(2))
+    );
 }
 
 #[test]
@@ -454,11 +461,12 @@ fn zero_detail_budget_keeps_legacy_rows_and_explicit_omission() {
     );
     assert_eq!(diff.changed_parameter_values.len(), 1);
     assert!(diff.semantic.rows.is_empty());
-    assert!(diff
-        .semantic
-        .limits
-        .iter()
-        .any(|limit| limit.code == "serialized_output_limit" && limit.omitted == Some(1)));
+    assert!(
+        diff.semantic
+            .limits
+            .iter()
+            .any(|limit| limit.code == "serialized_output_limit" && limit.omitted == Some(1))
+    );
     assert_eq!(diff.semantic.availability, Availability::Partial);
 }
 
@@ -522,14 +530,38 @@ fn hunk_caps_keep_exact_captured_file_actions_and_count_omissions() {
 #[test]
 fn all_existing_shock_forms_have_named_fields_at_their_legacy_pointer() {
     let cases = [
-        ("varexo e; shocks; var e; stderr 1; end;", "varexo e; shocks; var e; stderr 2; end;"),
-        ("varexo e; shocks(surprise); var e; periods 1; values 1; end;", "varexo e; shocks(surprise); var e; periods 1; values 2; end;"),
-        ("varexo e; mshocks(relative_to_initval); var e; periods 1; values 1; end;", "varexo e; mshocks(relative_to_initval); var e; periods 1; values 2; end;"),
-        ("varexo e; heteroskedastic_shocks; var e; periods 1; scales 1; end;", "varexo e; heteroskedastic_shocks; var e; periods 1; scales 2; end;"),
-        ("var y; varexo e; shock_paths; var e; periods 1; values 1; end;", "var y; varexo e; shock_paths; var e; periods 1; values 2; end;"),
-        ("var y; varexo e; endval(learnt_in=3); e=1; end;", "var y; varexo e; endval(learnt_in=3); e=2; end;"),
-        ("varexo e; shock_groups; group=e; end;", "varexo e u; shock_groups; group=e,u; end;"),
-        ("heterogeneity_dimension h; varexo(heterogeneity=h) e; shocks(heterogeneity=h); var e; stderr 1; end;", "heterogeneity_dimension h; varexo(heterogeneity=h) e; shocks(heterogeneity=h); var e; stderr 2; end;"),
+        (
+            "varexo e; shocks; var e; stderr 1; end;",
+            "varexo e; shocks; var e; stderr 2; end;",
+        ),
+        (
+            "varexo e; shocks(surprise); var e; periods 1; values 1; end;",
+            "varexo e; shocks(surprise); var e; periods 1; values 2; end;",
+        ),
+        (
+            "varexo e; mshocks(relative_to_initval); var e; periods 1; values 1; end;",
+            "varexo e; mshocks(relative_to_initval); var e; periods 1; values 2; end;",
+        ),
+        (
+            "varexo e; heteroskedastic_shocks; var e; periods 1; scales 1; end;",
+            "varexo e; heteroskedastic_shocks; var e; periods 1; scales 2; end;",
+        ),
+        (
+            "var y; varexo e; shock_paths; var e; periods 1; values 1; end;",
+            "var y; varexo e; shock_paths; var e; periods 1; values 2; end;",
+        ),
+        (
+            "var y; varexo e; endval(learnt_in=3); e=1; end;",
+            "var y; varexo e; endval(learnt_in=3); e=2; end;",
+        ),
+        (
+            "varexo e; shock_groups; group=e; end;",
+            "varexo e u; shock_groups; group=e,u; end;",
+        ),
+        (
+            "heterogeneity_dimension h; varexo(heterogeneity=h) e; shocks(heterogeneity=h); var e; stderr 1; end;",
+            "heterogeneity_dimension h; varexo(heterogeneity=h) e; shocks(heterogeneity=h); var e; stderr 2; end;",
+        ),
     ];
     for (before, after) in cases {
         let diff = compare_models(&parse(before), &parse(after));
@@ -578,15 +610,36 @@ fn all_existing_shock_forms_have_named_fields_at_their_legacy_pointer() {
 #[test]
 fn shock_scope_is_separate_from_target_domain_classification() {
     for (before, after, name, scope, target_domain) in [
-        ("varexo e; shocks; var e; stderr 1; end;", "varexo e; shocks; var e; stderr 2; end;", "e", "aggregate", "exogenous"),
-        ("var y; varobs y; shocks; var y; stderr 1; end;", "var y; varobs y; shocks; var y; stderr 2; end;", "y", "aggregate", "measurement_error"),
-        ("heterogeneity_dimension h; varexo(heterogeneity=h) e; shocks(heterogeneity=h); var e; stderr 1; end;", "heterogeneity_dimension h; varexo(heterogeneity=h) e; shocks(heterogeneity=h); var e; stderr 2; end;", "e", "heterogeneous", "exogenous"),
+        (
+            "varexo e; shocks; var e; stderr 1; end;",
+            "varexo e; shocks; var e; stderr 2; end;",
+            "e",
+            "aggregate",
+            "exogenous",
+        ),
+        (
+            "var y; varobs y; shocks; var y; stderr 1; end;",
+            "var y; varobs y; shocks; var y; stderr 2; end;",
+            "y",
+            "aggregate",
+            "measurement_error",
+        ),
+        (
+            "heterogeneity_dimension h; varexo(heterogeneity=h) e; shocks(heterogeneity=h); var e; stderr 1; end;",
+            "heterogeneity_dimension h; varexo(heterogeneity=h) e; shocks(heterogeneity=h); var e; stderr 2; end;",
+            "e",
+            "heterogeneous",
+            "exogenous",
+        ),
     ] {
         let diff = compare_models(&parse(before), &parse(after));
         let detail = row(&diff, SemanticFamily::Shocks, name);
         assert_eq!(detail.before.as_ref().unwrap().scope.domain, scope);
         assert_eq!(detail.after.as_ref().unwrap().scope.domain, scope);
-        assert_eq!(field(detail, "domain").after, FieldState::text(target_domain));
+        assert_eq!(
+            field(detail, "domain").after,
+            FieldState::text(target_domain)
+        );
     }
 }
 
@@ -634,9 +687,10 @@ fn actual_final_detail_json_stays_within_budget_after_reference_limit_metadata()
             .map(|hunk| serde_json::to_vec(hunk).unwrap().len())
             .sum::<usize>();
     assert!(actual <= diff.semantic.budgets.serialized_output_bytes);
-    assert!(diff
-        .semantic
-        .limits
-        .iter()
-        .any(|limit| limit.code == "reference_limit"));
+    assert!(
+        diff.semantic
+            .limits
+            .iter()
+            .any(|limit| limit.code == "reference_limit")
+    );
 }

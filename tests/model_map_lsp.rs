@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use dygnosis::server::new_service;
-use serde_json::{json, Value};
-use tower_lsp::lsp_types::*;
+use serde_json::{Value, json};
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 fn url(name: &str) -> Url {
     Url::parse(&format!("file:///C:/dygnosis-map-lsp/{name}")).unwrap()
@@ -292,15 +292,18 @@ async fn numbers_keep_macro_static_local_removed_and_dimension_scopes() {
     let mut flat = Vec::new();
     all(&rows, &mut flat);
     assert!(flat.iter().any(|row| row.name == "3–4 · copy"));
-    assert!(flat
-        .iter()
-        .any(|row| row.name == "old" && row.detail.as_deref() == Some("removed equation")));
-    assert!(flat
-        .iter()
-        .any(|row| row.detail.as_deref() == Some("static-only equation")));
-    assert!(flat
-        .iter()
-        .any(|row| row.detail.as_deref() == Some("model-local definition")));
+    assert!(
+        flat.iter()
+            .any(|row| row.name == "old" && row.detail.as_deref() == Some("removed equation"))
+    );
+    assert!(
+        flat.iter()
+            .any(|row| row.detail.as_deref() == Some("static-only equation"))
+    );
+    assert!(
+        flat.iter()
+            .any(|row| row.detail.as_deref() == Some("model-local definition"))
+    );
     server
         .did_change_configuration(DidChangeConfigurationParams {
             settings: json!({"outline":{"sections":["equations"],"equationNumbers":false}}),
@@ -308,9 +311,11 @@ async fn numbers_keep_macro_static_local_removed_and_dimension_scopes() {
         .await;
     let equations = symbols(server, &root).await;
     assert_local_tree(&equations, text, None);
-    assert!(equations
-        .iter()
-        .all(|row| row.kind == SymbolKind::FUNCTION && !row.name.contains('·')));
+    assert!(
+        equations
+            .iter()
+            .all(|row| row.kind == SymbolKind::FUNCTION && !row.name.contains('·'))
+    );
 }
 
 #[tokio::test]
@@ -355,11 +360,13 @@ async fn required_include_activity_controls_both_transport_count_authority() {
         assert_eq!(result["complete"], false);
         assert!(result.get("n_equations").is_none());
         assert!(result["equations"].as_array().unwrap().is_empty());
-        assert!(result["statements"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|row| row["equation_count"].is_null()));
+        assert!(
+            result["statements"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["equation_count"].is_null())
+        );
         let inactive = format!("@#if 0\n{prefix}@#endif\nvar y; model; y=0; end;\n");
         if !prefix.contains("unavailable") {
             open(server, &root, &inactive).await;
@@ -371,7 +378,9 @@ async fn required_include_activity_controls_both_transport_count_authority() {
     let cycle = url("activity-cycle.inc");
     open(server, &cycle, "@#include \"activity.mod\"\n").await;
     for (condition, complete) in [(1, false), (0, true)] {
-        let text = format!("@#if {condition}\n@#include \"activity-cycle.inc\"\n@#endif\nvar y; model; y=0; end;\n");
+        let text = format!(
+            "@#if {condition}\n@#include \"activity-cycle.inc\"\n@#endif\nvar y; model; y=0; end;\n"
+        );
         open(server, &root, &text).await;
         let result = info(server, &root, None).await;
         let files = HashMap::from([
@@ -485,12 +494,16 @@ async fn crlf_mixed_newlines_unicode_and_macro_copies_keep_exact_written_ranges(
     assert_local_tree(&symbols(server, &root).await, text, None);
     assert_local_tree(&symbols(server, &child).await, included, None);
     let folded = folds(server, &root).await;
-    assert!(folded
-        .iter()
-        .any(|row| row.start_line == 2 && row.end_line == 6));
-    assert!(folded
-        .iter()
-        .any(|row| row.start_line == 3 && row.end_line == 5));
+    assert!(
+        folded
+            .iter()
+            .any(|row| row.start_line == 2 && row.end_line == 6)
+    );
+    assert!(
+        folded
+            .iter()
+            .any(|row| row.start_line == 3 && row.end_line == 5)
+    );
 }
 
 #[tokio::test]
@@ -521,10 +534,12 @@ async fn model_info_supplies_resolved_and_missing_native_dependency_candidates()
     }
     let untitled = Url::parse("untitled:watch-untitled.mod").unwrap();
     open(server, &untitled, "var output_y; model; output_y=0; end;").await;
-    assert!(info(server, &untitled, None).await["dependency_candidates"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        info(server, &untitled, None).await["dependency_candidates"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 fn crate_path_key(uri: &Url) -> String {
@@ -636,9 +651,11 @@ async fn outline_omits_macro_and_included_assignments_in_recovered_and_shared_vi
         .await
         .unwrap()
         .unwrap();
-    assert!(workspace
-        .iter()
-        .all(|row| row.location.range == parameter.range));
+    assert!(
+        workspace
+            .iter()
+            .all(|row| row.location.range == parameter.range)
+    );
     assert!(workspace.iter().any(|row| row.location.uri == child));
     let helpers = server
         .symbol(WorkspaceSymbolParams {
@@ -692,12 +709,14 @@ async fn outline_names_use_written_heterogeneity_and_preserve_declaration_childr
         .find(|row| row.name == "model(heterogeneity=households)")
         .unwrap();
     assert!(model.detail.is_none());
-    assert!(model
-        .children
-        .as_ref()
-        .unwrap()
-        .iter()
-        .any(|row| row.name == "1 · individual"));
+    assert!(
+        model
+            .children
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|row| row.name == "1 · individual")
+    );
     let declarations: Vec<_> = rows
         .iter()
         .filter(|row| row.name == "var(heterogeneity=households)")
@@ -726,12 +745,16 @@ async fn outline_names_use_written_heterogeneity_and_preserve_declaration_childr
         .find(|row| row.name == "model(heterogeneity=households)")
         .unwrap();
     assert_eq!(model.detail.as_deref(), Some("recovered written structure"));
-    assert!(recovered
-        .iter()
-        .any(|row| row.name == "var(heterogeneity=households)"));
-    assert!(recovered
-        .iter()
-        .any(|row| row.name == "varexo(heterogeneity=households)"));
+    assert!(
+        recovered
+            .iter()
+            .any(|row| row.name == "var(heterogeneity=households)")
+    );
+    assert!(
+        recovered
+            .iter()
+            .any(|row| row.name == "varexo(heterogeneity=households)")
+    );
     let c = recovered
         .iter()
         .find(|row| row.name == "var(heterogeneity=households)")

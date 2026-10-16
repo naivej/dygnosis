@@ -24,37 +24,37 @@ mod rename;
 #[cfg(test)]
 mod ordering_tests;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, ClientSocket, LanguageServer, LspService, Server};
 
 use crate::engine::analysis::model_info::{
-    assigned_number, classify_variable_timing, format_timing_line, TimingClass,
+    TimingClass, assigned_number, classify_variable_timing, format_timing_line,
 };
-use crate::engine::catalog::{option_doc, HETEROGENEITY_OPTION, HET_SHOCKS_OVERWRITE};
-use crate::engine::comparison::{compare_models_with_sources, CompareSource};
+use crate::engine::catalog::{HET_SHOCKS_OVERWRITE, HETEROGENEITY_OPTION, option_doc};
+use crate::engine::comparison::{CompareSource, compare_models_with_sources};
 use crate::engine::diagnostics::explain;
-use crate::engine::diagnostics::{check_file, check_in_workspace_with_origins, DiagnosticSet};
+use crate::engine::diagnostics::{DiagnosticSet, check_file, check_in_workspace_with_origins};
 use crate::engine::editing::equation_names::{
     equation_name_plan, long_name_plan, metadata_completion,
 };
 use crate::engine::editing::format::{
-    format_outcome_with_limit, format_range_outcome_with_limit, FormatOutcome, RangeFormatOutcome,
+    FormatOutcome, RangeFormatOutcome, format_outcome_with_limit, format_range_outcome_with_limit,
 };
 use crate::engine::editing::refs::{
     enclosing_paren_has_ident, ident_at, is_legal_ident, option_command_at, option_owner_at,
 };
 use crate::engine::language::expand::{EquationOrigin, OriginFrame};
-use crate::engine::language::lexer::{tokenize, TokenKind};
+use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::language::model::{Decl, Equation, Model};
 use crate::engine::language::span::{LineIndex, Span};
 use crate::engine::workspace::Workspace;
-use crate::lsp::model_map::{common_leaves, WrittenView};
+use crate::lsp::model_map::{WrittenView, common_leaves};
 use crate::lsp::names::{NameRole, NameSites, SemanticMapping};
 use crate::lsp::settings::{
-    PresentationSettings, ResourceSettings, SettingsStore, CONFIGURATION_SCHEMA_VERSION,
-    MODEL_INFO_SCHEMA_VERSION,
+    CONFIGURATION_SCHEMA_VERSION, MODEL_INFO_SCHEMA_VERSION, PresentationSettings,
+    ResourceSettings, SettingsStore,
 };
 use crate::{Severity, VERSION};
 
@@ -1014,11 +1014,7 @@ impl Backend {
                 }
             })
             .collect::<Vec<_>>();
-        if hits.is_empty() {
-            None
-        } else {
-            Some(hits)
-        }
+        if hits.is_empty() { None } else { Some(hits) }
     }
 
     fn complete(
@@ -1505,11 +1501,7 @@ impl Backend {
                 data: None,
             });
         }
-        if links.is_empty() {
-            None
-        } else {
-            Some(links)
-        }
+        if links.is_empty() { None } else { Some(links) }
     }
 
     fn semantic_tokens(&self, uri: &Url, range: Option<Range>) -> Option<SemanticTokens> {
@@ -1692,7 +1684,7 @@ impl Backend {
             RangeFormatOutcome::Changed(start, end, replacement) => (start, end, replacement),
             RangeFormatOutcome::Unchanged => return Ok(None),
             RangeFormatOutcome::Unsupported(reason) => {
-                return Err(tower_lsp::jsonrpc::Error::invalid_params(reason))
+                return Err(tower_lsp::jsonrpc::Error::invalid_params(reason));
             }
         };
         Ok(Some(vec![line_range_edit(
@@ -1744,7 +1736,7 @@ impl Backend {
             Some(value) => match value.as_str().and_then(|uri| Url::parse(uri).ok()) {
                 Some(uri) => uri,
                 None => {
-                    return json!({"error":"dynare/modelInfo requires a valid document_uri", "code":"INVALID_ARGUMENTS"})
+                    return json!({"error":"dynare/modelInfo requires a valid document_uri", "code":"INVALID_ARGUMENTS"});
                 }
             },
         };
@@ -1816,16 +1808,20 @@ impl Backend {
         result["revision"] = json!(revision);
         result["complete"] = json!(complete);
         result["owner_roots"] = json!(inner.known_owner_roots(&document));
-        result["dependency_candidates"] = json!(inner
-            .workspace
-            .input_candidate_paths(root.as_str())
-            .iter()
-            .filter_map(|path| Url::from_file_path(path).ok())
-            .collect::<Vec<_>>());
-        result["block_categories"] = json!(crate::engine::workspace::model_map::BLOCK_CATEGORIES
-            .iter()
-            .map(|(category, default)| json!({"category":category,"default":default}))
-            .collect::<Vec<_>>());
+        result["dependency_candidates"] = json!(
+            inner
+                .workspace
+                .input_candidate_paths(root.as_str())
+                .iter()
+                .filter_map(|path| Url::from_file_path(path).ok())
+                .collect::<Vec<_>>()
+        );
+        result["block_categories"] = json!(
+            crate::engine::workspace::model_map::BLOCK_CATEGORIES
+                .iter()
+                .map(|(category, default)| json!({"category":category,"default":default}))
+                .collect::<Vec<_>>()
+        );
         let companions = inner
             .workspace
             .companion_records(root.as_str())
@@ -1958,8 +1954,8 @@ impl Backend {
         input: &crate::engine::comparison::compare_snapshots::SnapshotInput,
     ) -> crate::engine::comparison::compare_snapshots::SnapshotCapture {
         use crate::engine::comparison::compare_snapshots::{
-            capture_git_snapshot_with_limit, capture_working_snapshot, SnapshotCapture,
-            SnapshotFailure, SnapshotInput,
+            SnapshotCapture, SnapshotFailure, SnapshotInput, capture_git_snapshot_with_limit,
+            capture_working_snapshot,
         };
         match input {
             SnapshotInput::Git(input) => {
@@ -2033,8 +2029,8 @@ impl Backend {
 
     fn compare_snapshot_command(&self, arguments: &[Value]) -> Value {
         use crate::engine::comparison::compare_snapshots::{
-            compare_captured_snapshots, SnapshotCapture, SnapshotCompareRequest,
-            SnapshotCoordinates, SnapshotFailure, SnapshotInput, SNAPSHOT_SCHEMA_VERSION,
+            SNAPSHOT_SCHEMA_VERSION, SnapshotCapture, SnapshotCompareRequest, SnapshotCoordinates,
+            SnapshotFailure, SnapshotInput, compare_captured_snapshots,
         };
         let request = arguments
             .first()
@@ -2383,11 +2379,7 @@ impl Backend {
                 eq,
             ));
         }
-        if items.is_empty() {
-            None
-        } else {
-            Some(items)
-        }
+        if items.is_empty() { None } else { Some(items) }
     }
 
     fn incoming(&self, item: &CallHierarchyItem) -> Option<Vec<CallHierarchyIncomingCall>> {

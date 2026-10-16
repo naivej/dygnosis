@@ -9,8 +9,8 @@
 
 use dygnosis::model::{CalibrationRange, FamilyValueKind};
 use dygnosis::{
-    analyze, check_parse, find_preprocessor, parse, run_preprocessor, Diagnostic, JsonStage,
-    Severity,
+    Diagnostic, JsonStage, Severity, analyze, check_parse, find_preprocessor, parse,
+    run_preprocessor,
 };
 
 fn official_check(source: &str, accepted: bool, sentence: Option<&str>) {
@@ -365,7 +365,13 @@ fn block_row_names_are_mod_file_locals() {
         "irf_calibration;\ny, e, [zzz, 1];\nend;\n",
     ] {
         let source = format!("{head}{body}model;\nc = y + zzz;\nend;\n");
-        official_check(&source, false, Some("Variable zzz not allowed inside model declaration. Its scope is only outside model."));
+        official_check(
+            &source,
+            false,
+            Some(
+                "Variable zzz not allowed inside model declaration. Its scope is only outside model.",
+            ),
+        );
         let diags = analyze(&parse(&source));
         let codes: Vec<&str> = codes(&diags);
         assert!(
@@ -399,9 +405,11 @@ fn matched_moment_unknown_names_use_model_expression_scope() {
 
     let source = "var y zzz; model; y=0; zzz=0; end; matched_moments; zzz; end;";
     official_check(source, true, None);
-    assert!(!analyze(&parse(source))
-        .iter()
-        .any(|row| row.severity == Severity::Error));
+    assert!(
+        !analyze(&parse(source))
+            .iter()
+            .any(|row| row.severity == Severity::Error)
+    );
 }
 
 /// `priors` executes prior rows without entering either moment-block reader.

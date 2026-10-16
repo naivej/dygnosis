@@ -127,27 +127,31 @@ fn an_unchanged_copy_cannot_make_a_repeated_regime_pair_unique() {
         diff["unmatched_same_name"][0]["added"][0]["tags"]["bind"],
         "ELB"
     );
-    assert!(diff["semantic"]["rows"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|row| row["family"] == "equations"
-            && row["limits"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|limit| limit["code"] == "equation_correspondence_unpaired"))
-        .all(|row| row["timing"].as_array().unwrap().is_empty()));
+    assert!(
+        diff["semantic"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["family"] == "equations"
+                && row["limits"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|limit| limit["code"] == "equation_correspondence_unpaired"))
+            .all(|row| row["timing"].as_array().unwrap().is_empty())
+    );
 }
 
 #[test]
 fn reorder_of_unique_names_is_unchanged() {
     let diff = diff("reorder_before.mod", "reorder_after.mod");
     assert!(eq_lists_empty(&diff), "{diff}");
-    assert!(diff["heterogeneous_equations"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        diff["heterogeneous_equations"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -398,20 +402,24 @@ fn unmatched_groups_sort_by_name_and_source_order() {
 fn parameter_and_shock_diffs_stay_when_equations_only_reorder() {
     let diff = diff("preserve_before.mod", "preserve_after.mod");
     assert!(eq_lists_empty(&diff), "{diff}");
-    assert!(diff["changed_parameter_values"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|row| row["name"] == "beta"));
+    assert!(
+        diff["changed_parameter_values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["name"] == "beta")
+    );
     assert_eq!(diff["added_parameters"].as_array().unwrap().len(), 0);
     let shocks = diff["shock_setup_changes"].as_array().unwrap();
     assert_eq!(shocks.len(), 1, "{diff}");
     assert_eq!(shocks[0]["before"]["periods"][0], "2");
     assert_eq!(shocks[0]["after"]["periods"][0], "3");
-    assert!(diff["heterogeneous_equations"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        diff["heterogeneous_equations"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     let md = diff["markdown"].as_str().unwrap();
     assert!(md.contains("beta"), "{md}");
     assert!(md.contains("Shock setup changes"), "{md}");

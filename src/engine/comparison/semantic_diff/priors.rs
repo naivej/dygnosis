@@ -10,8 +10,8 @@ use crate::engine::language::model::{
 };
 
 use super::occurrences::{
-    accepted_statement, compare_facts, parent_at_order, statement_side, statement_text,
-    CapturedFact, FactField, TokenClaims,
+    CapturedFact, FactField, TokenClaims, accepted_statement, compare_facts, parent_at_order,
+    statement_side, statement_text,
 };
 use super::*;
 

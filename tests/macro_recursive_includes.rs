@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use dygnosis::{dynare_diagnose, dynare_expand, dynare_model_info, Workspace};
+use dygnosis::{Workspace, dynare_diagnose, dynare_expand, dynare_model_info};
 
 const ROOT: &str = "/recursive/root.mod";
 const STEP: &str =
@@ -112,9 +112,11 @@ fn recursive_expansion_reaches_existing_unknown_duplicate_type_and_syntax_checks
         );
         let quiet_child = recursive_leaf("var y; model; y=0; end;\n");
         let quiet = supplied(root, &[("step.inc", &quiet_child)]);
-        assert!(!dynare_diagnose(root, Some(ROOT), Some(&quiet))
-            .iter()
-            .any(|diagnostic| diagnostic.code == *code));
+        assert!(
+            !dynare_diagnose(root, Some(ROOT), Some(&quiet))
+                .iter()
+                .any(|diagnostic| diagnostic.code == *code)
+        );
     }
 }
 
@@ -191,7 +193,11 @@ fn equal_include_targets_with_different_loop_inputs_keep_each_call_value() {
 #[test]
 fn an_inactive_recursive_call_does_not_read_the_file() {
     // Guards treating a dormant edge as required source or incomplete coverage.
-    assert_complete("@#if false\n@#include \"root.mod\"\n@#include \"absent.inc\"\n@#endif\nvar y; model; y=0; end;", &[], 1);
+    assert_complete(
+        "@#if false\n@#include \"root.mod\"\n@#include \"absent.inc\"\n@#endif\nvar y; model; y=0; end;",
+        &[],
+        1,
+    );
 }
 
 #[test]

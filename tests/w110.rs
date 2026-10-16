@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use dygnosis::span::LineIndex;
-use dygnosis::{check_w110, parse, ShockKind};
+use dygnosis::{ShockKind, check_w110, parse};
 
 const CLEAN: &[&str] = &[
     "trend_rbc_gov_inv",

@@ -5,7 +5,7 @@ use std::time::Duration;
 use dygnosis::expr::ExprKind;
 use dygnosis::model::{EstimatedParamKind, ShockKind};
 use dygnosis::preprocessor::find_preprocessor;
-use dygnosis::{analyze, block_openers, parse, run_preprocessor, Diagnostic, JsonStage, Severity};
+use dygnosis::{Diagnostic, JsonStage, Severity, analyze, block_openers, parse, run_preprocessor};
 
 fn fixture(rel: &str) -> String {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -44,9 +44,11 @@ fn explicit_empty_name_prevents_the_implicit_default_collision() {
     let fire = "var y z; model; [name='2'] y=z; y+z=0; end;";
     let quiet_text = "var y z; model; [name='2'] y=z; [name=''] y+z=0; end;";
     let fire_diags = analyze(&parse(fire));
-    assert!(find(&fire_diags, "E257")
-        .message
-        .ends_with("number 2 because it is already in use"));
+    assert!(
+        find(&fire_diags, "E257")
+            .message
+            .ends_with("number 2 because it is already in use")
+    );
     quiet(&analyze(&parse(quiet_text)), "E257");
     let pp = std::path::PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
     if !pp.is_file() {
@@ -91,10 +93,12 @@ fn histval_fills_entries_not_initval() {
     assert_eq!(model.histval[0].lag, 0);
     assert!(model.histval[0].expr.is_some());
     assert!(model.initval.is_empty());
-    assert!(model
-        .helper_assignments
-        .iter()
-        .all(|a| model.name(a.name) != "y"));
+    assert!(
+        model
+            .helper_assignments
+            .iter()
+            .all(|a| model.name(a.name) != "y")
+    );
     assert!(!model.initval_all_values_required);
 }
 
@@ -304,8 +308,7 @@ const E245_MSG: &str = "in `estimated_params' block, the stderr of e is declared
 const E246_MSG: &str =
     "in `estimated_params' block, the correlation between e and e2 is declared twice.";
 const E247_MSG: &str = "in `estimated_params' block, the skewness of e is declared twice.";
-const E250_MSG: &str =
-    "The prior density is not defined for the beta distribution when the mean = standard deviation = 0.5.";
+const E250_MSG: &str = "The prior density is not defined for the beta distribution when the mean = standard deviation = 0.5.";
 
 fn ep_model(body: &str) -> String {
     format!(
@@ -350,18 +353,22 @@ fn e248_value_used() {
 #[test]
 fn e249_skew_on_endo() {
     let diags = analyze(&parse(&ep_model("skew y, 0;")));
-    assert!(find(&diags, "E249")
-        .message
-        .contains("skewness can only be specified for exogenous variables"));
+    assert!(
+        find(&diags, "E249")
+            .message
+            .contains("skewness can only be specified for exogenous variables")
+    );
     quiet(&diags, "E093");
 }
 
 #[test]
 fn e249_skew_on_param() {
     let diags = analyze(&parse(&ep_model("skew rho, 0;")));
-    assert!(find(&diags, "E249")
-        .message
-        .contains("skewness can only be specified for exogenous variables"));
+    assert!(
+        find(&diags, "E249")
+            .message
+            .contains("skewness can only be specified for exogenous variables")
+    );
     quiet(&diags, "E093");
 }
 
@@ -420,9 +427,11 @@ fn e251_planner_exo() {
         "{src} planner_objective e;",
         src = ramsey_ar1()
     )));
-    assert!(find(&diags, "E251")
-        .message
-        .contains("You cannot include exogenous variables"));
+    assert!(
+        find(&diags, "E251")
+            .message
+            .contains("You cannot include exogenous variables")
+    );
 }
 
 #[test]
@@ -518,9 +527,11 @@ fn e257_default_eq_tag() {
     let diags = analyze(&parse(
         "var y; varexo e; parameters rho; rho = 0.9; model; [name='2'] y = rho*y(-1)+e; y + y = 0; end;",
     ));
-    assert!(find(&diags, "E257")
-        .message
-        .contains("Error creating default equation tag"));
+    assert!(
+        find(&diags, "E257")
+            .message
+            .contains("Error creating default equation tag")
+    );
 }
 
 #[test]
@@ -635,9 +646,11 @@ fn e266_shock_variance_on_param() {
         "{src} shocks; var rho = 0.01; end;",
         src = ar1()
     )));
-    assert!(find(&diags, "E266")
-        .message
-        .contains("setting a variance on 'rho'"));
+    assert!(
+        find(&diags, "E266")
+            .message
+            .contains("setting a variance on 'rho'")
+    );
     quiet(&diags, "E020");
 }
 
@@ -647,9 +660,11 @@ fn e267_shock_stderr_on_param() {
         "{src} shocks; var rho; stderr 0.01; end;",
         src = ar1()
     )));
-    assert!(find(&diags, "E267")
-        .message
-        .contains("setting a standard error on 'rho'"));
+    assert!(
+        find(&diags, "E267")
+            .message
+            .contains("setting a standard error on 'rho'")
+    );
 }
 
 #[test]
@@ -658,9 +673,11 @@ fn e268_shock_cov_mixed() {
         "{src} shocks; var y, e = 0.01; end;",
         src = ar1()
     )));
-    assert!(find(&diags, "E268")
-        .message
-        .contains("setting a covariance between"));
+    assert!(
+        find(&diags, "E268")
+            .message
+            .contains("setting a covariance between")
+    );
 }
 
 #[test]
@@ -669,9 +686,11 @@ fn e269_shock_corr_mixed() {
         "{src} shocks; corr y, e = 0.1; end;",
         src = ar1()
     )));
-    assert!(find(&diags, "E269")
-        .message
-        .contains("setting a correlation between"));
+    assert!(
+        find(&diags, "E269")
+            .message
+            .contains("setting a correlation between")
+    );
 }
 
 #[test]
@@ -713,9 +732,11 @@ fn e272_static_with_lag() {
     let diags = analyze(&parse(
         "var y; varexo e; parameters rho; rho = 0.9; model; [static] y = y(-1); end;",
     ));
-    assert!(find(&diags, "E272")
-        .message
-        .contains("An equation tagged [static] cannot contain"));
+    assert!(
+        find(&diags, "E272")
+            .message
+            .contains("An equation tagged [static] cannot contain")
+    );
 }
 
 #[test]
@@ -724,9 +745,11 @@ fn e273_generate_irfs_name_twice() {
         "{src} generate_irfs; a, e = 1; a, e = 1; end;",
         src = ar1()
     )));
-    assert!(find(&diags, "E273")
-        .message
-        .contains("generate_irfs block must be unique"));
+    assert!(
+        find(&diags, "E273")
+            .message
+            .contains("generate_irfs block must be unique")
+    );
 }
 
 #[test]
@@ -735,9 +758,11 @@ fn e274_generate_irfs_exo_twice() {
         "{src} generate_irfs; a, e = 1, e = 2; end;",
         src = ar1()
     )));
-    assert!(find(&diags, "E274")
-        .message
-        .contains("You have set the exogenous variable"));
+    assert!(
+        find(&diags, "E274")
+            .message
+            .contains("You have set the exogenous variable")
+    );
 }
 
 #[test]
@@ -745,9 +770,11 @@ fn e275_namespace() {
     let diags = analyze(&parse(
         "var y; varexo e; parameters rho; rho = foo.bar; model; y = rho*y(-1)+e; end;",
     ));
-    assert!(find(&diags, "E275")
-        .message
-        .contains("Namespace-qualified symbol"));
+    assert!(
+        find(&diags, "E275")
+            .message
+            .contains("Namespace-qualified symbol")
+    );
 }
 
 #[test]
@@ -781,8 +808,10 @@ fn qualified_assignment_reports_the_refusal_without_its_w011() {
                 JsonStage::Check,
             );
             assert!(!check.success);
-            assert!(format!("{}{}", check.raw_stdout, check.raw_stderr)
-                .contains(&find(&diags, "E275").message));
+            assert!(
+                format!("{}{}", check.raw_stdout, check.raw_stderr)
+                    .contains(&find(&diags, "E275").message)
+            );
         }
     }
     let source =
@@ -835,9 +864,11 @@ fn e278_div_zero() {
     let diags = analyze(&parse(
         "var y; varexo e; parameters rho; rho = 0.9; model; y = 1/(1-1)+e; end;",
     ));
-    assert!(find(&diags, "E278")
-        .message
-        .contains("Division by zero when forming"));
+    assert!(
+        find(&diags, "E278")
+            .message
+            .contains("Division by zero when forming")
+    );
 }
 
 #[test]
@@ -855,9 +886,11 @@ fn e279_external_function_outside() {
     let diags = analyze(&parse(
         "var y; varexo e; parameters rho; external_function(name=myf); rho = myf; model; y = rho*y(-1)+e; end;",
     ));
-    assert!(find(&diags, "E279")
-        .message
-        .contains("name of a MATLAB/Octave function"));
+    assert!(
+        find(&diags, "E279")
+            .message
+            .contains("name of a MATLAB/Octave function")
+    );
 }
 
 #[test]
@@ -865,9 +898,11 @@ fn e280_external_function_inside() {
     let diags = analyze(&parse(
         "var y; varexo e; parameters rho; rho = 0.9; external_function(name=myf); model; y = myf; end;",
     ));
-    assert!(find(&diags, "E280")
-        .message
-        .contains("function name external to Dynare"));
+    assert!(
+        find(&diags, "E280")
+            .message
+            .contains("function name external to Dynare")
+    );
 }
 
 #[test]
@@ -875,9 +910,11 @@ fn e281_mod_file_local_in_model() {
     let diags = analyze(&parse(
         "var y; varexo e; parameters rho; rho = foo; model; y = foo; end;",
     ));
-    assert!(find(&diags, "E281")
-        .message
-        .contains("not allowed inside model declaration"));
+    assert!(
+        find(&diags, "E281")
+            .message
+            .contains("not allowed inside model declaration")
+    );
     quiet(&diags, "E020");
 }
 
@@ -886,9 +923,11 @@ fn e282_model_local_outside() {
     let diags = analyze(&parse(
         "var y; varexo e; parameters rho; rho = 0.9; model; #z = y; y = rho*y(-1)+e; end; rho = z;",
     ));
-    assert!(find(&diags, "E282")
-        .message
-        .contains("not allowed outside model declaration. Its scope is only inside model"));
+    assert!(
+        find(&diags, "E282")
+            .message
+            .contains("not allowed outside model declaration. Its scope is only inside model")
+    );
 }
 
 #[test]
@@ -907,9 +946,11 @@ fn e284_for_tuple_arity() {
     let diags = analyze(&parse(
         "var y; varexo e; parameters rho; rho = 0.9;\n@#for (a, b) in [(1, 2, 3)]\n@#define z = a\n@#endfor\nmodel; y = rho*y(-1)+e; end;",
     ));
-    assert!(find(&diags, "E284")
-        .message
-        .contains("Encountered tuple of size"));
+    assert!(
+        find(&diags, "E284")
+            .message
+            .contains("Encountered tuple of size")
+    );
 }
 
 #[test]
@@ -926,9 +967,27 @@ fn e285_plus_type_mismatch() {
 #[test]
 fn macro_type_controls_require_pinned_line_start_directives() {
     let inputs = [
-        ("var y; varexo e; parameters rho; rho = 0.9; @#if \"hello\"\n@#endif\nmodel; y=rho*y(-1)+e; end;", "E062", "syntax error, unexpected ENDIF, expecting end of file", "E283", "The condition must evaluate to a boolean or a double"),
-        ("var y; varexo e; parameters rho; rho = 0.9; @#for (a,b) in [(1,2,3)]\n@#define z=a\n@#endfor\nmodel; y=rho*y(-1)+e; end;", "E062", "syntax error, unexpected ENDFOR, expecting end of file", "E284", "Encountered tuple of size 3 but only have 2 index variables"),
-        ("var y; varexo e; parameters rho; rho = 0.9; @#define x=\"a\"\n@#define y=x+1\nmodel; y=rho*y(-1)+e; end;", "E063", "Unknown variable x", "E285", "Type mismatch for operands of + operator"),
+        (
+            "var y; varexo e; parameters rho; rho = 0.9; @#if \"hello\"\n@#endif\nmodel; y=rho*y(-1)+e; end;",
+            "E062",
+            "syntax error, unexpected ENDIF, expecting end of file",
+            "E283",
+            "The condition must evaluate to a boolean or a double",
+        ),
+        (
+            "var y; varexo e; parameters rho; rho = 0.9; @#for (a,b) in [(1,2,3)]\n@#define z=a\n@#endfor\nmodel; y=rho*y(-1)+e; end;",
+            "E062",
+            "syntax error, unexpected ENDFOR, expecting end of file",
+            "E284",
+            "Encountered tuple of size 3 but only have 2 index variables",
+        ),
+        (
+            "var y; varexo e; parameters rho; rho = 0.9; @#define x=\"a\"\n@#define y=x+1\nmodel; y=rho*y(-1)+e; end;",
+            "E063",
+            "Unknown variable x",
+            "E285",
+            "Type mismatch for operands of + operator",
+        ),
     ];
     let binary = std::path::PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
     for (inline, inline_code, inline_needle, code, needle) in inputs {
@@ -1048,9 +1107,11 @@ fn change_type_planner_instrument_and_osr_bounds_use_the_final_type() {
     quiet(&analyze(&parse(e251_quiet)), "E251");
 
     let e251_fire = "var y; varexo e; parameters a; change_type(varexo) a; model; y = e * y(-1); end; ramsey_model; planner_objective a;";
-    assert!(find(&analyze(&parse(e251_fire)), "E251")
-        .message
-        .contains("You cannot include exogenous variables"));
+    assert!(
+        find(&analyze(&parse(e251_fire)), "E251")
+            .message
+            .contains("You cannot include exogenous variables")
+    );
 
     let e101_quiet = "parameters i; var y; varexo e; change_type(var) i; parameters rho; rho = 0.9; model; y = rho*y(-1) + e + i; end; planner_objective y; ramsey_model(instruments=(i));";
     quiet(&analyze(&parse(e101_quiet)), "E101");

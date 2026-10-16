@@ -1,11 +1,11 @@
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 
-use dygnosis::server::{new_service, Backend};
+use dygnosis::server::{Backend, new_service};
 use dygnosis::{
-    analyze, dynare_diagnose, find_preprocessor, parse, run_preprocessor, Diagnostic, JsonStage,
-    Severity,
+    Diagnostic, JsonStage, Severity, analyze, dynare_diagnose, find_preprocessor, parse,
+    run_preprocessor,
 };
-use tower_lsp::{lsp_types::*, LanguageServer};
+use tower_lsp::{LanguageServer, lsp_types::*};
 
 const MODEL: &str = "var y r z; model(linear); y=r+z; end;";
 const OBJECTIVE: &str = "planner_objective y^2;";
@@ -118,7 +118,9 @@ fn mixed_policy_keeps_the_last_supplied_instruments_before_the_e202_refusal() {
                 &source,
                 false,
                 &expected,
-                Some("You cannot use the discretionary_policy command when you use either ramsey_model or ramsey_policy and vice versa"),
+                Some(
+                    "You cannot use the discretionary_policy command when you use either ramsey_model or ramsey_policy and vice versa",
+                ),
             );
             let rows = analyze(&parse(&source));
             assert_eq!(missing(&rows), expected, "{source}: {rows:?}");
@@ -353,7 +355,10 @@ fn macro_execution_order_retains_the_refusal_when_spans_repeat_or_run_backwards(
         let source = format!("{MODEL}{OBJECTIVE}{SSM}\n{policy}");
         official(&source, false, &[], None);
         let rows = analyze(&parse(&source));
-        assert!(rows.iter().any(|row| row.code == code), "{source}: {rows:?}");
+        assert!(
+            rows.iter().any(|row| row.code == code),
+            "{source}: {rows:?}"
+        );
         assert!(missing(&rows).is_empty(), "{source}: {rows:?}");
     }
     let source = format!(
@@ -474,10 +479,12 @@ async fn lsp_unsaved_policy_edits_update_the_same_w042_warning() {
         })
         .await;
     let rows = pull(server, &uri).await;
-    assert!(rows
-        .iter()
-        .any(|row| row.code == Some(NumberOrString::String("E297".into()))));
-    assert!(rows
-        .iter()
-        .all(|row| row.code != Some(NumberOrString::String("W042".into()))));
+    assert!(
+        rows.iter()
+            .any(|row| row.code == Some(NumberOrString::String("E297".into())))
+    );
+    assert!(
+        rows.iter()
+            .all(|row| row.code != Some(NumberOrString::String("W042".into())))
+    );
 }

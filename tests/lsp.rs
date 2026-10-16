@@ -1,10 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use dygnosis::server::{diagnostics_for, initialize_result, new_service};
 use dygnosis::Workspace;
-use tower_lsp::lsp_types::*;
+use dygnosis::server::{diagnostics_for, initialize_result, new_service};
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 const OUT: &[&str] = &[
     "E040", "W040", "W041", "I041", "W071", "I070", "I071", "W080", "W081", "DYNR",
@@ -2299,10 +2299,12 @@ fn initialize_capabilities_wave_c() {
     assert!(result.capabilities.code_lens_provider.is_none());
     assert!(result.capabilities.call_hierarchy_provider.is_some());
     assert!(result.capabilities.document_formatting_provider.is_some());
-    assert!(result
-        .capabilities
-        .document_range_formatting_provider
-        .is_some());
+    assert!(
+        result
+            .capabilities
+            .document_range_formatting_provider
+            .is_some()
+    );
     assert!(result.capabilities.signature_help_provider.is_some());
     assert_eq!(
         result.capabilities.text_document_sync,
@@ -3369,10 +3371,12 @@ async fn show_effective_model_evaluates_length() {
         .await;
     let payload = show_effective_payload(&service, &uri).await;
     assert!(payload.get("status").is_none(), "{payload}");
-    assert!(payload["effective_text"]
-        .as_str()
-        .unwrap()
-        .contains("y = 2"));
+    assert!(
+        payload["effective_text"]
+            .as_str()
+            .unwrap()
+            .contains("y = 2")
+    );
     assert_ne!(payload["origins"], serde_json::json!([]));
     assert!(payload["macro_messages"].as_array().unwrap().is_empty());
 }
@@ -3465,10 +3469,12 @@ async fn show_effective_model_hank_includes_heterogeneous_origins() {
     assert_eq!(origins[2]["scope"], "heterogeneous");
     assert_eq!(origins[2]["dimension"], "d");
     assert_eq!(origins[2]["index"], 2);
-    assert!(payload["effective_text"]
-        .as_str()
-        .unwrap()
-        .contains("model(heterogeneity = d)"));
+    assert!(
+        payload["effective_text"]
+            .as_str()
+            .unwrap()
+            .contains("model(heterogeneity = d)")
+    );
 }
 
 #[tokio::test]
@@ -3847,9 +3853,11 @@ async fn signature_help_uses_known_calls_and_option_lists_only() {
     assert!(signature_at_byte(declaration, option).await.is_some());
 
     let after_model = "var y; model; y = 0; end; stoch_simul(order";
-    assert!(signature_at_byte(after_model, after_model.len())
-        .await
-        .is_some());
+    assert!(
+        signature_at_byte(after_model, after_model.len())
+            .await
+            .is_some()
+    );
 
     let shock_timing = "var shocks; model; shocks = shocks(-1); end;";
     let timing = shock_timing.find("shocks(-1)").unwrap() + "shocks(".len();
@@ -3904,9 +3912,11 @@ var y; model; y=0; end;
     assert!(messages
         .iter()
         .any(|row| row["kind"] == "echo" && row["message"].as_str().unwrap().contains("before")));
-    assert!(!messages
-        .iter()
-        .any(|row| row["message"].as_str().unwrap_or("").contains("after")));
+    assert!(
+        !messages
+            .iter()
+            .any(|row| row["message"].as_str().unwrap_or("").contains("after"))
+    );
     assert!(messages[0].get("range").is_some(), "{messages:?}");
     let effective = payload["effective_text"].as_str().unwrap();
     assert!(!effective.contains("y = 0"), "{effective}");

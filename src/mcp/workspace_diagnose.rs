@@ -9,12 +9,12 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::engine::diagnostics::{
-    check_in_workspace_with_origins, Diagnostic, DiagnosticSet, Severity,
+    Diagnostic, DiagnosticSet, Severity, check_in_workspace_with_origins,
 };
 use crate::engine::language::span::LineIndex;
+use crate::engine::workspace::Workspace;
 use crate::engine::workspace::check_walk::{absolute_path, collect_model_files, starts_with_plus};
 use crate::engine::workspace::include_resolver::{normalize_uri, path_key};
-use crate::engine::workspace::Workspace;
 use crate::mcp::McpDiagnostic;
 
 /// Input error. No report is produced.
@@ -549,10 +549,12 @@ mod tests {
         assert_eq!(report.roots[1].root, ROOT_B);
         assert!(report.roots.iter().all(|entry| entry.root != SHARED));
         assert!(report.roots.iter().all(|entry| entry.root != CAL));
-        assert!(report
-            .roots
-            .iter()
-            .all(|entry| entry.status == RootStatus::Ok));
+        assert!(
+            report
+                .roots
+                .iter()
+                .all(|entry| entry.status == RootStatus::Ok)
+        );
         assert!(report.roots.iter().all(|entry| entry.failure.is_none()));
 
         let a = by_root(&report, ROOT_A);
@@ -651,10 +653,12 @@ mod tests {
             bad.failure.as_deref(),
             Some("unresolved @#include \"dygnosis_slice13_missing.inc\"")
         );
-        assert!(report
-            .roots
-            .iter()
-            .all(|entry| entry.root != "batch13_mid.mod"));
+        assert!(
+            report
+                .roots
+                .iter()
+                .all(|entry| entry.root != "batch13_mid.mod")
+        );
 
         let notes = by_root(&report, "batch13_notes.txt");
         assert_eq!(notes.status, RootStatus::Failed);
@@ -764,10 +768,12 @@ end;
         let entry = by_root(&report, &root);
         assert_eq!(entry.status, RootStatus::Ok, "{entry:?}");
         assert_eq!(entry.failure, None);
-        assert!(!entry
-            .diagnostics
-            .iter()
-            .any(|d| d.diagnostic.code == "E304"));
+        assert!(
+            !entry
+                .diagnostics
+                .iter()
+                .any(|d| d.diagnostic.code == "E304")
+        );
 
         std::fs::create_dir_all(dir.path.join("parts")).expect("disk directory");
         let with_host_directory =
@@ -798,10 +804,12 @@ end;
         let report = diagnose_map(&files, std::slice::from_ref(&root)).expect("nested map");
         let entry = by_root(&report, &root);
         assert_eq!(entry.status, RootStatus::Ok, "{entry:?}");
-        assert!(!entry
-            .diagnostics
-            .iter()
-            .any(|diag| diag.diagnostic.code == "E304"));
+        assert!(
+            !entry
+                .diagnostics
+                .iter()
+                .any(|diag| diag.diagnostic.code == "E304")
+        );
         assert!(mentions(entry, "root_hit"), "{entry:?}");
         assert!(!mentions(entry, "child_hit"), "{entry:?}");
     }
@@ -892,7 +900,10 @@ end;
     fn map_includepath_dot_components_find_virtual_directory() {
         let root = "batch13_dot_dir/main.mod";
         let files = map_of(&[
-            (root, "@#includepath \".\"\n@#includepath \"parts/.\"\n@#include \"leaf.inc\"\nvar y;\nmodel;\ny=0;\nend;\n"),
+            (
+                root,
+                "@#includepath \".\"\n@#includepath \"parts/.\"\n@#include \"leaf.inc\"\nvar y;\nmodel;\ny=0;\nend;\n",
+            ),
             ("batch13_dot_dir/parts/leaf.inc", "parameters hit;\n"),
         ]);
         let report = diagnose_map(&files, &[root.to_string()]).expect("dot map");
@@ -1035,14 +1046,18 @@ end;
         let files = map_of(&[(root.as_str(), source)]);
         let roots = [root.clone()];
         let missing = diagnose_map(&files, &roots).expect("missing companion");
-        assert!(by_root(&missing, &root)
-            .diagnostics
-            .iter()
-            .any(|d| d.diagnostic.code == "W160"));
-        assert!(by_root(&missing, &root)
-            .diagnostics
-            .iter()
-            .any(|d| d.diagnostic.code == "I050"));
+        assert!(
+            by_root(&missing, &root)
+                .diagnostics
+                .iter()
+                .any(|d| d.diagnostic.code == "W160")
+        );
+        assert!(
+            by_root(&missing, &root)
+                .diagnostics
+                .iter()
+                .any(|d| d.diagnostic.code == "I050")
+        );
 
         std::fs::write(&companion, "disk only").expect("disk companion");
         std::fs::write(&steady_file, "disk only").expect("disk steady file");
@@ -1053,14 +1068,18 @@ end;
         supplied.insert(slash_key(&companion), "supplied".to_string());
         supplied.insert(slash_key(&steady_file), "supplied".to_string());
         let resolved = diagnose_map(&supplied, &roots).expect("supplied companion");
-        assert!(!by_root(&resolved, &root)
-            .diagnostics
-            .iter()
-            .any(|d| d.diagnostic.code == "W160"));
-        assert!(!by_root(&resolved, &root)
-            .diagnostics
-            .iter()
-            .any(|d| d.diagnostic.code == "I050"));
+        assert!(
+            !by_root(&resolved, &root)
+                .diagnostics
+                .iter()
+                .any(|d| d.diagnostic.code == "W160")
+        );
+        assert!(
+            !by_root(&resolved, &root)
+                .diagnostics
+                .iter()
+                .any(|d| d.diagnostic.code == "I050")
+        );
     }
 
     #[test]
@@ -1072,10 +1091,12 @@ end;
         let files = map_of(&[(root.as_str(), source)]);
         let roots = [root.clone()];
         let missing = diagnose_map(&files, &roots).expect("missing file");
-        assert!(by_root(&missing, &root)
-            .diagnostics
-            .iter()
-            .any(|d| d.diagnostic.code == "E306"));
+        assert!(
+            by_root(&missing, &root)
+                .diagnostics
+                .iter()
+                .any(|d| d.diagnostic.code == "E306")
+        );
 
         std::fs::write(&named, "host_name 1\n").expect("host file");
         assert_eq!(missing, diagnose_map(&files, &roots).expect("same map"));
@@ -1084,10 +1105,12 @@ end;
         supplied.insert(slash_key(&named), "supplied_name 1\n".to_string());
         let mapped = diagnose_map(&supplied, &roots).expect("mapped file");
         let entry = by_root(&mapped, &root);
-        assert!(!entry
-            .diagnostics
-            .iter()
-            .any(|d| d.diagnostic.code == "E306"));
+        assert!(
+            !entry
+                .diagnostics
+                .iter()
+                .any(|d| d.diagnostic.code == "E306")
+        );
         assert!(entry.diagnostics.iter().any(|d| {
             d.diagnostic.code == "W204" && d.diagnostic.message.contains("supplied_name")
         }));
@@ -1119,10 +1142,12 @@ end;
         let entry = &report.roots[0];
         assert_eq!(entry.status, RootStatus::Ok);
         assert!(entry.failure.is_none());
-        assert!(entry
-            .diagnostics
-            .iter()
-            .all(|diag| diag.file == "batch13_solo.mod"));
+        assert!(
+            entry
+                .diagnostics
+                .iter()
+                .all(|diag| diag.file == "batch13_solo.mod")
+        );
         assert_matches_dynare(&files, entry);
         assert!(mentions(entry, "solo_unknown"));
     }
@@ -1657,10 +1682,12 @@ end;
         let gone = root_named(&body, "/gone.mod");
         assert_eq!(gone["status"], "failed");
         assert!(gone["diagnostics"].as_array().unwrap().is_empty());
-        assert!(gone["failure"]
-            .as_str()
-            .unwrap()
-            .starts_with("File not found:"));
+        assert!(
+            gone["failure"]
+                .as_str()
+                .unwrap()
+                .starts_with("File not found:")
+        );
         assert!(body["summary"]["errors"].as_u64().unwrap() >= 1);
     }
 

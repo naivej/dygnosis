@@ -385,13 +385,22 @@ pub(super) fn rename(
     }
     let row = &view.named[id];
     if row.kind == "database" {
-        return Err(Refusal::new("EXTERNAL_NAMESPACE", "A database name identifies a MATLAB workspace value. Rename cannot update that external value; no edits were proposed."));
+        return Err(Refusal::new(
+            "EXTERNAL_NAMESPACE",
+            "A database name identifies a MATLAB workspace value. Rename cannot update that external value; no edits were proposed.",
+        ));
     }
     if row.declarations.is_empty() {
         return Err(if row.kind == "named_subsample" {
-            Refusal::new("UNRESOLVED_SUBSAMPLE", "This copy operand has no prior subsample declaration in its namespace. Rename cannot verify the runtime label; no edits were proposed.")
+            Refusal::new(
+                "UNRESOLVED_SUBSAMPLE",
+                "This copy operand has no prior subsample declaration in its namespace. Rename cannot verify the runtime label; no edits were proposed.",
+            )
         } else {
-            Refusal::new("UNRESOLVED_NAME", "This name has no accepted declaration in its namespace at the required stage. Rename cannot verify its binding; no edits were proposed.")
+            Refusal::new(
+                "UNRESOLVED_NAME",
+                "This name has no accepted declaration in its namespace at the required stage. Rename cannot verify its binding; no edits were proposed.",
+            )
         });
     }
     if !is_legal_ident(replacement) {
@@ -473,7 +482,10 @@ pub(super) fn rename(
         })
         .collect();
     if expected != collect(&renamed) {
-        return Err(Refusal::new("NAMESPACE_CAPTURE", "The new name would change another named reference or copy relation in an affected namespace; no edits were proposed."));
+        return Err(Refusal::new(
+            "NAMESPACE_CAPTURE",
+            "The new name would change another named reference or copy relation in an affected namespace; no edits were proposed.",
+        ));
     }
     if view.model.symbol_type_events.len() != renamed.symbol_type_events.len()
         || view

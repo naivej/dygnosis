@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use dygnosis::server::new_service;
 use dygnosis::{
-    dynare_related_files, dynare_workspace_diagnose, CompanionKind, CompanionRecord, Workspace,
+    CompanionKind, CompanionRecord, Workspace, dynare_related_files, dynare_workspace_diagnose,
 };
-use tower_lsp::{lsp_types::*, LanguageServer};
+use tower_lsp::{LanguageServer, lsp_types::*};
 
 struct Fixture(PathBuf);
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
@@ -178,9 +178,11 @@ fn package_file_create_change_delete_and_overlay_edits_change_root_revision() {
     workspace.load_from_disk(&root).unwrap();
     let uri = root.to_str().unwrap();
     let before = workspace.input_revision(uri).unwrap();
-    assert!(named(&records(&mut workspace, &root), "pkg.sub.foo")
-        .path
-        .is_none());
+    assert!(
+        named(&records(&mut workspace, &root), "pkg.sub.foo")
+            .path
+            .is_none()
+    );
     let helper = fixture.file("+pkg/+sub/foo.m", "% created");
     let created = workspace.input_revision(uri).unwrap();
     assert_ne!(before, created);
@@ -201,9 +203,11 @@ fn package_file_create_change_delete_and_overlay_edits_change_root_revision() {
     assert_ne!(overlay, restored);
     fs::remove_file(&helper).unwrap();
     assert_ne!(restored, workspace.input_revision(uri).unwrap());
-    assert!(named(&records(&mut workspace, &root), "pkg.sub.foo")
-        .path
-        .is_none());
+    assert!(
+        named(&records(&mut workspace, &root), "pkg.sub.foo")
+            .path
+            .is_none()
+    );
 }
 
 #[test]
@@ -270,11 +274,13 @@ fn map_only_package_discovery_uses_supplied_files_and_keeps_full_missing_names()
     );
     let resolved =
         dynare_workspace_diagnose(Some(&files), Some(std::slice::from_ref(&key)), None).unwrap();
-    assert!(!resolved["roots"][0]["diagnostics"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|row| row["code"] == "W160"));
+    assert!(
+        !resolved["roots"][0]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["code"] == "W160")
+    );
 }
 
 #[test]

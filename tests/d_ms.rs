@@ -16,7 +16,7 @@
 //! quiet.
 
 use dygnosis::model::{DottedKind, FamilyValueKind, SvarIdentificationElement};
-use dygnosis::{analyze, check_file, parse, Diagnostic};
+use dygnosis::{Diagnostic, analyze, check_file, parse};
 
 const QUIET: &[&str] = &[
     "d_ms/quiet_statements.mod",
@@ -175,10 +175,11 @@ fn option_rows_keep_their_value_shape() {
         .find(|opt| opt.name == "equations")
         .expect("the equations option is read");
     assert_eq!(equations.value_kind, FamilyValueKind::Vector);
-    assert!(svar
-        .options
-        .iter()
-        .any(|opt| opt.name == "coefficients" && !opt.has_value));
+    assert!(
+        svar.options
+            .iter()
+            .any(|opt| opt.name == "coefficients" && !opt.has_value)
+    );
 
     let data = model
         .data_statements
@@ -207,10 +208,12 @@ fn svar_identification_body_keeps_structured_rows() {
         element,
         SvarIdentificationElement::ExclusionConstants { .. }
     )));
-    assert!(block
-        .elements
-        .iter()
-        .any(|element| matches!(element, SvarIdentificationElement::UpperCholesky { .. })));
+    assert!(
+        block
+            .elements
+            .iter()
+            .any(|element| matches!(element, SvarIdentificationElement::UpperCholesky { .. }))
+    );
     let lag0 = block
         .elements
         .iter()
@@ -274,20 +277,28 @@ fn dotted_prior_heads_are_parsed() {
         .find(|opt| opt.name == "mean")
         .expect("the joint prior's mean option");
     assert_eq!(mean.value_kind, FamilyValueKind::Vector);
-    assert!(priors
-        .iter()
-        .any(|stmt| matches!(stmt.head, dygnosis::model::DottedHead::Std { .. })));
-    assert!(priors
-        .iter()
-        .any(|stmt| matches!(stmt.head, dygnosis::model::DottedHead::Corr { .. })));
-    assert!(model
-        .dotted_statements
-        .iter()
-        .any(|stmt| stmt.kind == DottedKind::Options));
-    assert!(model
-        .dotted_statements
-        .iter()
-        .any(|stmt| stmt.kind == DottedKind::Subsamples));
+    assert!(
+        priors
+            .iter()
+            .any(|stmt| matches!(stmt.head, dygnosis::model::DottedHead::Std { .. }))
+    );
+    assert!(
+        priors
+            .iter()
+            .any(|stmt| matches!(stmt.head, dygnosis::model::DottedHead::Corr { .. }))
+    );
+    assert!(
+        model
+            .dotted_statements
+            .iter()
+            .any(|stmt| stmt.kind == DottedKind::Options)
+    );
+    assert!(
+        model
+            .dotted_statements
+            .iter()
+            .any(|stmt| stmt.kind == DottedKind::Subsamples)
+    );
 }
 
 #[test]
@@ -332,12 +343,16 @@ fn shipped_extras_still_reach_the_family() {
         "one per statement that repeats an option: {:?}",
         codes(&diags)
     );
-    assert!(twice
-        .iter()
-        .any(|d| d.message == "option freq declared twice"));
-    assert!(twice
-        .iter()
-        .any(|d| d.message == "option mean declared twice"));
+    assert!(
+        twice
+            .iter()
+            .any(|d| d.message == "option freq declared twice")
+    );
+    assert!(
+        twice
+            .iter()
+            .any(|d| d.message == "option mean declared twice")
+    );
     assert!(diags.iter().any(|d| d.code == "W201"));
 
     // W160 reaches a family statement: `ms_estimation(datafile=…)` names a file 7.1
@@ -473,90 +488,216 @@ fn data_statement_carries_file_or_series_for_the_e227_gate() {
 #[test]
 fn the_family_refusals_fire_with_their_text() {
     const TABLE: &[(&str, &str, &str)] = &[
-        ("d_ms/e338_data_no_file.mod", "E338",
-         "The file or series option must be passed to the data statement."),
-        ("d_ms/e339_data_file_and_series.mod", "E339",
-         "The file and series options cannot be used simultaneously in the data statement."),
-        ("d_ms/e340_data_nobs_zero.mod", "E340",
-         "The nobs option of the data statement only accepts positive integers."),
-        ("d_ms/e341_ms_estimation_missing.mod", "E341",
-         "If you do not pass no_create_init to ms_estimation, you must pass the datafile and initial_year options."),
-        ("d_ms/e342_conditional_forecast_no_parameter_set.mod", "E342",
-         "You must pass the `parameter_set` option to conditional_forecast"),
-        ("d_ms/e343_cfp_count_mismatch.mod", "E343",
-         "shocks/conditional_forecast_paths: variable Pie: number of periods is different from number of shock values"),
-        ("d_ms/e344_cfp_var_twice.mod", "E344",
-         "shocks/conditional_forecast_paths: variable Pie declared twice"),
-        ("d_ms/e345_markov_switching_option_missing.mod", "E345",
-         "A 'chain' option must be passed to the 'markov_switching' statement."),
-        ("d_ms/e346_markov_switching_chain_zero.mod", "E346",
-         "The value passed to the chain option must be greater than zero."),
-        ("d_ms/e347_markov_switching_regimes_zero.mod", "E347",
-         "The value passed to the number_of_regimes option must be greater than zero."),
-        ("d_ms/e348_markov_switching_chain_order.mod", "E348",
-         "The markov_switching chain option takes consecutive integers beginning at 1."),
-        ("d_ms/e349_markov_switching_parameters_type.mod", "E349",
-         "Variables passed to the parameters option of the markov_switching statement must be parameters. Caused by: Pie"),
-        ("d_ms/e350_markov_switching_restrictions_form.mod", "E350",
-         "restrictions in the subsample statement must be specified in the form [current_period_regime, next_period_regime, transition_probability]"),
-        ("d_ms/e351_markov_switching_regime_beyond.mod", "E351",
-         "the regimes specified in the restrictions option must be <= the number of regimes specified in the number_of_regimes option"),
-        ("d_ms/e352_markov_switching_restriction_twice.mod", "E352",
-         "two restrictions were given for: 1, 2"),
-        ("d_ms/e353_markov_switching_probability_gt_one.mod", "E353",
-         "the transition probability, 1.5 must be less than 1"),
-        ("d_ms/e354_markov_switching_sums.mod", "E354",
-         "When all transitions probabilities are specified for a certain regime, they must sum to 1"),
-        ("d_ms/e355_markov_switching_partial_sum.mod", "E355",
-         "When transition probabilites are not specified for every regime, their sum must be < 1"),
-        ("d_ms/e356_svar_identification_twice.mod", "E356",
-         "You may only have one svar_identification block in your .mod file."),
-        ("d_ms/e357_svar_identification_two_cholesky.mod", "E357",
-         "Within the svar_identification statement, you may only have one of upper_cholesky and lower_cholesky."),
-        ("d_ms/e358_svar_identification_lag_twice.mod", "E358",
-         "lag 0 used more than once."),
-        ("d_ms/e359_svar_identification_equation_twice.mod", "E359",
-         "equation number 1 referenced more than once under a single lag."),
-        ("d_ms/e360_svar_identification_equation_zero.mod", "E360",
-         "equation numbers must be greater than or equal to 1."),
-        ("d_ms/e361_svar_identification_name_twice.mod", "E361",
-         "Pie restriction added twice."),
-        ("d_ms/e362_svar_identification_qi_ri.mod", "E362",
-         "SVAR_IDENTIFICATION: a single restrictions must affect either Qi or Ri, but not both"),
-        ("d_ms/e363_svar_none_of_three.mod", "E363",
-         "You must pass one of 'coefficients', 'variances', or 'constants'."),
-        ("d_ms/e364_svar_two_of_three.mod", "E364",
-         "You may only pass one of 'coefficients', 'variances', or 'constants'."),
-        ("d_ms/e365_svar_chain_missing.mod", "E365",
-         "A 'chain' option must be passed to the 'svar' statement."),
-        ("d_ms/e366_svar_chain_zero.mod", "E366",
-         "The value passed to the 'chain' option must be greater than zero."),
-        ("d_ms/e367_svar_equations_zero.mod", "E367",
-         "The value(s) passed to the 'equations' option must be greater than zero."),
-        ("d_ms/e368_ms_compute_probabilities_two.mod", "E368",
-         "You may only pass one of real_time_smoothed and filtered_probabilities to ms_compute_probabilities."),
-        ("d_ms/e369_ms_irf_two.mod", "E369",
-         "You may only pass one of regime, regimes and filtered_probabilities to ms_irf"),
-        ("d_ms/e370_ms_forecast_two.mod", "E370",
-         "You may only pass one of regime and regimes to ms_forecast"),
-        ("d_ms/e371_ms_variance_decomposition_two.mod", "E371",
-         "You may only pass one of regime, regimes and filtered_probabilities to ms_variance_decomposition"),
-        ("d_ms/e372_prior_no_shape.mod", "E372",
-         "You must pass the shape option to the prior statement."),
-        ("d_ms/e373_prior_no_mean_or_mode.mod", "E373",
-         "You must pass at least one of mean and mode to the prior statement."),
-        ("d_ms/e374_prior_stdev_and_variance.mod", "E374",
-         "You must pass exactly one of stdev and variance to the prior statement."),
-        ("d_ms/e375_prior_domain_two_values.mod", "E375",
-         "You must pass exactly two values to the domain option."),
-        ("d_ms/e376_joint_prior_domain_four_values.mod", "E376",
-         "You must pass exactly four values to the domain option."),
-        ("d_ms/e377_joint_prior_one_name.mod", "E377",
-         "you must pass at least two parameters to the joint prior statement"),
-        ("d_ms/e378_prior_head_not_parameter.mod", "E378",
-         "Pie is not a parameter"),
-        ("d_ms/e379_prior_corr_mixed_types.mod", "E379",
-         "In the corr(A,B).prior statement, A and B must be of the same type. In your case, Pie and eps are of different types."),
+        (
+            "d_ms/e338_data_no_file.mod",
+            "E338",
+            "The file or series option must be passed to the data statement.",
+        ),
+        (
+            "d_ms/e339_data_file_and_series.mod",
+            "E339",
+            "The file and series options cannot be used simultaneously in the data statement.",
+        ),
+        (
+            "d_ms/e340_data_nobs_zero.mod",
+            "E340",
+            "The nobs option of the data statement only accepts positive integers.",
+        ),
+        (
+            "d_ms/e341_ms_estimation_missing.mod",
+            "E341",
+            "If you do not pass no_create_init to ms_estimation, you must pass the datafile and initial_year options.",
+        ),
+        (
+            "d_ms/e342_conditional_forecast_no_parameter_set.mod",
+            "E342",
+            "You must pass the `parameter_set` option to conditional_forecast",
+        ),
+        (
+            "d_ms/e343_cfp_count_mismatch.mod",
+            "E343",
+            "shocks/conditional_forecast_paths: variable Pie: number of periods is different from number of shock values",
+        ),
+        (
+            "d_ms/e344_cfp_var_twice.mod",
+            "E344",
+            "shocks/conditional_forecast_paths: variable Pie declared twice",
+        ),
+        (
+            "d_ms/e345_markov_switching_option_missing.mod",
+            "E345",
+            "A 'chain' option must be passed to the 'markov_switching' statement.",
+        ),
+        (
+            "d_ms/e346_markov_switching_chain_zero.mod",
+            "E346",
+            "The value passed to the chain option must be greater than zero.",
+        ),
+        (
+            "d_ms/e347_markov_switching_regimes_zero.mod",
+            "E347",
+            "The value passed to the number_of_regimes option must be greater than zero.",
+        ),
+        (
+            "d_ms/e348_markov_switching_chain_order.mod",
+            "E348",
+            "The markov_switching chain option takes consecutive integers beginning at 1.",
+        ),
+        (
+            "d_ms/e349_markov_switching_parameters_type.mod",
+            "E349",
+            "Variables passed to the parameters option of the markov_switching statement must be parameters. Caused by: Pie",
+        ),
+        (
+            "d_ms/e350_markov_switching_restrictions_form.mod",
+            "E350",
+            "restrictions in the subsample statement must be specified in the form [current_period_regime, next_period_regime, transition_probability]",
+        ),
+        (
+            "d_ms/e351_markov_switching_regime_beyond.mod",
+            "E351",
+            "the regimes specified in the restrictions option must be <= the number of regimes specified in the number_of_regimes option",
+        ),
+        (
+            "d_ms/e352_markov_switching_restriction_twice.mod",
+            "E352",
+            "two restrictions were given for: 1, 2",
+        ),
+        (
+            "d_ms/e353_markov_switching_probability_gt_one.mod",
+            "E353",
+            "the transition probability, 1.5 must be less than 1",
+        ),
+        (
+            "d_ms/e354_markov_switching_sums.mod",
+            "E354",
+            "When all transitions probabilities are specified for a certain regime, they must sum to 1",
+        ),
+        (
+            "d_ms/e355_markov_switching_partial_sum.mod",
+            "E355",
+            "When transition probabilites are not specified for every regime, their sum must be < 1",
+        ),
+        (
+            "d_ms/e356_svar_identification_twice.mod",
+            "E356",
+            "You may only have one svar_identification block in your .mod file.",
+        ),
+        (
+            "d_ms/e357_svar_identification_two_cholesky.mod",
+            "E357",
+            "Within the svar_identification statement, you may only have one of upper_cholesky and lower_cholesky.",
+        ),
+        (
+            "d_ms/e358_svar_identification_lag_twice.mod",
+            "E358",
+            "lag 0 used more than once.",
+        ),
+        (
+            "d_ms/e359_svar_identification_equation_twice.mod",
+            "E359",
+            "equation number 1 referenced more than once under a single lag.",
+        ),
+        (
+            "d_ms/e360_svar_identification_equation_zero.mod",
+            "E360",
+            "equation numbers must be greater than or equal to 1.",
+        ),
+        (
+            "d_ms/e361_svar_identification_name_twice.mod",
+            "E361",
+            "Pie restriction added twice.",
+        ),
+        (
+            "d_ms/e362_svar_identification_qi_ri.mod",
+            "E362",
+            "SVAR_IDENTIFICATION: a single restrictions must affect either Qi or Ri, but not both",
+        ),
+        (
+            "d_ms/e363_svar_none_of_three.mod",
+            "E363",
+            "You must pass one of 'coefficients', 'variances', or 'constants'.",
+        ),
+        (
+            "d_ms/e364_svar_two_of_three.mod",
+            "E364",
+            "You may only pass one of 'coefficients', 'variances', or 'constants'.",
+        ),
+        (
+            "d_ms/e365_svar_chain_missing.mod",
+            "E365",
+            "A 'chain' option must be passed to the 'svar' statement.",
+        ),
+        (
+            "d_ms/e366_svar_chain_zero.mod",
+            "E366",
+            "The value passed to the 'chain' option must be greater than zero.",
+        ),
+        (
+            "d_ms/e367_svar_equations_zero.mod",
+            "E367",
+            "The value(s) passed to the 'equations' option must be greater than zero.",
+        ),
+        (
+            "d_ms/e368_ms_compute_probabilities_two.mod",
+            "E368",
+            "You may only pass one of real_time_smoothed and filtered_probabilities to ms_compute_probabilities.",
+        ),
+        (
+            "d_ms/e369_ms_irf_two.mod",
+            "E369",
+            "You may only pass one of regime, regimes and filtered_probabilities to ms_irf",
+        ),
+        (
+            "d_ms/e370_ms_forecast_two.mod",
+            "E370",
+            "You may only pass one of regime and regimes to ms_forecast",
+        ),
+        (
+            "d_ms/e371_ms_variance_decomposition_two.mod",
+            "E371",
+            "You may only pass one of regime, regimes and filtered_probabilities to ms_variance_decomposition",
+        ),
+        (
+            "d_ms/e372_prior_no_shape.mod",
+            "E372",
+            "You must pass the shape option to the prior statement.",
+        ),
+        (
+            "d_ms/e373_prior_no_mean_or_mode.mod",
+            "E373",
+            "You must pass at least one of mean and mode to the prior statement.",
+        ),
+        (
+            "d_ms/e374_prior_stdev_and_variance.mod",
+            "E374",
+            "You must pass exactly one of stdev and variance to the prior statement.",
+        ),
+        (
+            "d_ms/e375_prior_domain_two_values.mod",
+            "E375",
+            "You must pass exactly two values to the domain option.",
+        ),
+        (
+            "d_ms/e376_joint_prior_domain_four_values.mod",
+            "E376",
+            "You must pass exactly four values to the domain option.",
+        ),
+        (
+            "d_ms/e377_joint_prior_one_name.mod",
+            "E377",
+            "you must pass at least two parameters to the joint prior statement",
+        ),
+        (
+            "d_ms/e378_prior_head_not_parameter.mod",
+            "E378",
+            "Pie is not a parameter",
+        ),
+        (
+            "d_ms/e379_prior_corr_mixed_types.mod",
+            "E379",
+            "In the corr(A,B).prior statement, A and B must be of the same type. In your case, Pie and eps are of different types.",
+        ),
     ];
     for (rel, code, message) in TABLE {
         let diags = analyze(&parse(&fixture(rel)));
@@ -617,7 +758,9 @@ fn the_bison_junk_shapes_borrow_no_digit() {
         format!("{raw}data(file='x.csv', nobs=-2);\n"),
         format!("{raw}conditional_forecast(parameter_set=1);\n"),
         format!("{raw}svar_identification;\nexclusion lag -1;\nequation 1, Pie;\nend;\n"),
-        format!("{raw}conditional_forecast_paths;\nexogenize Pie;\nperiods 1:4;\nvalues 1 2 3 4;\nend;\n"),
+        format!(
+            "{raw}conditional_forecast_paths;\nexogenize Pie;\nperiods 1:4;\nvalues 1 2 3 4;\nend;\n"
+        ),
     ] {
         let diags = analyze(&parse(&src));
         for code in owned {
@@ -705,7 +848,9 @@ fn a_lag_with_no_equation_row_borrows_no_digit() {
     for src in [
         format!("{head}svar_identification;\nexclusion lag 0;\nexclusion lag 0;\nend;\n"),
         format!("{head}svar_identification;\nexclusion lag 0;\nend;\n"),
-        format!("{head}svar_identification;\nexclusion lag 0;\nequation 1, Pie;\nexclusion lag 1;\nend;\n"),
+        format!(
+            "{head}svar_identification;\nexclusion lag 0;\nequation 1, Pie;\nexclusion lag 1;\nend;\n"
+        ),
         format!("{head}svar_identification;\nequation 1, Pie;\nend;\n"),
     ] {
         let diags = analyze(&parse(&src));
@@ -717,11 +862,7 @@ fn a_lag_with_no_equation_row_borrows_no_digit() {
             );
         }
         for d in &diags {
-            assert_ne!(
-                d.span.start, 0,
-                "{src:?} put {} at offset 0",
-                d.code
-            );
+            assert_ne!(d.span.start, 0, "{src:?} put {} at offset 0", d.code);
         }
     }
     // The shape 7.1 does refuse keeps its sentence and its range.
@@ -1123,9 +1264,11 @@ fn a_shape_refuse_comes_before_the_check_stage_sentences() {
          initval;\nR = 0;\nPie = 0;\nY = 0;\nend;\nshocks;\nvar eps; stderr 0.1;\nend;\n\
          varobs Y Pie R;\ndata(nobs=10);\nmarkov_switching();\n",
     ));
-    assert!(find(&junk_late, "E001")
-        .message
-        .contains("markov_switching"));
+    assert!(
+        find(&junk_late, "E001")
+            .message
+            .contains("markov_switching")
+    );
     quiet(&junk_late, "E338");
 
     // Two parse-stage refusals keep file order.
@@ -1149,9 +1292,11 @@ fn a_shape_refuse_comes_before_the_check_stage_sentences() {
          varobs Y Pie R;\nmarkov_switching();\n\
          markov_switching(chain=0, number_of_regimes=2, duration=2);\n",
     ));
-    assert!(find(&junk_first, "E001")
-        .message
-        .contains("markov_switching"));
+    assert!(
+        find(&junk_first, "E001")
+            .message
+            .contains("markov_switching")
+    );
     quiet(&junk_first, "E346");
 
     // The `conditional_forecast_paths` count sentence is a parse-stage action too,
@@ -1318,18 +1463,9 @@ fn a_shape_refuse_inside_a_statement_pre_empts_its_own_sentence() {
             "markov_switching(chain=0, number_of_regimes=2, duration=2, nonsense=1);",
             "E346",
         ),
-        (
-            "markov_switching(chain=1, nonsense=1);",
-            "E345",
-        ),
-        (
-            "ms_estimation(datafile=nosuch, nonsense=1);",
-            "E341",
-        ),
-        (
-            "conditional_forecast(periods=8, nonsense=1);",
-            "E342",
-        ),
+        ("markov_switching(chain=1, nonsense=1);", "E345"),
+        ("ms_estimation(datafile=nosuch, nonsense=1);", "E341"),
+        ("conditional_forecast(periods=8, nonsense=1);", "E342"),
         (
             "markov_switching(chain=1, number_of_regimes=2, duration=2, parameters=[], nonsense=1);",
             "E349",

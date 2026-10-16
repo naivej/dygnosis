@@ -199,9 +199,10 @@ fn format_range_assignments() {
     let end = line_of(&src, "rk = alppha * y / k(-1);");
     let rust = format_range(&src, start, end, "\t").expect("model range");
     assert_eq!((rust.0, rust.1), (start, end));
-    assert!(rust
-        .2
-        .contains("y = exp(z) * kg(-1) ^ alphag * k(-1) ^ alppha * n ^ (1 - alppha - alphag);"));
+    assert!(
+        rust.2
+            .contains("y = exp(z) * kg(-1) ^ alphag * k(-1) ^ alppha * n ^ (1 - alppha - alphag);")
+    );
     assert!(rust.2.contains("rk = alppha * y / k(-1);"));
     let original = slice_lines(&src, start, end);
     assert_ne!(rust.2, original);

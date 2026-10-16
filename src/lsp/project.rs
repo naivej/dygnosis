@@ -6,19 +6,19 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
-use tower_lsp::lsp_types::{notification, Diagnostic, Url};
+use serde_json::{Value, json};
 use tower_lsp::Client;
+use tower_lsp::lsp_types::{Diagnostic, Url, notification};
 
 use super::{
-    file_url_from_path_key, is_model_root, prepare_root_report, Backend, Inner, RootReport,
+    Backend, Inner, RootReport, file_url_from_path_key, is_model_root, prepare_root_report,
 };
+use crate::Workspace;
 use crate::engine::diagnostics::check_in_workspace_with_origins;
+use crate::engine::workspace::InputStamps;
 use crate::engine::workspace::check_walk::{collect_project_files, is_include_path};
 use crate::engine::workspace::include_resolver::{normalize_uri, path_key};
-use crate::engine::workspace::InputStamps;
 use crate::lsp::settings::SettingsStore;
-use crate::Workspace;
 
 pub(super) const SCHEMA_VERSION: u32 = 1;
 const TYPING_PAUSE: Duration = Duration::from_millis(250);
@@ -1325,9 +1325,11 @@ mod tests {
             std::env::temp_dir().join(format!("dygnosis-absent-{}-root.mod", std::process::id())),
         )
         .unwrap();
-        assert!(compute(&uri, Workspace::new(), None)
-            .err()
-            .expect("failure")
-            .contains("Cannot read root model"));
+        assert!(
+            compute(&uri, Workspace::new(), None)
+                .err()
+                .expect("failure")
+                .contains("Cannot read root model")
+        );
     }
 }

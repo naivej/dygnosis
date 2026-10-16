@@ -1,7 +1,7 @@
 //! Source-context projections of the shared pinned syntax reference.
 
 use crate::engine::catalog::syntax::{self, SyntaxRecord};
-use crate::engine::language::lexer::{tokenize, TokenKind};
+use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::language::model::{ExecutionStep, Model, StatementKind};
 use crate::engine::language::span::Span;
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, Documentation};

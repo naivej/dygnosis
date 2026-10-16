@@ -3,10 +3,10 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
-use dygnosis::server::{new_service, Backend};
+use dygnosis::server::{Backend, new_service};
 use dygnosis::span::LineIndex;
-use serde_json::{json, Value};
-use tower_lsp::{lsp_types::*, LanguageServer};
+use serde_json::{Value, json};
+use tower_lsp::{LanguageServer, lsp_types::*};
 
 const HEAD: &str = "var y; varexo e u; parameters p q; database db; model; y=e+u+p+q; end;\n";
 
@@ -20,21 +20,126 @@ struct Pair {
 }
 
 const PAIRS: &[Pair] = &[
-    Pair { code: "E278", fire: "(q+p)/0", quiet: "(q+p)/0.0", sentence: "Division by zero when forming (q+p)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0).", written: "(q+p)/0", controlled: false },
-    Pair { code: "E278", fire: "(q+p)/0", quiet: "(q+p)/0e0", sentence: "Division by zero when forming (q+p)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0).", written: "(q+p)/0", controlled: true },
-    Pair { code: "E276", fire: "log(0)", quiet: "log(p)", sentence: "log(0) not defined!", written: "log(0)", controlled: false },
-    Pair { code: "E277", fire: "log10(0)", quiet: "log10(p)", sentence: "log10(0) not defined!", written: "log10(0)", controlled: false },
-    Pair { code: "E405", fire: "self.e(-1)", quiet: "0*self.e(-1)", sentence: "shock_paths: a lag of 1 is not allowed at period 1", written: "self.e(-1)", controlled: false },
-    Pair { code: "E405", fire: "db.y(-1)", quiet: "db.p(-1)", sentence: "shock_paths: a lag of 1 is not allowed at period 1", written: "db.y(-1)", controlled: false },
-    Pair { code: "E420", fire: "self.e", quiet: "0*self.e", sentence: "in the definition of 'e' in a 'shock_paths' block, the use of 'self.e' without a lag is not allowed, since it is a circular reference", written: "self.e", controlled: false },
-    Pair { code: "E415", fire: "Self.u", quiet: "self.u", sentence: "Unknown database: Self. You may want to declare it via the 'database' command.", written: "Self.u", controlled: false },
-    Pair { code: "E416", fire: "0*self.e", quiet: "init.y", sentence: "The syntax self.e is not accepted in an 'endogenize' stanza of a 'shock_paths' block", written: "self.e", controlled: true },
-    Pair { code: "E001", fire: "p,", quiet: "p", sentence: "syntax error, unexpected ';'", written: ";", controlled: false },
-    Pair { code: "E001", fire: "p; nonsense", quiet: "p", sentence: "syntax error, unexpected IDENTIFIER, expecting END", written: "nonsense", controlled: false },
-    Pair { code: "E001", fire: "p; var e; values p", quiet: "p", sentence: "syntax error, unexpected VALUES, expecting PERIODS", written: "values", controlled: false },
-    Pair { code: "E001", fire: "periods 1 nonsense; values p;", quiet: "periods 1; values p;", sentence: "syntax error, unexpected IDENTIFIER, expecting COMMA or ';'", written: "nonsense", controlled: false },
-    Pair { code: "E001", fire: "periods 1,; values p;", quiet: "periods 1; values p;", sentence: "syntax error, unexpected ';', expecting END or DATE or INT_NUMBER", written: ";", controlled: false },
-    Pair { code: "E395", fire: "periods 2:1,; values p;", quiet: "periods 1; values p;", sentence: "Can't have first period index greater than second index in range specification", written: "2:1", controlled: false },
+    Pair {
+        code: "E278",
+        fire: "(q+p)/0",
+        quiet: "(q+p)/0.0",
+        sentence: "Division by zero when forming (q+p)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0).",
+        written: "(q+p)/0",
+        controlled: false,
+    },
+    Pair {
+        code: "E278",
+        fire: "(q+p)/0",
+        quiet: "(q+p)/0e0",
+        sentence: "Division by zero when forming (q+p)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0).",
+        written: "(q+p)/0",
+        controlled: true,
+    },
+    Pair {
+        code: "E276",
+        fire: "log(0)",
+        quiet: "log(p)",
+        sentence: "log(0) not defined!",
+        written: "log(0)",
+        controlled: false,
+    },
+    Pair {
+        code: "E277",
+        fire: "log10(0)",
+        quiet: "log10(p)",
+        sentence: "log10(0) not defined!",
+        written: "log10(0)",
+        controlled: false,
+    },
+    Pair {
+        code: "E405",
+        fire: "self.e(-1)",
+        quiet: "0*self.e(-1)",
+        sentence: "shock_paths: a lag of 1 is not allowed at period 1",
+        written: "self.e(-1)",
+        controlled: false,
+    },
+    Pair {
+        code: "E405",
+        fire: "db.y(-1)",
+        quiet: "db.p(-1)",
+        sentence: "shock_paths: a lag of 1 is not allowed at period 1",
+        written: "db.y(-1)",
+        controlled: false,
+    },
+    Pair {
+        code: "E420",
+        fire: "self.e",
+        quiet: "0*self.e",
+        sentence: "in the definition of 'e' in a 'shock_paths' block, the use of 'self.e' without a lag is not allowed, since it is a circular reference",
+        written: "self.e",
+        controlled: false,
+    },
+    Pair {
+        code: "E415",
+        fire: "Self.u",
+        quiet: "self.u",
+        sentence: "Unknown database: Self. You may want to declare it via the 'database' command.",
+        written: "Self.u",
+        controlled: false,
+    },
+    Pair {
+        code: "E416",
+        fire: "0*self.e",
+        quiet: "init.y",
+        sentence: "The syntax self.e is not accepted in an 'endogenize' stanza of a 'shock_paths' block",
+        written: "self.e",
+        controlled: true,
+    },
+    Pair {
+        code: "E001",
+        fire: "p,",
+        quiet: "p",
+        sentence: "syntax error, unexpected ';'",
+        written: ";",
+        controlled: false,
+    },
+    Pair {
+        code: "E001",
+        fire: "p; nonsense",
+        quiet: "p",
+        sentence: "syntax error, unexpected IDENTIFIER, expecting END",
+        written: "nonsense",
+        controlled: false,
+    },
+    Pair {
+        code: "E001",
+        fire: "p; var e; values p",
+        quiet: "p",
+        sentence: "syntax error, unexpected VALUES, expecting PERIODS",
+        written: "values",
+        controlled: false,
+    },
+    Pair {
+        code: "E001",
+        fire: "periods 1 nonsense; values p;",
+        quiet: "periods 1; values p;",
+        sentence: "syntax error, unexpected IDENTIFIER, expecting COMMA or ';'",
+        written: "nonsense",
+        controlled: false,
+    },
+    Pair {
+        code: "E001",
+        fire: "periods 1,; values p;",
+        quiet: "periods 1; values p;",
+        sentence: "syntax error, unexpected ';', expecting END or DATE or INT_NUMBER",
+        written: ";",
+        controlled: false,
+    },
+    Pair {
+        code: "E395",
+        fire: "periods 2:1,; values p;",
+        quiet: "periods 1; values p;",
+        sentence: "Can't have first period index greater than second index in range specification",
+        written: "2:1",
+        controlled: false,
+    },
 ];
 
 fn body(pair: &Pair, value: &str) -> String {
@@ -351,7 +456,10 @@ async fn path_macro_copies_keep_per_root_multiplicity_and_source_navigation() {
         let from = index.position_utf16(&body, start);
         let to = index.position_utf16(&body, end);
         for row in errors {
-            assert_eq!(row.message, "Division by zero when forming (1)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0).");
+            assert_eq!(
+                row.message,
+                "Division by zero when forming (1)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0)."
+            );
             assert_eq!(row.severity, Some(DiagnosticSeverity::ERROR));
             assert_eq!(
                 row.range,
@@ -375,7 +483,10 @@ async fn path_macro_copies_keep_per_root_multiplicity_and_source_navigation() {
         for row in errors {
             assert_eq!(row["file"], "body.inc");
             assert_eq!(row["severity"], "ERROR");
-            assert_eq!(row["message"], "Division by zero when forming (1)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0).");
+            assert_eq!(
+                row["message"],
+                "Division by zero when forming (1)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0)."
+            );
             assert_eq!(row["line"], from.line + 1);
             assert_eq!(row["column"], from.character + 1);
             assert_eq!(row["end_line"], to.line + 1);

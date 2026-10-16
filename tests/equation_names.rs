@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use dygnosis::server::new_service;
 use dygnosis::span::LineIndex;
-use dygnosis::{check_file, Severity};
+use dygnosis::{Severity, check_file};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService};
 
@@ -472,10 +472,12 @@ async fn included_writing_notes_keep_owner_context_until_last_helper_closes() {
         .inner()
         .did_change(change_params(eq_uri.clone(), named.into(), 2))
         .await;
-    assert!(items(&service, &eq_uri)
-        .await
-        .iter()
-        .all(|diag| diag_code(diag) != "I208"));
+    assert!(
+        items(&service, &eq_uri)
+            .await
+            .iter()
+            .all(|diag| diag_code(diag) != "I208")
+    );
     service
         .inner()
         .did_close(DidCloseTextDocumentParams {
@@ -501,10 +503,12 @@ async fn included_writing_notes_keep_owner_context_until_last_helper_closes() {
             text_document: TextDocumentIdentifier { uri: eq_uri },
         })
         .await;
-    assert!(items(&service, &decl_uri)
-        .await
-        .iter()
-        .all(|diag| diag_code(diag) != "I209"));
+    assert!(
+        items(&service, &decl_uri)
+            .await
+            .iter()
+            .all(|diag| diag_code(diag) != "I209")
+    );
     fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -574,9 +578,11 @@ async fn shared_included_i208_offers_one_action_per_root() {
         } else {
             (&b_uri, &a_uri)
         };
-        assert!(action
-            .title
-            .contains(own.to_file_path().unwrap().to_string_lossy().as_ref()));
+        assert!(
+            action
+                .title
+                .contains(own.to_file_path().unwrap().to_string_lossy().as_ref())
+        );
         assert_eq!(edits_for(action, own).len(), 1);
         assert_eq!(edits_for(action, &child_uri).len(), 1);
         assert!(edits_for(action, other).is_empty());
@@ -858,10 +864,12 @@ async fn a_shared_include_is_skipped_and_reported() {
         .inner()
         .did_open(open_params(root_uri.clone(), root_text.clone(), 1))
         .await;
-    assert!(items(&service, &inc_uri)
-        .await
-        .iter()
-        .all(|diag| diag_code(diag) != "I208"));
+    assert!(
+        items(&service, &inc_uri)
+            .await
+            .iter()
+            .all(|diag| diag_code(diag) != "I208")
+    );
     let action = naming_on_i208(&service, &root_uri)
         .await
         .expect("naming action");
@@ -889,10 +897,12 @@ async fn a_unique_include_is_edited_in_that_file() {
         .did_open(open_params(root_uri.clone(), root_text.clone(), 1))
         .await;
     let before = items(&service, &root_uri).await;
-    assert!(items(&service, &inc_uri)
-        .await
-        .iter()
-        .all(|diag| diag_code(diag) != "I208"));
+    assert!(
+        items(&service, &inc_uri)
+            .await
+            .iter()
+            .all(|diag| diag_code(diag) != "I208")
+    );
     let action = naming_on_i208(&service, &root_uri)
         .await
         .expect("naming action");
@@ -1170,8 +1180,10 @@ async fn a_partial_action_reserves_untouched_lhs_defaults_and_does_not_renumber_
                 result.raw_stdout, result.raw_stderr
             );
             if !accepted {
-                assert!(format!("{}{}", result.raw_stdout, result.raw_stderr)
-                    .contains("number 3 because it is already in use"));
+                assert!(
+                    format!("{}{}", result.raw_stdout, result.raw_stderr)
+                        .contains("number 3 because it is already in use")
+                );
             }
         }
     } else {
@@ -1253,18 +1265,24 @@ async fn long_name_actions_keep_tex_partitions_comments_and_nonempty_values() {
         .inner()
         .did_change(change_params(uri.clone(), edited.clone(), 8))
         .await;
-    assert!(items(&service, &uri)
-        .await
-        .iter()
-        .all(|note| diag_code(note) != "I209"));
-    assert!(actions_for(&service, &uri, full_range(&edited))
-        .await
-        .iter()
-        .all(|action| !action.title.starts_with("Add long names")));
-    assert!(actions_for_note(&service, &uri, &notes[0])
-        .await
-        .iter()
-        .all(|action| !action.title.starts_with("Add long names")));
+    assert!(
+        items(&service, &uri)
+            .await
+            .iter()
+            .all(|note| diag_code(note) != "I209")
+    );
+    assert!(
+        actions_for(&service, &uri, full_range(&edited))
+            .await
+            .iter()
+            .all(|action| !action.title.starts_with("Add long names"))
+    );
+    assert!(
+        actions_for_note(&service, &uri, &notes[0])
+            .await
+            .iter()
+            .all(|action| !action.title.starts_with("Add long names"))
+    );
 }
 
 #[tokio::test]
@@ -1305,10 +1323,12 @@ async fn repeated_declarations_need_one_literal_edit_and_macro_values_stay_writt
         .collect();
     assert_eq!(notes.len(), 1);
     assert_eq!(notes[0].message, "2 symbols have no long_name.");
-    assert!(actions_for_note(&service, &uri, &notes[0])
-        .await
-        .iter()
-        .all(|action| !action.title.starts_with("Add long names")));
+    assert!(
+        actions_for_note(&service, &uri, &notes[0])
+            .await
+            .iter()
+            .all(|action| !action.title.starts_with("Add long names"))
+    );
 }
 
 #[tokio::test]
@@ -1402,10 +1422,12 @@ async fn included_completions_require_owner_agreement_and_long_name_actions_keep
         .unwrap();
     let edited = apply_edits(incomplete, &[completion_edit(&item)]);
     assert!(edited.contains("[name='eq1'] y=0"), "{edited}");
-    assert!(actions_for_note(&service, &child_uri, &notes[1])
-        .await
-        .iter()
-        .all(|action| !action.title.starts_with("Add long names")));
+    assert!(
+        actions_for_note(&service, &child_uri, &notes[1])
+            .await
+            .iter()
+            .all(|action| !action.title.starts_with("Add long names"))
+    );
     // Literal labels equal to the proof marker do not identify the selected
     // site, including when several roots own that same written declaration.
     let include_only = "@#include \"shared.inc\"\n";

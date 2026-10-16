@@ -4209,9 +4209,11 @@ mod budget_regressions {
             );
         assert!(errors.is_empty(), "{errors:?}");
         assert!(incomplete.is_some());
-        assert!(reasons
-            .iter()
-            .any(|reason| reason.limit_name == Some("iteration work")));
+        assert!(
+            reasons
+                .iter()
+                .any(|reason| reason.limit_name == Some("iteration work"))
+        );
         assert!(tokens.iter().all(|token| token.kind == TokenKind::Eof));
     }
 
@@ -4232,8 +4234,10 @@ mod budget_regressions {
             );
         assert!(errors.is_empty());
         assert!(incomplete.is_some());
-        assert!(reasons
-            .iter()
-            .any(|reason| reason.code == "I211" && reason.message.contains("iteration work")));
+        assert!(
+            reasons
+                .iter()
+                .any(|reason| reason.code == "I211" && reason.message.contains("iteration work"))
+        );
     }
 }

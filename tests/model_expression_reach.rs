@@ -1,7 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use dygnosis::{
-    analyze, find_preprocessor, parse, run_preprocessor, ExprKind, JsonStage, Severity,
+    ExprKind, JsonStage, Severity, analyze, find_preprocessor, parse, run_preprocessor,
 };
 use serde::Deserialize;
 
@@ -78,7 +78,9 @@ fn exact_model_expression_reach_regressions_and_accepted_controls() {
         let expected_sentences = if strict && case.family == "E020" {
             let [start, end] = case.range.unwrap();
             let name = &case.source[start as usize..end as usize];
-            vec![format!("Undeclared identifier '{name}' in equation. Fix: add '{name}' to a var, varexo, or parameters declaration.")]
+            vec![format!(
+                "Undeclared identifier '{name}' in equation. Fix: add '{name}' to a var, varexo, or parameters declaration."
+            )]
         } else {
             case.sentences.clone()
         };
@@ -150,10 +152,34 @@ fn official(source: &str, accepted: bool, sentence: Option<&str>) {
 #[test]
 fn model_roles_and_timing_use_the_type_known_before_later_retypes() {
     for (prefix, name, argument, code, sentence) in [
-        ("external_function(name=bar,nargs=1);", "bar", "bar", "E280", "Symbol bar is a function name external to Dynare. It cannot be used like a variable without input argument inside model."),
-        ("parameters p; p=local;", "local", "local", "E281", "Variable local not allowed inside model declaration. Its scope is only outside model."),
-        ("var z; model; z=0; end; epilogue; epi=z; end;", "epi", "epi", "E294", "Symbol 'epi' cannot be used outside the epilogue block."),
-        ("varexo_det ed;", "ed", "ed(-1)", "E024", "Exogenous deterministic variable ed cannot be given a lead or a lag."),
+        (
+            "external_function(name=bar,nargs=1);",
+            "bar",
+            "bar",
+            "E280",
+            "Symbol bar is a function name external to Dynare. It cannot be used like a variable without input argument inside model.",
+        ),
+        (
+            "parameters p; p=local;",
+            "local",
+            "local",
+            "E281",
+            "Variable local not allowed inside model declaration. Its scope is only outside model.",
+        ),
+        (
+            "var z; model; z=0; end; epilogue; epi=z; end;",
+            "epi",
+            "epi",
+            "E294",
+            "Symbol 'epi' cannot be used outside the epilogue block.",
+        ),
+        (
+            "varexo_det ed;",
+            "ed",
+            "ed(-1)",
+            "E024",
+            "Exogenous deterministic variable ed cannot be given a lead or a lag.",
+        ),
     ] {
         for before in [false, true] {
             // The earlier ordinary assignment has already used this implicit
@@ -162,13 +188,24 @@ fn model_roles_and_timing_use_the_type_known_before_later_retypes() {
                 continue;
             }
             let change = format!("change_type(parameters) {name};");
-            let source = format!("{prefix} {} external_function(name=fn,nargs=1); var y; model; y=fn({argument}); end; {}",
-                if before { &change } else { "" }, if before { "" } else { &change });
+            let source = format!(
+                "{prefix} {} external_function(name=fn,nargs=1); var y; model; y=fn({argument}); end; {}",
+                if before { &change } else { "" },
+                if before { "" } else { &change }
+            );
             official(&source, before, if before { None } else { Some(sentence) });
             let rows = analyze(&parse(&source));
-            assert_eq!(rows.iter().any(|row| row.code == code && row.message == sentence), !before, "{source}: {rows:?}");
+            assert_eq!(
+                rows.iter()
+                    .any(|row| row.code == code && row.message == sentence),
+                !before,
+                "{source}: {rows:?}"
+            );
             if before {
-                assert!(!rows.iter().any(|row| row.severity == Severity::Error), "{source}: {rows:?}");
+                assert!(
+                    !rows.iter().any(|row| row.severity == Severity::Error),
+                    "{source}: {rows:?}"
+                );
             }
         }
     }
@@ -206,16 +243,20 @@ fn repeated_macro_spans_keep_each_model_expression_type_in_execution_order() {
 #[test]
 fn integer_function_arguments_and_variable_timing_keep_distinct_trees() {
     for rhs in ["fn(1)", "pkg.fn(-1)", "exp(1)", "max(1,2)"] {
-        let source = format!("external_function(name=fn,nargs=1); external_function(name=pkg.fn,nargs=1); var y; model; y={rhs}; end;");
+        let source = format!(
+            "external_function(name=fn,nargs=1); external_function(name=pkg.fn,nargs=1); var y; model; y={rhs}; end;"
+        );
         official(&source, true, None);
         let model = parse(&source);
         assert!(matches!(
             model.exprs.get(model.equations[0].rhs_expr.unwrap()).kind,
             ExprKind::Call { .. }
         ));
-        assert!(!analyze(&model)
-            .iter()
-            .any(|row| row.severity == Severity::Error));
+        assert!(
+            !analyze(&model)
+                .iter()
+                .any(|row| row.severity == Severity::Error)
+        );
     }
     for rhs in ["p(-1)", "y(+1)", "ed(0)"] {
         let source = format!("parameters p; p=1; varexo_det ed; var y; model; y={rhs}; end;");
@@ -228,9 +269,11 @@ fn integer_function_arguments_and_variable_timing_keep_distinct_trees() {
                 ..
             }
         ));
-        assert!(!analyze(&model)
-            .iter()
-            .any(|row| row.severity == Severity::Error));
+        assert!(
+            !analyze(&model)
+                .iter()
+                .any(|row| row.severity == Severity::Error)
+        );
     }
 }
 
@@ -242,38 +285,58 @@ fn matched_moment_roles_use_prior_retypes_and_keep_their_row_context() {
     ] {
         official(source, true, None);
         let rows = analyze(&parse(source));
-        assert!(!rows.iter().any(|row| row.severity == Severity::Error), "{source}: {rows:?}");
+        assert!(
+            !rows.iter().any(|row| row.severity == Severity::Error),
+            "{source}: {rows:?}"
+        );
     }
     let source = "external_function(name=bar,nargs=1); var y; model; y=0; end;\n@#for i in 1:2\n@#if i==2\nchange_type(var) bar;\n@#endif\nmatched_moments; bar; end;\n@#endfor\n";
     let sentence = "Symbol bar is a function name external to Dynare. It cannot be used like a variable without input argument inside model.";
     official(source, false, Some(sentence));
-    assert!(analyze(&parse(source))
-        .iter()
-        .any(|row| row.code == "E280" && row.message == sentence));
+    assert!(
+        analyze(&parse(source))
+            .iter()
+            .any(|row| row.code == "E280" && row.message == sentence)
+    );
 }
 
 #[test]
 fn replacement_unknown_arguments_keep_their_declaration_context() {
     let prefix = "external_function(name=fn,nargs=1); var y; model; [name='eq'] y=0; end;";
     for source in [
-        format!("{prefix} model_replace('eq'); y=fn(missing); end; external_function(name=missing,nargs=1);"),
+        format!(
+            "{prefix} model_replace('eq'); y=fn(missing); end; external_function(name=missing,nargs=1);"
+        ),
         format!("{prefix} model_replace('eq'); y=fn(missing); end; parameters p; p=missing;"),
-        format!("{prefix}\n@#for i in 1:2\n@#if i==2\nparameters missing;\n@#endif\nmodel_replace('eq'); y=fn(missing); end;\n@#endfor\n"),
+        format!(
+            "{prefix}\n@#for i in 1:2\n@#if i==2\nparameters missing;\n@#endif\nmodel_replace('eq'); y=fn(missing); end;\n@#endfor\n"
+        ),
     ] {
         official(&source, false, Some("Unknown symbol: missing"));
         let rows = analyze(&parse(&source));
         let rows: Vec<_> = rows.iter().filter(|row| row.code == "E020").collect();
         assert_eq!(rows.len(), 1, "{source}: {rows:?}");
         assert_eq!(rows[0].severity, Severity::Error);
-        assert_eq!(rows[0].message, "Undeclared identifier 'missing' in equation. Fix: add 'missing' to a var, varexo, or parameters declaration.");
-        assert_eq!(rows[0].span.start as usize, source.find("fn(missing)").unwrap() + 3);
-        assert_eq!(&source[rows[0].span.start as usize..rows[0].span.end as usize], "missing");
+        assert_eq!(
+            rows[0].message,
+            "Undeclared identifier 'missing' in equation. Fix: add 'missing' to a var, varexo, or parameters declaration."
+        );
+        assert_eq!(
+            rows[0].span.start as usize,
+            source.find("fn(missing)").unwrap() + 3
+        );
+        assert_eq!(
+            &source[rows[0].span.start as usize..rows[0].span.end as usize],
+            "missing"
+        );
     }
     let source = format!("parameters missing; {prefix} model_replace('eq'); y=fn(missing); end;");
     official(&source, true, None);
-    assert!(!analyze(&parse(&source))
-        .iter()
-        .any(|row| row.severity == Severity::Error));
+    assert!(
+        !analyze(&parse(&source))
+            .iter()
+            .any(|row| row.severity == Severity::Error)
+    );
 }
 
 #[test]
@@ -336,7 +399,9 @@ fn retyped_external_names_parse_as_variable_timing() {
             ..
         }
     ));
-    assert!(!analyze(&model)
-        .iter()
-        .any(|row| row.severity == Severity::Error));
+    assert!(
+        !analyze(&model)
+            .iter()
+            .any(|row| row.severity == Severity::Error)
+    );
 }

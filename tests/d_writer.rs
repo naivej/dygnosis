@@ -4,7 +4,7 @@
 //! Stage rule: `dev_logs/0.5/0.5.5/probe-writer.md`. The write run itself is the
 //! honesty suite's (`tests/honesty.rs`); these locks are the product-side verdicts.
 
-use dygnosis::{analyze, check_file, parse, Diagnostic};
+use dygnosis::{Diagnostic, analyze, check_file, parse};
 
 fn fixture(rel: &str) -> String {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

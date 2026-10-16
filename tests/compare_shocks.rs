@@ -1,4 +1,4 @@
-use dygnosis::model_diff::{compare_models_with_sources, CompareSource};
+use dygnosis::model_diff::{CompareSource, compare_models_with_sources};
 use dygnosis::{compare_models, parse};
 
 fn compare(before: &str, after: &str) -> serde_json::Value {
@@ -46,10 +46,12 @@ fn stochastic_written_forms_and_measurement_error_change() {
         row(&diff, "stochastic_shock", "y")["after"]["domain"],
         "measurement_error"
     );
-    assert!(diff["markdown"]
-        .as_str()
-        .unwrap()
-        .contains("Shock setup changes"));
+    assert!(
+        diff["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("Shock setup changes")
+    );
 }
 
 #[test]
@@ -131,10 +133,12 @@ fn shock_paths_show_terminal_control_and_expression_changes() {
     let controlled = row(&diff, "shock_path", "y");
     assert_eq!(controlled["before"]["released_exogenous"], "e");
     assert_eq!(controlled["after"]["released_exogenous"], "u");
-    assert!(diff["markdown"]
-        .as_str()
-        .unwrap()
-        .contains("released exogenous e → u"));
+    assert!(
+        diff["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("released exogenous e → u")
+    );
 }
 
 #[test]
@@ -185,10 +189,12 @@ fn overwrite_changes_status_and_empty_reset_is_visible() {
         "deterministic schedules and variance/covariance settings",
     );
     assert_eq!(reset["change"], "added");
-    assert!(diff["markdown"]
-        .as_str()
-        .unwrap()
-        .contains("superseded by overwrite"));
+    assert!(
+        diff["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("superseded by overwrite")
+    );
 }
 
 #[test]
@@ -275,9 +281,11 @@ fn mshocks_overwrite_keeps_stochastic_size_active() {
     let extended = format!("{base}mshocks(overwrite); var u; periods 3; values 1.1; end;\n");
     let diff = compare(base, &extended);
     assert!(rows(&diff).iter().all(|row| row["target"] != "e"), "{diff}");
-    assert!(rows(&diff)
-        .iter()
-        .any(|row| row["target"] == "u" && row["after"]["status"] == "superseded"));
+    assert!(
+        rows(&diff)
+            .iter()
+            .any(|row| row["target"] == "u" && row["after"]["status"] == "superseded")
+    );
 }
 
 #[test]
@@ -287,15 +295,19 @@ fn paths_overwrite_uses_typed_learning_period() {
         "{base}shock_paths(learnt_in=2024Q1 overwrite); var e; periods 2024Q2; values 2; end;"
     );
     let diff = compare(base, &different);
-    assert!(rows(&diff)
-        .iter()
-        .all(|row| row["after"]["status"] != "superseded"));
+    assert!(
+        rows(&diff)
+            .iter()
+            .all(|row| row["after"]["status"] != "superseded")
+    );
     let same =
         format!("{base}shock_paths(learnt_in=2 overwrite); var e; periods 4; values 2; end;");
     let diff = compare(base, &same);
-    assert!(rows(&diff)
-        .iter()
-        .any(|row| row["after"]["status"] == "superseded"));
+    assert!(
+        rows(&diff)
+            .iter()
+            .any(|row| row["after"]["status"] == "superseded")
+    );
 }
 
 #[test]
@@ -389,9 +401,11 @@ fn learnt_shock_date_overwrite_uses_72_period_count() {
             if replaced { "superseded" } else { "active" },
             "{first} versus {second}: {diff}"
         );
-        assert!(rows(&diff)
-            .iter()
-            .any(|item| item["after"]["learnt_in"]["text"] == second));
+        assert!(
+            rows(&diff)
+                .iter()
+                .any(|item| item["after"]["learnt_in"]["text"] == second)
+        );
     }
 }
 

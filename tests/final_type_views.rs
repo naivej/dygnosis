@@ -1,13 +1,13 @@
 use std::time::Duration;
 
-use dygnosis::model_info::{classify_variable_timing, structure_summary, TimingClass};
+use dygnosis::model_info::{TimingClass, classify_variable_timing, structure_summary};
 use dygnosis::server::new_service;
 use dygnosis::{
-    dynare_model_info, equations, find_preprocessor, parse, run_preprocessor, IdentClass, JsonStage,
+    IdentClass, JsonStage, dynare_model_info, equations, find_preprocessor, parse, run_preprocessor,
 };
 use serde_json::json;
-use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 const SOURCE: &str = "var y z;\nparameters q;\nvarexo e;\nvarexo_det d;\nchange_type(parameters) z;\nchange_type(var) q;\nchange_type(varexo_det) e;\nchange_type(varexo) d;\nmodel;\ny=q(-1)+z+e+d;\nq=y(-1);\nend;\n";
 
@@ -78,9 +78,13 @@ fn repeated_changes_and_restoration_show_the_last_type() {
         let model = parse(source);
         assert_eq!(structure_summary(&model).endogenous, 1);
         assert_eq!(equations(&model)[0].idents[1].class, IdentClass::Parameter);
-        assert_eq!(dynare_model_info(source, None, None)["parameters"], json!(["z"]));
+        assert_eq!(
+            dynare_model_info(source, None, None)["parameters"],
+            json!(["z"])
+        );
         if let Some(pp) = find_preprocessor(None) {
-            let official = run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
+            let official =
+                run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
             assert!(official.success, "{official:?}");
         }
     }
@@ -196,13 +200,15 @@ fn retyping_a_heterogeneous_name_makes_its_final_dimension_ordinary() {
         if kind == "endogenous" {
             assert_eq!(structure_summary(&model).endogenous, 2);
             assert_eq!(model.final_endogenous().len(), 2);
-            assert!(model
-                .endogenous
-                .iter()
-                .find(|decl| model.name(decl.name) == name)
-                .unwrap()
-                .heterogeneity
-                .is_some());
+            assert!(
+                model
+                    .endogenous
+                    .iter()
+                    .find(|decl| model.name(decl.name) == name)
+                    .unwrap()
+                    .heterogeneity
+                    .is_some()
+            );
         }
         if let Some(pp) = find_preprocessor(None) {
             let official = run_preprocessor(

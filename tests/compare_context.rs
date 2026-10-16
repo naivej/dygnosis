@@ -1,4 +1,4 @@
-use dygnosis::model_diff::{compare_models_with_sources, CompareSource};
+use dygnosis::model_diff::{CompareSource, compare_models_with_sources};
 use dygnosis::{compare_models, parse};
 
 fn compare(before: &str, after: &str) -> serde_json::Value {
@@ -69,10 +69,12 @@ fn multiplicative_baseline_changes_even_when_shock_row_does_not() {
     assert_eq!(row["after"]["values"][0], "2");
     assert!(row["after"].get("status").is_none());
     assert_eq!(changes(&diff, "shock_context").len(), 1, "{diff}");
-    assert!(diff["markdown"]
-        .as_str()
-        .unwrap()
-        .contains("written baseline for mshocks"));
+    assert!(
+        diff["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("written baseline for mshocks")
+    );
 }
 
 #[test]
@@ -335,10 +337,12 @@ fn mcp_compare_exposes_context_change_with_direct_source_location() {
     let row = context(&diff, "data_source", "estimation.first_obs");
     assert_eq!(row["after"]["location"]["line"], 3);
     assert_eq!(row["after"]["origin_uri"], "after.mod");
-    assert!(diff["markdown"]
-        .as_str()
-        .unwrap()
-        .contains("Heteroskedastic data"));
+    assert!(
+        diff["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("Heteroskedastic data")
+    );
 }
 
 #[test]
@@ -355,10 +359,12 @@ fn explicit_default_group_name_is_a_written_change() {
         assert_eq!(rows[0]["before"]["group_explicit"], false);
         assert_eq!(rows[0]["after"]["group_explicit"], true);
     }
-    assert!(diff["markdown"]
-        .as_str()
-        .unwrap()
-        .contains("block name bare default → name=default"));
+    assert!(
+        diff["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("block name bare default → name=default")
+    );
 }
 
 #[test]
@@ -368,9 +374,11 @@ fn one_written_baseline_has_one_context_change_for_multiple_references() {
     let after = before.replace("e=1", "e=2");
     let diff = compare(before, &after);
     assert_eq!(changes(&diff, "shock_context").len(), 1, "{diff}");
-    assert!(context(&diff, "baseline", "e")["after"]
-        .get("related_target")
-        .is_none());
+    assert!(
+        context(&diff, "baseline", "e")["after"]
+            .get("related_target")
+            .is_none()
+    );
 
     // This mix passes json=check but has an E113 transform clash. Comparison
     // still reports the shared written assignment only once.

@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use dygnosis::server::{new_service, Backend};
+use dygnosis::server::{Backend, new_service};
 use dygnosis::span::Span;
-use dygnosis::{analyze, dynare_diagnose, find_preprocessor, parse, run_preprocessor, JsonStage};
-use tower_lsp::lsp_types::*;
+use dygnosis::{JsonStage, analyze, dynare_diagnose, find_preprocessor, parse, run_preprocessor};
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 const PREFIX: &str = "var y; model; y=0; end; steady_state_model; ";
 const TIMED_SENTENCE: &str = "syntax error, unexpected '(', expecting EQUAL";

@@ -1,4 +1,4 @@
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage};
+use dygnosis::{JsonStage, analyze, find_preprocessor, parse, run_preprocessor};
 use std::time::Duration;
 
 #[test]
@@ -35,7 +35,9 @@ fn discretionary_discount_parameter_uses_its_type_at_the_command() {
             false,
         ),
     ] {
-        let source = format!("var y pol; {decl} model(linear); y=0; end; planner_objective y^2; {before} discretionary_policy(instruments=(pol)); {after}");
+        let source = format!(
+            "var y pol; {decl} model(linear); y=0; end; planner_objective y^2; {before} discretionary_policy(instruments=(pol)); {after}"
+        );
         let diagnostics = analyze(&parse(&source));
         let errors: Vec<_> = diagnostics
             .iter()
@@ -131,7 +133,9 @@ fn policy_option_expressions_register_native_locals_before_instrument_validation
             ("", "instruments=(pol),planner_discount=pol"),
             ("", "planner_discount=pol,instruments=(pol)"),
         ] {
-            let source = format!("var y; {prefix} model(linear); y=0; end; planner_objective y^2; {command}({options});");
+            let source = format!(
+                "var y; {prefix} model(linear); y=0; end; planner_objective y^2; {command}({options});"
+            );
             let diagnostics = analyze(&parse(&source));
             let errors: Vec<_> = diagnostics
                 .iter()
@@ -156,7 +160,9 @@ fn policy_option_expressions_register_native_locals_before_instrument_validation
 #[test]
 fn later_policy_expressions_know_the_generated_discount_parameter() {
     for earlier_command in ["ramsey_model", "ramsey_policy", "discretionary_policy"] {
-        let source = format!("var y pol; model(linear); y=0; end; planner_objective y^2; {earlier_command}(instruments=(pol)); discretionary_policy(instruments=(pol),planner_discount=optimal_policy_discount_factor);");
+        let source = format!(
+            "var y pol; model(linear); y=0; end; planner_objective y^2; {earlier_command}(instruments=(pol)); discretionary_policy(instruments=(pol),planner_discount=optimal_policy_discount_factor);"
+        );
         let diagnostics = analyze(&parse(&source));
         assert!(
             !diagnostics.iter().any(|row| row.code == "E378"),

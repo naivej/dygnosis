@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower_lsp::lsp_types::Url;
 
 use crate::engine::comparison::semantic_diff::{
@@ -13,9 +13,9 @@ use crate::engine::comparison::semantic_diff::{
 use crate::engine::comparison::{EquationChange, IndexedEquation, ModelDiff, ShockSetting};
 use crate::engine::language::model::{AssignmentIndex, Model};
 use crate::engine::language::span::LineIndex;
+use crate::engine::workspace::Workspace;
 use crate::engine::workspace::include_resolver::{is_virtual_uri, normalize_uri};
 use crate::engine::workspace::model_map::{SourceOccurrence, WrittenSegment};
-use crate::engine::workspace::Workspace;
 
 pub(crate) enum Coordinates {
     Mcp,

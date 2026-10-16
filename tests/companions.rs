@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use dygnosis::span::Span;
-use dygnosis::{analyze, check_file, parse, CompanionKind, CompanionRecord, Workspace};
+use dygnosis::{CompanionKind, CompanionRecord, Workspace, analyze, check_file, parse};
 
 fn fixtures_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/companions")

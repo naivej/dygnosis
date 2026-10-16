@@ -1,8 +1,8 @@
 use std::{collections::HashMap, time::Duration};
 
-use dygnosis::server::{new_service, Backend};
-use dygnosis::{analyze, dynare_diagnose, find_preprocessor, parse, run_preprocessor, JsonStage};
-use tower_lsp::{lsp_types::*, LanguageServer};
+use dygnosis::server::{Backend, new_service};
+use dygnosis::{JsonStage, analyze, dynare_diagnose, find_preprocessor, parse, run_preprocessor};
+use tower_lsp::{LanguageServer, lsp_types::*};
 
 fn official(source: &str, accepted: bool, sentence: Option<&str>) {
     let Some(pp) = find_preprocessor(None) else {
@@ -53,11 +53,15 @@ fn forbidden_bare_rhs_roles_reach_scalar_and_multiple_outputs() {
             let source = format!("{prefix} steady_state_model; {lhs}=bar({name}); end;");
             official(&source, false, Some(sentence));
             let rows = analyze(&parse(&source));
-            let row = rows.iter().find(|row| row.code == code).unwrap_or_else(|| {
-                panic!("missing {code} for {lhs}: {rows:?}")
-            });
+            let row = rows
+                .iter()
+                .find(|row| row.code == code)
+                .unwrap_or_else(|| panic!("missing {code} for {lhs}: {rows:?}"));
             assert_eq!(row.message, sentence);
-            assert_eq!(&source[row.span.start as usize..row.span.end as usize], name);
+            assert_eq!(
+                &source[row.span.start as usize..row.span.end as usize],
+                name
+            );
         }
     }
 }
@@ -136,7 +140,10 @@ fn removed_names_are_not_missing_steady_state_outputs() {
     ] {
         official(source, true, None);
         let rows = analyze(&parse(source));
-        assert!(!rows.iter().any(|row| row.code == "W042"), "{source}: {rows:?}");
+        assert!(
+            !rows.iter().any(|row| row.code == "W042"),
+            "{source}: {rows:?}"
+        );
     }
 }
 
@@ -175,7 +182,9 @@ fn qualified_call_arguments_keep_the_ordinary_variable_call_refusal() {
     for name in ["y", "p", "tmp"] {
         for arguments in ["0", "-1", "1.5", "1,2"] {
             let call = format!("{name}({arguments})");
-            let source = format!("parameters p; var y; model; y=0; end; steady_state_model; tmp=1; y=pkg.foo({call}); end;");
+            let source = format!(
+                "parameters p; var y; model; y=0; end; steady_state_model; tmp=1; y=pkg.foo({call}); end;"
+            );
             let sentence = format!(
                 "Using variable {name} with a lead or a lag is not allowed in this context"
             );
@@ -238,13 +247,35 @@ fn role_checks_use_parser_context_before_later_retypes() {
 #[test]
 fn final_endogenous_types_control_the_missing_output_warning() {
     for (source, warns) in [
-        ("parameters gone; change_type(var) gone; var y; model; y=0; gone=0; end; steady_state_model; y=1; end;", true),
-        ("var gone; change_type(parameters) gone; var y; model; y=0; end; steady_state_model; y=1; end;", false),
-        ("var y gone; var_remove gone; change_type(var) gone; model; y=0; gone=0; end; steady_state_model; y=1; end;", true),
+        (
+            "parameters gone; change_type(var) gone; var y; model; y=0; gone=0; end; steady_state_model; y=1; end;",
+            true,
+        ),
+        (
+            "var gone; change_type(parameters) gone; var y; model; y=0; end; steady_state_model; y=1; end;",
+            false,
+        ),
+        (
+            "var y gone; var_remove gone; change_type(var) gone; model; y=0; gone=0; end; steady_state_model; y=1; end;",
+            true,
+        ),
     ] {
-        official(source,true, if warns {Some("variable 'gone' is not assigned a value")} else {None});
+        official(
+            source,
+            true,
+            if warns {
+                Some("variable 'gone' is not assigned a value")
+            } else {
+                None
+            },
+        );
         let rows = analyze(&parse(source));
-        assert_eq!(rows.iter().any(|row| row.code == "W042" && row.message == "variable 'gone' is not assigned a value"), warns, "{source}: {rows:?}");
+        assert_eq!(
+            rows.iter().any(|row| row.code == "W042"
+                && row.message == "variable 'gone' is not assigned a value"),
+            warns,
+            "{source}: {rows:?}"
+        );
     }
 }
 
@@ -296,8 +327,13 @@ fn true_builtins_and_declared_or_repeated_native_calls_stay_accepted() {
         "var y; model; y=0; end; steady_state_model; y=pkg.foo(1); y=pkg.foo(1,2); end;",
         "parameters pkg; var y; model; y=0; end; steady_state_model; y=pkg.foo(1); end;",
     ] {
-        official(source,true,None);
-        assert!(!analyze(&parse(source)).iter().any(|row| row.code.starts_with('E')), "{source}");
+        official(source, true, None);
+        assert!(
+            !analyze(&parse(source))
+                .iter()
+                .any(|row| row.code.starts_with('E')),
+            "{source}"
+        );
     }
 }
 
@@ -339,7 +375,9 @@ fn repeated_macro_spans_keep_each_rhs_role_at_its_parser_context() {
         ("external_function(name=foo,nargs=1);", "foo", "E279"),
         ("var gone; var_remove gone;", "gone", "E426"),
     ] {
-        let source = format!("{prefix} var y; model; y=0; end;\n@#for i in 1:2\n@#if i==2\nchange_type(parameters) {name};\n@#endif\nsteady_state_model; y=pkg.foo({name}); end;\n@#endfor\n");
+        let source = format!(
+            "{prefix} var y; model; y=0; end;\n@#for i in 1:2\n@#if i==2\nchange_type(parameters) {name};\n@#endif\nsteady_state_model; y=pkg.foo({name}); end;\n@#endfor\n"
+        );
         official(&source, false, None);
         let rows = analyze(&parse(&source));
         assert_eq!(
@@ -353,7 +391,9 @@ fn repeated_macro_spans_keep_each_rhs_role_at_its_parser_context() {
 #[test]
 fn qualified_call_identity_reaches_duplicate_declarations_with_the_first_call_range() {
     for name in ["pkg.foo", "pkg.sub.foo"] {
-        let source = format!("var y; model; y=0; end; steady_state_model; y={name}(1); end; external_function(name={name},nargs=1);");
+        let source = format!(
+            "var y; model; y=0; end; steady_state_model; y={name}(1); end; external_function(name={name},nargs=1);"
+        );
         let sentence = format!("Symbol {name} declared twice.");
         official(&source, true, Some(&sentence));
         let model = parse(&source);

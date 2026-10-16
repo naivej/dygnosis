@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use dygnosis::model_info::TimingClass;
 use dygnosis::{
-    count_gap, equations, explain_equation, parse, CountGap, EquationIdent, EquationRow, IdentClass,
+    CountGap, EquationIdent, EquationRow, IdentClass, count_gap, equations, explain_equation, parse,
 };
 
 fn fixture(rel: &str) -> String {
@@ -101,10 +101,12 @@ fn equivalent_capital_models_share_dynare_timing_and_keep_written_offsets() {
     assert_eq!(info["mixed"], serde_json::json!([]));
     assert_eq!(info["n_predetermined"], 1);
     let expanded = dygnosis::dynare_expand(BEGINNING_CAPITAL, None, None);
-    assert!(expanded["effective_text"]
-        .as_str()
-        .unwrap()
-        .contains("k(+1)"));
+    assert!(
+        expanded["effective_text"]
+            .as_str()
+            .unwrap()
+            .contains("k(+1)")
+    );
     let extracted = dygnosis::dynare_extract(
         BEGINNING_CAPITAL,
         None,
@@ -131,11 +133,12 @@ fn predetermined_four_offsets_and_combined_classes() {
         .map(|id| (id.timing, id.dynare_timing))
         .collect();
     assert_eq!(offsets, [(1, 0), (0, -1), (-1, -2), (2, 1)]);
-    assert!(row
-        .idents
-        .iter()
-        .filter(|id| id.name == "u")
-        .all(|id| id.timing == id.dynare_timing));
+    assert!(
+        row.idents
+            .iter()
+            .filter(|id| id.name == "u")
+            .all(|id| id.timing == id.dynare_timing)
+    );
     let timing = classify_variable_timing(&model);
     assert_eq!(timing["k"].offsets, [-2, -1, 0, 1]);
     assert_eq!(timing["k"].class, TimingClass::Mixed);
@@ -166,18 +169,52 @@ fn predetermined_marks_follow_valid_roles_and_successful_type_changes() {
     use dygnosis::classify_variable_timing;
     for (prefix, shifted) in [
         ("predetermined_variables k; var k;", false),
-        ("parameters k; predetermined_variables k; change_type(var) k;", false),
-        ("varexo k; predetermined_variables k; change_type(var) k;", false),
-        ("var k; predetermined_variables k; change_type(parameters) k; change_type(var) k;", false),
-        ("var k; predetermined_variables k; change_type(parameters) k; change_type(var) k; predetermined_variables k;", true),
-        ("parameters k; change_type(var) k; predetermined_variables k;", true),
-        ("var k; predetermined_variables k; change_type(var) k;", true),
+        (
+            "parameters k; predetermined_variables k; change_type(var) k;",
+            false,
+        ),
+        (
+            "varexo k; predetermined_variables k; change_type(var) k;",
+            false,
+        ),
+        (
+            "var k; predetermined_variables k; change_type(parameters) k; change_type(var) k;",
+            false,
+        ),
+        (
+            "var k; predetermined_variables k; change_type(parameters) k; change_type(var) k; predetermined_variables k;",
+            true,
+        ),
+        (
+            "parameters k; change_type(var) k; predetermined_variables k;",
+            true,
+        ),
+        (
+            "var k; predetermined_variables k; change_type(var) k;",
+            true,
+        ),
     ] {
         let model = parse(&format!("{prefix} model; k(1)=0; end;"));
         let id = &equations(&model)[0].idents[0];
-        assert_eq!((id.timing, id.dynare_timing), (1, if shifted { 0 } else { 1 }), "{prefix}");
-        assert_eq!(classify_variable_timing(&model)["k"].class, if shifted { TimingClass::Static } else { TimingClass::ForwardLooking }, "{prefix}");
-        assert_eq!(classify_variable_timing(&model)["k"].predetermined_convention, shifted, "{prefix}");
+        assert_eq!(
+            (id.timing, id.dynare_timing),
+            (1, if shifted { 0 } else { 1 }),
+            "{prefix}"
+        );
+        assert_eq!(
+            classify_variable_timing(&model)["k"].class,
+            if shifted {
+                TimingClass::Static
+            } else {
+                TimingClass::ForwardLooking
+            },
+            "{prefix}"
+        );
+        assert_eq!(
+            classify_variable_timing(&model)["k"].predetermined_convention,
+            shifted,
+            "{prefix}"
+        );
     }
     let model =
         parse("var k; predetermined_variables k; model; k(1)=0; end; change_type(parameters) k;");
@@ -192,7 +229,9 @@ fn predetermined_marks_follow_valid_roles_and_successful_type_changes() {
 #[test]
 fn predetermined_macro_execution_order_clears_and_restores_marks() {
     for (remark, expected) in [("", 1), ("predetermined_variables k;", 0)] {
-        let source = format!("var k;\n@#for j in 1:2\n@#if j == 1\npredetermined_variables k;\n@#else\nchange_type(parameters) k; change_type(var) k; {remark}\n@#endif\n@#endfor\nmodel; k(1)=0; end;");
+        let source = format!(
+            "var k;\n@#for j in 1:2\n@#if j == 1\npredetermined_variables k;\n@#else\nchange_type(parameters) k; change_type(var) k; {remark}\n@#endif\n@#endfor\nmodel; k(1)=0; end;"
+        );
         let rows = dygnosis::dynare_equations(&source, None, None, None, None);
         assert_eq!(rows["equations"][0]["idents"][0]["timing"], 1);
         assert_eq!(
@@ -210,10 +249,12 @@ fn predetermined_local_definitions_shift_once_and_static_rows_do_not_add_lags() 
     assert_eq!(timing["k"].offsets, [-1, 0]);
     assert_eq!(timing["k"].class, TimingClass::Predetermined);
     assert_eq!(local.ident_refs(&local.equations[0])[1].timing, 0);
-    assert!(equations(&local)[0]
-        .idents
-        .iter()
-        .any(|id| id.name == "loc" && id.dynare_timing == 0));
+    assert!(
+        equations(&local)[0]
+            .idents
+            .iter()
+            .any(|id| id.name == "loc" && id.dynare_timing == 0)
+    );
     for (dynamic, expected) in [
         ("k(1)=0;", TimingClass::Static),
         ("k(2)=0;", TimingClass::ForwardLooking),
@@ -223,10 +264,12 @@ fn predetermined_local_definitions_shift_once_and_static_rows_do_not_add_lags() 
         );
         let model = parse(&source);
         assert_eq!(classify_variable_timing(&model)["k"].class, expected);
-        assert!(!classify_variable_timing(&model)["k"]
-            .offsets
-            .iter()
-            .any(|offset| *offset < 0));
+        assert!(
+            !classify_variable_timing(&model)["k"]
+                .offsets
+                .iter()
+                .any(|offset| *offset < 0)
+        );
     }
 }
 
@@ -254,7 +297,7 @@ fn heterogeneous_timing_never_applies_an_aggregate_mark() {
 
 #[test]
 fn equivalent_capital_models_are_accepted_at_pinned_check_and_transform() {
-    use dygnosis::{run_preprocessor, JsonStage};
+    use dygnosis::{JsonStage, run_preprocessor};
     let binary = PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
     if !binary.is_file() {
         eprintln!("skip predetermined timing honesty: Dynare 7.2 is absent");

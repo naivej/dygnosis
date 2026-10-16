@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use dygnosis::explain::{explain, known_codes, render_markdown, ExplainKind};
+use dygnosis::explain::{ExplainKind, explain, known_codes, render_markdown};
 use dygnosis::{analyze, check_file, dynare_explain, parse};
 
 const RUST_CODES: &[&str] = &[

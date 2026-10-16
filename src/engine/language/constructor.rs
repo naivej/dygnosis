@@ -796,11 +796,7 @@ impl ConstructorTree {
         } else {
             self.intern(Node::Builtin(callee, args), None)
         };
-        if negative {
-            self.neg(node)
-        } else {
-            node
-        }
+        if negative { self.neg(node) } else { node }
     }
 
     fn call_value(&self, callee: &str, args: &[NodeId]) -> Option<f64> {

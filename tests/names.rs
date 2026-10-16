@@ -1,7 +1,7 @@
-use dygnosis::server::{new_service, Backend};
+use dygnosis::server::{Backend, new_service};
 use serde_json::json;
-use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 fn uri(name: &str) -> Url {
     let root = if cfg!(windows) {
@@ -461,7 +461,7 @@ async fn heterogeneous_uses_do_not_change_aggregate_timing_displays() {
 #[tokio::test]
 async fn written_metadata_preferences_and_final_role_icons_are_independent() {
     let document = uri("metadata.mod");
-    let text="var y $y_t$ (long_name='Output_[level]');\nparameters p $p$ (long_name='Price');\nvarexo e $e$;\nvarexo_det d $d$;\nchange_type(parameters) y; change_type(var) p; change_type(varexo_det) e; change_type(varexo) d;\nmodel; p=p(-1)+y+e+d; end;\n";
+    let text = "var y $y_t$ (long_name='Output_[level]');\nparameters p $p$ (long_name='Price');\nvarexo e $e$;\nvarexo_det d $d$;\nchange_type(parameters) y; change_type(var) p; change_type(varexo_det) e; change_type(varexo) d;\nmodel; p=p(-1)+y+e+d; end;\n";
     let (service, _socket) = new_service();
     let server = service.inner();
     initialize(server, None, &[], true, true).await;
@@ -507,18 +507,22 @@ async fn written_metadata_preferences_and_final_role_icons_are_independent() {
         })
         .await;
     let items = completion(server, &document).await;
-    assert!(items
-        .iter()
-        .find(|item| item.label == "y")
-        .unwrap()
-        .label_details
-        .is_none());
-    assert!(items
-        .iter()
-        .find(|item| item.label == "y")
-        .unwrap()
-        .documentation
-        .is_none());
+    assert!(
+        items
+            .iter()
+            .find(|item| item.label == "y")
+            .unwrap()
+            .label_details
+            .is_none()
+    );
+    assert!(
+        items
+            .iter()
+            .find(|item| item.label == "y")
+            .unwrap()
+            .documentation
+            .is_none()
+    );
     let markdown = hover(server, position(&document, text, "p=p(-1)", 0)).await;
     assert!(!markdown.contains("Price") && !markdown.contains("TeX:"));
     assert_eq!(dygnosis::dynare_model_info(text, None, None), before);
@@ -657,10 +661,12 @@ async fn semantic_capability_matrix_uses_its_returned_legend_for_full_and_range(
                     .filter(|token| token.0 == 1)
                     .collect::<Vec<_>>()
             );
-            assert!(legend
-                .token_modifiers
-                .iter()
-                .all(|modifier| modifiers.contains(&modifier.as_str())));
+            assert!(
+                legend
+                    .token_modifiers
+                    .iter()
+                    .all(|modifier| modifiers.contains(&modifier.as_str()))
+            );
         }
     }
 }
@@ -668,7 +674,7 @@ async fn semantic_capability_matrix_uses_its_returned_legend_for_full_and_range(
 #[tokio::test]
 async fn highlight_targets_come_from_parser_and_model_equalities_are_reads() {
     let document = uri("writes.mod");
-    let text="var y; parameters p; p=1;\nmodel; #loc=p; y=y(-1)+p+loc; end;\nsteady_state_model; y=p; end;\ninitval; y=0; end;\nendval; y=1; end;\nhistval; y(-1)=0; end;\nfilter_initial_state; y(-1)=0; end;\nepilogue; out=y; end;\nhelper=p;\n// y = p;\n\"y = p\";\n";
+    let text = "var y; parameters p; p=1;\nmodel; #loc=p; y=y(-1)+p+loc; end;\nsteady_state_model; y=p; end;\ninitval; y=0; end;\nendval; y=1; end;\nhistval; y(-1)=0; end;\nfilter_initial_state; y(-1)=0; end;\nepilogue; out=y; end;\nhelper=p;\n// y = p;\n\"y = p\";\n";
     let (service, _socket) = new_service();
     let server = service.inner();
     open(server, &document, text).await;
@@ -687,10 +693,12 @@ async fn highlight_targets_come_from_parser_and_model_equalities_are_reads() {
         .map(|row| row.range.start.line)
         .collect();
     assert_eq!(writes, [0, 2, 3, 4, 5, 6]);
-    assert!(response
-        .iter()
-        .filter(|row| row.range.start.line == 1)
-        .all(|row| row.kind == Some(DocumentHighlightKind::READ)));
+    assert!(
+        response
+            .iter()
+            .filter(|row| row.range.start.line == 1)
+            .all(|row| row.kind == Some(DocumentHighlightKind::READ))
+    );
     assert!(response.iter().all(|row| row.range.start.line < 9));
     let parameter = server
         .document_highlight(DocumentHighlightParams {
@@ -841,40 +849,52 @@ async fn semantic_roles_keep_local_scopes_final_types_and_removed_sites() {
             )
         })
         .collect();
-    assert!(named
-        .iter()
-        .filter(|(name, _)| *name == "x")
-        .all(|(_, token)| token.3 == "dynareParameter"
-            && !token
-                .4
-                .iter()
-                .any(|modifier| modifier == "predetermined" || modifier == "forwardLooking")));
+    assert!(
+        named
+            .iter()
+            .filter(|(name, _)| *name == "x")
+            .all(|(_, token)| token.3 == "dynareParameter"
+                && !token
+                    .4
+                    .iter()
+                    .any(|modifier| modifier == "predetermined" || modifier == "forwardLooking"))
+    );
     assert!(named.iter().all(|(name, _)| *name != "gone"));
-    assert!(named
-        .iter()
-        .filter(|(name, _)| *name == "hx")
-        .all(|(_, token)| token.3 == "dynareEndogenous"
-            && token.4.iter().any(|modifier| modifier == "predetermined")));
-    assert!(named
-        .iter()
-        .filter(|(name, _)| *name == "d")
-        .all(|(_, token)| token.3 == "dynareExogenous"));
-    assert!(named
-        .iter()
-        .filter(|(name, _)| *name == "declared_local")
-        .all(|(_, token)| token.3 == "dynareModelLocal"));
+    assert!(
+        named
+            .iter()
+            .filter(|(name, _)| *name == "hx")
+            .all(|(_, token)| token.3 == "dynareEndogenous"
+                && token.4.iter().any(|modifier| modifier == "predetermined"))
+    );
+    assert!(
+        named
+            .iter()
+            .filter(|(name, _)| *name == "d")
+            .all(|(_, token)| token.3 == "dynareExogenous")
+    );
+    assert!(
+        named
+            .iter()
+            .filter(|(name, _)| *name == "declared_local")
+            .all(|(_, token)| token.3 == "dynareModelLocal")
+    );
     let locals: Vec<_> = named.iter().filter(|(name, _)| *name == "loc").collect();
     assert_eq!(locals.len(), 2);
-    assert!(locals
-        .iter()
-        .all(|(_, token)| token.0 == 9 && token.3 == "dynareModelLocal"));
+    assert!(
+        locals
+            .iter()
+            .all(|(_, token)| token.0 == 9 && token.3 == "dynareModelLocal")
+    );
     let copies = "@#for k in 1:2\nvar x@{k};\n@#endfor\nvar_remove x1;\nmodel; x2=0; end;\n";
     open(server, &document, copies).await;
     let tokens = decode(&full(server, &document).await, &legend);
     assert!(tokens.iter().all(|token| token.0 != 1), "{tokens:?}");
-    assert!(tokens
-        .iter()
-        .any(|token| token.0 == 4 && token.3 == "dynareEndogenous"));
+    assert!(
+        tokens
+            .iter()
+            .any(|token| token.0 == 4 && token.3 == "dynareEndogenous")
+    );
 }
 
 #[tokio::test]
@@ -922,9 +942,11 @@ async fn mapped_name_ranges_use_original_utf16_and_mixed_line_endings() {
             .await
             .unwrap()
             .unwrap();
-        assert!(highlights
-            .iter()
-            .all(|row| written_text(source, row.range) == &needle[..1]));
+        assert!(
+            highlights
+                .iter()
+                .all(|row| written_text(source, row.range) == &needle[..1])
+        );
     }
     let tokens = decode(&full(server, &child).await, &legend);
     assert!(tokens.iter().all(|token| matches!(
@@ -937,9 +959,11 @@ async fn mapped_name_ranges_use_original_utf16_and_mixed_line_endings() {
         ),
         "p" | "y"
     )));
-    assert!(tokens
-        .iter()
-        .any(|token| token.0 == 2 && token.3 == "dynareEndogenous"));
+    assert!(
+        tokens
+            .iter()
+            .any(|token| token.0 == 2 && token.3 == "dynareEndogenous")
+    );
     let writes = server
         .document_highlight(DocumentHighlightParams {
             text_document_position_params: position(&child, body, "y=p", 0),
@@ -957,7 +981,7 @@ async fn opaque_and_partial_targets_do_not_gain_fabricated_writes() {
     let (service, _socket) = new_service();
     let server = service.inner();
     let document = uri("partial.mod");
-    let text="var y; parameters p;\n[y,p]=native_call();\nobj.y=p;\nmodel; y=; end;\nsteady_state_model; y=; end;\nsteady_state_model; y(0)=1; end;\nmodel; #y(0)=1; y=0; end;\n";
+    let text = "var y; parameters p;\n[y,p]=native_call();\nobj.y=p;\nmodel; y=; end;\nsteady_state_model; y=; end;\nsteady_state_model; y(0)=1; end;\nmodel; #y(0)=1; y=0; end;\n";
     open(server, &document, text).await;
     let opaque = server
         .document_highlight(DocumentHighlightParams {
@@ -1014,9 +1038,11 @@ async fn several_owners_keep_common_facts_and_withhold_conflicting_roles_and_tim
     open(server, &child, body).await;
     open(server, &a, root).await;
     open(server, &b, root).await;
-    assert!(hover(server, position(&child, body, "y $", 0))
-        .await
-        .contains("Output"));
+    assert!(
+        hover(server, position(&child, body, "y $", 0))
+            .await
+            .contains("Output")
+    );
     let tokens = decode(&full(server, &child).await, &legend);
     assert!(tokens.iter().any(|token| token.3 == "dynareEndogenous"
         && token.4.iter().any(|modifier| modifier == "predetermined")));
@@ -1027,13 +1053,15 @@ async fn several_owners_keep_common_facts_and_withhold_conflicting_roles_and_tim
     )
     .await;
     let tokens = decode(&full(server, &child).await, &legend);
-    assert!(tokens
-        .iter()
-        .filter(|token| token.3 == "dynareEndogenous")
-        .all(|token| !token
-            .4
+    assert!(
+        tokens
             .iter()
-            .any(|modifier| modifier == "predetermined" || modifier == "forwardLooking")));
+            .filter(|token| token.3 == "dynareEndogenous")
+            .all(|token| !token
+                .4
+                .iter()
+                .any(|modifier| modifier == "predetermined" || modifier == "forwardLooking"))
+    );
     open(
         server,
         &b,
@@ -1044,17 +1072,21 @@ async fn several_owners_keep_common_facts_and_withhold_conflicting_roles_and_tim
     assert!(tokens.iter().all(|token| token.3 == "dynareParameter"));
     let items = completion(server, &child).await;
     assert!(!items.iter().any(|item| item.label == "y"));
-    assert!(items
-        .iter()
-        .any(|item| item.label == "p" && item.kind == Some(CompletionItemKind::CONSTANT)));
-    assert!(server
-        .hover(HoverParams {
-            text_document_position_params: position(&child, body, "y $", 0),
-            work_done_progress_params: Default::default()
-        })
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        items
+            .iter()
+            .any(|item| item.label == "p" && item.kind == Some(CompletionItemKind::CONSTANT))
+    );
+    assert!(
+        server
+            .hover(HoverParams {
+                text_document_position_params: position(&child, body, "y $", 0),
+                work_done_progress_params: Default::default()
+            })
+            .await
+            .unwrap()
+            .is_none()
+    );
     let highlights = server
         .document_highlight(DocumentHighlightParams {
             text_document_position_params: position(&child, body, "y $", 0),

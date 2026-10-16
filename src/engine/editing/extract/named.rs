@@ -6,7 +6,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ops::Range;
 
-use super::{eq_at, is_pac_name, EqRef, Model, OmittedContext};
+use super::{EqRef, Model, OmittedContext, eq_at, is_pac_name};
 use crate::engine::language::expr::{ExprId, ExprKind};
 use crate::engine::language::intern::Name;
 use crate::engine::language::model::{
@@ -66,7 +66,9 @@ impl NamedContext {
         }
         self.visits += 1;
         if self.visits > MAX_VISITS {
-            return Err(format!("named model dependency closure exceeded {MAX_VISITS} visits; no fragment was returned"));
+            return Err(format!(
+                "named model dependency closure exceeded {MAX_VISITS} visits; no fragment was returned"
+            ));
         }
         Ok(())
     }
@@ -319,7 +321,10 @@ impl NamedContext {
                             .targets
                             .contains_key(&operator.name)
                     {
-                        return Err(format!("PAC model `{}` has no pac_target_info context for pac_target_nonstationary", model.name(operator.name)));
+                        return Err(format!(
+                            "PAC model `{}` has no pac_target_info context for pac_target_nonstationary",
+                            model.name(operator.name)
+                        ));
                     }
                 }
                 ExprKind::Number
@@ -432,7 +437,10 @@ impl NamedContext {
                             .cloned()
                             .unwrap_or_default();
                         if matches.is_empty() {
-                            return Err(format!("named model `{}` requires equation tag `{tag}`, which has no retained aggregate equation", model.name(name)));
+                            return Err(format!(
+                                "named model `{}` requires equation tag `{tag}`, which has no retained aggregate equation",
+                                model.name(name)
+                            ));
                         }
                         self.include_equation_set(&matches)?;
                     }
@@ -652,7 +660,9 @@ impl NamedContext {
                 let text = token.text(&model.source);
                 bytes = bytes.saturating_add(text.len() + 1);
                 if bytes > MAX_CONTEXT_BYTES {
-                    return Err(format!("named model context exceeds {MAX_CONTEXT_BYTES} bytes; no fragment was returned"));
+                    return Err(format!(
+                        "named model context exceeds {MAX_CONTEXT_BYTES} bytes; no fragment was returned"
+                    ));
                 }
                 if super::contains_macro(text) {
                     return Err(
@@ -722,10 +732,12 @@ mod tests {
             visits: MAX_VISITS,
             ..Default::default()
         };
-        assert!(context
-            .grow(&model, &retained)
-            .unwrap_err()
-            .contains("exceeded"));
+        assert!(
+            context
+                .grow(&model, &retained)
+                .unwrap_err()
+                .contains("exceeded")
+        );
         let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let result = crate::engine::control::run(Some(flag.clone()), || {
             crate::engine::control::cancel_after(&flag, 0);
@@ -746,10 +758,12 @@ mod tests {
             visits: MAX_VISITS - 2,
             ..Default::default()
         };
-        assert!(context
-            .accepted_parent(&model, command.parse_order, &command.active_tokens)
-            .unwrap_err()
-            .contains("exceeded"));
+        assert!(
+            context
+                .accepted_parent(&model, command.parse_order, &command.active_tokens)
+                .unwrap_err()
+                .contains("exceeded")
+        );
         assert!(context.parents.is_none());
 
         let mut context = NamedContext::default();
@@ -758,10 +772,12 @@ mod tests {
             .unwrap();
         // The built index is reused, but a lookup must still use the same budget.
         context.visits = MAX_VISITS;
-        assert!(context
-            .accepted_parent(&model, command.parse_order, &command.active_tokens)
-            .unwrap_err()
-            .contains("exceeded"));
+        assert!(
+            context
+                .accepted_parent(&model, command.parse_order, &command.active_tokens)
+                .unwrap_err()
+                .contains("exceeded")
+        );
         let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let result = crate::engine::control::run(Some(flag.clone()), || {
             crate::engine::control::cancel_after(&flag, 3);

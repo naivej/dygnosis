@@ -7,7 +7,7 @@ use std::sync::Arc;
 use rmcp::model::{CallToolResult, Tool, ToolAnnotations};
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::request::{ExpandedRange, LineRange, Target};
 use super::result::{Detail, Pages, ResultOptions, ToolResult};
@@ -413,7 +413,7 @@ pub(super) fn dispatch(
             .ok_or_else(|| invalid("comparison is required"))?
         {
             ComparisonInput::Sources { before, after } => {
-                return super::multi_request::comparison_sources(arguments, control, before, after)
+                return super::multi_request::comparison_sources(arguments, control, before, after);
             }
             ComparisonInput::Repository {
                 repository_path,
@@ -512,7 +512,9 @@ pub(super) fn dispatch(
                     .as_deref()
                     .is_some_and(|kind| kind != "diagnostic_fix")
             {
-                return Err(invalid("Choose one action_id or diagnostic fixes; action alternatives cannot be combined"));
+                return Err(invalid(
+                    "Choose one action_id or diagnostic fixes; action alternatives cannot be combined",
+                ));
             }
             object.remove("action_kind");
             object.remove("action_id");
@@ -556,7 +558,7 @@ fn reference_result(
     ) {
         Ok(pages) => pages,
         Err(message) if message.starts_with("INPUT_CHANGED") => {
-            return Ok(ToolResult::refused("INPUT_CHANGED", message).wire())
+            return Ok(ToolResult::refused("INPUT_CHANGED", message).wire());
         }
         Err(message) => return Err(invalid(message)),
     };
@@ -620,7 +622,17 @@ fn diagnostic_info(params: &Params, arguments: &Value) -> Result<CallToolResult,
     });
     if let Some(code) = &params.code {
         if !crate::engine::diagnostics::explain::known_codes().contains(&code.as_str()) {
-            return reference_result("dynare_diagnostic_info",params,arguments,ToolResult::refused("UNKNOWN_CODE",format!("Diagnostic code {code} is not in the current catalog. Search or omit code to inspect known codes.")));
+            return reference_result(
+                "dynare_diagnostic_info",
+                params,
+                arguments,
+                ToolResult::refused(
+                    "UNKNOWN_CODE",
+                    format!(
+                        "Diagnostic code {code} is not in the current catalog. Search or omit code to inspect known codes."
+                    ),
+                ),
+            );
         }
         if let Some(row) = rows.as_array_mut().unwrap().first_mut() {
             row["explanation"] = json!(super::dynare_explain(code));
@@ -721,30 +733,36 @@ mod tests {
         let result = call("dynare_model_info", json!({"source":source(MODEL)}));
         let data = result["data"].as_object().unwrap();
         assert_eq!(data.len(), 1);
-        assert!(data["summary"]
-            .as_object()
-            .unwrap()
-            .values()
-            .all(|value| !value.is_array() && !value.is_object()));
+        assert!(
+            data["summary"]
+                .as_object()
+                .unwrap()
+                .values()
+                .all(|value| !value.is_array() && !value.is_object())
+        );
         assert_eq!(data["summary"]["declaration_count"], 3);
         let relationships = call(
             "dynare_model_info",
             json!({"source":{"kind":"map","root":"root.mod","files":{"root.mod":"@#include \"body.inc\"\n","body.inc":MODEL}},"sections":["sources"]}),
         );
-        assert!(relationships["data"]["sources"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| row["kind"] == "include" && row["path"] == "body.inc"));
+        assert!(
+            relationships["data"]["sources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["kind"] == "include" && row["path"] == "body.inc")
+        );
         let unnamed = call(
             "dynare_model_info",
             json!({"source":source(MODEL),"sections":["sources"]}),
         );
         assert_eq!(unnamed["data"]["sources"]["available"], false);
-        assert!(!unnamed["data"]["sources"]["cause"]
-            .as_str()
-            .unwrap()
-            .is_empty());
+        assert!(
+            !unnamed["data"]["sources"]["cause"]
+                .as_str()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     // Guards a references-only request requiring an earlier binding lookup,
@@ -829,17 +847,21 @@ mod tests {
             json!({"source":source(MODEL),"action_id":action["action_id"],"expected_revision":listed["inputs"][0]["revision"]}),
         );
         assert!(!selected["proposal"]["edits"].as_array().unwrap().is_empty());
-        assert!(!selected["proposal"]["inputs"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            !selected["proposal"]["inputs"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         assert!(selected["data"].get("text").is_none());
-        assert!(dispatch(
-            "dynare_actions",
-            json!({"source":source(MODEL),"fixes":true,"action_id":action["action_id"]}),
-            RequestControl::default()
-        )
-        .is_err());
+        assert!(
+            dispatch(
+                "dynare_actions",
+                json!({"source":source(MODEL),"fixes":true,"action_id":action["action_id"]}),
+                RequestControl::default()
+            )
+            .is_err()
+        );
     }
 
     // Guards Diagnose identities differing from the fix worker's identities.
@@ -881,12 +903,14 @@ mod tests {
             json!({"source":source(MODEL),"symbol":{"kind":"name","name":"a"},"new_name":"rho"}),
         );
         assert_eq!(renamed["proposal"]["edits"].as_array().unwrap().len(), 3);
-        assert!(dispatch(
-            "dynare_rename",
-            json!({"file_content":MODEL,"old_name":"a","new_name":"rho"}),
-            RequestControl::default()
-        )
-        .is_err());
+        assert!(
+            dispatch(
+                "dynare_rename",
+                json!({"file_content":MODEL,"old_name":"a","new_name":"rho"}),
+                RequestControl::default()
+            )
+            .is_err()
+        );
         let target = call(
             "dynare_symbol_info",
             json!({"source":source(MODEL),"symbol":{"kind":"target","line":1,"column":5}}),
@@ -935,11 +959,13 @@ mod tests {
                         result["outcome"]["status"], "unchanged",
                         "{tool}, named={named}, full={full}"
                     );
-                    assert!(result["outcome"]["reasons"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .any(|row| row["code"] == reason));
+                    assert!(
+                        result["outcome"]["reasons"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|row| row["code"] == reason)
+                    );
                     assert!(result["proposal"].is_null());
                     assert!(!result["inputs"][0]["guards"].as_array().unwrap().is_empty());
                     for field in ["text", "files", "formatted_text"] {
@@ -960,10 +986,12 @@ mod tests {
             "dynare_expand",
             json!({"source":source(MODEL),"detail":"full"}),
         );
-        assert!(expanded["data"]["effective_text"]
-            .as_str()
-            .unwrap()
-            .contains("a"));
+        assert!(
+            expanded["data"]["effective_text"]
+                .as_str()
+                .unwrap()
+                .contains("a")
+        );
     }
 
     // Guards source-free language and diagnostic queries being split across
@@ -976,20 +1004,24 @@ mod tests {
             "dynare_syntax",
             json!({"name":"irf","kind":"option","parent":"stoch_simul"}),
         );
-        assert!(!option["data"]["forms"][0]["signatures"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            !option["data"]["forms"][0]["signatures"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         let wrong = call(
             "dynare_syntax",
             json!({"name":"pac_model","context":"macro_expression"}),
         );
         assert_eq!(wrong["outcome"]["reasons"][0]["code"], "WRONG_CONTEXT");
         let info = call("dynare_diagnostic_info", json!({"code":"W010"}));
-        assert!(!info["data"]["diagnostics"][0]["explanation"]
-            .as_str()
-            .unwrap()
-            .is_empty());
+        assert!(
+            !info["data"]["diagnostics"][0]["explanation"]
+                .as_str()
+                .unwrap()
+                .is_empty()
+        );
         assert!(info["inputs"].as_array().unwrap().is_empty());
     }
 
@@ -1035,11 +1067,13 @@ mod tests {
         );
         assert_eq!(result["coverage"]["inputs"]["before"]["complete"], true);
         assert_eq!(result["coverage"]["inputs"]["after"]["complete"], true);
-        assert!(result["data"]["semantic"]["rows"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| row["family"] == "parameters"));
+        assert!(
+            result["data"]["semantic"]["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["family"] == "parameters")
+        );
         assert_eq!(result["inputs"][0]["include_dirs"], json!(["shared"]));
         assert!(result["data"]["sources"].is_null());
     }

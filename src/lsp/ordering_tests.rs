@@ -1,6 +1,6 @@
 use super::*;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, DuplexStream};
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 struct Wire {
     read: BufReader<tokio::io::ReadHalf<DuplexStream>>,
@@ -145,9 +145,11 @@ async fn cancellation_bypasses_a_dependent_read_wait() {
         .unwrap();
     assert_eq!(cancelled["error"]["code"], -32800, "{cancelled}");
     wire.send(&[symbols(3, uri)]).await;
-    assert!(timeout(Duration::from_millis(100), wire.response(3))
-        .await
-        .is_err());
+    assert!(
+        timeout(Duration::from_millis(100), wire.response(3))
+            .await
+            .is_err()
+    );
     drop(held);
     let result = timeout(Duration::from_secs(2), wire.response(3))
         .await
@@ -236,9 +238,11 @@ async fn malformed_cancellation_and_cancellation_with_request_id_keep_normal_han
         .await
         .unwrap();
     assert_eq!(rejected["error"]["code"], -32600, "{rejected}");
-    assert!(timeout(Duration::from_millis(100), wire.response(2))
-        .await
-        .is_err());
+    assert!(
+        timeout(Duration::from_millis(100), wire.response(2))
+            .await
+            .is_err()
+    );
     drop(held);
     let result = timeout(Duration::from_secs(2), wire.response(2))
         .await
@@ -306,9 +310,11 @@ async fn independent_reads_overlap_and_later_input_waits_for_older_reads() {
     );
     second.await.unwrap().unwrap();
     let input = tokio::spawn(service.call(Request::build("textDocument/didOpen").finish()));
-    assert!(timeout(Duration::from_millis(100), events.recv())
-        .await
-        .is_err());
+    assert!(
+        timeout(Duration::from_millis(100), events.recv())
+            .await
+            .is_err()
+    );
     release.notify_waiters();
     first.await.unwrap().unwrap();
     assert_eq!(
@@ -379,9 +385,11 @@ async fn cancelled_and_malformed_mutations_do_not_skip_prior_input_or_wedge_foll
             .unwrap()["error"]["code"],
         -32602
     );
-    assert!(timeout(Duration::from_millis(100), wire.response(4))
-        .await
-        .is_err());
+    assert!(
+        timeout(Duration::from_millis(100), wire.response(4))
+            .await
+            .is_err()
+    );
     drop(held);
     let result = timeout(Duration::from_secs(2), wire.response(4))
         .await

@@ -1,5 +1,5 @@
 //! Regression and official reach checks for repaired Dynare statement readers.
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage, Severity};
+use dygnosis::{JsonStage, Severity, analyze, find_preprocessor, parse, run_preprocessor};
 use std::time::Duration;
 
 const BASE: &str = "var y;varexo e;parameters a;a=0.5;model;y=a*y(-1)+e;end;";
@@ -82,11 +82,15 @@ fn controlled_paths_require_order_separators_and_complete_values() {
             );
         }
     }
-    let source = format!("{BASE}perfect_foresight_controlled_paths;exogenize y;periods 1;values (a);endogenize e;end;");
+    let source = format!(
+        "{BASE}perfect_foresight_controlled_paths;exogenize y;periods 1;values (a);endogenize e;end;"
+    );
     let model = parse(&source);
-    assert!(!analyze(&model)
-        .iter()
-        .any(|row| row.severity == Severity::Error));
+    assert!(
+        !analyze(&model)
+            .iter()
+            .any(|row| row.severity == Severity::Error)
+    );
 }
 
 // A range must consume its complete production; rejected text creates no row.
@@ -113,9 +117,11 @@ fn calibration_rows_reject_trailing_and_missing_tokens() {
             );
         }
         let source = format!("{BASE}{head};{names},[-1,1];end;");
-        assert!(!analyze(&parse(&source))
-            .iter()
-            .any(|row| row.severity == Severity::Error));
+        assert!(
+            !analyze(&parse(&source))
+                .iter()
+                .any(|row| row.severity == Severity::Error)
+        );
     }
 }
 
@@ -189,7 +195,9 @@ fn repaired_readers_reach_existing_generic_diagnostics() {
 
 fn path_source(controlled: bool, periods: &str, values: &str) -> String {
     if controlled {
-        format!("{BASE}perfect_foresight_controlled_paths;exogenize y;periods {periods};values {values};endogenize e;end;")
+        format!(
+            "{BASE}perfect_foresight_controlled_paths;exogenize y;periods {periods};values {values};endogenize e;end;"
+        )
     } else {
         format!("{BASE}conditional_forecast_paths;var y;periods {periods};values {values};end;")
     }
@@ -334,18 +342,24 @@ fn conditional_dates_reach_the_pinned_block_callback_after_row_checks() {
                 JsonStage::Parse,
             );
             assert!(!result.success);
-            assert!(format!("{}{}", result.raw_stdout, result.raw_stderr)
-                .contains("conditional_forecast_paths: dates are not allowed"));
+            assert!(
+                format!("{}{}", result.raw_stdout, result.raw_stderr)
+                    .contains("conditional_forecast_paths: dates are not allowed")
+            );
         }
     }
     let source = path_source(false, "2000Q1,2000Q2", "2");
     assert_code(&source, "E343", "number of periods is different");
-    assert!(!analyze(&parse(&source))
-        .iter()
-        .any(|row| row.code == "E482"));
+    assert!(
+        !analyze(&parse(&source))
+            .iter()
+            .any(|row| row.code == "E482")
+    );
     let source = format!("{BASE}conditional_forecast_paths;var a;periods 2000Q1;values 2;end;");
     assert_code(&source, "E317", "a is not endogenous");
-    assert!(!analyze(&parse(&source))
-        .iter()
-        .any(|row| row.code == "E482"));
+    assert!(
+        !analyze(&parse(&source))
+            .iter()
+            .any(|row| row.code == "E482")
+    );
 }

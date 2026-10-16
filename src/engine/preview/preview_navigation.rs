@@ -1,6 +1,6 @@
 //! Shared preview facts. Each transport verifies targets and converts ranges.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::engine::language::expand::ExpandReport;
 use crate::engine::language::span::Span;

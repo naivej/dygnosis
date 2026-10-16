@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use dygnosis::explain::known_codes;
 use dygnosis::span::Span;
 use dygnosis::{
-    analyze, equations, expand_report, EquationOrigin, EquationRow, ExpandReport, OriginFrame,
-    Workspace,
+    EquationOrigin, EquationRow, ExpandReport, OriginFrame, Workspace, analyze, equations,
+    expand_report,
 };
 
 fn fixtures_root() -> PathBuf {

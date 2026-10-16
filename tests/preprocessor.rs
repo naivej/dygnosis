@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use dygnosis::preprocessor::{
-    find_preprocessor, find_preprocessor_from, parse_preprocessor_output,
-    rewrite_supplied_absolute_includes, run_preprocessor, windows_common_candidates, JsonStage,
+    JsonStage, find_preprocessor, find_preprocessor_from, parse_preprocessor_output,
+    rewrite_supplied_absolute_includes, run_preprocessor, windows_common_candidates,
 };
 use dygnosis::span::LineIndex;
-use dygnosis::{check_file, Severity};
+use dygnosis::{Severity, check_file};
 
 fn copilot_mod(archive_dir: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

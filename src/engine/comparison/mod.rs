@@ -9,12 +9,12 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::engine::analysis::equations::{equations, heterogeneous_equations, EquationRow};
+use crate::engine::analysis::equations::{EquationRow, equations, heterogeneous_equations};
 use crate::engine::analysis::model_info::assigned_number;
 use crate::engine::comparison::semantic_diff::{
     ComparisonBudgets, ComparisonCoverage, ComparisonVersions, SemanticDiff, SourceChanges,
 };
-use crate::engine::language::lexer::{tokenize, TokenKind};
+use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::language::model::{
     Assignment, Decl, EndvalInstruction, Model, PathBlock, PathTarget, PeriodPoint, PeriodRange,
     ShockBlock, ShockBlockKind, ShockKind, ShockOperation, ShockOptions, ShockStmt,
@@ -2928,10 +2928,12 @@ end;
             !blob.contains("c = betta*c(+1)") && !blob.contains("c=betta*c(+1)"),
             "common Euler must be absent from compare JSON: {blob}"
         );
-        assert!(json["changed_equations"]
-            .as_array()
-            .expect("changed")
-            .is_empty());
+        assert!(
+            json["changed_equations"]
+                .as_array()
+                .expect("changed")
+                .is_empty()
+        );
         let added = json["added_equations"].as_array().expect("added");
         let removed = json["removed_equations"].as_array().expect("removed");
         assert_eq!(added.len(), 1);

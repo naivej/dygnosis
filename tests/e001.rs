@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use dygnosis::lexer::{tokenize, TokenKind};
+use dygnosis::lexer::{TokenKind, tokenize};
 use dygnosis::span::LineIndex;
-use dygnosis::{analyze, auto_fix, check_parse, has_structural_error, parse, Severity, TextEdit};
+use dygnosis::{Severity, TextEdit, analyze, auto_fix, check_parse, has_structural_error, parse};
 
 const ARCHIVES: &[&str] = &[
     "trend_rbc_gov_inv",
@@ -213,9 +213,11 @@ fn e001_strip_betta_semicolon() {
     let got = missing_semi_only(rust_e001(&text));
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].code, "E001");
-    assert!(got[0]
-        .message
-        .contains("Parameter assignment 'betta' is missing its terminating semicolon"));
+    assert!(
+        got[0]
+            .message
+            .contains("Parameter assignment 'betta' is missing its terminating semicolon")
+    );
     assert_span(&text, &got[0], "betta = 0.99");
 }
 
@@ -242,9 +244,11 @@ fn e001_join_two_param_assignments() {
     let text = check_mod("e001/join_two_params.mod");
     let got = missing_semi_only(rust_e001(&text));
     assert_eq!(got.len(), 1);
-    assert!(got[0]
-        .message
-        .contains("Parameter assignment 'betta' is missing its terminating semicolon"));
+    assert!(
+        got[0]
+            .message
+            .contains("Parameter assignment 'betta' is missing its terminating semicolon")
+    );
     assert_span(&text, &got[0], "betta = 0.99");
 }
 
@@ -270,9 +274,11 @@ fn e001_assign_before_cmd_still_missing_semi() {
     let got = missing_semi_only(rust_e001(&text));
     assert_eq!(got.len(), 1, "assign_before_cmd: {got:?}");
     assert_eq!(got[0].code, "E001");
-    assert!(got[0]
-        .message
-        .contains("Parameter assignment 'scale' is missing its terminating semicolon"));
+    assert!(
+        got[0]
+            .message
+            .contains("Parameter assignment 'scale' is missing its terminating semicolon")
+    );
     assert_span(&text, &got[0], "scale = 1");
 }
 
@@ -282,9 +288,11 @@ fn e001_cmd_name_lhs_still_missing_semi() {
     let got = missing_semi_only(rust_e001(&text));
     assert_eq!(got.len(), 1, "cmd_name_lhs: {got:?}");
     assert_eq!(got[0].code, "E001");
-    assert!(got[0]
-        .message
-        .contains("Parameter assignment 'data' is missing its terminating semicolon"));
+    assert!(
+        got[0]
+            .message
+            .contains("Parameter assignment 'data' is missing its terminating semicolon")
+    );
     assert_span(&text, &got[0], "data = 0.50");
 }
 
@@ -312,9 +320,11 @@ fn e001_keyword_typo_mdoel() {
     let text = check_mod("e001/typo_mdoel.mod");
     let got = rust_e001(&text);
     assert_eq!(got.len(), 1);
-    assert!(got[0]
-        .message
-        .contains("Possible misspelling of 'model' keyword: 'mdoel'"));
+    assert!(
+        got[0]
+            .message
+            .contains("Possible misspelling of 'model' keyword: 'mdoel'")
+    );
     assert_span_in(&text, &got[0], "mdoel;", "mdoel");
 }
 
@@ -1364,8 +1374,10 @@ stoch_simul(order=1, irf=0, nograph);
             dygnosis::JsonStage::Transform,
         );
         assert!(!transform.success);
-        assert!(format!("{}{}", transform.raw_stdout, transform.raw_stderr)
-            .contains("There are 1 equations but 2 endogenous variables!"));
+        assert!(
+            format!("{}{}", transform.raw_stdout, transform.raw_stderr)
+                .contains("There are 1 equations but 2 endogenous variables!")
+        );
     }
 }
 

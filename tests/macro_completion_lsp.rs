@@ -2,8 +2,8 @@
 
 use dygnosis::server::{initialize_result, new_service};
 use dygnosis::span::LineIndex;
-use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 fn directives() -> Vec<(&'static str, &'static str)> {
     dygnosis::catalog::syntax::in_context("macro_directive", Some("macro_directive"), None)

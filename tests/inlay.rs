@@ -3,8 +3,8 @@ use dygnosis::model_info::assigned_number;
 use dygnosis::parse;
 use dygnosis::server::new_service;
 use serde_json::json;
-use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 fn values(text: &str) -> Vec<(String, Option<f64>, bool)> {
     let model = parse(text);
@@ -66,7 +66,9 @@ fn plain_numbers_are_written_syntax_and_macro_literals_are_occurrence_values() {
 
 #[test]
 fn arithmetic_is_finite_and_unknown_assignments_do_not_reuse_older_values() {
-    let actual = values("parameters p q r a b c d e; p=2; q=-p+3*4/2^2; r=unknown+1; p=exp(1); a=p+1; b=1e308*1e308; c=1/0; d=(-1)^0.5; e=2+3;");
+    let actual = values(
+        "parameters p q r a b c d e; p=2; q=-p+3*4/2^2; r=unknown+1; p=exp(1); a=p+1; b=1e308*1e308; c=1/0; d=(-1)^0.5; e=2+3;",
+    );
     assert_eq!(actual[1].1, Some(1.0));
     assert!(actual[2..8].iter().all(|row| row.1.is_none()));
     assert_eq!(actual[8].1, Some(5.0));

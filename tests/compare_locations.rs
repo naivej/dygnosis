@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use dygnosis::{compare_models_with_sources, dynare_compare_models, parse, CompareSource};
+use dygnosis::{CompareSource, compare_models_with_sources, dynare_compare_models, parse};
 use serde_json::Value;
 
 fn row<'a>(diff: &'a Value, id: &str) -> &'a Value {
@@ -138,9 +138,11 @@ fn each_workspace_maps_its_own_include_and_revision() {
         );
     }
     // Old shock fields still withhold an incorrect root location for includes.
-    assert!(diff["shock_setup_changes"][0]["before"]
-        .get("location")
-        .is_none());
+    assert!(
+        diff["shock_setup_changes"][0]["before"]
+            .get("location")
+            .is_none()
+    );
     let mut edited = files_b.clone();
     edited.insert("after/part.inc".to_owned(), after.replace("p=2", "p=3"));
     let changed = compare(&edited);
@@ -425,9 +427,11 @@ fn supplied_source_registry_keeps_empty_executed_files_and_excludes_unused_files
         assert_eq!(texts.len(), 3);
         assert!(texts.values().any(|text| text == ""));
         assert!(!texts.values().any(|text| text == "unexecuted"));
-        assert!(texts
-            .values()
-            .any(|text| text.as_str().unwrap().contains("\nvar y;")));
+        assert!(
+            texts
+                .values()
+                .any(|text| text.as_str().unwrap().contains("\nvar y;"))
+        );
     }
     let file = &diff["source_changes"]["files"][0];
     assert_eq!(file["correspondence"], "proven_file_identity");
@@ -543,8 +547,7 @@ fn transport_source_alignment_limit_preserves_exact_captured_text() {
 
 #[test]
 fn heterogeneous_statement_context_targets_keep_the_proven_dimension() {
-    let before =
-        "heterogeneity_dimension d; heterogeneity_dimension h; var(heterogeneity=d) x; model(heterogeneity=d); x=0; end;";
+    let before = "heterogeneity_dimension d; heterogeneity_dimension h; var(heterogeneity=d) x; model(heterogeneity=d); x=0; end;";
     let after = before.replace("heterogeneity=d", "heterogeneity=h");
     let result = dynare_compare_models(before, &after, None, None, None, None, None);
     let contexts: Vec<_> = result["semantic"]["rows"]
@@ -565,9 +568,9 @@ fn heterogeneous_statement_context_targets_keep_the_proven_dimension() {
     }
 }
 
-use dygnosis::server::{new_service, Backend};
-use tower_lsp::lsp_types::*;
+use dygnosis::server::{Backend, new_service};
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 async fn open(backend: &Backend, uri: Url, text: &str) {
     backend
@@ -642,14 +645,12 @@ async fn lsp_uses_utf16_and_current_overlay_revisions() {
         edited["navigation"]["after"]["revision"]
     );
     assert_eq!(
-        row(&edited, "/changed_equations/0")["after"]["written_locations"][0]["range"]["start"]
-            ["line"],
+        row(&edited, "/changed_equations/0")["after"]["written_locations"][0]["range"]["start"]["line"],
         1
     );
     let capability = serde_json::to_value(dygnosis::server::initialize_result()).unwrap();
     assert_eq!(
-        capability["capabilities"]["experimental"]["dygnosis"]["compareModels"]
-            ["navigation_schema_version"],
+        capability["capabilities"]["experimental"]["dygnosis"]["compareModels"]["navigation_schema_version"],
         1
     );
 }

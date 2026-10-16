@@ -498,14 +498,14 @@ fn check_scheduled(model: &Model, out: &mut OrderedRows<'_>) {
                             "shocks"
                         };
                         error(
-                                    out,
-                                    range.span,
-                                    "E401",
-                                    format!(
-                                        "{command}: for variable {}, shock period ({first}) is earlier than the period in which the shock is learnt ({n})",
-                                        model.name(row.name)
-                                    ),
-                                );
+                            out,
+                            range.span,
+                            "E401",
+                            format!(
+                                "{command}: for variable {}, shock period ({first}) is earlier than the period in which the shock is learnt ({n})",
+                                model.name(row.name)
+                            ),
+                        );
                         break;
                     }
                 }

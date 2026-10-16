@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use dygnosis::preprocessor::find_preprocessor;
 use dygnosis::span::LineIndex;
-use dygnosis::{analyze, check_occbin, parse, run_preprocessor, Diagnostic, JsonStage, Severity};
+use dygnosis::{Diagnostic, JsonStage, Severity, analyze, check_occbin, parse, run_preprocessor};
 
 const OCCBIN_ERRORS: &[&str] = &[
     "E170", "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E180", "E181", "E182", "E183",

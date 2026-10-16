@@ -4,7 +4,7 @@ use dygnosis::model::{Model, ShockKind, SvarIdentificationElement};
 use dygnosis::server::diagnostics_for;
 use dygnosis::span::LineIndex;
 use dygnosis::{
-    analyze, dynare_diagnose, find_preprocessor, parse, run_preprocessor, JsonStage, Severity,
+    JsonStage, Severity, analyze, dynare_diagnose, find_preprocessor, parse, run_preprocessor,
 };
 use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString};
 
@@ -87,10 +87,10 @@ fn incomplete_row_does_not_reach_name_type_or_duplicate_actions() {
         let source = file(&format!("shocks; var {name}; end;"));
         let model = parse(&source);
         let diags = analyze(&model);
-        assert!(diags
-            .iter()
-            .any(|d| d.code == "E001"
-                && d.message == "syntax error, unexpected END, expecting PERIODS"));
+        assert!(
+            diags.iter().any(|d| d.code == "E001"
+                && d.message == "syntax error, unexpected END, expecting PERIODS")
+        );
         assert!(
             !diags
                 .iter()
@@ -234,10 +234,10 @@ fn complete_regular_productions_keep_their_rows_and_values() {
 fn regular_row_repair_preserves_heteroskedastic_stderr_sentence() {
     let source = file("heteroskedastic_shocks; var e; stderr .1; end;");
     let diags = analyze(&parse(&source));
-    assert!(diags
-        .iter()
-        .any(|d| d.code == "E001"
-            && d.message == "syntax error, unexpected STDERR, expecting PERIODS"));
+    assert!(
+        diags.iter().any(|d| d.code == "E001"
+            && d.message == "syntax error, unexpected STDERR, expecting PERIODS")
+    );
 }
 
 #[test]
@@ -293,9 +293,11 @@ fn shock_row_refusal_and_complete_control_match_library_lsp_and_mcp() {
     assert_eq!(mcp.end_column - mcp.column, 3);
     let control = file("shocks; var e; stderr .1; end;");
     assert!(!analyze(&parse(&control)).iter().any(|d| d.code == "E001"));
-    assert!(!dynare_diagnose(&control, None, None)
-        .iter()
-        .any(|d| d.code == "E001"));
+    assert!(
+        !dynare_diagnose(&control, None, None)
+            .iter()
+            .any(|d| d.code == "E001")
+    );
     assert!(
         !diagnostics_for("file:///C:/tmp/parse_gap_shocks_quiet.mod", &control)
             .iter()
@@ -452,10 +454,12 @@ fn assert_completed_svar_exclusion(model: &Model) {
     assert_eq!(equations.len(), 1);
     assert_eq!(equations[0].number, Some(1));
     assert_eq!(equations[0].names.len(), 2);
-    assert!(equations[0]
-        .names
-        .iter()
-        .all(|(name, _)| model.name(*name) == "y"));
+    assert!(
+        equations[0]
+            .names
+            .iter()
+            .all(|(name, _)| model.name(*name) == "y")
+    );
 }
 
 #[test]
@@ -565,19 +569,31 @@ fn family_row_priority_and_retention_use_macro_execution_order_at_shared_written
     for (body, code, message, absent, paths) in [
         (
             "conditional_forecast_paths; var y; periods 1; values 1; var y; periods 2; values 2; var y; periods 3; values {3}; end;",
-            "E344", PATH_DUPLICATE_MESSAGE, LEXER_MESSAGE, true,
+            "E344",
+            PATH_DUPLICATE_MESSAGE,
+            LEXER_MESSAGE,
+            true,
         ),
         (
             "conditional_forecast_paths; var y; periods 1; values {1}; var y; periods 2; values 2; var y; periods 3; values 3; end;",
-            "E001", LEXER_MESSAGE, PATH_DUPLICATE_MESSAGE, true,
+            "E001",
+            LEXER_MESSAGE,
+            PATH_DUPLICATE_MESSAGE,
+            true,
         ),
         (
             "svar_identification; exclusion lag 1; equation 1,y,y; restriction equation 1,{y}=0; end;",
-            "E361", SVAR_DUPLICATE_MESSAGE, LEXER_MESSAGE, false,
+            "E361",
+            SVAR_DUPLICATE_MESSAGE,
+            LEXER_MESSAGE,
+            false,
         ),
         (
             "svar_identification; restriction equation 1,{y}=0; exclusion lag 1; equation 1,y,y; end;",
-            "E001", LEXER_MESSAGE, SVAR_DUPLICATE_MESSAGE, false,
+            "E001",
+            LEXER_MESSAGE,
+            SVAR_DUPLICATE_MESSAGE,
+            false,
         ),
     ] {
         let source = family_file(&format!(

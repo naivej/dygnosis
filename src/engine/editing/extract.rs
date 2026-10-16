@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::engine::diagnostics::check_e060::check_e063;
 use crate::engine::diagnostics::check_writing::model_structure;
-use crate::engine::language::expand::{expand_report, ExpandReport};
+use crate::engine::language::expand::{ExpandReport, expand_report};
 use crate::engine::language::expr::{ExprId, ExprKind, IdentRef};
 use crate::engine::language::intern::Name;
 use crate::engine::language::model::{Decl, Equation, ExternalFunctionStmt, Model, TrendVar};
@@ -2130,7 +2130,7 @@ fn skip_noise(input: &str) -> &str {
 /// TeX and per-name options belong to the preceding name; token boundaries keep
 /// commas/parentheses inside quoted metadata from becoming separators.
 fn declaration_pieces(input: &str) -> Vec<&str> {
-    use crate::engine::language::lexer::{tokenize, TokenKind};
+    use crate::engine::language::lexer::{TokenKind, tokenize};
     let mut pieces = Vec::new();
     let mut depth = 0usize;
     let mut start = None;
@@ -2383,18 +2383,24 @@ stoch_simul;
         assert_eq!(row.name.as_deref(), Some("cap"));
         assert_eq!(row.role, EquationRole::Requested);
         assert!(result.origins[0].frames.is_empty());
-        assert!(result
-            .omitted_context
-            .iter()
-            .any(|item| item.kind == "calibration"));
-        assert!(result
-            .omitted_context
-            .iter()
-            .any(|item| item.kind == "shocks"));
-        assert!(result
-            .omitted_context
-            .iter()
-            .any(|item| item.kind == "execution"));
+        assert!(
+            result
+                .omitted_context
+                .iter()
+                .any(|item| item.kind == "calibration")
+        );
+        assert!(
+            result
+                .omitted_context
+                .iter()
+                .any(|item| item.kind == "shocks")
+        );
+        assert!(
+            result
+                .omitted_context
+                .iter()
+                .any(|item| item.kind == "execution")
+        );
     }
 
     #[test]
@@ -2573,10 +2579,11 @@ heterogeneity_solve;
         assert_eq!(het.origins[0].dimension.as_deref(), Some("h"));
         assert_eq!(het.origins[0].index, Some(0));
         assert_eq!(het.origins[0].role, EquationRole::Requested);
-        assert!(het
-            .omitted_context
-            .iter()
-            .any(|item| item.kind == "execution"));
+        assert!(
+            het.omitted_context
+                .iter()
+                .any(|item| item.kind == "execution")
+        );
 
         let agg = extract(&req(src, &["agg"], &[])).unwrap();
         assert_eq!(agg.status, ExtractStatus::Ok);
@@ -2966,10 +2973,12 @@ end;
         }
         assert!(!fragment.contains("z=0;"), "{fragment}");
         assert!(!fragment.contains("bindp=0;"), "{fragment}");
-        assert!(result
-            .omitted_context
-            .iter()
-            .any(|item| item.kind == "calibration"));
+        assert!(
+            result
+                .omitted_context
+                .iter()
+                .any(|item| item.kind == "calibration")
+        );
     }
 
     #[test]
@@ -3203,10 +3212,11 @@ end;
 
         let both = extract(&req(src, &["policy"], &[])).unwrap();
         assert_eq!(both.selected_equations.len(), 2);
-        assert!(both
-            .selected_equations
-            .iter()
-            .all(|row| row.role == EquationRole::Requested));
+        assert!(
+            both.selected_equations
+                .iter()
+                .all(|row| row.role == EquationRole::Requested)
+        );
 
         let before = "\
 occbin_constraints;
@@ -3677,10 +3687,12 @@ end;
         let result = extract(&req(src, &["row"], &[])).unwrap();
         assert_eq!(result.status, ExtractStatus::Ok);
         assert_eq!(result.origins.len(), 2);
-        assert!(result
-            .origins
-            .iter()
-            .all(|origin| origin.span == result.origins[0].span));
+        assert!(
+            result
+                .origins
+                .iter()
+                .all(|origin| origin.span == result.origins[0].span)
+        );
         let values: Vec<&str> = result
             .origins
             .iter()

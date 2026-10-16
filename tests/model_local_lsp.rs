@@ -1,6 +1,6 @@
-use dygnosis::server::{new_service, Backend};
-use tower_lsp::lsp_types::*;
+use dygnosis::server::{Backend, new_service};
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 fn at(uri: &Url, text: &str, marker: &str) -> TextDocumentPositionParams {
     let byte = text.find(marker).unwrap() + marker.len() - 1;
@@ -102,10 +102,12 @@ async fn local_completion_respects_order_role_and_value_sites() {
     let uri = Url::parse("file:///tmp/local-completion.mod").unwrap();
     let text = "var y; parameters p; p=.9;\nmodel;\ny=0;\n#z=p*y(-1);\n#w=z+1;\ny=z(+1);\n// z comment\nend;\np=0;";
     open(server, &uri, text).await;
-    assert!(!complete(server, at(&uri, text, "y=0"))
-        .await
-        .iter()
-        .any(|item| item.label == "z"));
+    assert!(
+        !complete(server, at(&uri, text, "y=0"))
+            .await
+            .iter()
+            .any(|item| item.label == "z")
+    );
     let items = complete(server, at(&uri, text, "#w=z")).await;
     let local = items.iter().find(|item| item.label == "z").unwrap();
     assert_eq!(local.kind, Some(CompletionItemKind::VARIABLE));
@@ -113,24 +115,32 @@ async fn local_completion_respects_order_role_and_value_sites() {
     assert_eq!(local.filter_text.as_deref(), Some("z"));
     assert_eq!(local.insert_text.as_deref(), Some("z"));
     assert!(items.iter().any(|item| item.label == "p"));
-    assert!(!complete(server, at(&uri, text, "#w"))
-        .await
-        .iter()
-        .any(|item| item.label == "z"));
-    assert!(!complete(server, at(&uri, text, "// z"))
-        .await
-        .iter()
-        .any(|item| item.label == "z"));
-    assert!(!complete(server, at(&uri, text, "p=0"))
-        .await
-        .iter()
-        .any(|item| item.label == "z"));
+    assert!(
+        !complete(server, at(&uri, text, "#w"))
+            .await
+            .iter()
+            .any(|item| item.label == "z")
+    );
+    assert!(
+        !complete(server, at(&uri, text, "// z"))
+            .await
+            .iter()
+            .any(|item| item.label == "z")
+    );
+    assert!(
+        !complete(server, at(&uri, text, "p=0"))
+            .await
+            .iter()
+            .any(|item| item.label == "z")
+    );
     let partial = "var y; parameters p; model; #z=p; y=z";
     open(server, &uri, partial).await;
-    assert!(complete(server, at(&uri, partial, "y=z"))
-        .await
-        .iter()
-        .any(|item| item.label == "z"));
+    assert!(
+        complete(server, at(&uri, partial, "y=z"))
+            .await
+            .iter()
+            .any(|item| item.label == "z")
+    );
 }
 
 #[tokio::test]
@@ -142,10 +152,12 @@ async fn explicit_local_forward_use_has_metadata_and_distinct_navigation() {
         "var y; parameters p;\nmodel_local_variable z $Z_t$;\nmodel;\ny=z;\n#z=p*y(-1);\nend;";
     open(server, &uri, text).await;
     let pos = at(&uri, text, "y=z");
-    assert!(complete(server, pos.clone())
-        .await
-        .iter()
-        .any(|item| item.label == "z"));
+    assert!(
+        complete(server, pos.clone())
+            .await
+            .iter()
+            .any(|item| item.label == "z")
+    );
     let help = hover(server, pos.clone()).await.unwrap();
     assert!(help.contains("Model-local variable"), "{help}");
     assert!(help.contains("Z_t"), "{help}");
@@ -198,10 +210,12 @@ async fn explicit_local_forward_use_has_metadata_and_distinct_navigation() {
             settings: serde_json::json!({"dynare":{"nameDetails":{"tex":false}}}),
         })
         .await;
-    assert!(!hover(server, at(&uri, text, "y=z"))
-        .await
-        .unwrap()
-        .contains("Z_t"));
+    assert!(
+        !hover(server, at(&uri, text, "y=z"))
+            .await
+            .unwrap()
+            .contains("Z_t")
+    );
 }
 
 #[tokio::test]
@@ -370,29 +384,35 @@ async fn rename_rejects_duplicate_declarations_and_shared_macro_bindings() {
         "var y; model_local_variable z; model_local_variable z $Z$; model; #z=1; y=z; end;";
     open(server, &uri, duplicate).await;
     for marker in ["#z", "y=z", "; model_local_variable z"] {
-        assert!(!server
-            .prepare_rename(at(&uri, duplicate, marker))
-            .await
-            .expect_err("refused Rename must explain its cause")
-            .message
-            .is_empty());
+        assert!(
+            !server
+                .prepare_rename(at(&uri, duplicate, marker))
+                .await
+                .expect_err("refused Rename must explain its cause")
+                .message
+                .is_empty()
+        );
     }
     let shared = "heterogeneity_dimension h k; var(heterogeneity=h) yh; var(heterogeneity=k) yk;\n@#for dim in [\"h\",\"k\"]\nmodel(heterogeneity=@{dim}); #z=1; end;\n@#endfor\nmodel(heterogeneity=h); yh=z; end; model(heterogeneity=k); yk=z; end;";
     open(server, &uri, shared).await;
-    assert!(!server
-        .prepare_rename(at(&uri, shared, "yh=z"))
-        .await
-        .expect_err("refused Rename must explain its cause")
-        .message
-        .is_empty());
+    assert!(
+        !server
+            .prepare_rename(at(&uri, shared, "yh=z"))
+            .await
+            .expect_err("refused Rename must explain its cause")
+            .message
+            .is_empty()
+    );
     let mixed = "@#for i in 1:2\n@#if i==2\nvar y;\nmodel;\n#z=1;\n@#endif\ny=z;\n@#if i==2\nend;\n@#endif\n@#endfor\n";
     open(server, &uri, mixed).await;
-    assert!(!server
-        .prepare_rename(at(&uri, mixed, "#z"))
-        .await
-        .expect_err("refused Rename must explain its cause")
-        .message
-        .is_empty());
+    assert!(
+        !server
+            .prepare_rename(at(&uri, mixed, "#z"))
+            .await
+            .expect_err("refused Rename must explain its cause")
+            .message
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -444,12 +464,14 @@ async fn dimension_bindings_are_separate_and_shared_declaration_rename_is_unavai
     assert!(server.prepare_rename(pos).await.unwrap().is_some());
     let text = format!("model_local_variable z;\n{text}");
     open(server, &uri, &text).await;
-    assert!(!server
-        .prepare_rename(at(&uri, &text, "b=z"))
-        .await
-        .expect_err("refused Rename must explain its cause")
-        .message
-        .is_empty());
+    assert!(
+        !server
+            .prepare_rename(at(&uri, &text, "b=z"))
+            .await
+            .expect_err("refused Rename must explain its cause")
+            .message
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -460,19 +482,23 @@ async fn literal_macro_reads_keep_navigation_and_synthesized_names_refuse_rename
     let text = "@#define value=2\nvar y; model; #z=@{value}; y=z; end;";
     open(server, &uri, text).await;
     let pos = at(&uri, text, "y=z");
-    assert!(hover(server, pos.clone())
-        .await
-        .unwrap()
-        .contains("Expanded expression"));
+    assert!(
+        hover(server, pos.clone())
+            .await
+            .unwrap()
+            .contains("Expanded expression")
+    );
     assert!(server.prepare_rename(pos).await.unwrap().is_some());
     let text = "@#define name=\"z\"\nvar y; model; #@{name}=1; y=@{name}; end;";
     open(server, &uri, text).await;
-    assert!(!server
-        .prepare_rename(at(&uri, text, "y=@{name"))
-        .await
-        .expect_err("refused Rename must explain its cause")
-        .message
-        .is_empty());
+    assert!(
+        !server
+            .prepare_rename(at(&uri, text, "y=@{name"))
+            .await
+            .expect_err("refused Rename must explain its cause")
+            .message
+            .is_empty()
+    );
 }
 
 // A retained recovery declaration/definition after a Parse refusal cannot
@@ -488,8 +514,10 @@ async fn local_queries_exclude_actions_after_an_earlier_parse_refusal() {
     assert!(target(server, pos.clone(), false).await.is_none());
     assert!(target(server, pos.clone(), true).await.is_none());
     assert!(refs(server, pos.clone(), true).await.is_empty());
-    assert!(complete(server, pos)
-        .await
-        .iter()
-        .all(|item| item.label != "z"));
+    assert!(
+        complete(server, pos)
+            .await
+            .iter()
+            .all(|item| item.label != "z")
+    );
 }

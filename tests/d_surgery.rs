@@ -10,7 +10,7 @@
 //! wherever the grammar reads a string (verbatim bodies excepted).
 
 use dygnosis::model::Model;
-use dygnosis::{analyze, check_file, parse, Diagnostic};
+use dygnosis::{Diagnostic, analyze, check_file, parse};
 
 const QUIET: &[&str] = &[
     "d_surgery/quiet_remove.mod",
@@ -238,10 +238,12 @@ fn dropped_symbol_entries_do_not_fire() {
     quiet(&diags, "E058");
     quiet(&diags, "E090");
     let model = parse(&fixture("d_surgery/quiet_dropped_symbol.mod"));
-    assert!(model
-        .excluded_endogenous
-        .iter()
-        .any(|d| model.name(d.name) == "c"));
+    assert!(
+        model
+            .excluded_endogenous
+            .iter()
+            .any(|d| model.name(d.name) == "c")
+    );
 }
 
 #[test]

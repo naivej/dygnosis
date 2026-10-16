@@ -2,12 +2,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use dygnosis::include_resolver::path_key;
-use dygnosis::server::{new_service, Backend};
 use dygnosis::Workspace;
-use serde_json::{json, Value};
-use tower_lsp::lsp_types::*;
+use dygnosis::include_resolver::path_key;
+use dygnosis::server::{Backend, new_service};
+use serde_json::{Value, json};
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
 
@@ -301,10 +301,12 @@ async fn folder_snapshot_uses_deepest_folder_and_loose_defaults() {
     for name in ["outer/root.mod", "outer/nested/root.mod", "loose/root.mod"] {
         let uri = files.uri(name);
         open(backend, uri.clone(), source).await;
-        assert!(!codes(backend, uri)
-            .await
-            .iter()
-            .any(|code| code == "E020" || code == "E061"));
+        assert!(
+            !codes(backend, uri)
+                .await
+                .iter()
+                .any(|code| code == "E020" || code == "E061")
+        );
     }
     assert!(
         !backend
@@ -342,9 +344,11 @@ async fn folder_snapshot_uses_deepest_folder_and_loose_defaults() {
             .await
             .unwrap()
             .unwrap();
-        assert!(edits[0]
-            .new_text
-            .contains(&format!("\n{}y", " ".repeat(count))));
+        assert!(
+            edits[0]
+                .new_text
+                .contains(&format!("\n{}y", " ".repeat(count)))
+        );
     }
     let virtual_uri = Url::parse("untitled:Untitled-1.mod").unwrap();
     assert!(
@@ -498,11 +502,13 @@ async fn snapshots_clear_removed_values_and_folder_events_reselect_settings() {
         .unwrap();
     open(backend, uri.clone(), "var y; model; y=0; end;\n").await;
     let before = backend.model_input_revision(&uri).unwrap();
-    assert!(backend
-        .presentation_settings(&uri)
-        .outline
-        .sections
-        .is_empty());
+    assert!(
+        backend
+            .presentation_settings(&uri)
+            .outline
+            .sections
+            .is_empty()
+    );
     backend
         .did_change_workspace_folders(DidChangeWorkspaceFoldersParams {
             event: WorkspaceFoldersChangeEvent {
@@ -589,9 +595,11 @@ async fn virtual_roots_never_resolve_native_includes_or_companions() {
             include.display()
         );
         open(backend, uri.clone(), &text).await;
-        assert!(!codes(backend, uri.clone())
-            .await
-            .contains(&"E061".to_owned()));
+        assert!(
+            !codes(backend, uri.clone())
+                .await
+                .contains(&"E061".to_owned())
+        );
         let effective = backend
             .execute_command(ExecuteCommandParams {
                 command: "dynare/showEffectiveModel".to_owned(),
@@ -601,10 +609,12 @@ async fn virtual_roots_never_resolve_native_includes_or_companions() {
             .await
             .unwrap()
             .unwrap();
-        assert!(!effective["effective_text"]
-            .as_str()
-            .unwrap()
-            .contains("from_disk"));
+        assert!(
+            !effective["effective_text"]
+                .as_str()
+                .unwrap()
+                .contains("from_disk")
+        );
         assert_eq!(effective["status"], "incomplete");
         assert!(backend.model_input_revision(&uri).is_some());
         backend
@@ -871,9 +881,11 @@ impl Wire {
             capabilities["workspace"]["workspaceFolders"]["supported"],
             true
         );
-        assert!(capabilities["experimental"]["dygnosis"]
-            .get("projectStatus")
-            .is_none());
+        assert!(
+            capabilities["experimental"]["dygnosis"]
+                .get("projectStatus")
+                .is_none()
+        );
         self.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}))
             .await;
     }
@@ -1013,9 +1025,11 @@ async fn include_invalidation_keeps_owner_provenance_and_clears_deleted_closed_r
     // a model invalidation which the equal content deliberately does not emit.
     wire.send(json!({"jsonrpc":"2.0","id":3,"method":"textDocument/diagnostic","params":{"textDocument":{"uri":root}}})).await;
     let closed = wire.until_response(3).await;
-    assert!(!closed
-        .iter()
-        .any(|message| message["method"] == "dynare/modelInfoChanged"));
+    assert!(
+        !closed
+            .iter()
+            .any(|message| message["method"] == "dynare/modelInfoChanged")
+    );
     fs::remove_file(root_path).unwrap();
     wire.send(
         json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{

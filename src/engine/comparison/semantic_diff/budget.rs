@@ -175,7 +175,13 @@ pub fn enforce_output_budget(diff: &mut ModelDiff) {
         bytes = bytes.saturating_sub(json_bytes(&row));
         omitted_rows += 1;
     }
-    add_limit(&mut diff.semantic.limits, "serialized_output_limit", "Semantic rows were omitted by the serialized detail limit; legacy structural rows remain available.", omitted_rows, "semantic_diff");
+    add_limit(
+        &mut diff.semantic.limits,
+        "serialized_output_limit",
+        "Semantic rows were omitted by the serialized detail limit; legacy structural rows remain available.",
+        omitted_rows,
+        "semantic_diff",
+    );
     add_limit(
         &mut diff.semantic.limits,
         "reference_output_limit",
@@ -201,7 +207,13 @@ pub fn enforce_output_budget(diff: &mut ModelDiff) {
         final_bytes = final_bytes.saturating_sub(json_bytes(&row));
         additional_rows += 1;
     }
-    add_limit(&mut diff.semantic.limits, "serialized_output_limit", "Semantic rows were omitted by the serialized detail limit; legacy structural rows remain available.", additional_rows, "semantic_diff");
+    add_limit(
+        &mut diff.semantic.limits,
+        "serialized_output_limit",
+        "Semantic rows were omitted by the serialized detail limit; legacy structural rows remain available.",
+        additional_rows,
+        "semantic_diff",
+    );
     if additional_rows > 0 {
         diff.semantic.availability = Availability::Partial;
         diff.coverage.availability = Availability::Partial;
@@ -239,7 +251,13 @@ fn repair_reference_links(diff: &mut ModelDiff) {
         diff.semantic.availability = Availability::Partial;
         diff.coverage.availability = Availability::Partial;
         for limits in [&mut diff.semantic.limits, &mut diff.coverage.limits] {
-            add_limit(limits, "reference_target_output_limit", "References to omitted semantic equation rows were omitted; remaining reference targets are retained.", omitted, "semantic_equations");
+            add_limit(
+                limits,
+                "reference_target_output_limit",
+                "References to omitted semantic equation rows were omitted; remaining reference targets are retained.",
+                omitted,
+                "semantic_equations",
+            );
         }
     }
     let retained: HashMap<_, _> = diff
@@ -281,5 +299,11 @@ fn omit_hunks(file: &mut SourceFileChange, omitted: usize, code: &str) {
     }
     file.omitted_hunks = Some(file.omitted_hunks.unwrap_or(0).saturating_add(omitted));
     file.availability = Availability::Partial;
-    add_limit(&mut file.limits, code, "Source hunks were omitted; the captured-file text diff remains available when exact_text_available is true.", omitted, "source_changes");
+    add_limit(
+        &mut file.limits,
+        code,
+        "Source hunks were omitted; the captured-file text diff remains available when exact_text_available is true.",
+        omitted,
+        "source_changes",
+    );
 }

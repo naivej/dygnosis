@@ -3,8 +3,8 @@
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 
 use dygnosis::server::new_service;
-use dygnosis::{analyze, dynare_diagnose, parse, run_preprocessor, JsonStage, Severity};
-use tower_lsp::{lsp_types::*, LanguageServer};
+use dygnosis::{JsonStage, Severity, analyze, dynare_diagnose, parse, run_preprocessor};
+use tower_lsp::{LanguageServer, lsp_types::*};
 
 const MODEL: &str = "var y z; varexo e; model; y=z+e; z=y; end;\n";
 const EMPTY: &str = "steady_state_model; end;";
@@ -47,13 +47,16 @@ fn empty_and_comment_only_blocks_refuse_on_the_written_end() {
         assert!(model.ss_block.is_none());
         assert!(model.steady_state_equations.is_empty());
         assert_eq!(model.equations.len(), 2);
-        assert!(model
-            .parameters
-            .iter()
-            .any(|decl| model.name(decl.name) == "later"));
-        assert!(rows
-            .iter()
-            .all(|row| !matches!(row.code.as_str(), "E021" | "W022" | "W042")));
+        assert!(
+            model
+                .parameters
+                .iter()
+                .any(|decl| model.name(decl.name) == "later")
+        );
+        assert!(
+            rows.iter()
+                .all(|row| !matches!(row.code.as_str(), "E021" | "W022" | "W042"))
+        );
     }
 }
 
@@ -105,9 +108,10 @@ fn invalid_only_rows_keep_the_first_refusal_without_an_empty_body_error() {
             "{source}: {rows:?}"
         );
         assert!(model.ss_block.is_none(), "{source}");
-        assert!(rows
-            .iter()
-            .all(|row| !matches!(row.code.as_str(), "E021" | "W022" | "W042")));
+        assert!(
+            rows.iter()
+                .all(|row| !matches!(row.code.as_str(), "E021" | "W022" | "W042"))
+        );
     }
 }
 
@@ -118,9 +122,11 @@ fn scalar_and_bracketed_rows_accept_and_unfinished_blocks_keep_their_closer_erro
         official(&source, true, None);
         let model = parse(&source);
         assert!(model.ss_block.is_some());
-        assert!(analyze(&model)
-            .iter()
-            .all(|row| row.severity != Severity::Error));
+        assert!(
+            analyze(&model)
+                .iter()
+                .all(|row| row.severity != Severity::Error)
+        );
     }
     for body in ["", "y=0;"] {
         let source = format!("{MODEL}steady_state_model; {body}");
@@ -147,10 +153,12 @@ fn a_refused_rhs_does_not_register_a_steady_state_output() {
         let source = format!("{MODEL}steady_state_model; y=0; {row} end;");
         official(&source, false, Some("Division by zero"));
         let model = parse(&source);
-        assert!(model
-            .mod_file_locals
-            .iter()
-            .all(|name| model.name(*name) != "fresh"));
+        assert!(
+            model
+                .mod_file_locals
+                .iter()
+                .all(|name| model.name(*name) != "fresh")
+        );
         assert_eq!(
             model.steady_state_equations.len(),
             2,
@@ -170,9 +178,10 @@ fn a_refused_rhs_does_not_register_a_steady_state_output() {
     official(&source, false, Some("Division by zero"));
     let rows = analyze(&parse(&source));
     assert!(rows.iter().any(|row| row.code == "E278"));
-    assert!(rows
-        .iter()
-        .all(|row| !matches!(row.code.as_str(), "E279" | "E481")));
+    assert!(
+        rows.iter()
+            .all(|row| !matches!(row.code.as_str(), "E279" | "E481"))
+    );
 }
 
 #[test]
@@ -180,7 +189,9 @@ fn a_captured_epilogue_role_has_one_owner_per_executed_refusal() {
     for copies in [1, 2] {
         let root = "C:/slice22-role/root.mod";
         let child = "C:/slice22-role/body.inc";
-        let source = format!("var y; parameters p; model;y=0;end; epilogue;x=y;end;\n@#for j in 1:{copies}\n@#include \"body.inc\"\n@#endfor\n");
+        let source = format!(
+            "var y; parameters p; model;y=0;end; epilogue;x=y;end;\n@#for j in 1:{copies}\n@#include \"body.inc\"\n@#endfor\n"
+        );
         let files = HashMap::from([
             (root.to_string(), source.clone()),
             (child.to_string(), "p=x/0;".to_string()),
@@ -206,17 +217,20 @@ fn macro_selection_and_copies_use_the_current_blocks_completed_rows() {
         let model = parse(&source);
         assert!(model.ss_block.is_none());
         let rows = analyze(&model);
-        assert!(rows
-            .iter()
-            .any(|row| row.code == "E001" && row.message == SENTENCE));
+        assert!(
+            rows.iter()
+                .any(|row| row.code == "E001" && row.message == SENTENCE)
+        );
         assert!(rows.iter().all(|row| row.code != "W042"));
     }
     let source =
         format!("{MODEL}@#if 0\n{EMPTY}\n@#else\nsteady_state_model; y=0; z=0; end;\n@#endif\n");
     official(&source, true, None);
-    assert!(analyze(&parse(&source))
-        .iter()
-        .all(|row| row.severity != Severity::Error));
+    assert!(
+        analyze(&parse(&source))
+            .iter()
+            .all(|row| row.severity != Severity::Error)
+    );
 }
 
 #[test]
@@ -263,9 +277,11 @@ fn mcp_unsaved_include_reports_the_empty_block_end_and_accepts_its_repair() {
         child.to_string(),
         "steady_state_model; y=0; z=0; end;\n".to_string(),
     );
-    assert!(dynare_diagnose(&source, Some(root), Some(&files))
-        .iter()
-        .all(|row| row.severity != "ERROR"));
+    assert!(
+        dynare_diagnose(&source, Some(root), Some(&files))
+            .iter()
+            .all(|row| row.severity != "ERROR")
+    );
 }
 
 #[tokio::test]
@@ -339,10 +355,11 @@ async fn lsp_unsaved_include_updates_the_same_mapped_empty_block_error() {
         else {
             panic!("expected full report");
         };
-        assert!(full
-            .full_document_diagnostic_report
-            .items
-            .iter()
-            .all(|row| row.severity != Some(DiagnosticSeverity::ERROR)));
+        assert!(
+            full.full_document_diagnostic_report
+                .items
+                .iter()
+                .all(|row| row.severity != Some(DiagnosticSeverity::ERROR))
+        );
     }
 }

@@ -99,7 +99,12 @@ fn policy(model: &Model, facts: &mut Vec<CapturedFact>, work: &mut RetainedExpre
             FieldState::present(FieldValue::List(instruments)),
             ChangeFacet::Target,
         );
-        gap(&mut value, "policy_options_context", "Policy records retain command form, instrument occurrences and discount presence. Other accepted options remain statement context.", "parser_policy_option_retention");
+        gap(
+            &mut value,
+            "policy_options_context",
+            "Policy records retain command form, instrument occurrences and discount presence. Other accepted options remain statement context.",
+            "parser_policy_option_retention",
+        );
         facts.push(value);
     }
     let mut value = CapturedFact::new(
@@ -121,7 +126,12 @@ fn policy(model: &Model, facts: &mut Vec<CapturedFact>, work: &mut RetainedExpre
         work,
     );
     expr(&mut value, "planner_objective", objective);
-    gap(&mut value, "planner_objective_first_only", "The parser retains the first nonempty planner objective expression. Later accepted objectives remain statement context.", "parser_planner_objective_retention");
+    gap(
+        &mut value,
+        "planner_objective_first_only",
+        "The parser retains the first nonempty planner objective expression. Later accepted objectives remain statement context.",
+        "parser_planner_objective_retention",
+    );
     facts.push(value);
     let mut value = CapturedFact::new(
         SemanticFamily::Policy,
@@ -139,7 +149,12 @@ fn policy(model: &Model, facts: &mut Vec<CapturedFact>, work: &mut RetainedExpre
         {
             value.side.context = None;
             value.side.provenance = None;
-            gap(&mut value, "planner_discount_selected_origins", "First expression and first finite value were retained from different option occurrences; there is no single supporting statement context for both fields.", "parser_planner_discount_retention");
+            gap(
+                &mut value,
+                "planner_discount_selected_origins",
+                "First expression and first finite value were retained from different option occurrences; there is no single supporting statement context for both fields.",
+                "parser_planner_discount_retention",
+            );
         }
     }
     let discount = expression(
@@ -160,7 +175,12 @@ fn policy(model: &Model, facts: &mut Vec<CapturedFact>, work: &mut RetainedExpre
         },
         ChangeFacet::ParameterValue,
     );
-    gap(&mut value, "planner_discount_first_only", "The expression and first folded discount are retained separately with first-wins behavior. Later option values remain statement context.", "parser_planner_discount_retention");
+    gap(
+        &mut value,
+        "planner_discount_first_only",
+        "The expression and first folded discount are retained separately with first-wins behavior. Later option values remain statement context.",
+        "parser_planner_discount_retention",
+    );
     facts.push(value);
     let mut value = CapturedFact::new(
         SemanticFamily::Policy,
@@ -175,7 +195,12 @@ fn policy(model: &Model, facts: &mut Vec<CapturedFact>, work: &mut RetainedExpre
         FieldState::present(names(model, model.instruments.iter().copied())),
         ChangeFacet::Target,
     );
-    gap(&mut value, "instrument_union_first_seen", "This retained union keeps each distinct instrument in first-seen order. Accepted per-command instrument lists retain written duplicates and their own association.", "parser_policy_option_retention");
+    gap(
+        &mut value,
+        "instrument_union_first_seen",
+        "This retained union keeps each distinct instrument in first-seen order. Accepted per-command instrument lists retain written duplicates and their own association.",
+        "parser_policy_option_retention",
+    );
     facts.push(value);
     for (index, row) in model.osr_params_bounds.iter().enumerate() {
         let name = model.name(row.name);
@@ -475,7 +500,12 @@ fn heterogeneity(model: &Model, facts: &mut Vec<CapturedFact>) {
             )),
             ChangeFacet::Target,
         );
-        gap(&mut value, "heterogeneity_numerical_data_not_captured", "Options are written settings. Referenced MAT files, grids, policies, distributions and numerical solutions are not captured model facts.", "source_capture_boundary");
+        gap(
+            &mut value,
+            "heterogeneity_numerical_data_not_captured",
+            "Options are written settings. Referenced MAT files, grids, policies, distributions and numerical solutions are not captured model facts.",
+            "source_capture_boundary",
+        );
         facts.push(value);
     }
 }
@@ -523,7 +553,12 @@ fn external_and_trends(
             derivative(model, row.second_deriv.as_ref()),
             ChangeFacet::Options,
         );
-        gap(&mut value, "external_function_body_not_captured", "The declared external interface is compared. External M/MEX function bodies and numerical evaluations are not captured.", "source_capture_boundary");
+        gap(
+            &mut value,
+            "external_function_body_not_captured",
+            "The declared external interface is compared. External M/MEX function bodies and numerical evaluations are not captured.",
+            "source_capture_boundary",
+        );
         full_claim(model, &mut value);
         facts.push(value);
     }

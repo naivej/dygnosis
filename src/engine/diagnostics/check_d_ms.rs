@@ -420,7 +420,15 @@ fn check_parse_phase(
                 }
             }
             Unit::RemovedUse(name, span, _) => {
-                push(out, span, "E426", format!("Variable '{}' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement", model.name(name)));
+                push(
+                    out,
+                    span,
+                    "E426",
+                    format!(
+                        "Variable '{}' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement",
+                        model.name(name)
+                    ),
+                );
                 true
             }
             Unit::ChangeType(statement) => {
@@ -1300,15 +1308,18 @@ fn conditional_forecast_path_refusal(
         }
         seen.insert(row.name, row.span);
         if row.periods.len() != row.values.len() {
-            return Some((Diagnostic::new(
-                row.span,
-                Severity::Error,
-                "E343",
-                format!(
-                    "shocks/conditional_forecast_paths: variable {}: number of periods is different from number of shock values",
-                    model.name(row.name)
+            return Some((
+                Diagnostic::new(
+                    row.span,
+                    Severity::Error,
+                    "E343",
+                    format!(
+                        "shocks/conditional_forecast_paths: variable {}: number of periods is different from number of shock values",
+                        model.name(row.name)
+                    ),
                 ),
-            ), order));
+                order,
+            ));
         }
     }
     if let Some(order) = block.parse_order

@@ -4,7 +4,7 @@ use dygnosis::model::{
     DottedHead, DottedKind, PathTarget, PeriodPoint, ShockBlockKind, ShockOperation,
     SubsampleInstruction,
 };
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage};
+use dygnosis::{JsonStage, analyze, find_preprocessor, parse, run_preprocessor};
 
 const BASE: &str = "var y; varexo e; varexo_det d; parameters p; p=.5; model; y=p*y(-1)+e+d; end;";
 
@@ -144,7 +144,9 @@ fn date_typed_command_options_keep_full_offsets() {
         .collect();
     assert_eq!(
         values,
-        ["2000Q1+1", "2001Q1", "2000Q1+1", "2001Q1", "2000Q1+2", "2001Q4", "2000Q1+3", "2001Q1"]
+        [
+            "2000Q1+1", "2001Q1", "2000Q1+1", "2001Q1", "2000Q1+2", "2001Q4", "2000Q1+3", "2001Q1"
+        ]
     );
 }
 
@@ -278,17 +280,27 @@ fn pinned_72_accepts_new_forms_and_refuses_nearby_syntax() {
     let accepted = [
         file("shocks; var e; stderr .1; var d; periods 2 3; values .2 .3; end;"),
         file("shocks(surprise); var e; periods 2; values .1; end;"),
-        file("mshocks(relative_to_initval overwrite learnt_in=2); var e; periods 2; values 1.1; end;"),
-        file("heteroskedastic_shocks; var e; periods 1; values .1; var e; periods 2; scales 1.1; end;"),
+        file(
+            "mshocks(relative_to_initval overwrite learnt_in=2); var e; periods 2; values 1.1; end;",
+        ),
+        file(
+            "heteroskedastic_shocks; var e; periods 1; values .1; var e; periods 2; scales 1.1; end;",
+        ),
         file("database db; shock_paths; var e; periods 1, 2:end; values db.x, self.e(-1); end;"),
-        file("perfect_foresight_controlled_paths(learnt_in=2); exogenize y; periods 2; values (1); endogenize e; end;"),
+        file(
+            "perfect_foresight_controlled_paths(learnt_in=2); exogenize y; periods 2; values (1); endogenize e; end;",
+        ),
         file("p.subsamples(a=2000Q1:2001Q1); set_time(-2000Q1+1+2);"),
         file("p.subsamples(a=2000Q1:2001Q1); p.a.prior(shape=normal,mean=0,stdev=1);"),
-        file("p.a.prior = p.b.prior; p.a.options = p.b.options; p.subsamples(a=2000Q1:2001Q1); p.subsamples(b=2001Q2:2002Q1);"),
+        file(
+            "p.a.prior = p.b.prior; p.a.options = p.b.options; p.subsamples(a=2000Q1:2001Q1); p.subsamples(b=2001Q2:2002Q1);",
+        ),
         file("shocks(learnt_in=2000Q1+1); var e; periods 2000Q2; values .1; end;"),
         file("data(file='x.csv',first_obs=2000Q1+1,last_obs=2001Q1);"),
         file("initval_file(datafile='x.csv',first_obs=2000Q1+1,last_obs=2001Q1);"),
-        file("perfect_foresight_setup(first_simulation_period=2000Q1+2,last_simulation_period=2001Q4);"),
+        file(
+            "perfect_foresight_setup(first_simulation_period=2000Q1+2,last_simulation_period=2001Q4);",
+        ),
         file("plot_shock_decomposition(plot_init_date=2000Q1+3,plot_end_date=2001Q1);"),
     ];
     for source in accepted {
@@ -323,8 +335,16 @@ fn pinned_72_accepts_new_forms_and_refuses_nearby_syntax() {
             "2",
         ),
         (file("p.subsamples();"), "syntax error, unexpected ')'", ")"),
-        (file("set_time(+2000Q1);"), "syntax error, unexpected PLUS, expecting DATE", "+"),
-        (file("set_time(- 2000Q1);"), "syntax error, unexpected MINUS, expecting DATE", "-"),
+        (
+            file("set_time(+2000Q1);"),
+            "syntax error, unexpected PLUS, expecting DATE",
+            "+",
+        ),
+        (
+            file("set_time(- 2000Q1);"),
+            "syntax error, unexpected MINUS, expecting DATE",
+            "-",
+        ),
         (
             file("mshocks(overwrite,relative_to_initval); var e; periods 2; values 1.1; end;"),
             "syntax error, unexpected COMMA, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'",
@@ -386,24 +406,29 @@ fn path_expression_reader_keeps_namespace_leaves_and_full_function_names() {
     let value = &model.shock_paths[0].stanzas[0].values[0];
     assert_eq!(value.text, "0*self.e(-1)+db.x+pkg.f(p)");
     let refs = &value.path_refs;
-    assert!(refs
-        .iter()
-        .any(|reference| reference.namespace.as_deref() == Some("self")
-            && reference.lag.as_deref() == Some("-1")));
-    assert!(refs
-        .iter()
-        .any(|reference| reference.namespace.as_deref() == Some("db")
-            && model.name(reference.name) == "x"));
-    assert!(refs
-        .iter()
-        .any(|reference| reference.call && model.name(reference.name) == "pkg.f"));
+    assert!(
+        refs.iter()
+            .any(|reference| reference.namespace.as_deref() == Some("self")
+                && reference.lag.as_deref() == Some("-1"))
+    );
+    assert!(
+        refs.iter()
+            .any(|reference| reference.namespace.as_deref() == Some("db")
+                && model.name(reference.name) == "x")
+    );
+    assert!(
+        refs.iter()
+            .any(|reference| reference.call && model.name(reference.name) == "pkg.f")
+    );
     assert!(
         model.exprs.iter().any(|(_, expr)| matches!(&expr.kind,
         ExprKind::PathNamespace { reference, .. } if reference.namespace.as_deref() == Some("db")))
     );
-    assert!(!analyze(&model)
-        .iter()
-        .any(|diag| diag.severity == dygnosis::Severity::Error));
+    assert!(
+        !analyze(&model)
+            .iter()
+            .any(|diag| diag.severity == dygnosis::Severity::Error)
+    );
 }
 
 #[test]
@@ -473,18 +498,42 @@ fn path_values_require_complete_comma_separated_expressions() {
 fn path_namespace_actions_capture_earlier_declarations_and_function_calls() {
     for (body, code) in [
         ("shock_paths; var e; periods 1; values Self.e; end;", "E415"),
-        ("shock_paths; var e; periods 1; values db.x; end; database db;", "E415"),
-        ("database db; shock_paths; var e; periods 1; values db.x; end; shock_paths; var e; periods 1; values x; end;", "E407"),
-        ("shock_paths; var e; periods 1; values f(p); end; shock_paths; var e; periods 1; values f; end;", "E407"),
+        (
+            "shock_paths; var e; periods 1; values db.x; end; database db;",
+            "E415",
+        ),
+        (
+            "database db; shock_paths; var e; periods 1; values db.x; end; shock_paths; var e; periods 1; values x; end;",
+            "E407",
+        ),
+        (
+            "shock_paths; var e; periods 1; values f(p); end; shock_paths; var e; periods 1; values f; end;",
+            "E407",
+        ),
         ("shock_paths; var e; periods 1; values p(1); end;", "E001"),
-        ("shock_paths; var e; periods 1; values self.e(p); end;", "E409"),
-        ("shock_paths; var e; periods 1; values self.e(1); end;", "E408"),
-        ("shock_paths; var e; periods 1; values self.e(0,1); end;", "E410"),
-        ("shock_paths; exogenize y; periods 1; values 0*self.e; endogenize e; end;", "E416"),
+        (
+            "shock_paths; var e; periods 1; values self.e(p); end;",
+            "E409",
+        ),
+        (
+            "shock_paths; var e; periods 1; values self.e(1); end;",
+            "E408",
+        ),
+        (
+            "shock_paths; var e; periods 1; values self.e(0,1); end;",
+            "E410",
+        ),
+        (
+            "shock_paths; exogenize y; periods 1; values 0*self.e; endogenize e; end;",
+            "E416",
+        ),
     ] {
         let source = file(body);
         let diags = analyze(&parse(&source));
-        assert!(diags.iter().any(|diag| diag.code == code), "{body}: {diags:?}");
+        assert!(
+            diags.iter().any(|diag| diag.code == code),
+            "{body}: {diags:?}"
+        );
     }
     for expression in [
         "self.e(-1.0)",
@@ -527,13 +576,17 @@ fn path_refused_values_prevent_stanza_actions_and_retain_written_recovery() {
     }
     let source = file("shock_paths; var e; periods 1; values unknown/0; end;");
     let model = parse(&source);
-    assert!(!analyze(&model)
-        .iter()
-        .any(|diag| matches!(diag.code.as_str(), "E278" | "E407" | "E058")));
-    assert!(!model
-        .mod_file_locals
-        .iter()
-        .any(|name| model.name(*name) == "unknown"));
+    assert!(
+        !analyze(&model)
+            .iter()
+            .any(|diag| matches!(diag.code.as_str(), "E278" | "E407" | "E058"))
+    );
+    assert!(
+        !model
+            .mod_file_locals
+            .iter()
+            .any(|name| model.name(*name) == "unknown")
+    );
 }
 
 #[test]
@@ -575,33 +628,111 @@ fn path_reach_names_roles_and_reader_exclusions_match_the_pin() {
     let base =
         "var y; varexo e u; varexo_det d; parameters p q; p=.5; q=.7; model; y=e+u+d+p+q; end;";
     for (body, code, sentence) in [
-        ("shock_paths; var missing; periods 1; values 1; end;", "E058", "Unknown symbol: missing."),
-        ("shock_paths; var p; periods 1; values 1; end;", "E387", "p is not exogenous."),
-        ("shock_paths; var d; periods 1; values 1; end;", "E317", "d is an exogenous deterministic."),
-        ("shock_paths; exogenize p; periods 1; values 1; endogenize e; end;", "E317", "p is not endogenous."),
-        ("shock_paths; var e; periods 1; values init.missing; end;", "E058", "Unknown symbol: missing."),
-        ("shock_paths; var e; periods 1; values init.p; end;", "E059", "p is neither endogenous or exogenous."),
-        ("shock_paths; var e; periods 1; values init.d; end;", "E317", "d is an exogenous deterministic."),
-        ("shock_paths; var e; periods 1; values self.y; end;", "E387", "y is not exogenous."),
-        ("shock_paths; var e; periods 1; values self.d; end;", "E317", "d is an exogenous deterministic."),
-        ("shock_paths; var e; periods 1; values p(1/0); end;", "E278", "Division by zero when forming (1)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0)."),
-        ("shock_paths; var e; periods 1; values init.e+q; end;", "", ""),
-        ("p=self.e;", "E275", "Namespace-qualified symbol self.e not allowed in this context"),
-        ("trend_var(growth_factor=1.02) t; p=t;", "E310", "Variable t not allowed outside model declaration, because it is a trend variable."),
-        ("trend_var(growth_factor=1.02) t; shock_paths; var e; periods 1; values t; end;", "E407", "In the shock_paths block, parameters are the only symbols allowed without a namespace-qualifier"),
+        (
+            "shock_paths; var missing; periods 1; values 1; end;",
+            "E058",
+            "Unknown symbol: missing.",
+        ),
+        (
+            "shock_paths; var p; periods 1; values 1; end;",
+            "E387",
+            "p is not exogenous.",
+        ),
+        (
+            "shock_paths; var d; periods 1; values 1; end;",
+            "E317",
+            "d is an exogenous deterministic.",
+        ),
+        (
+            "shock_paths; exogenize p; periods 1; values 1; endogenize e; end;",
+            "E317",
+            "p is not endogenous.",
+        ),
+        (
+            "shock_paths; var e; periods 1; values init.missing; end;",
+            "E058",
+            "Unknown symbol: missing.",
+        ),
+        (
+            "shock_paths; var e; periods 1; values init.p; end;",
+            "E059",
+            "p is neither endogenous or exogenous.",
+        ),
+        (
+            "shock_paths; var e; periods 1; values init.d; end;",
+            "E317",
+            "d is an exogenous deterministic.",
+        ),
+        (
+            "shock_paths; var e; periods 1; values self.y; end;",
+            "E387",
+            "y is not exogenous.",
+        ),
+        (
+            "shock_paths; var e; periods 1; values self.d; end;",
+            "E317",
+            "d is an exogenous deterministic.",
+        ),
+        (
+            "shock_paths; var e; periods 1; values p(1/0); end;",
+            "E278",
+            "Division by zero when forming (1)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0).",
+        ),
+        (
+            "shock_paths; var e; periods 1; values init.e+q; end;",
+            "",
+            "",
+        ),
+        (
+            "p=self.e;",
+            "E275",
+            "Namespace-qualified symbol self.e not allowed in this context",
+        ),
+        (
+            "trend_var(growth_factor=1.02) t; p=t;",
+            "E310",
+            "Variable t not allowed outside model declaration, because it is a trend variable.",
+        ),
+        (
+            "trend_var(growth_factor=1.02) t; shock_paths; var e; periods 1; values t; end;",
+            "E407",
+            "In the shock_paths block, parameters are the only symbols allowed without a namespace-qualifier",
+        ),
     ] {
         let source = format!("{base} {body}");
         let diags = analyze(&parse(&source));
         if code.is_empty() {
-            assert!(!diags.iter().any(|diag| diag.severity == dygnosis::Severity::Error), "{body}: {diags:?}");
+            assert!(
+                !diags
+                    .iter()
+                    .any(|diag| diag.severity == dygnosis::Severity::Error),
+                "{body}: {diags:?}"
+            );
         } else {
-            assert!(diags.iter().any(|diag| diag.code == code && diag.message == sentence), "{body}: {diags:?}");
+            assert!(
+                diags
+                    .iter()
+                    .any(|diag| diag.code == code && diag.message == sentence),
+                "{body}: {diags:?}"
+            );
         }
         if let Some(binary) = find_preprocessor(None) {
-            let result = run_preprocessor(&source, &binary, None, Duration::from_secs(30), JsonStage::Check);
+            let result = run_preprocessor(
+                &source,
+                &binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Check,
+            );
             let output = format!("{} {}", result.raw_stdout, result.raw_stderr);
-            if code.is_empty() { assert!(result.success, "{body}: {output}"); }
-            else { assert!(!result.success && output.contains(sentence.trim_end_matches('.')), "{body}: {output}"); }
+            if code.is_empty() {
+                assert!(result.success, "{body}: {output}");
+            } else {
+                assert!(
+                    !result.success && output.contains(sentence.trim_end_matches('.')),
+                    "{body}: {output}"
+                );
+            }
         }
     }
 }
@@ -701,9 +832,11 @@ fn path_symbol_actions_use_execution_order_when_macro_copies_share_written_spans
         assert!(diags.iter().any(|diag| diag.code == expected), "{source}: {diags:?}");
     }
     let source = "var y; varexo e; parameters p; model; y=e; end; change_type(var) p; change_type(parameters) p; shock_paths; var e; periods 1; values p; end;".to_string();
-    assert!(!analyze(&parse(&source))
-        .iter()
-        .any(|diag| matches!(diag.code.as_str(), "E407" | "E310")));
+    assert!(
+        !analyze(&parse(&source))
+            .iter()
+            .any(|diag| matches!(diag.code.as_str(), "E407" | "E310"))
+    );
 }
 
 #[test]

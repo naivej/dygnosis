@@ -4,13 +4,13 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::engine::language::span::{LineIndex, Span};
@@ -670,11 +670,13 @@ mod tests {
         .unwrap();
         assert_eq!(snapshot.inputs["root"], Value::Null);
         assert_eq!(snapshot.inputs["checked_owners"], json!([]));
-        assert!(snapshot.inputs["guards"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|row| row["file"].is_null()));
+        assert!(
+            snapshot.inputs["guards"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["file"].is_null())
+        );
         assert!(snapshot.guards.iter().any(|guard| guard.file == TEXT_ROOT));
         let repeated = resolve_source(
             SourceInput::Text { text: MODEL.into() },
@@ -707,10 +709,13 @@ mod tests {
             assert!(reason["message"].as_str().unwrap().contains(name));
             assert_eq!(reason["source"]["file"], Value::Null);
             assert_eq!(reason["source"]["range"]["line"], 2);
-            assert_eq!(crate::engine::diagnostics::analyze(&text_snapshot.model)
-                .iter()
-                .any(|row| row.code == "E001"),tail == "priors;",
-                "The priors alias uses the estimated-parameter reader and reports its incomplete body.");
+            assert_eq!(
+                crate::engine::diagnostics::analyze(&text_snapshot.model)
+                    .iter()
+                    .any(|row| row.code == "E001"),
+                tail == "priors;",
+                "The priors alias uses the estimated-parameter reader and reports its incomplete body."
+            );
             let map_snapshot = resolve_source(
                 mapped(
                     "pkg/root.mod",
@@ -743,11 +748,13 @@ mod tests {
             &RequestControl::default(),
         )
         .unwrap();
-        assert!(broken.coverage["reasons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|reason| reason["code"] == "E001"));
+        assert!(
+            broken.coverage["reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason["code"] == "E001")
+        );
     }
 
     #[test]
@@ -813,12 +820,14 @@ mod tests {
         assert_eq!(after.revision, before.revision);
         assert!(!declared(&after.model, "disk_only"));
         assert_eq!(after.sources.len(), 1);
-        assert!(after
-            .workspace
-            .companion_records(&root)
-            .unwrap()
-            .iter()
-            .all(|record| record.path.is_none()));
+        assert!(
+            after
+                .workspace
+                .companion_records(&root)
+                .unwrap()
+                .iter()
+                .all(|record| record.path.is_none())
+        );
         assert!(!after.coverage["complete"].as_bool().unwrap());
     }
 
@@ -827,7 +836,18 @@ mod tests {
         // Guards host case folding, suffix fallback, ignored configured folders and rewritten source keys.
         let root = "Models\\./Root.mod";
         let child = "Models\\parts\\../parts/child.inc";
-        let mut input=mapped(root,&[(root,"@#include \"parts/../parts/child.inc\"\n@#include \"extra.inc\"\nmodel; x=0; end;"),(child,"var x;"),("Search\\./extra.inc","parameters beta;"),("Elsewhere/extra.inc","var wrong;")]);
+        let mut input = mapped(
+            root,
+            &[
+                (
+                    root,
+                    "@#include \"parts/../parts/child.inc\"\n@#include \"extra.inc\"\nmodel; x=0; end;",
+                ),
+                (child, "var x;"),
+                ("Search\\./extra.inc", "parameters beta;"),
+                ("Elsewhere/extra.inc", "var wrong;"),
+            ],
+        );
         if let SourceInput::Map { include_dirs, .. } = &mut input {
             include_dirs.push("Search/".into());
         }
@@ -841,13 +861,15 @@ mod tests {
         );
         assert!(declared(&snapshot.model, "beta"));
         assert!(!declared(&snapshot.model, "wrong"));
-        assert!(snapshot
-            .report
-            .model_map
-            .declarations
-            .iter()
-            .flat_map(|source| &source.segments)
-            .any(|segment| segment.file.as_deref() == Some(child)));
+        assert!(
+            snapshot
+                .report
+                .model_map
+                .declarations
+                .iter()
+                .flat_map(|source| &source.segments)
+                .any(|segment| segment.file.as_deref() == Some(child))
+        );
         let suffix = resolve_source(
             mapped(
                 "Models/Root.mod",
@@ -903,7 +925,9 @@ mod tests {
     fn companion_merge_preserves_supplied_case_and_exact_source_keys() {
         // Guards host case folding or canonicalization collapsing distinct
         // supplied companions or distinct unresolved names in one root.
-        let text=format!("{MODEL}\ndata(file='A.csv');\ndata(file='a.csv');\ndata(file='Missing.csv');\ndata(file='missing.csv');");
+        let text = format!(
+            "{MODEL}\ndata(file='A.csv');\ndata(file='a.csv');\ndata(file='Missing.csv');\ndata(file='missing.csv');"
+        );
         let mut snapshot = resolve_source(
             mapped(
                 "models/root.mod",
@@ -929,9 +953,11 @@ mod tests {
             assert_eq!(row.path.as_ref().unwrap().to_str().unwrap(), key);
         }
         for name in ["Missing.csv", "missing.csv"] {
-            assert!(records
-                .iter()
-                .any(|row| row.name == name && row.path.is_none()));
+            assert!(
+                records
+                    .iter()
+                    .any(|row| row.name == name && row.path.is_none())
+            );
         }
     }
 
@@ -939,7 +965,7 @@ mod tests {
     fn actual_macro_work_stop_has_a_typed_limit_but_unsupported_i211_does_not() {
         // Guards a real nested-loop ceiling being reported only as generic
         // incomplete analysis, and classifying every I211 as a budget stop.
-        let text="var y;\nmodel;\n@#for i in 1:1000\n@#for j in 1:1000\ny=0;\n@#endfor\n@#endfor\nend;\n";
+        let text = "var y;\nmodel;\n@#for i in 1:1000\n@#for j in 1:1000\ny=0;\n@#endfor\n@#endfor\nend;\n";
         let root = "Models\\.\\root.mod";
         let stopped = resolve_source(
             mapped(root, &[(root, text)]),
@@ -961,11 +987,13 @@ mod tests {
         );
         assert_eq!(limit["root"], root);
         assert!(!limit["omitted"].as_str().unwrap().is_empty());
-        assert!(stopped
-            .model
-            .incomplete_reasons
-            .iter()
-            .any(|reason| reason.limit_name == Some("iteration work")));
+        assert!(
+            stopped
+                .model
+                .incomplete_reasons
+                .iter()
+                .any(|reason| reason.limit_name == Some("iteration work"))
+        );
         let unsupported = resolve_source(
             SourceInput::Text {
                 text: format!("@#include \"unavailable.inc\"\n{MODEL}"),
@@ -974,14 +1002,18 @@ mod tests {
             &RequestControl::default(),
         )
         .unwrap();
-        assert!(crate::engine::diagnostics::analyze(&unsupported.model)
-            .iter()
-            .any(|reason| reason.code == "I211"));
-        assert!(unsupported
-            .model
-            .incomplete_reasons
-            .iter()
-            .all(|reason| reason.limit_name.is_none()));
+        assert!(
+            crate::engine::diagnostics::analyze(&unsupported.model)
+                .iter()
+                .any(|reason| reason.code == "I211")
+        );
+        assert!(
+            unsupported
+                .model
+                .incomplete_reasons
+                .iter()
+                .all(|reason| reason.limit_name.is_none())
+        );
         assert_eq!(unsupported.coverage["work_limits"], json!([]));
     }
 
@@ -1110,12 +1142,23 @@ mod tests {
             .code,
             "INPUT_CHANGED"
         );
-        let mut loader=mapped(root,&[(root,"parameters beta; load_params_and_steady_state('values.inc'); var x; model; x=beta; end;"),("values.inc","beta = 1;")]);
+        let mut loader = mapped(
+            root,
+            &[
+                (
+                    root,
+                    "parameters beta; load_params_and_steady_state('values.inc'); var x; model; x=beta; end;",
+                ),
+                ("values.inc", "beta = 1;"),
+            ],
+        );
         let snapshot = resolve_source(loader.clone(), None, &RequestControl::default()).unwrap();
-        assert!(snapshot
-            .guards
-            .iter()
-            .any(|guard| guard.file == "values.inc"));
+        assert!(
+            snapshot
+                .guards
+                .iter()
+                .any(|guard| guard.file == "values.inc")
+        );
         if let SourceInput::Map { files, .. } = &mut loader {
             files.insert("values.inc".into(), "beta = 2;".into());
         }
@@ -1169,9 +1212,11 @@ mod tests {
             json!({"line":2,"column":5,"end_line":2,"end_column":6})
         );
         let emoji = text.find('😀').unwrap();
-        assert!(snapshot
-            .range(&snapshot.root, Span::new(emoji + 1, emoji + 2))
-            .is_none());
+        assert!(
+            snapshot
+                .range(&snapshot.root, Span::new(emoji + 1, emoji + 2))
+                .is_none()
+        );
         assert!(snapshot.range("uncaptured.inc", Span::new(0, 0)).is_none());
         assert_eq!(
             snapshot.guards[0].text_sha256.as_deref(),
@@ -1291,14 +1336,16 @@ mod tests {
         // work limits can still make an accepted byte-bound input incomplete.
         let control = RequestControl::default();
         let maximum = " ".repeat(control.limits.max_file_bytes);
-        assert!(resolve_source(
-            SourceInput::Text {
-                text: maximum.clone()
-            },
-            None,
-            &control
-        )
-        .is_ok());
+        assert!(
+            resolve_source(
+                SourceInput::Text {
+                    text: maximum.clone()
+                },
+                None,
+                &control
+            )
+            .is_ok()
+        );
         assert_eq!(
             error(
                 SourceInput::Text {
@@ -1347,18 +1394,20 @@ mod tests {
         let mut files: BTreeMap<_, _> = (0..control.limits.max_files)
             .map(|index| (format!("file{index}.mod"), String::new()))
             .collect();
-        assert!(resolve_source(
-            SourceInput::Map {
-                root: "file0.mod".into(),
-                files: files.clone(),
-                root_text: None,
-                include_dirs: Vec::new(),
-                owner_roots: Vec::new()
-            },
-            None,
-            &control
-        )
-        .is_ok());
+        assert!(
+            resolve_source(
+                SourceInput::Map {
+                    root: "file0.mod".into(),
+                    files: files.clone(),
+                    root_text: None,
+                    include_dirs: Vec::new(),
+                    owner_roots: Vec::new()
+                },
+                None,
+                &control
+            )
+            .is_ok()
+        );
         files.insert("one_extra.mod".into(), String::new());
         assert_eq!(
             error(
@@ -1380,18 +1429,20 @@ mod tests {
         let owners: Vec<_> = (1..control.limits.max_roots)
             .map(|index| format!("root{index}.mod"))
             .collect();
-        assert!(resolve_source(
-            SourceInput::Map {
-                root: "root0.mod".into(),
-                files: files.clone(),
-                root_text: None,
-                include_dirs: Vec::new(),
-                owner_roots: owners.clone()
-            },
-            None,
-            &control
-        )
-        .is_ok());
+        assert!(
+            resolve_source(
+                SourceInput::Map {
+                    root: "root0.mod".into(),
+                    files: files.clone(),
+                    root_text: None,
+                    include_dirs: Vec::new(),
+                    owner_roots: owners.clone()
+                },
+                None,
+                &control
+            )
+            .is_ok()
+        );
         let mut owners = owners;
         owners.push(format!("root{}.mod", control.limits.max_roots));
         assert_eq!(

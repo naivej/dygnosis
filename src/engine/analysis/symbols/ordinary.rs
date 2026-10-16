@@ -463,10 +463,16 @@ pub(super) fn decision(
     if kind == "external_function"
         || event.is_some_and(|event| event.kind.as_str() == "external_function")
     {
-        return Err(Refusal::new("EXTERNAL_IMPLEMENTATION", "An external function name also identifies its MATLAB implementation. Rename cannot update that implementation and its callers outside this model; no edits were proposed."));
+        return Err(Refusal::new(
+            "EXTERNAL_IMPLEMENTATION",
+            "An external function name also identifies its MATLAB implementation. Rename cannot update that implementation and its callers outside this model; no edits were proposed.",
+        ));
     }
     if kind == "database_variable" {
-        return Err(Refusal::new("EXTERNAL_DATABASE_MEMBER", "This name identifies a member of an external database. Rename cannot update that database's fields; no edits were proposed."));
+        return Err(Refusal::new(
+            "EXTERNAL_DATABASE_MEMBER",
+            "This name identifies a member of an external database. Rename cannot update that database's fields; no edits were proposed.",
+        ));
     }
     if !is_legal_ident(name) || !is_legal_ident(replacement) {
         return Err(IDENTIFIER);
@@ -498,7 +504,10 @@ pub(super) fn decision(
                 })
         })
     {
-        return Err(Refusal::new("EXTERNAL_DATABASE_MEMBER", "This symbol is also used as an explicit field of an external database. Rename cannot update that database's column; no edits were proposed."));
+        return Err(Refusal::new(
+            "EXTERNAL_DATABASE_MEMBER",
+            "This symbol is also used as an explicit field of an external database. Rename cannot update that database's column; no edits were proposed.",
+        ));
     }
     if name != replacement
         && model

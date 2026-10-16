@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use crate::engine::analysis::model_locals::ModelLocals;
 use crate::engine::comparison::{
-    final_symbol_declarations, last_assignment, normalize_equation, ModelDiff,
+    ModelDiff, final_symbol_declarations, last_assignment, normalize_equation,
 };
 use crate::engine::language::expr::ExprKind;
 use crate::engine::language::model::{Assignment, Model, StatementKind};

@@ -2,8 +2,8 @@
 
 use dygnosis::server::new_service;
 use serde_json::json;
-use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 // Guards malformed Explain requests silently returning null.
 #[tokio::test]
@@ -20,10 +20,12 @@ async fn explain_requires_a_code_and_keeps_the_argument_cause() {
         .unwrap()
         .unwrap();
     assert_eq!(result["code"], "INVALID_ARGUMENTS");
-    assert!(result["error"]
-        .as_str()
-        .unwrap()
-        .contains("diagnostic code"));
+    assert!(
+        result["error"]
+            .as_str()
+            .unwrap()
+            .contains("diagnostic code")
+    );
 }
 
 async fn open(server: &dygnosis::server::Backend, uri: &Url, text: &str) {
@@ -94,12 +96,14 @@ async fn formatting_distinguishes_refusal_from_unchanged_source() {
         options: serde_json::from_value(json!({"tabSize":4,"insertSpaces":true})).unwrap(),
         work_done_progress_params: Default::default(),
     };
-    assert!(server
-        .formatting(params.clone())
-        .await
-        .unwrap_err()
-        .message
-        .contains("unavailable"));
+    assert!(
+        server
+            .formatting(params.clone())
+            .await
+            .unwrap_err()
+            .message
+            .contains("unavailable")
+    );
     open(server, &uri, "var y;\n").await;
     assert!(server.formatting(params).await.unwrap().is_none());
     let error = server

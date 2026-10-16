@@ -240,7 +240,9 @@ fn validate_inputs(
         }
         if pair.proof == SourceIdentityProof::SameRepositoryKey && pair.before_key != pair.after_key
         {
-            return Err(invalid("Same-repository-key proof requires the same captured repository key on both sides."));
+            return Err(invalid(
+                "Same-repository-key proof requires the same captured repository key on both sides.",
+            ));
         }
     }
     Ok(())

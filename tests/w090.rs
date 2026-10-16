@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use dygnosis::span::LineIndex;
 use dygnosis::{
-    analyze, check_w090, find_preprocessor, parse, run_preprocessor, EstimatedParamKind, JsonStage,
+    EstimatedParamKind, JsonStage, analyze, check_w090, find_preprocessor, parse, run_preprocessor,
 };
 
 const CLEAN: &[&str] = &["trend_rbc_gov_inv", "sims_wu_2019", "lk2024"];
@@ -292,9 +292,11 @@ fn w090_w093_stderr() {
     assert_eq!(rust.len(), 1);
     assert_eq!(rust[0].code, "E093");
     assert_eq!(rust[0].severity, 1);
-    assert!(rust[0]
-        .message
-        .contains("stderr 'not_a_shock' is not a declared shock or observed variable"));
+    assert!(
+        rust[0]
+            .message
+            .contains("stderr 'not_a_shock' is not a declared shock or observed variable")
+    );
     assert_span(&src, &rust[0], "\nstderr not_a_shock, 0.1, 0, 1;");
 }
 

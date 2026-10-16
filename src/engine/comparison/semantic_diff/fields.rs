@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::engine::analysis::model_info::assigned_number;
 use crate::engine::analysis::timing::TimingAnalysis;
 use crate::engine::comparison::{
-    final_symbol_declarations, last_assignment, normalize_equation, normalize_expr,
-    parameter_value_changed, ModelDiff, ShockSetting,
+    ModelDiff, ShockSetting, final_symbol_declarations, last_assignment, normalize_equation,
+    normalize_expr, parameter_value_changed,
 };
 use crate::engine::language::model::{Decl, Model};
 

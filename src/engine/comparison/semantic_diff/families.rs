@@ -10,7 +10,7 @@ mod operations;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::expression_values::{
-    expression, gap, parent_id, range_text, span_text, RetainedExpressionWork,
+    RetainedExpressionWork, expression, gap, parent_id, range_text, span_text,
 };
 use crate::engine::comparison::ModelDiff;
 use crate::engine::language::intern::Name;
@@ -159,7 +159,12 @@ fn fact(
         fact.claims.extend(receipt.claims.iter().cloned());
     }
     if parent.is_none() {
-        gap(&mut fact, "producer_occurrence_context", "This retained producer has no proven expanded parent. Written spans do not prove command context, cross-side correspondence or navigation.", "parser_occurrence_retention");
+        gap(
+            &mut fact,
+            "producer_occurrence_context",
+            "This retained producer has no proven expanded parent. Written spans do not prove command context, cross-side correspondence or navigation.",
+            "parser_occurrence_retention",
+        );
     }
     fact
 }
@@ -202,7 +207,12 @@ fn attach_setting_context(model: &Model, fact: &mut CapturedFact, order: usize) 
         fact.side.context = side.context;
         fact.side.provenance = side.provenance;
     } else {
-        gap(fact, "setting_origin_unavailable", "The retained setting has no directly proven expanded parent; its semantic value remains available.", "parser_setting_origin_retention");
+        gap(
+            fact,
+            "setting_origin_unavailable",
+            "The retained setting has no directly proven expanded parent; its semantic value remains available.",
+            "parser_setting_origin_retention",
+        );
     }
 }
 
@@ -467,11 +477,12 @@ mod tests {
         diff.semantic.rows.clear();
         populate(&model, &model, &mut diff, &mut claims);
         assert!(diff.semantic.rows.is_empty(), "{}", diff.to_json());
-        assert!(diff
-            .coverage
-            .families
-            .iter()
-            .flat_map(|family| &family.limits)
-            .any(|limit| limit.code == "planner_objective_tree_materialization_limit"));
+        assert!(
+            diff.coverage
+                .families
+                .iter()
+                .flat_map(|family| &family.limits)
+                .any(|limit| limit.code == "planner_objective_tree_materialization_limit")
+        );
     }
 }

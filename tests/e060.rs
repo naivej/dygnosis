@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use dygnosis::span::LineIndex;
-use dygnosis::{check_e060_family, check_e060_family_on_model, parse, Workspace};
+use dygnosis::{Workspace, check_e060_family, check_e060_family_on_model, parse};
 
 const FAMILY: &[&str] = &["E061", "E062", "E063", "E064", "E065", "W061"];
 

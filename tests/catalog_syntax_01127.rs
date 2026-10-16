@@ -2,9 +2,9 @@
 
 use std::time::Duration;
 
-use dygnosis::catalog::syntax::{query, SyntaxQuery};
+use dygnosis::catalog::syntax::{SyntaxQuery, query};
 use dygnosis::preprocessor::find_preprocessor;
-use dygnosis::{check_file, command_options, run_preprocessor, JsonStage, Severity};
+use dygnosis::{JsonStage, Severity, check_file, command_options, run_preprocessor};
 
 const BASE: &str = "var y;\nvarexo e;\nparameters a;\na=.5;\nmodel;\ny=a*y(-1)+e;\nend;\n";
 
@@ -84,30 +84,38 @@ fn model_options_values_and_open_partition_keys_have_distinct_reference_forms() 
         parent: Some("model".into()),
         ..Default::default()
     });
-    assert!(heterogeneity
-        .records
-        .iter()
-        .any(|r| r.signatures == ["heterogeneity = NAME"]));
+    assert!(
+        heterogeneity
+            .records
+            .iter()
+            .any(|r| r.signatures == ["heterogeneity = NAME"])
+    );
     let partition = query(&SyntaxQuery {
         name: Some("<partition_name>".into()),
         parent: Some("var".into()),
         ..Default::default()
     });
-    assert!(partition
-        .records
-        .iter()
-        .any(|r| r.kind == "open_slot" && r.value_rules == ["QUOTED_STRING"]));
+    assert!(
+        partition
+            .records
+            .iter()
+            .any(|r| r.kind == "open_slot" && r.value_rules == ["QUOTED_STRING"])
+    );
     let block = query(&SyntaxQuery {
         name: Some("priors".into()),
         kind: Some("block".into()),
         ..Default::default()
     });
-    assert!(block
-        .records
-        .iter()
-        .any(|r| r.options.iter().any(|o| o.name == "overwrite")));
-    assert!(block
-        .records
-        .iter()
-        .all(|r| !r.options.iter().any(|o| o.name == "prior_mean")));
+    assert!(
+        block
+            .records
+            .iter()
+            .any(|r| r.options.iter().any(|o| o.name == "overwrite"))
+    );
+    assert!(
+        block
+            .records
+            .iter()
+            .all(|r| !r.options.iter().any(|o| o.name == "prior_mean"))
+    );
 }

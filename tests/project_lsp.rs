@@ -6,7 +6,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower_lsp::lsp_types::Url;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -131,8 +131,7 @@ impl Wire {
         let response = self.request("initialize", json!({"workspaceFolders":folders,"capabilities":{"experimental":{"dygnosis":{"projectStatusChanged":opt_in}}},
             "initializationOptions":{"dynare":{"configuration":{"schemaVersion":1,"loose":loose,"folders":scoped}}}})).await;
         assert_eq!(
-            response["capabilities"]["experimental"]["dygnosis"]["projectDiagnostics"]
-                ["schema_version"],
+            response["capabilities"]["experimental"]["dygnosis"]["projectDiagnostics"]["schema_version"],
             1
         );
         self.notify("initialized", json!({}));
@@ -365,10 +364,11 @@ async fn ambiguous_context_waits_for_choice_and_navigation_follows_it_without_we
         wire.pull(&h).await.is_empty(),
         "ambiguous context must not choose standalone or a parent"
     );
-    assert!(wire
-        .request("textDocument/definition", position.clone())
-        .await
-        .is_null());
+    assert!(
+        wire.request("textDocument/definition", position.clone())
+            .await
+            .is_null()
+    );
     for owner in [&a, &b] {
         let selected = wire.choose_context(&h, 1, owner).await;
         assert!(selected.get("error").is_none(), "{selected}");
@@ -377,16 +377,20 @@ async fn ambiguous_context_waits_for_choice_and_navigation_follows_it_without_we
             .await;
         assert_eq!(definition["uri"], *owner, "{definition}");
         let references = wire.request("textDocument/references", json!({"textDocument":{"uri":h},"position":{"line":1,"character":4},"context":{"includeDeclaration":true}})).await;
-        assert!(references
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|site| site["uri"] == *owner));
-        assert!(!references
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|site| site["uri"] == *if owner == &a { &b } else { &a }));
+        assert!(
+            references
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|site| site["uri"] == *owner)
+        );
+        assert!(
+            !references
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|site| site["uri"] == *if owner == &a { &b } else { &a })
+        );
     }
     let rename = wire.command_args("dynare/captureRename", json!({"textDocument":{"uri":h},"position":{"line":1,"character":4},"newName":"changed"})).await;
     assert_eq!(rename["code"], "RENAME_REFUSED", "{rename}");
@@ -408,10 +412,11 @@ async fn ambiguous_context_waits_for_choice_and_navigation_follows_it_without_we
         )
         .await;
     assert!(cleared.get("error").is_none());
-    assert!(wire
-        .request("textDocument/definition", position)
-        .await
-        .is_null());
+    assert!(
+        wire.request("textDocument/definition", position)
+            .await
+            .is_null()
+    );
 }
 
 // Guards the .mod helper fix for ordinary LSP clients which have no owner picker,
@@ -551,10 +556,12 @@ async fn configured_work_reaches_inactive_checks_and_formatting_over_stdio() {
             }),
         )
         .await;
-    assert!(formatted[0]["newText"]
-        .as_str()
-        .unwrap()
-        .contains("model;\n    y=2;\nend;"));
+    assert!(
+        formatted[0]["newText"]
+            .as_str()
+            .unwrap()
+            .contains("model;\n    y=2;\nend;")
+    );
     let range = wire
         .request(
             "textDocument/rangeFormatting",
@@ -723,10 +730,11 @@ async fn folder_only_cli_discovery_checked_errors_and_identical_push_pull() {
             .unwrap();
         assert_eq!(report["items"], json!(pulled));
     }
-    assert!(wire
-        .seen
-        .iter()
-        .any(|message| message["method"] == "dynare/projectStatusChanged"));
+    assert!(
+        wire.seen
+            .iter()
+            .any(|message| message["method"] == "dynare/projectStatusChanged")
+    );
     wire.open(&files.uri("ordinary.dyn"), "var y; model; y=x; end;", 1);
     assert!(has_code(
         &wire.pull(&files.uri("ordinary.dyn")).await,
@@ -1044,10 +1052,12 @@ async fn failed_folder_walk_retains_include_inventory_until_folder_removal() {
         failed["discovery_failures"][0]["folder_uri"],
         files.uri("a")
     );
-    assert!(failed["discovery_failures"][0]["failure"]
-        .as_str()
-        .unwrap()
-        .contains("include files"));
+    assert!(
+        failed["discovery_failures"][0]["failure"]
+            .as_str()
+            .unwrap()
+            .contains("include files")
+    );
     assert!(failed["roots"].as_array().unwrap().is_empty());
 
     wire.notify(
@@ -1071,10 +1081,12 @@ async fn failed_discovery_is_not_complete_coverage_and_notifications_are_opt_in(
     let status = wire.complete().await;
     assert_eq!(status["coverage_complete"], false);
     assert_eq!(status["discovery_failures"].as_array().unwrap().len(), 1);
-    assert!(!wire
-        .seen
-        .iter()
-        .any(|message| message["method"] == "dynare/projectStatusChanged"));
+    assert!(
+        !wire
+            .seen
+            .iter()
+            .any(|message| message["method"] == "dynare/projectStatusChanged")
+    );
 }
 
 #[tokio::test]
@@ -1106,9 +1118,11 @@ async fn chosen_active_root_is_first_and_checks_are_serial() {
         root(checking[0], &files.uri("chosen.mod"))["state"],
         "checking"
     );
-    assert!(statuses
-        .iter()
-        .all(|status| status["counts"]["checking"].as_u64().unwrap() <= 1));
+    assert!(
+        statuses
+            .iter()
+            .all(|status| status["counts"]["checking"].as_u64().unwrap() <= 1)
+    );
 }
 
 #[tokio::test]
@@ -1137,12 +1151,14 @@ async fn unopened_root_fixes_retain_context_and_open_document_versions() {
         .iter()
         .find(|action| action.get("edit").is_some())
         .unwrap();
-    assert!(action["edit"]["documentChanges"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|edit| edit["textDocument"]["uri"] == files.uri("body.inc")
-            && edit["textDocument"]["version"].is_null()));
+    assert!(
+        action["edit"]["documentChanges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|edit| edit["textDocument"]["uri"] == files.uri("body.inc")
+                && edit["textDocument"]["version"].is_null())
+    );
     wire.open(&files.uri("body.inc"), "y=0;\n", 9);
     wire.complete().await;
     let note = wire
@@ -1158,12 +1174,14 @@ async fn unopened_root_fixes_retain_context_and_open_document_versions() {
         .iter()
         .find(|action| action.get("edit").is_some())
         .unwrap();
-    assert!(action["edit"]["documentChanges"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|edit| edit["textDocument"]["uri"] == files.uri("body.inc")
-            && edit["textDocument"]["version"] == 9));
+    assert!(
+        action["edit"]["documentChanges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|edit| edit["textDocument"]["uri"] == files.uri("body.inc")
+                && edit["textDocument"]["version"] == 9)
+    );
 }
 
 #[tokio::test]
@@ -1223,12 +1241,13 @@ async fn turning_off_during_a_running_check_cannot_republish_project_diagnostics
     assert_eq!(wire.command("dynare/projectStatus").await["enabled"], false);
     tokio::time::sleep(Duration::from_millis(700)).await;
     assert!(wire.pull(&files.uri("large.mod")).await.is_empty());
-    assert!(!wire.seen.iter().any(|message| message["method"]
-        == "textDocument/publishDiagnostics"
-        && message["params"]["uri"] == files.uri("large.mod")
-        && message["params"]["diagnostics"]
-            .as_array()
-            .is_some_and(|items| !items.is_empty())));
+    assert!(!wire.seen.iter().any(|message| {
+        message["method"] == "textDocument/publishDiagnostics"
+            && message["params"]["uri"] == files.uri("large.mod")
+            && message["params"]["diagnostics"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+    }));
 }
 
 #[tokio::test]
@@ -1297,10 +1316,12 @@ async fn committed_dependency_candidates_wait_for_the_next_report() {
         .await;
     let before = wire.complete().await;
     let committed = root(&before, &root_uri).clone();
-    assert!(committed["dependency_candidates"]
-        .as_array()
-        .unwrap()
-        .contains(&json!(files.uri("observed/params.inc"))));
+    assert!(
+        committed["dependency_candidates"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(files.uri("observed/params.inc")))
+    );
 
     // A status read must describe the committed report, even if a path now
     // resolves elsewhere. A new analysis must then observe that new identity.
@@ -1330,14 +1351,18 @@ async fn committed_dependency_candidates_wait_for_the_next_report() {
     let after = wire.complete().await;
     let updated = root(&after, &root_uri);
     assert_ne!(updated["revision"], committed["revision"]);
-    assert!(updated["dependency_candidates"]
-        .as_array()
-        .unwrap()
-        .contains(&json!(files.uri("replacement/params.inc"))));
-    assert!(!updated["dependency_candidates"]
-        .as_array()
-        .unwrap()
-        .contains(&json!(files.uri("observed/params.inc"))));
+    assert!(
+        updated["dependency_candidates"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(files.uri("replacement/params.inc")))
+    );
+    assert!(
+        !updated["dependency_candidates"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(files.uri("observed/params.inc")))
+    );
 }
 
 #[cfg(any(unix, windows))]
@@ -1357,12 +1382,13 @@ async fn retargeted_include_routes_to_current_open_alias_version() {
     wire.complete().await;
     wire.open(&alias, "parameters first_unused;\n", 7);
     wire.complete().await;
-    assert!(wire
-        .pull(&alias)
-        .await
-        .iter()
-        .any(|item| item["code"] == "W022"
-            && item["message"].as_str().unwrap().contains("first_unused")));
+    assert!(
+        wire.pull(&alias)
+            .await
+            .iter()
+            .any(|item| item["code"] == "W022"
+                && item["message"].as_str().unwrap().contains("first_unused"))
+    );
 
     let observed = files.0.join("observed");
     let replacement = files.0.join("replacement");
@@ -1391,9 +1417,11 @@ async fn retargeted_include_routes_to_current_open_alias_version() {
     assert!(current.iter().any(|item| {
         item["code"] == "W022" && item["message"].as_str().unwrap().contains("second_unused")
     }));
-    assert!(!current
-        .iter()
-        .any(|item| item["message"].as_str().unwrap().contains("first_unused")));
+    assert!(
+        !current
+            .iter()
+            .any(|item| item["message"].as_str().unwrap().contains("first_unused"))
+    );
     let physical = files.uri("replacement/body.data");
     assert_eq!(wire.pull(&physical).await, current);
     assert!(wire.seen.iter().any(|message| {
@@ -1405,16 +1433,18 @@ async fn retargeted_include_routes_to_current_open_alias_version() {
     let workspace = wire
         .request("workspace/diagnostic", json!({"previousResultIds":[]}))
         .await;
-    assert!(workspace["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| { item["uri"] == alias && item["items"] == json!(current) }));
-    assert!(!workspace["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| { item["uri"] == physical && !item["items"].as_array().unwrap().is_empty() }));
+    assert!(
+        workspace["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| { item["uri"] == alias && item["items"] == json!(current) })
+    );
+    assert!(
+        !workspace["items"].as_array().unwrap().iter().any(|item| {
+            item["uri"] == physical && !item["items"].as_array().unwrap().is_empty()
+        })
+    );
 }
 
 #[cfg(windows)]

@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use dygnosis::server::diagnostics_for;
 use dygnosis::{
-    analyze, check_file, dynare_diagnose, find_preprocessor, parse, run_preprocessor, Diagnostic,
-    JsonStage, Severity,
+    Diagnostic, JsonStage, Severity, analyze, check_file, dynare_diagnose, find_preprocessor,
+    parse, run_preprocessor,
 };
 use tower_lsp::lsp_types::NumberOrString;
 
@@ -66,9 +66,11 @@ fn e111_cross_form_and_skew_duplicates() {
 #[test]
 fn unknown_stochastic_shock_reaches_e058_before_type_checks() {
     let result = diagnostics(&fixture("e058_stochastic_unknown.mod"));
-    assert!(result
-        .iter()
-        .any(|d| d.code == "E058" && d.message == "Unknown symbol: z."));
+    assert!(
+        result
+            .iter()
+            .any(|d| d.code == "E058" && d.message == "Unknown symbol: z.")
+    );
     assert!(!has(&result, "E266"));
     let valid = base("shocks; var e = 0.1; end;");
     assert!(!has(&diagnostics(&valid), "E058"));
@@ -266,9 +268,11 @@ fn irf_shocks_option_uses_parse_time_name_and_exogenous_role() {
     let valid_list = diagnostics(&base("stoch_simul(irf_shocks=(e,u));"));
     assert!(!has(&valid_list, "E001"));
     let repeated_irf = diagnostics(&base("stoch_simul(irf=10,irf=20);"));
-    assert!(repeated_irf
-        .iter()
-        .any(|d| d.code == "E271" && d.message == "option irf declared twice"));
+    assert!(
+        repeated_irf
+            .iter()
+            .any(|d| d.code == "E271" && d.message == "option irf declared twice")
+    );
     assert!(!has(&repeated_irf, "W060"));
 }
 
@@ -598,18 +602,48 @@ fn database_path_lags_follow_symbol_roles_at_each_stanza_callback() {
         }
     }
     for (body, fires, model_body) in [
-        ("shock_paths; var e; periods 1; values db.p(-1); end; change_type(var) p; shock_paths; var e; periods 1; values db.p(-1); end;", true, "y=e; p=0;"),
-        ("shock_paths; var e; periods 1; values db.p(-1)+q; end; change_type(var) p; shock_paths; var e; periods 1; values db.p(-1)+q; end;", true, "y=e; p=0;"),
-        ("change_type(var) p; shock_paths; var e; periods 2; values db.p(-1); end; change_type(parameters) p; shock_paths; var e; periods 1; values db.p(-1); end;", false, "y=e;"),
-        ("change_type(var) p; shock_paths; var e; periods 2; values db.p(-1)+q; end; change_type(parameters) p; shock_paths; var e; periods 1; values db.p(-1)+q; end;", false, "y=e;"),
-        ("shock_paths; var e; periods 1; values db.p(-1); end; change_type(var) p;", false, "y=e; p=0;"),
-        ("shock_paths; var e; periods 1; values db.p(-1)-db.p(-1); end; change_type(var) p; shock_paths; var e; periods 1; values db.p(-1)-db.p(-1); end;", false, "y=e; p=0;"),
+        (
+            "shock_paths; var e; periods 1; values db.p(-1); end; change_type(var) p; shock_paths; var e; periods 1; values db.p(-1); end;",
+            true,
+            "y=e; p=0;",
+        ),
+        (
+            "shock_paths; var e; periods 1; values db.p(-1)+q; end; change_type(var) p; shock_paths; var e; periods 1; values db.p(-1)+q; end;",
+            true,
+            "y=e; p=0;",
+        ),
+        (
+            "change_type(var) p; shock_paths; var e; periods 2; values db.p(-1); end; change_type(parameters) p; shock_paths; var e; periods 1; values db.p(-1); end;",
+            false,
+            "y=e;",
+        ),
+        (
+            "change_type(var) p; shock_paths; var e; periods 2; values db.p(-1)+q; end; change_type(parameters) p; shock_paths; var e; periods 1; values db.p(-1)+q; end;",
+            false,
+            "y=e;",
+        ),
+        (
+            "shock_paths; var e; periods 1; values db.p(-1); end; change_type(var) p;",
+            false,
+            "y=e; p=0;",
+        ),
+        (
+            "shock_paths; var e; periods 1; values db.p(-1)-db.p(-1); end; change_type(var) p; shock_paths; var e; periods 1; values db.p(-1)-db.p(-1); end;",
+            false,
+            "y=e; p=0;",
+        ),
     ] {
         let source = format!("{prefix}{body}model; {model_body} end;");
         let rows = diagnostics(&source);
         assert_eq!(has(&rows, "E405"), fires, "{body}: {rows:?}");
         if let Some(binary) = find_preprocessor(None) {
-            let result = run_preprocessor(&source, &binary, None, Duration::from_secs(30), JsonStage::Check);
+            let result = run_preprocessor(
+                &source,
+                &binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Check,
+            );
             assert_eq!(result.success, !fires, "{body}: {result:?}");
         }
     }
@@ -690,7 +724,13 @@ fn shock_path_refused_rhs_withholds_target_count_lag_and_later_check_callbacks()
     ] {
         let result = diagnostics(&base(body));
         assert!(has(&result, "E278"), "{body}: {result:?}");
-        assert!(result.iter().all(|row| !matches!(row.code.as_str(), "E058" | "E404" | "E405" | "E406" | "E420")), "{body}: {result:?}");
+        assert!(
+            result.iter().all(|row| !matches!(
+                row.code.as_str(),
+                "E058" | "E404" | "E405" | "E406" | "E420"
+            )),
+            "{body}: {result:?}"
+        );
     }
 }
 
@@ -852,63 +892,291 @@ fn parse_and_check_refusals_preempt_later_shock_stages() {
 #[test]
 fn reviewed_shock_dialects_refuse_at_the_official_token() {
     let fire = [
-        ("shocks; var e; periods 1; scales 0.1; end;", "scales", "syntax error, unexpected SCALES, expecting VALUES or ADD or MULTIPLY"),
-        ("shocks(surprise); corr e,u = 0.1; end;", "corr", "syntax error, unexpected CORR, expecting VAR"),
-        ("shocks(learnt_in=2); corr e,u = 0.1; end;", "corr", "syntax error, unexpected CORR, expecting VAR"),
-        ("mshocks; corr e,u = 0.1; end;", "corr", "syntax error, unexpected CORR, expecting VAR"),
-        ("heteroskedastic_shocks; var e; periods 1; add 0.1; end;", "add", "syntax error, unexpected ADD, expecting VALUES or SCALES"),
-        ("shocks(surprise); skew e = 0.1; end;", "skew", "syntax error, unexpected SKEW, expecting VAR"),
-        ("shocks(surprise); var e,u = 0.1; end;", ",", "syntax error, unexpected COMMA, expecting ';'"),
-        ("shocks(learnt_in=2); var e,u = 0.1; end;", ",", "syntax error, unexpected COMMA, expecting ';'"),
-        ("mshocks; var e,u = 0.1; end;", ",", "syntax error, unexpected COMMA, expecting ';'"),
-        ("heteroskedastic_shocks; var e,u = 0.1; end;", ",", "syntax error, unexpected COMMA, expecting ';'"),
-        ("heteroskedastic_shocks; var e; stderr 0.1; end;", "stderr", "syntax error, unexpected STDERR, expecting PERIODS"),
-        ("heteroskedastic_shocks; var e = 0.1; end;", "=", "syntax error, unexpected EQUAL, expecting ';'"),
-        ("shocks(foo); var e = 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or SURPRISE or LEARNT_IN or HETEROGENEITY"),
-        ("mshocks(foo); var e; periods 1; values 1.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL"),
-        ("heteroskedastic_shocks(foo); var e; periods 1; values 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE"),
-        ("shock_paths(foo); var e; periods 1; values 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN"),
-        ("endval(foo); e = 1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting ALL_VALUES_REQUIRED or LEARNT_IN"),
-        ("perfect_foresight_controlled_paths(foo); exogenize y; periods 1; values 1; endogenize e; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting LEARNT_IN"),
-        ("shocks(surprise overwrite); var e; periods 1; values 0.1; end;", "overwrite", "syntax error, unexpected OVERWRITE, expecting COMMA or ')'"),
-        ("shocks(overwrite,overwrite); var e = 0.1; end;", "overwrite", "syntax error, unexpected OVERWRITE, expecting SURPRISE or LEARNT_IN or HETEROGENEITY"),
-        ("shocks(overwrite,foo); var e = 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting SURPRISE or LEARNT_IN or HETEROGENEITY"),
-        ("shocks(surprise,foo); var e; periods 1; values 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE"),
-        ("mshocks(overwrite foo); var e; periods 1; values 1.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'"),
-        ("mshocks(learnt_in=2 foo); var e; periods 2; values 1.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'"),
-        ("heteroskedastic_shocks(overwrite foo); var e; periods 1; values 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting ')'"),
-        ("heteroskedastic_shocks(overwrite overwrite); var e; periods 1; values 0.1; end;", "overwrite", "syntax error, unexpected OVERWRITE, expecting ')'"),
-        ("shock_paths(learnt_in=2 foo); var e; periods 2; values 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN or ')'"),
-        ("endval(learnt_in=1 foo); e = 1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting ')'"),
-        ("endval(all_values_required foo); e = 1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting ')'"),
-        ("perfect_foresight_controlled_paths(learnt_in=1 foo); exogenize y; periods 1; values 1; endogenize e; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting ')'"),
-        ("mshocks(surprise); var e; periods 1; values 1.1; end;", "surprise", "syntax error, unexpected SURPRISE, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL"),
-        ("mshocks(overwrite surprise); var e; periods 1; values 1.1; end;", "surprise", "syntax error, unexpected SURPRISE, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'"),
-        ("shock_paths(surprise); var e; periods 1; values 0.1; end;", "surprise", "syntax error, unexpected SURPRISE, expecting OVERWRITE or LEARNT_IN"),
-        ("shock_paths(overwrite surprise); var e; periods 1; values 0.1; end;", "surprise", "syntax error, unexpected SURPRISE, expecting OVERWRITE or LEARNT_IN or ')'"),
-        ("heteroskedastic_shocks(learnt_in=2); var e; periods 1; values 0.1; end;", "learnt_in", "syntax error, unexpected LEARNT_IN, expecting OVERWRITE"),
-        ("heteroskedastic_shocks(overwrite learnt_in=2); var e; periods 1; values 0.1; end;", "learnt_in", "syntax error, unexpected LEARNT_IN, expecting ')'"),
-        ("endval(overwrite); e = 1; end;", "overwrite", "syntax error, unexpected OVERWRITE, expecting ALL_VALUES_REQUIRED or LEARNT_IN"),
-        ("endval(learnt_in=1 overwrite); e = 1; end;", "overwrite", "syntax error, unexpected OVERWRITE, expecting ')'"),
-        ("perfect_foresight_controlled_paths(overwrite); exogenize y; periods 1; values 1; endogenize e; end;", "overwrite", "syntax error, unexpected OVERWRITE, expecting LEARNT_IN"),
-        ("perfect_foresight_controlled_paths(learnt_in=1 overwrite); exogenize y; periods 1; values 1; endogenize e; end;", "overwrite", "syntax error, unexpected OVERWRITE, expecting ')'"),
-        ("shocks(relative_to_initval); var e = 0.1; end;", "relative_to_initval", "syntax error, unexpected RELATIVE_TO_INITVAL, expecting OVERWRITE or SURPRISE or LEARNT_IN or HETEROGENEITY"),
-        ("shocks(overwrite,relative_to_initval); var e = 0.1; end;", "relative_to_initval", "syntax error, unexpected RELATIVE_TO_INITVAL, expecting SURPRISE or LEARNT_IN or HETEROGENEITY"),
-        ("shocks(surprise,learnt_in=2); var e; periods 1; values 0.1; end;", "learnt_in", "syntax error, unexpected LEARNT_IN, expecting OVERWRITE"),
-        ("shocks(); var e = 0.1; end;", ")", "syntax error, unexpected ')', expecting OVERWRITE or SURPRISE or LEARNT_IN or HETEROGENEITY"),
-        ("mshocks(); var e; periods 1; values 1.1; end;", ")", "syntax error, unexpected ')', expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL"),
-        ("heteroskedastic_shocks(); var e; periods 1; values 0.1; end;", ")", "syntax error, unexpected ')', expecting OVERWRITE"),
-        ("shock_paths(); var e; periods 1; values 0.1; end;", ")", "syntax error, unexpected ')', expecting OVERWRITE or LEARNT_IN"),
-        ("endval(); e = 1; end;", ")", "syntax error, unexpected ')', expecting ALL_VALUES_REQUIRED or LEARNT_IN"),
-        ("perfect_foresight_controlled_paths(); exogenize y; periods 1; values 1; endogenize e; end;", ")", "syntax error, unexpected ')', expecting LEARNT_IN"),
-        ("shocks(learnt_in); var e; periods 1; values 0.1; end;", ")", "syntax error, unexpected ')', expecting EQUAL"),
-        ("mshocks(learnt_in foo); var e; periods 1; values 1.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting EQUAL"),
-        ("shocks(learnt_in=foo); var e; periods 1; values 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting DATE or INT_NUMBER"),
-        ("shock_paths(learnt_in=foo); var e; periods 1; values 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting DATE or INT_NUMBER"),
-        ("endval(learnt_in=foo); e=1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting DATE or INT_NUMBER"),
-        ("perfect_foresight_controlled_paths(learnt_in=foo); exogenize y; periods 1; values 1; endogenize e; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting DATE or INT_NUMBER"),
-        ("shocks(overwrite,); var e=0.1; end;", ")", "syntax error, unexpected ')', expecting SURPRISE or LEARNT_IN or HETEROGENEITY"),
-        ("mshocks(overwrite 4); var e; periods 1; values 1.1; end;", "4", "syntax error, unexpected INT_NUMBER, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'"),
+        (
+            "shocks; var e; periods 1; scales 0.1; end;",
+            "scales",
+            "syntax error, unexpected SCALES, expecting VALUES or ADD or MULTIPLY",
+        ),
+        (
+            "shocks(surprise); corr e,u = 0.1; end;",
+            "corr",
+            "syntax error, unexpected CORR, expecting VAR",
+        ),
+        (
+            "shocks(learnt_in=2); corr e,u = 0.1; end;",
+            "corr",
+            "syntax error, unexpected CORR, expecting VAR",
+        ),
+        (
+            "mshocks; corr e,u = 0.1; end;",
+            "corr",
+            "syntax error, unexpected CORR, expecting VAR",
+        ),
+        (
+            "heteroskedastic_shocks; var e; periods 1; add 0.1; end;",
+            "add",
+            "syntax error, unexpected ADD, expecting VALUES or SCALES",
+        ),
+        (
+            "shocks(surprise); skew e = 0.1; end;",
+            "skew",
+            "syntax error, unexpected SKEW, expecting VAR",
+        ),
+        (
+            "shocks(surprise); var e,u = 0.1; end;",
+            ",",
+            "syntax error, unexpected COMMA, expecting ';'",
+        ),
+        (
+            "shocks(learnt_in=2); var e,u = 0.1; end;",
+            ",",
+            "syntax error, unexpected COMMA, expecting ';'",
+        ),
+        (
+            "mshocks; var e,u = 0.1; end;",
+            ",",
+            "syntax error, unexpected COMMA, expecting ';'",
+        ),
+        (
+            "heteroskedastic_shocks; var e,u = 0.1; end;",
+            ",",
+            "syntax error, unexpected COMMA, expecting ';'",
+        ),
+        (
+            "heteroskedastic_shocks; var e; stderr 0.1; end;",
+            "stderr",
+            "syntax error, unexpected STDERR, expecting PERIODS",
+        ),
+        (
+            "heteroskedastic_shocks; var e = 0.1; end;",
+            "=",
+            "syntax error, unexpected EQUAL, expecting ';'",
+        ),
+        (
+            "shocks(foo); var e = 0.1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or SURPRISE or LEARNT_IN or HETEROGENEITY",
+        ),
+        (
+            "mshocks(foo); var e; periods 1; values 1.1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL",
+        ),
+        (
+            "heteroskedastic_shocks(foo); var e; periods 1; values 0.1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting OVERWRITE",
+        ),
+        (
+            "shock_paths(foo); var e; periods 1; values 0.1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN",
+        ),
+        (
+            "endval(foo); e = 1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting ALL_VALUES_REQUIRED or LEARNT_IN",
+        ),
+        (
+            "perfect_foresight_controlled_paths(foo); exogenize y; periods 1; values 1; endogenize e; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting LEARNT_IN",
+        ),
+        (
+            "shocks(surprise overwrite); var e; periods 1; values 0.1; end;",
+            "overwrite",
+            "syntax error, unexpected OVERWRITE, expecting COMMA or ')'",
+        ),
+        (
+            "shocks(overwrite,overwrite); var e = 0.1; end;",
+            "overwrite",
+            "syntax error, unexpected OVERWRITE, expecting SURPRISE or LEARNT_IN or HETEROGENEITY",
+        ),
+        (
+            "shocks(overwrite,foo); var e = 0.1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting SURPRISE or LEARNT_IN or HETEROGENEITY",
+        ),
+        (
+            "shocks(surprise,foo); var e; periods 1; values 0.1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting OVERWRITE",
+        ),
+        (
+            "mshocks(overwrite foo); var e; periods 1; values 1.1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'",
+        ),
+        (
+            "mshocks(learnt_in=2 foo); var e; periods 2; values 1.1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'",
+        ),
+        (
+            "heteroskedastic_shocks(overwrite foo); var e; periods 1; values 0.1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting ')'",
+        ),
+        (
+            "heteroskedastic_shocks(overwrite overwrite); var e; periods 1; values 0.1; end;",
+            "overwrite",
+            "syntax error, unexpected OVERWRITE, expecting ')'",
+        ),
+        (
+            "shock_paths(learnt_in=2 foo); var e; periods 2; values 0.1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN or ')'",
+        ),
+        (
+            "endval(learnt_in=1 foo); e = 1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting ')'",
+        ),
+        (
+            "endval(all_values_required foo); e = 1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting ')'",
+        ),
+        (
+            "perfect_foresight_controlled_paths(learnt_in=1 foo); exogenize y; periods 1; values 1; endogenize e; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting ')'",
+        ),
+        (
+            "mshocks(surprise); var e; periods 1; values 1.1; end;",
+            "surprise",
+            "syntax error, unexpected SURPRISE, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL",
+        ),
+        (
+            "mshocks(overwrite surprise); var e; periods 1; values 1.1; end;",
+            "surprise",
+            "syntax error, unexpected SURPRISE, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'",
+        ),
+        (
+            "shock_paths(surprise); var e; periods 1; values 0.1; end;",
+            "surprise",
+            "syntax error, unexpected SURPRISE, expecting OVERWRITE or LEARNT_IN",
+        ),
+        (
+            "shock_paths(overwrite surprise); var e; periods 1; values 0.1; end;",
+            "surprise",
+            "syntax error, unexpected SURPRISE, expecting OVERWRITE or LEARNT_IN or ')'",
+        ),
+        (
+            "heteroskedastic_shocks(learnt_in=2); var e; periods 1; values 0.1; end;",
+            "learnt_in",
+            "syntax error, unexpected LEARNT_IN, expecting OVERWRITE",
+        ),
+        (
+            "heteroskedastic_shocks(overwrite learnt_in=2); var e; periods 1; values 0.1; end;",
+            "learnt_in",
+            "syntax error, unexpected LEARNT_IN, expecting ')'",
+        ),
+        (
+            "endval(overwrite); e = 1; end;",
+            "overwrite",
+            "syntax error, unexpected OVERWRITE, expecting ALL_VALUES_REQUIRED or LEARNT_IN",
+        ),
+        (
+            "endval(learnt_in=1 overwrite); e = 1; end;",
+            "overwrite",
+            "syntax error, unexpected OVERWRITE, expecting ')'",
+        ),
+        (
+            "perfect_foresight_controlled_paths(overwrite); exogenize y; periods 1; values 1; endogenize e; end;",
+            "overwrite",
+            "syntax error, unexpected OVERWRITE, expecting LEARNT_IN",
+        ),
+        (
+            "perfect_foresight_controlled_paths(learnt_in=1 overwrite); exogenize y; periods 1; values 1; endogenize e; end;",
+            "overwrite",
+            "syntax error, unexpected OVERWRITE, expecting ')'",
+        ),
+        (
+            "shocks(relative_to_initval); var e = 0.1; end;",
+            "relative_to_initval",
+            "syntax error, unexpected RELATIVE_TO_INITVAL, expecting OVERWRITE or SURPRISE or LEARNT_IN or HETEROGENEITY",
+        ),
+        (
+            "shocks(overwrite,relative_to_initval); var e = 0.1; end;",
+            "relative_to_initval",
+            "syntax error, unexpected RELATIVE_TO_INITVAL, expecting SURPRISE or LEARNT_IN or HETEROGENEITY",
+        ),
+        (
+            "shocks(surprise,learnt_in=2); var e; periods 1; values 0.1; end;",
+            "learnt_in",
+            "syntax error, unexpected LEARNT_IN, expecting OVERWRITE",
+        ),
+        (
+            "shocks(); var e = 0.1; end;",
+            ")",
+            "syntax error, unexpected ')', expecting OVERWRITE or SURPRISE or LEARNT_IN or HETEROGENEITY",
+        ),
+        (
+            "mshocks(); var e; periods 1; values 1.1; end;",
+            ")",
+            "syntax error, unexpected ')', expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL",
+        ),
+        (
+            "heteroskedastic_shocks(); var e; periods 1; values 0.1; end;",
+            ")",
+            "syntax error, unexpected ')', expecting OVERWRITE",
+        ),
+        (
+            "shock_paths(); var e; periods 1; values 0.1; end;",
+            ")",
+            "syntax error, unexpected ')', expecting OVERWRITE or LEARNT_IN",
+        ),
+        (
+            "endval(); e = 1; end;",
+            ")",
+            "syntax error, unexpected ')', expecting ALL_VALUES_REQUIRED or LEARNT_IN",
+        ),
+        (
+            "perfect_foresight_controlled_paths(); exogenize y; periods 1; values 1; endogenize e; end;",
+            ")",
+            "syntax error, unexpected ')', expecting LEARNT_IN",
+        ),
+        (
+            "shocks(learnt_in); var e; periods 1; values 0.1; end;",
+            ")",
+            "syntax error, unexpected ')', expecting EQUAL",
+        ),
+        (
+            "mshocks(learnt_in foo); var e; periods 1; values 1.1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting EQUAL",
+        ),
+        (
+            "shocks(learnt_in=foo); var e; periods 1; values 0.1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting DATE or INT_NUMBER",
+        ),
+        (
+            "shock_paths(learnt_in=foo); var e; periods 1; values 0.1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting DATE or INT_NUMBER",
+        ),
+        (
+            "endval(learnt_in=foo); e=1; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting DATE or INT_NUMBER",
+        ),
+        (
+            "perfect_foresight_controlled_paths(learnt_in=foo); exogenize y; periods 1; values 1; endogenize e; end;",
+            "foo",
+            "syntax error, unexpected IDENTIFIER, expecting DATE or INT_NUMBER",
+        ),
+        (
+            "shocks(overwrite,); var e=0.1; end;",
+            ")",
+            "syntax error, unexpected ')', expecting SURPRISE or LEARNT_IN or HETEROGENEITY",
+        ),
+        (
+            "mshocks(overwrite 4); var e; periods 1; values 1.1; end;",
+            "4",
+            "syntax error, unexpected INT_NUMBER, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'",
+        ),
     ];
     let pp = find_preprocessor(None);
     for (body, token, message) in fire {
@@ -994,11 +1262,23 @@ fn reviewed_neighbours_accept_in_dynare_72() {
 #[test]
 fn nondefault_learning_requires_expectation_errors_pair() {
     let cases = [
-        ("shocks(learnt_in=2); var e; periods 2; values 1; end;", "E422"),
-        ("mshocks(learnt_in=2); var e; periods 2; values 1; end;", "E422"),
+        (
+            "shocks(learnt_in=2); var e; periods 2; values 1; end;",
+            "E422",
+        ),
+        (
+            "mshocks(learnt_in=2); var e; periods 2; values 1; end;",
+            "E422",
+        ),
         ("endval(learnt_in=2); e = 1; end;", "E423"),
-        ("perfect_foresight_controlled_paths(learnt_in=2); exogenize y; periods 1; values 1; endogenize e; end;", "E424"),
-        ("shock_paths(learnt_in=2); var e; periods 1; values 1; end;", "E425"),
+        (
+            "perfect_foresight_controlled_paths(learnt_in=2); exogenize y; periods 1; values 1; endogenize e; end;",
+            "E424",
+        ),
+        (
+            "shock_paths(learnt_in=2); var e; periods 1; values 1; end;",
+            "E425",
+        ),
     ];
     for (body, code) in cases {
         let result = diagnostics(&base(body));
@@ -1012,10 +1292,19 @@ fn nondefault_learning_requires_expectation_errors_pair() {
         );
     }
     for (body, code) in [
-        ("shocks(learnt_in=1); var e; periods 1; values 1; end;", "E422"),
+        (
+            "shocks(learnt_in=1); var e; periods 1; values 1; end;",
+            "E422",
+        ),
         ("endval(learnt_in=1); e = 1; end;", "E423"),
-        ("perfect_foresight_controlled_paths(learnt_in=1); exogenize y; periods 1; values 1; endogenize e; end;", "E424"),
-        ("shock_paths(learnt_in=1); var e; periods 1; values 1; end;", "E425"),
+        (
+            "perfect_foresight_controlled_paths(learnt_in=1); exogenize y; periods 1; values 1; endogenize e; end;",
+            "E424",
+        ),
+        (
+            "shock_paths(learnt_in=1); var e; periods 1; values 1; end;",
+            "E425",
+        ),
     ] {
         assert!(!has(&diagnostics(&base(body)), code), "{body}");
     }

@@ -5,11 +5,11 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use crate::engine::analysis::equations::{equations, heterogeneous_equations, EquationRow};
+use crate::engine::analysis::equations::{EquationRow, equations, heterogeneous_equations};
 use crate::engine::diagnostics::{WritingContext, WritingRows};
 use crate::engine::language::expand::{EquationOrigin, ExpandReport};
 use crate::engine::language::expr::ExprKind;
-use crate::engine::language::lexer::{tokenize, TokenKind};
+use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::language::model::Model;
 use crate::engine::language::span::Span;
 use crate::engine::workspace::Workspace;

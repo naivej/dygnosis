@@ -962,11 +962,12 @@ mod tests {
             &mut TokenClaims::default(),
         );
         assert!(diff.semantic.rows.is_empty());
-        assert!(diff
-            .coverage
-            .limits
-            .iter()
-            .any(|limit| limit.code == "expression_tree_materialization_limit"));
+        assert!(
+            diff.coverage
+                .limits
+                .iter()
+                .any(|limit| limit.code == "expression_tree_materialization_limit")
+        );
     }
     #[test]
     fn budget_mask_preserves_other_field_changes_and_wire_availability() {
@@ -994,9 +995,11 @@ mod tests {
             expression.comparison_availability,
             Availability::LimitExceeded
         );
-        assert!(serde_json::to_string(expression)
-            .unwrap()
-            .contains("limit_exceeded"));
+        assert!(
+            serde_json::to_string(expression)
+                .unwrap()
+                .contains("limit_exceeded")
+        );
     }
     #[test]
     fn real_known_to_unknown_value_keeps_its_change() {
@@ -1012,11 +1015,13 @@ mod tests {
         );
         assert_eq!(diff.semantic.rows.len(), 1);
         assert_eq!(diff.semantic.rows[0].facets, vec![ChangeFacet::Expression]);
-        assert!(diff.semantic.rows[0]
-            .fields
-            .iter()
-            .any(|field| field.name == "expression"
-                && field.changed
-                && field.comparison_availability == Availability::Complete));
+        assert!(
+            diff.semantic.rows[0]
+                .fields
+                .iter()
+                .any(|field| field.name == "expression"
+                    && field.changed
+                    && field.comparison_availability == Availability::Complete)
+        );
     }
 }

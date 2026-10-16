@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use dygnosis::{analyze, parse, Diagnostic};
+use dygnosis::{Diagnostic, analyze, parse};
 
 fn fixture(rel: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -57,9 +57,10 @@ fn flags_planner_shock_paths_and_commands() {
 fn e104_two_planner_with_ramsey() {
     let diags = analyze(&parse(&fixture("clash/e104_two_planner.mod")));
     let d = find(&diags, "E104");
-    assert!(d
-        .message
-        .contains("there can only be one planner_objective statement"));
+    assert!(
+        d.message
+            .contains("there can only be one planner_objective statement")
+    );
 }
 
 #[test]
@@ -101,9 +102,10 @@ fn e026_varexo_det_without_solver_is_quiet() {
 fn e027_ramsey_varexo_det() {
     let diags = analyze(&parse(&fixture("clash/e027_ramsey_varexo_det.mod")));
     let d = find(&diags, "E027");
-    assert!(d
-        .message
-        .contains("incompatible with deterministic exogenous variables"));
+    assert!(
+        d.message
+            .contains("incompatible with deterministic exogenous variables")
+    );
 }
 
 #[test]
@@ -120,9 +122,10 @@ fn e027_ramsey_without_varexo_det_is_quiet() {
 fn e028_identification_varexo_det() {
     let diags = analyze(&parse(&fixture("clash/e028_identification_varexo_det.mod")));
     let d = find(&diags, "E028");
-    assert!(d
-        .message
-        .contains("identification is incompatible with deterministic exogenous variables"));
+    assert!(
+        d.message
+            .contains("identification is incompatible with deterministic exogenous variables")
+    );
 }
 
 #[test]
@@ -141,9 +144,10 @@ fn e028_identification_without_varexo_det_is_quiet() {
 fn e028_sensitivity_varexo_det() {
     let diags = analyze(&parse(&fixture("clash/e028_sensitivity_varexo_det.mod")));
     let d = find(&diags, "E028");
-    assert!(d
-        .message
-        .contains("identification is incompatible with deterministic exogenous variables"));
+    assert!(
+        d.message
+            .contains("identification is incompatible with deterministic exogenous variables")
+    );
 }
 
 #[test]

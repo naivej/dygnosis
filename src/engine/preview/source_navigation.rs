@@ -1,8 +1,8 @@
 //! Source-layout preview regions for Go to written source.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::engine::language::lexer::{tokenize, TokenKind};
+use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::language::macro_expand::{SourceFragment, SourceFragmentKind};
 use crate::engine::language::span::Span;
 
@@ -589,13 +589,15 @@ mod tests {
         assert!(!fully_shaded(&display, &ranges, "parameters "), "{display}");
         let beta_at = display.find("beta_2").unwrap();
         let params = display.find("parameters").unwrap();
-        assert!(ranges
-            .iter()
-            .any(|span| span.start == beta_at as u32
-                && span.end == (beta_at + "beta_2".len()) as u32));
-        assert!(!ranges
-            .iter()
-            .any(|span| span.start <= params as u32 && (params + 10) as u32 <= span.end));
+        assert!(
+            ranges.iter().any(|span| span.start == beta_at as u32
+                && span.end == (beta_at + "beta_2".len()) as u32)
+        );
+        assert!(
+            !ranges
+                .iter()
+                .any(|span| span.start <= params as u32 && (params + 10) as u32 <= span.end)
+        );
     }
 
     #[test]

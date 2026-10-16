@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use dygnosis::explain::{explain, ExplainKind};
-use dygnosis::{analyze, check_file, parse, Diagnostic};
+use dygnosis::explain::{ExplainKind, explain};
+use dygnosis::{Diagnostic, analyze, check_file, parse};
 
 #[tokio::test]
 async fn included_writing_notes_keep_owners_and_scalar_or_utf16_positions() {
-    use tower_lsp::lsp_types::*;
     use tower_lsp::LanguageServer;
+    use tower_lsp::lsp_types::*;
 
     let dir = std::env::temp_dir().join(format!(
         "dygnosis-writing-wire-{}-{}",
@@ -326,14 +326,16 @@ fn explain_calls_them_writing_preferences() {
         let entry = explain(code).unwrap();
         assert_eq!(entry.kind, ExplainKind::Added);
         assert!(entry.body.contains("writing preference"));
-        assert!(entry
-            .body
-            .contains("does not mean Dynare will refuse the model"));
+        assert!(
+            entry
+                .body
+                .contains("does not mean Dynare will refuse the model")
+        );
     }
 }
 
 mod ownership {
-    use dygnosis::{analyze, check_file_with_origins, parse, Diagnostic, WritingRows};
+    use dygnosis::{Diagnostic, WritingRows, analyze, check_file_with_origins, parse};
     use std::collections::{BTreeMap, HashMap, HashSet};
 
     fn notes(source: &str, code: &str) -> Vec<Diagnostic> {
@@ -493,9 +495,11 @@ mod ownership {
             summaries[1].span.start as usize,
             source.find("parameters").unwrap()
         );
-        assert!(summaries
-            .iter()
-            .all(|note| note.message == "1 symbol has no long_name."));
+        assert!(
+            summaries
+                .iter()
+                .all(|note| note.message == "1 symbol has no long_name.")
+        );
     }
 
     #[test]

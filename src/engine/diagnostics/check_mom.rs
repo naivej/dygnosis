@@ -976,32 +976,34 @@ impl<'a> Ctx<'a> {
                 return Default::default();
             }
             let name = self.model.name(usage.name);
-            let (span, code, message) =
-                match self.model.symbol_kind_in_context(usage.name, usage.context) {
-                    Some("external_function") => (
-                        usage.span,
-                        "E280",
-                        crate::engine::language::model::external_function_in_model_message(name),
-                    ),
-                    Some("mod_file_local") => (
-                        usage.span,
-                        "E281",
-                        crate::engine::language::model::mod_file_local_in_model_message(name),
-                    ),
-                    Some("varexo_det") if usage.timing != 0 => (
-                        usage.full_span,
-                        "E024",
-                        format!(
+            let (span, code, message) = match self
+                .model
+                .symbol_kind_in_context(usage.name, usage.context)
+            {
+                Some("external_function") => (
+                    usage.span,
+                    "E280",
+                    crate::engine::language::model::external_function_in_model_message(name),
+                ),
+                Some("mod_file_local") => (
+                    usage.span,
+                    "E281",
+                    crate::engine::language::model::mod_file_local_in_model_message(name),
+                ),
+                Some("varexo_det") if usage.timing != 0 => (
+                    usage.full_span,
+                    "E024",
+                    format!(
                         "Exogenous deterministic variable {name} cannot be given a lead or a lag."
                     ),
-                    ),
-                    Some("epilogue") => (
-                        usage.span,
-                        "E294",
-                        format!("Symbol '{name}' cannot be used outside the epilogue block."),
-                    ),
-                    _ => continue,
-                };
+                ),
+                Some("epilogue") => (
+                    usage.span,
+                    "E294",
+                    format!("Symbol '{name}' cannot be used outside the epilogue block."),
+                ),
+                _ => continue,
+            };
             return Some((span.start, err(span, code, message)));
         }
         None
@@ -1058,7 +1060,7 @@ impl<'a> Ctx<'a> {
                         return Some(
                             "Second argument of power expression must be a positive integer"
                                 .to_string(),
-                        )
+                        );
                     }
                 }
                 self.walk_folded(left, context)
@@ -1412,11 +1414,7 @@ impl<'a> Ctx<'a> {
             BinOp::Ne => a != b,
             _ => return Folded::BinaryOp,
         };
-        if hit {
-            self.one()
-        } else {
-            self.zero()
-        }
+        if hit { self.one() } else { self.zero() }
     }
 
     fn zero(&self) -> Folded {
@@ -1654,12 +1652,22 @@ mod parse_receipt_tests {
         assert!(parse_refusals(&model).is_empty());
         // Guards counts and the end-block moment walk being omitted from the frontier.
         for (text, code) in [
-            ("var y;varexo e;matched_irfs;var y;varexo e;periods 1 2;values 1;end;database later;", "E390"),
+            (
+                "var y;varexo e;matched_irfs;var y;varexo e;periods 1 2;values 1;end;database later;",
+                "E390",
+            ),
             ("var y;matched_moments;y+1;end;database later;", "E386"),
         ] {
             let model = crate::parse(text);
-            let (_, order) = parse_refusals(&model).into_iter().find(|(row, _)| row.code == code).unwrap();
-            let later = model.expanded_tokens.iter().position(|token| token.text(&model.source) == "database").unwrap();
+            let (_, order) = parse_refusals(&model)
+                .into_iter()
+                .find(|(row, _)| row.code == code)
+                .unwrap();
+            let later = model
+                .expanded_tokens
+                .iter()
+                .position(|token| token.text(&model.source) == "database")
+                .unwrap();
             assert!(order <= later, "{text}");
         }
         for block in [
@@ -1682,7 +1690,9 @@ mod parse_receipt_tests {
     #[test]
     fn moment_name_receipts_use_their_execution_type_and_survive_later_syntax() {
         // Guards future retyping and repeated written spans changing earlier roles.
-        let model = crate::parse("@#for i in 1:2\n@#if i==1\nparameters p;\n@#else\nchange_type(var)p;\n@#endif\nmoment_calibration;p,p,+;end;\n@#endfor\n");
+        let model = crate::parse(
+            "@#for i in 1:2\n@#if i==1\nparameters p;\n@#else\nchange_type(var)p;\n@#endif\nmoment_calibration;p,p,+;end;\n@#endfor\n",
+        );
         let rows: Vec<_> = parse_refusals(&model)
             .into_iter()
             .filter(|(row, _)| row.code == "E317")
@@ -1702,14 +1712,18 @@ mod parse_receipt_tests {
     #[test]
     fn empty_moment_callback_precedes_a_later_macro_copy_syntax_failure() {
         // Guards syntax in a later equal-span copy suppressing the first empty body.
-        let model = crate::parse("@#for i in 1:2\n@#if i==1\n@#define body=\"\"\n@#else\n@#define body=\"garbage;\"\n@#endif\nmatched_irfs;@{body} end;database ghost@{i};\n@#endfor\n");
+        let model = crate::parse(
+            "@#for i in 1:2\n@#if i==1\n@#define body=\"\"\n@#else\n@#define body=\"garbage;\"\n@#endif\nmatched_irfs;@{body} end;database ghost@{i};\n@#endfor\n",
+        );
         let first_database = model
             .expanded_tokens
             .iter()
             .position(|token| token.text(&model.source) == "database")
             .unwrap();
-        assert!(parse_refusals(&model)
-            .iter()
-            .any(|(row, order)| row.code == "E001" && *order <= first_database));
+        assert!(
+            parse_refusals(&model)
+                .iter()
+                .any(|(row, order)| row.code == "E001" && *order <= first_database)
+        );
     }
 }

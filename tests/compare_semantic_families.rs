@@ -1,6 +1,6 @@
 //! Named retained-family facts and conservative occurrence acceptance.
 
-use dygnosis::model_diff::{compare_models, ModelDiff};
+use dygnosis::model_diff::{ModelDiff, compare_models};
 use dygnosis::semantic_diff::{ChangeKind, CountUnit, FieldValue, SemanticFamily};
 use dygnosis::{check_parse, parse};
 
@@ -89,23 +89,28 @@ fn observation_trends_own_target_and_expression_changes() {
         &format!("{BASE}observation_trends; y(a); end;"),
         &format!("{BASE}observation_trends; y(b); end;"),
     );
-    assert!(!diff
-        .coverage
-        .families
-        .iter()
-        .filter(|family| family.family == SemanticFamily::Observables)
-        .flat_map(|family| &family.limits)
-        .any(|limit| limit.code == "observation_trend_expression_not_retained"));
-    assert!(!diff
-        .semantic
-        .rows
-        .iter()
-        .any(|row| row.family == SemanticFamily::Commands));
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .any(|row| row.family == SemanticFamily::Observables));
+    assert!(
+        !diff
+            .coverage
+            .families
+            .iter()
+            .filter(|family| family.family == SemanticFamily::Observables)
+            .flat_map(|family| &family.limits)
+            .any(|limit| limit.code == "observation_trend_expression_not_retained")
+    );
+    assert!(
+        !diff
+            .semantic
+            .rows
+            .iter()
+            .any(|row| row.family == SemanticFamily::Commands)
+    );
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .any(|row| row.family == SemanticFamily::Observables)
+    );
 }
 
 #[test]
@@ -156,12 +161,13 @@ fn data_options_and_estimation_forms_compare_named_fields() {
         "data(file='a.csv', nobs=10);",
         "data(file='b.csv', nobs=10);",
     );
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .filter(|row| row.family == SemanticFamily::Data && row.name == "data")
-        .any(|row| row.change == ChangeKind::Changed));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .filter(|row| row.family == SemanticFamily::Data && row.name == "data")
+            .any(|row| row.change == ChangeKind::Changed)
+    );
     appended(
         SemanticFamily::Data,
         "has_datafile",
@@ -190,13 +196,14 @@ fn occbin_conditions_compare_exact_retained_text() {
         "occbin_constraints; name 'ELB'; bind y<0; relax y>1; end;",
         "occbin_constraints; name 'ELB'; bind y<.1; relax y>1; end;",
     );
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .filter(|row| row.family == SemanticFamily::Occbin)
-        .flat_map(|row| &row.expressions)
-        .any(|detail| detail.field == "bind"));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .filter(|row| row.family == SemanticFamily::Occbin)
+            .flat_map(|row| &row.expressions)
+            .any(|detail| detail.field == "bind")
+    );
 }
 
 #[test]
@@ -241,16 +248,17 @@ fn policy_bounds_weights_and_constraints_compare_owned_trees() {
         "ramsey_constraints; y>0; end;",
         "ramsey_constraints; y>1; end;",
     );
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .filter(|row| row.family == SemanticFamily::Policy)
-        .flat_map(|row| &row.fields)
-        .any(|field| matches!(
-            field.before.value.as_ref().or(field.after.value.as_ref()),
-            Some(FieldValue::List(_))
-        )));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .filter(|row| row.family == SemanticFamily::Policy)
+            .flat_map(|row| &row.fields)
+            .any(|field| matches!(
+                field.before.value.as_ref().or(field.after.value.as_ref()),
+                Some(FieldValue::List(_))
+            ))
+    );
 }
 
 #[test]
@@ -261,8 +269,18 @@ fn semi_structural_options_preserve_shapes_and_pac_components() {
         "var_model(model_name=aux,eqtags=['y','c']);",
         "var_model(model_name=aux,eqtags=['c','y']);",
     );
-    appended(SemanticFamily::SemiStructural, "options", "var_expectation_model(model_name=forecast,expression=y+c(-1),auxiliary_model_name=aux,horizon=1:Inf);", "var_expectation_model(model_name=forecast,expression=y+c(-2),auxiliary_model_name=aux,horizon=1:Inf);");
-    let diff = appended(SemanticFamily::SemiStructural, "rows", "pac_target_info(pac); target v; component y; kind ll; auxname ya; component x; kind dd; auxname xa; end;", "pac_target_info(pac); target v; component y; kind ll; auxname ya; component x; kind dl; auxname xa; end;");
+    appended(
+        SemanticFamily::SemiStructural,
+        "options",
+        "var_expectation_model(model_name=forecast,expression=y+c(-1),auxiliary_model_name=aux,horizon=1:Inf);",
+        "var_expectation_model(model_name=forecast,expression=y+c(-2),auxiliary_model_name=aux,horizon=1:Inf);",
+    );
+    let diff = appended(
+        SemanticFamily::SemiStructural,
+        "rows",
+        "pac_target_info(pac); target v; component y; kind ll; auxname ya; component x; kind dd; auxname xa; end;",
+        "pac_target_info(pac); target v; component y; kind ll; auxname ya; component x; kind dl; auxname xa; end;",
+    );
     assert!(diff.to_json().to_string().contains("xa"));
 }
 
@@ -324,12 +342,13 @@ fn ms_options_keep_matrix_shape_text_and_order() {
         "markov_switching(chain=1,number_of_regimes=2,duration=2.5,parameters=[a,b]);",
         "markov_switching(chain=1,number_of_regimes=2,duration=2.5,parameters=[b,a]);",
     );
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .filter(|row| row.family == SemanticFamily::MsSbvar)
-        .any(|row| row.change == ChangeKind::Changed));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .filter(|row| row.family == SemanticFamily::MsSbvar)
+            .any(|row| row.change == ChangeKind::Changed)
+    );
     appended(
         SemanticFamily::MsSbvar,
         "options",
@@ -391,12 +410,13 @@ fn external_interface_keeps_omitted_and_explicit_default_distinct() {
         "external_function(name=f,first_deriv_provided);",
         "external_function(name=f,first_deriv_provided=df);",
     );
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .filter(|row| row.family == SemanticFamily::ExternalFunctions)
-        .all(|row| row.count_unit == CountUnit::AcceptedOccurrence));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .filter(|row| row.family == SemanticFamily::ExternalFunctions)
+            .all(|row| row.count_unit == CountUnit::AcceptedOccurrence)
+    );
     assert!(
         diff.semantic
             .rows
@@ -465,12 +485,13 @@ fn type_surgery_and_pruning_count_operations_separately() {
         "parameters a; change_type(var) a;",
         "parameters a; change_type(varexo) a;",
     );
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .filter(|row| row.family == SemanticFamily::Operations)
-        .all(|row| row.count_unit == CountUnit::Operation));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .filter(|row| row.family == SemanticFamily::Operations)
+            .all(|row| row.count_unit == CountUnit::Operation)
+    );
     appended(
         SemanticFamily::Operations,
         "target",
@@ -480,12 +501,13 @@ fn type_surgery_and_pruning_count_operations_separately() {
     let old = "var y c; initval; y=1; c=2; end; model; [name='y',endogenous='y'] y=0; [name='c',endogenous='c'] c=0; end; model_remove('y');";
     let new = old.replace("model_remove('y')", "model_remove('c')");
     let diff = assert_case(SemanticFamily::Operations, "tag_sets", old, &new);
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .flat_map(|row| &row.limits)
-        .any(|limit| limit.code == "pruned_initialization_rhs_not_retained"));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .flat_map(|row| &row.limits)
+            .any(|limit| limit.code == "pruned_initialization_rhs_not_retained")
+    );
 }
 
 #[test]
@@ -494,11 +516,12 @@ fn equation_surgery_written_source_has_no_extra_terminator_command() {
     let new = "var c; model; [name='Consumption'] c=1; end; model_replace('Consumption'); [name='Consumption'] c=.8; end;";
     let diff = comparison(old, new);
     assert!(diff.changed_equations.is_empty());
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .any(|row| row.family == SemanticFamily::Operations && row.name == "model_replace"));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .any(|row| row.family == SemanticFamily::Operations && row.name == "model_replace")
+    );
     assert!(
         diff.semantic
             .rows
@@ -535,11 +558,12 @@ fn written_macro_context_does_not_claim_expanded_occurrence_pairs() {
         } else {
             ChangeKind::Added
         }));
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .all(|row| row.family != SemanticFamily::Commands));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .all(|row| row.family != SemanticFamily::Commands)
+    );
 }
 
 #[test]
@@ -556,12 +580,13 @@ fn selected_presence_and_numeric_settings_keep_history_limits() {
         "identification(order=1);",
         "identification(order=2);",
     );
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .flat_map(|row| &row.limits)
-        .any(|limit| limit.code == "identification_order_retained_history"));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .flat_map(|row| &row.limits)
+            .any(|limit| limit.code == "identification_order_retained_history")
+    );
 }
 
 #[test]
@@ -590,11 +615,13 @@ fn retained_include_fact_uses_expanded_order_and_macro_copies_stay_separate() {
     let old = included("external_function(name=f,nargs=1);");
     let new = included("external_function(name=f,nargs=2);");
     let control = compare_models(&old, &old);
-    assert!(control
-        .semantic
-        .rows
-        .iter()
-        .all(|row| row.family != SemanticFamily::ExternalFunctions));
+    assert!(
+        control
+            .semantic
+            .rows
+            .iter()
+            .all(|row| row.family != SemanticFamily::ExternalFunctions)
+    );
     let diff = compare_models(&old, &new);
     let row = diff
         .semantic
@@ -605,10 +632,11 @@ fn retained_include_fact_uses_expanded_order_and_macro_copies_stay_separate() {
     assert_eq!(row.change, ChangeKind::Changed);
     assert!(row.before.as_ref().unwrap().context.is_some());
     assert!(row.after.as_ref().unwrap().context.is_some());
-    assert!(row
-        .fields
-        .iter()
-        .any(|field| field.name == "nargs" && field.changed));
+    assert!(
+        row.fields
+            .iter()
+            .any(|field| field.name == "nargs" && field.changed)
+    );
 }
 
 #[test]
@@ -626,12 +654,13 @@ fn missing_homotopy_endpoints_and_irf_coefficients_keep_accepted_body_context() 
         ),
     ] {
         let diff = comparison(&format!("{BASE}{old}"), &format!("{BASE}{new}"));
-        assert!(diff
-            .coverage
-            .families
-            .iter()
-            .flat_map(|family| &family.limits)
-            .any(|limit| limit.code == code));
+        assert!(
+            diff.coverage
+                .families
+                .iter()
+                .flat_map(|family| &family.limits)
+                .any(|limit| limit.code == code)
+        );
         assert!(
             diff.semantic
                 .rows
@@ -720,11 +749,13 @@ fn command_list_proof_keeps_options_diagnostics_and_macro_ambiguity() {
         &format!("{BASE}stoch_simul(order=2) y;"),
     );
     assert_eq!(list_rows(&options), 0);
-    assert!(options
-        .semantic
-        .rows
-        .iter()
-        .any(|row| row.family == SemanticFamily::Commands));
+    assert!(
+        options
+            .semantic
+            .rows
+            .iter()
+            .any(|row| row.family == SemanticFamily::Commands)
+    );
 
     let old = format!("{BASE}@#for i in 1:2\nstoch_simul y;\n@#endfor\n");
     let new = old.replace("stoch_simul y", "stoch_simul c");
@@ -797,10 +828,11 @@ fn refused_filter_rows_stay_unavailable_while_accepted_children_compare() {
     assert!(!diff.semantic.rows.iter().any(|row| {
         row.family == SemanticFamily::Commands && row.name == "filter_initial_state"
     }));
-    assert!(rows
-        .iter()
-        .flat_map(|row| &row.fields)
-        .any(|field| field.name == "expression" && field.changed));
+    assert!(
+        rows.iter()
+            .flat_map(|row| &row.fields)
+            .any(|field| field.name == "expression" && field.changed)
+    );
 }
 
 fn assert_one_owner(diff: &ModelDiff, family: SemanticFamily, field: &str) {
@@ -911,12 +943,13 @@ fn mixed_matched_irfs_keep_each_ordered_item_and_range() {
     ] {
         let diff = appended(SemanticFamily::Moments, "rows", old, &new);
         assert_one_owner(&diff, SemanticFamily::Moments, "rows");
-        assert!(diff
-            .semantic
-            .rows
-            .iter()
-            .flat_map(|row| &row.limits)
-            .any(|limit| limit.code == "matched_irf_expression_positions"));
+        assert!(
+            diff.semantic
+                .rows
+                .iter()
+                .flat_map(|row| &row.limits)
+                .any(|limit| limit.code == "matched_irf_expression_positions")
+        );
     }
 }
 
@@ -996,16 +1029,18 @@ fn direct_condition_request_and_selected_setting_receipts_have_one_owner() {
     let old = format!("{BASE}stoch_simul(irf=0,order=1);");
     let new = old.replace("irf=0,order=1", "irf=1,order=2");
     let diff = comparison(&old, &new);
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .any(|row| row.family == SemanticFamily::Shocks));
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .any(|row| row.family == SemanticFamily::Commands));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .any(|row| row.family == SemanticFamily::Shocks)
+    );
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .any(|row| row.family == SemanticFamily::Commands)
+    );
     let old = "var y; model(linear,block); y=0; end;";
     let new = "var y; model; y=0; end;";
     let diff = comparison(old, new);
@@ -1255,28 +1290,33 @@ fn target_date_and_subsample_receipts_do_not_count_command_context_twice() {
         .unwrap();
     assert!(text.before.as_ref().unwrap().text.contains("order = 1"));
     assert!(text.after.as_ref().unwrap().text.contains("order = 2"));
-    assert!(rows[0]
-        .fields
-        .iter()
-        .any(|field| field.name == "data_options" && !field.changed));
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .all(|row| row.family != SemanticFamily::Commands));
+    assert!(
+        rows[0]
+            .fields
+            .iter()
+            .any(|field| field.name == "data_options" && !field.changed)
+    );
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .all(|row| row.family != SemanticFamily::Commands)
+    );
     let old = format!(
         "{BASE}load_params_and_steady_state('a.mat'); load_params_and_steady_state('b.mat');"
     );
     let new = old.replace("'b.mat'", "'c.mat'");
     let diff = comparison(&old, &new);
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .all(|row| row.family != SemanticFamily::Data));
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .any(|row| row.family == SemanticFamily::Commands));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .all(|row| row.family != SemanticFamily::Data)
+    );
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .any(|row| row.family == SemanticFamily::Commands)
+    );
 }

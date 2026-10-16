@@ -1,6 +1,6 @@
 //! Dynare 7.2 language and accepted block-scope regressions.
 
-use dygnosis::{analyze, command_options, parse, Severity};
+use dygnosis::{Severity, analyze, command_options, parse};
 
 const QUIET: &[(&str, &str)] = &[
     ("quiet_e111_two_shocks_blocks.mod", "E111"),

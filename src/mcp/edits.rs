@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use rmcp::ErrorData;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::engine::analysis::symbols::Edit;
 use crate::engine::diagnostics::{Diagnostic, DiagnosticSet, TextEdit};
@@ -12,9 +12,9 @@ use crate::engine::editing::{auto_fix, equation_names, extract, format, shock_te
 use crate::engine::language::span::Span;
 use crate::engine::workspace::Workspace;
 
-use super::request::{location, proposal_result, Params};
-use super::result::{ToolResult, OUTPUT_BYTES};
-use super::source::{sha256, SourceSnapshot};
+use super::request::{Params, location, proposal_result};
+use super::result::{OUTPUT_BYTES, ToolResult};
+use super::source::{SourceSnapshot, sha256};
 
 pub(super) fn edit_request(
     tool: &str,
@@ -158,7 +158,7 @@ fn format_request(params: &Params, snapshot: &mut SourceSnapshot) -> Result<Tool
             }
             format::RangeFormatOutcome::Unchanged => None,
             format::RangeFormatOutcome::Unsupported(message) => {
-                return Ok(ToolResult::refused("FORMAT_UNSUPPORTED", message))
+                return Ok(ToolResult::refused("FORMAT_UNSUPPORTED", message));
             }
         }
     } else {
@@ -175,7 +175,7 @@ fn format_request(params: &Params, snapshot: &mut SourceSnapshot) -> Result<Tool
             )?),
             format::FormatOutcome::Unchanged => None,
             format::FormatOutcome::Unsupported(message) => {
-                return Ok(ToolResult::refused("FORMAT_UNSUPPORTED", message))
+                return Ok(ToolResult::refused("FORMAT_UNSUPPORTED", message));
             }
         }
     };
@@ -414,7 +414,9 @@ fn repair(
         return Err("This diagnostic has no verified stored source fix.");
     };
     if macro_unsafe {
-        return Err("Automatic fixes were withheld because macro definitions or loops with identifier interpolation can change the written edit targets.");
+        return Err(
+            "Automatic fixes were withheld because macro definitions or loops with identifier interpolation can change the written edit targets.",
+        );
     }
     let Some(text) = snapshot.text(Some(&row.file)) else {
         return Err("The diagnostic's written source is unavailable.");
@@ -495,7 +497,7 @@ fn fix_request(params: &Params, snapshot: &mut SourceSnapshot) -> Result<ToolRes
         let fixed = match fixed_result {
             Ok(text) => text,
             Err(auto_fix::AutoFixFailure::Refused(message)) => {
-                return Ok(ToolResult::refused("FIX_UNSAFE_MACRO", message))
+                return Ok(ToolResult::refused("FIX_UNSAFE_MACRO", message));
             }
             Err(auto_fix::AutoFixFailure::Cancelled) => return Err(cancelled_error()),
         };
@@ -588,7 +590,10 @@ fn fix_selected(
         if accepted.iter().any(|item| item["diagnostic_id"] == row.id)
             && owner_count(&after, &row.diagnostic) >= owner_count(&set, &row.diagnostic)
         {
-            return Ok(ToolResult::refused("FIX_VERIFICATION_FAILED","The combined fixes did not repair every selected diagnostic; no proposal was returned."));
+            return Ok(ToolResult::refused(
+                "FIX_VERIFICATION_FAILED",
+                "The combined fixes did not repair every selected diagnostic; no proposal was returned.",
+            ));
         }
     }
     let mut result = proposed(snapshot, &edits)?;
@@ -654,7 +659,10 @@ fn proposed_capture(
 
 fn mapped_bulk_fix(snapshot: &mut SourceSnapshot) -> Result<ToolResult, ErrorData> {
     if macro_unsafe(snapshot) {
-        return Ok(ToolResult::refused("FIX_UNSAFE_MACRO","Automatic fixes were withheld because macro definitions or loops with identifier interpolation can change the written edit targets."));
+        return Ok(ToolResult::refused(
+            "FIX_UNSAFE_MACRO",
+            "Automatic fixes were withheld because macro definitions or loops with identifier interpolation can change the written edit targets.",
+        ));
     }
     let mut current = proposed_capture(snapshot, &[])?;
     let mut fixed = Vec::new();
@@ -1050,9 +1058,11 @@ fn extract_request(
                     .clone()
                     .ok_or_else(|| invalid("Dimension equation selection requires dimension"))?,
             ),
-            _ => return Err(invalid(
-                "Equation scope must be aggregate or dimension; aggregate scope has no dimension",
-            )),
+            _ => {
+                return Err(invalid(
+                    "Equation scope must be aggregate or dimension; aggregate scope has no dimension",
+                ));
+            }
         };
         Some(extract::ExtractSelector::Counted {
             dimension,
@@ -1109,7 +1119,7 @@ fn extract_request(
 
 #[cfg(test)]
 mod tests {
-    use super::super::source::{resolve_source, RequestControl, SourceInput};
+    use super::super::source::{RequestControl, SourceInput, resolve_source};
     use super::*;
 
     fn params(value: Value) -> Params {
@@ -1159,7 +1169,7 @@ mod tests {
     fn range_formatting_changes_only_selected_include_lines() {
         // Guards include selection editing the root and whole-line formatting changing outside source/native layout.
         let root = "@#include \"body.inc\"\n";
-        let body="// 😀 saved prefix\r\nvar x;\r\nmodel;\r\nx  =  0;\r\nend;\r\ndisp('leave   this');\r\n";
+        let body = "// 😀 saved prefix\r\nvar x;\r\nmodel;\r\nx  =  0;\r\nend;\r\ndisp('leave   this');\r\n";
         let mut snapshot = map_snapshot("root.mod", &[("root.mod", root), ("body.inc", body)]);
         let result=edit_request("dynare_format",&params(json!({"file":"body.inc","line_range":{"start_line":4,"end_line":4},"formatIndent":2})),&mut snapshot).unwrap();
         assert_eq!(result.outcome.status, "changed");
@@ -1173,12 +1183,14 @@ mod tests {
             json!({"start_line":5,"end_line":4}),
             json!({"start_line":1,"end_line":99}),
         ] {
-            assert!(edit_request(
-                "dynare_format",
-                &params(json!({"file":"body.inc","line_range":range})),
-                &mut snapshot
-            )
-            .is_err());
+            assert!(
+                edit_request(
+                    "dynare_format",
+                    &params(json!({"file":"body.inc","line_range":range})),
+                    &mut snapshot
+                )
+                .is_err()
+            );
         }
     }
 
@@ -1218,11 +1230,13 @@ mod tests {
             "var y;\nmodel;\ny=0;\nend;\n"
         );
         assert!(result.data["files"].get("root.mod").is_none());
-        assert!(!result.data["remaining_diagnostics"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| row["code"] == "E001"));
+        assert!(
+            !result.data["remaining_diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["code"] == "E001")
+        );
         assert_eq!(snapshot.text(Some("body.inc")), Some(body));
         assert_eq!(result.proposal.unwrap()["edits"][0]["file"], "body.inc");
     }
@@ -1247,10 +1261,12 @@ mod tests {
             .iter()
             .find(|action| action["kind"] == "long_names")
             .expect("long names action");
-        assert!(labels["data"]["text"]
-            .as_str()
-            .unwrap()
-            .contains("x (long_name='Output')"));
+        assert!(
+            labels["data"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("x (long_name='Output')")
+        );
         let selected = edit_request(
             "dynare_code_actions",
             &params(json!({"action_id":tags["action_id"],"action_kind":"equation_tags"})),
@@ -1265,7 +1281,7 @@ mod tests {
     #[test]
     fn scoped_unnamed_extraction_keeps_local_dependencies() {
         // Guards an unnamed scope-qualified row selecting another scope and dropping its local dependency.
-        let source="heterogeneity_dimension h, g;\nvar y;\nvar(heterogeneity=h) c;\nvar(heterogeneity=g) d;\nmodel;\ny=0;\nend;\nmodel(heterogeneity=h);\n# helper=.9;\nc=helper*c(-1);\nend;\nmodel(heterogeneity=g);\nd=1;\nend;\n";
+        let source = "heterogeneity_dimension h, g;\nvar y;\nvar(heterogeneity=h) c;\nvar(heterogeneity=g) d;\nmodel;\ny=0;\nend;\nmodel(heterogeneity=h);\n# helper=.9;\nc=helper*c(-1);\nend;\nmodel(heterogeneity=g);\nd=1;\nend;\n";
         let mut snapshot = text_snapshot(source);
         let result = edit_request(
             "dynare_extract",
@@ -1300,10 +1316,12 @@ mod tests {
         assert!(inserted.contains("// shocks;"));
         assert!(inserted.contains("// var e;"));
         assert!(inserted.contains("// stderr ;"));
-        assert!(inserted
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .all(|line| line.starts_with("// ")));
+        assert!(
+            inserted
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .all(|line| line.starts_with("// "))
+        );
         assert!(result.proposal.is_none());
     }
 
@@ -1320,16 +1338,20 @@ mod tests {
         let fixed = result.data["files"]["body.inc"].as_str().unwrap();
         assert!(fixed.contains("y=z;"), "{fixed}");
         assert!(!fixed.contains("var z;"), "{}", result.data);
-        assert!(!result.data["remaining_diagnostics"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| row["code"] == "E001"));
-        assert!(result.data["remaining_diagnostics"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| row["code"] == "E020"));
+        assert!(
+            !result.data["remaining_diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["code"] == "E001")
+        );
+        assert!(
+            result.data["remaining_diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["code"] == "E020")
+        );
         assert!(result.data["files"].get("root.mod").is_none());
     }
 
@@ -1348,13 +1370,13 @@ mod tests {
         assert_eq!(action["skipped_items"], 2);
         let skipped = action["skipped"].as_array().unwrap();
         assert_eq!(skipped.len(), 2);
-        assert!(skipped
-            .iter()
-            .all(|row| row["reason"].as_str().unwrap().contains("repeated")
+        assert!(skipped.iter().all(|row| {
+            row["reason"].as_str().unwrap().contains("repeated")
                 && row["equation_id"]
                     .as_str()
                     .unwrap()
-                    .starts_with(&snapshot.revision)));
+                    .starts_with(&snapshot.revision)
+        }));
         assert_ne!(skipped[0]["equation_id"], skipped[1]["equation_id"]);
         let selected = edit_request(
             "dynare_code_actions",

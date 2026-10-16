@@ -5,8 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use dygnosis::server::new_service;
 use dygnosis::span::{LineIndex, Position as SpanPos};
-use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 fn e001_count(text: &str) -> usize {
     dygnosis::check_file(text, "file:///tmp/shock_template.mod")
@@ -149,9 +149,11 @@ async fn offers_commented_rows_before_the_command_without_applying_them() {
 
 #[tokio::test]
 async fn no_varexo_and_existing_ordinary_shocks_offer_nothing() {
-    assert!(template_for("var y;\nparameters a;\n", None)
-        .await
-        .is_none());
+    assert!(
+        template_for("var y;\nparameters a;\n", None)
+            .await
+            .is_none()
+    );
     assert!(
         template_for("varexo e;\nshocks;\nvar e; stderr 0.01;\nend;\n", None)
             .await
@@ -182,9 +184,11 @@ async fn heterogeneous_shocks_still_offer_and_varexo_det_is_ignored() {
 #[tokio::test]
 async fn quickfix_filter_does_not_return_the_template() {
     let text = "varexo e;\n";
-    assert!(template_for(text, Some(vec![CodeActionKind::QUICKFIX]))
-        .await
-        .is_none());
+    assert!(
+        template_for(text, Some(vec![CodeActionKind::QUICKFIX]))
+            .await
+            .is_none()
+    );
     let action = template_for(text, None)
         .await
         .expect("offered without a filter");
@@ -336,19 +340,23 @@ async fn both_forms_follow_command_context_and_declared_names() {
         .await
         .expect("deterministic form");
     let edit = versioned_insert(&plain_det);
-    assert!(edit
-        .new_text
-        .contains("// var e;\n// periods ;\n// values ;"));
-    assert!(edit
-        .new_text
-        .contains("// var x;\n// periods ;\n// values ;"));
+    assert!(
+        edit.new_text
+            .contains("// var e;\n// periods ;\n// values ;")
+    );
+    assert!(
+        edit.new_text
+            .contains("// var x;\n// periods ;\n// values ;")
+    );
     assert!(template_named(plain, stochastic, None).await.is_some());
 
     let stoch_only = "varexo e;\nstoch_simul;\n";
     assert!(template_named(stoch_only, stochastic, None).await.is_some());
-    assert!(template_named(stoch_only, deterministic, None)
-        .await
-        .is_none());
+    assert!(
+        template_named(stoch_only, deterministic, None)
+            .await
+            .is_none()
+    );
 
     let pf_only = "varexo e;\nperfect_foresight_setup(periods=5);\nperfect_foresight_solver;\n";
     assert!(template_named(pf_only, stochastic, None).await.is_none());
@@ -364,12 +372,16 @@ async fn both_forms_follow_command_context_and_declared_names() {
     assert!(template_named(mixed, deterministic, None).await.is_some());
 
     let det_name_only = "varexo_det x;\n";
-    assert!(template_named(det_name_only, stochastic, None)
-        .await
-        .is_none());
-    assert!(template_named(det_name_only, deterministic, None)
-        .await
-        .is_some());
+    assert!(
+        template_named(det_name_only, stochastic, None)
+            .await
+            .is_none()
+    );
+    assert!(
+        template_named(det_name_only, deterministic, None)
+            .await
+            .is_some()
+    );
 }
 
 #[tokio::test]

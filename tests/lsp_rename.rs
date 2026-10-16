@@ -1,12 +1,12 @@
 //! Actual Rename requests: complete ownership, binding, and source guards.
 
-use dygnosis::server::{new_service, Backend};
+use dygnosis::server::{Backend, new_service};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 const MODEL: &str = "var y;\nparameters p;\np=0.9;\nmodel;\ny=p*y(-1);\nend;\n";
@@ -250,12 +250,14 @@ async fn rename_supported_roots_and_untitled_use_one_decision() {
     ] {
         let (service, _socket) = new_service();
         open(service.inner(), &uri, MODEL, 7).await;
-        assert!(service
-            .inner()
-            .prepare_rename(position(&uri, MODEL, "p;"))
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            service
+                .inner()
+                .prepare_rename(position(&uri, MODEL, "p;"))
+                .await
+                .unwrap()
+                .is_some()
+        );
         let changes = edits(
             rename(service.inner(), &uri, MODEL, "p;", "rho")
                 .await
@@ -293,12 +295,14 @@ async fn rename_owned_include_names_use_saved_source_or_open_overlay() {
             if opened {
                 open(service.inner(), &child, child_text, 4).await;
             }
-            assert!(service
-                .inner()
-                .prepare_rename(position(&root, &root_text, "p;"))
-                .await
-                .unwrap()
-                .is_some());
+            assert!(
+                service
+                    .inner()
+                    .prepare_rename(position(&root, &root_text, "p;"))
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
             let changes = edits(
                 rename(service.inner(), &root, &root_text, "p;", "rho")
                     .await
@@ -448,12 +452,14 @@ async fn rename_and_references_include_pac_discount_parameter() {
             .unwrap()
             .unwrap();
         assert_eq!(references, expected, "PAC option {option}");
-        assert!(service
-            .inner()
-            .prepare_rename(position(&root, &text, "beta);"))
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            service
+                .inner()
+                .prepare_rename(position(&root, &text, "beta);"))
+                .await
+                .unwrap()
+                .is_some()
+        );
         let changes = edits(
             rename(service.inner(), &root, &text, "beta);", "betta")
                 .await
@@ -484,9 +490,11 @@ async fn rename_pac_discount_keeps_generated_and_unbound_slot_guards() {
             .await
             .expect_err("unproved PAC name must withhold Rename");
         assert!(!refusal.message.is_empty());
-        assert!(rename(service.inner(), &root, text, "beta;", "betta")
-            .await
-            .is_none());
+        assert!(
+            rename(service.inner(), &root, text, "beta;", "betta")
+                .await
+                .is_none()
+        );
     }
     let text = "parameters beta; pac_model(model_name=beta, discount=beta);\n";
     let root = fixture.write("separate_pac.mod", text);
@@ -557,9 +565,11 @@ async fn rename_checks_collisions_in_every_shared_owner() {
     let (service, _socket) = new_service();
     open(service.inner(), &first, first_text, 1).await;
     open(service.inner(), &second, second_text, 1).await;
-    assert!(rename(service.inner(), &first, first_text, "p;", "rho")
-        .await
-        .is_none());
+    assert!(
+        rename(service.inner(), &first, first_text, "p;", "rho")
+            .await
+            .is_none()
+    );
 }
 
 // Guards duplicate written macro edits and edits into interpolated/generated names.
@@ -583,16 +593,20 @@ async fn rename_deduplicates_macro_copies_and_withholds_generated_targets() {
     let generated = "var y;parameters p;model;y=@{\"p\"};end;\n";
     let root = fixture.write("generated.mod", generated);
     open(service.inner(), &root, generated, 1).await;
-    assert!(!service
-        .inner()
-        .prepare_rename(position(&root, generated, "p;"))
-        .await
-        .expect_err("refused Rename must explain its cause")
-        .message
-        .is_empty());
-    assert!(rename(service.inner(), &root, generated, "p;", "rho")
-        .await
-        .is_none());
+    assert!(
+        !service
+            .inner()
+            .prepare_rename(position(&root, generated, "p;"))
+            .await
+            .expect_err("refused Rename must explain its cause")
+            .message
+            .is_empty()
+    );
+    assert!(
+        rename(service.inner(), &root, generated, "p;", "rho")
+            .await
+            .is_none()
+    );
 }
 
 // Guards stale saved-file ranges and read-only targets becoming partial edits.
@@ -604,12 +618,14 @@ async fn rename_rechecks_saved_sources_and_requires_all_targets_editable() {
     let root = fixture.write("root.mod", text);
     let (service, _socket) = new_service();
     open(service.inner(), &root, text, 1).await;
-    assert!(service
-        .inner()
-        .prepare_rename(position(&root, text, "p;"))
-        .await
-        .unwrap()
-        .is_some());
+    assert!(
+        service
+            .inner()
+            .prepare_rename(position(&root, text, "p;"))
+            .await
+            .unwrap()
+            .is_some()
+    );
     let path = child.to_file_path().unwrap();
     fs::write(&path, "// changed\ny=p+p;\n").unwrap();
     let changes = edits(
@@ -625,21 +641,27 @@ async fn rename_rechecks_saved_sources_and_requires_all_targets_editable() {
     let mut permissions = original_permissions.clone();
     permissions.set_readonly(true);
     fs::set_permissions(&path, permissions.clone()).unwrap();
-    assert!(rename(service.inner(), &root, text, "p;", "rho")
-        .await
-        .is_none());
+    assert!(
+        rename(service.inner(), &root, text, "p;", "rho")
+            .await
+            .is_none()
+    );
     fs::set_permissions(&path, original_permissions).unwrap();
     fs::remove_file(path).unwrap();
-    assert!(!service
-        .inner()
-        .prepare_rename(position(&root, text, "p;"))
-        .await
-        .expect_err("refused Rename must explain its cause")
-        .message
-        .is_empty());
-    assert!(rename(service.inner(), &root, text, "p;", "rho")
-        .await
-        .is_none());
+    assert!(
+        !service
+            .inner()
+            .prepare_rename(position(&root, text, "p;"))
+            .await
+            .expect_err("refused Rename must explain its cause")
+            .message
+            .is_empty()
+    );
+    assert!(
+        rename(service.inner(), &root, text, "p;", "rho")
+            .await
+            .is_none()
+    );
 }
 
 // Guards source-map ranges being sent as scalar columns after a supplementary character.
@@ -681,9 +703,11 @@ async fn rename_withholds_unproven_name_slots() {
     let root = fixture.write("filename.mod", text);
     let (service, _socket) = new_service();
     open(service.inner(), &root, text, 1).await;
-    assert!(rename(service.inner(), &root, text, "p;", "rho")
-        .await
-        .is_none());
+    assert!(
+        rename(service.inner(), &root, text, "p;", "rho")
+            .await
+            .is_none()
+    );
 }
 
 // Guards the native capture omitting an unedited owner or macro-only input
@@ -745,12 +769,14 @@ async fn rename_includes_predetermined_variable_name_slots() {
     let root = fixture.write("predetermined.mod", text);
     let (service, _socket) = new_service();
     open(service.inner(), &root, text, 1).await;
-    assert!(service
-        .inner()
-        .prepare_rename(position(&root, text, "y;\nmodel"))
-        .await
-        .unwrap()
-        .is_some());
+    assert!(
+        service
+            .inner()
+            .prepare_rename(position(&root, text, "y;\nmodel"))
+            .await
+            .unwrap()
+            .is_some()
+    );
     let changes = edits(
         rename(service.inner(), &root, text, "y;\nmodel", "z")
             .await
@@ -768,16 +794,47 @@ async fn rename_includes_predetermined_variable_name_slots() {
 async fn rename_includes_homotopy_osr_bounds_and_prior_copy_sources() {
     let fixture = Fixture::new();
     for (filename, text, expected, selected) in [
-        ("homotopy.mod", "var y;parameters p;p=.9;model;y=p;end;homotopy_setup;p,.5,.9;end;\n", "var y;parameters rho;rho=.9;model;y=rho;end;homotopy_setup;rho,.5,.9;end;\n", "p,.5"),
-        ("osr.mod", "var y;parameters p;p=.9;model;y=p;end;osr_params p;osr_params_bounds;p,0,1;end;\n", "var y;parameters rho;rho=.9;model;y=rho;end;osr_params rho;osr_params_bounds;rho,0,1;end;\n", "p,0"),
-        ("prior_copy.mod", "var y;parameters p q;p=.9;model;y=p;end;q.prior=p.prior;\n", "var y;parameters rho q;rho=.9;model;y=rho;end;q.prior=rho.prior;\n", "p.prior"),
+        (
+            "homotopy.mod",
+            "var y;parameters p;p=.9;model;y=p;end;homotopy_setup;p,.5,.9;end;\n",
+            "var y;parameters rho;rho=.9;model;y=rho;end;homotopy_setup;rho,.5,.9;end;\n",
+            "p,.5",
+        ),
+        (
+            "osr.mod",
+            "var y;parameters p;p=.9;model;y=p;end;osr_params p;osr_params_bounds;p,0,1;end;\n",
+            "var y;parameters rho;rho=.9;model;y=rho;end;osr_params rho;osr_params_bounds;rho,0,1;end;\n",
+            "p,0",
+        ),
+        (
+            "prior_copy.mod",
+            "var y;parameters p q;p=.9;model;y=p;end;q.prior=p.prior;\n",
+            "var y;parameters rho q;rho=.9;model;y=rho;end;q.prior=rho.prior;\n",
+            "p.prior",
+        ),
     ] {
         let root = fixture.write(filename, text);
         let (service, _socket) = new_service();
         open(service.inner(), &root, text, 1).await;
-        assert!(service.inner().prepare_rename(position(&root, text, selected)).await.unwrap().is_some(), "Prepare {filename}");
-        let changes = edits(rename(service.inner(), &root, text, selected, "rho").await.unwrap());
-        assert_eq!(apply(text, &changes[&root].1), expected, "Rename {filename}");
+        assert!(
+            service
+                .inner()
+                .prepare_rename(position(&root, text, selected))
+                .await
+                .unwrap()
+                .is_some(),
+            "Prepare {filename}"
+        );
+        let changes = edits(
+            rename(service.inner(), &root, text, selected, "rho")
+                .await
+                .unwrap(),
+        );
+        assert_eq!(
+            apply(text, &changes[&root].1),
+            expected,
+            "Rename {filename}"
+        );
     }
 }
 
@@ -787,23 +844,54 @@ async fn rename_includes_homotopy_osr_bounds_and_prior_copy_sources() {
 async fn rename_updates_verified_semantic_tag_references() {
     let fixture = Fixture::new();
     for (text, selected, expected) in [
-        ("var y;model;[endogenous='y'] y=y(-1);end;\n", "y;", "var z;model;[endogenous='z'] z=z(-1);end;\n"),
-        ("var y;model;[mcp='y > 0'] y=0;end;\n", "y >", "var z;model;[mcp='z > 0'] z=0;end;\n"),
-        ("var y(long_name='y');model;[name='😀 y',note='y',endogenous='y',mcp='  y  >  0'] y=1;end;\n", "y',mcp", "var z(long_name='y');model;[name='😀 y',note='y',endogenous='z',mcp='  z  >  0'] z=1;end;\n"),
-        ("model;[endogenous='y'] y=0;end;\n", "y']", "model;[endogenous='z'] z=0;end;\n"),
-        ("@#define bound=0\nvar y;model;[mcp='y  >  @{bound}'] y=0;end;\n", "y  >", "@#define bound=0\nvar z;model;[mcp='z  >  @{bound}'] z=0;end;\n"),
-        ("var y;model;\n@#for i in [1,2]\n[endogenous='y',mcp='y>0'] y=0;\n@#endfor\nend;\n", "y;", "var z;model;\n@#for i in [1,2]\n[endogenous='z',mcp='z>0'] z=0;\n@#endfor\nend;\n"),
+        (
+            "var y;model;[endogenous='y'] y=y(-1);end;\n",
+            "y;",
+            "var z;model;[endogenous='z'] z=z(-1);end;\n",
+        ),
+        (
+            "var y;model;[mcp='y > 0'] y=0;end;\n",
+            "y >",
+            "var z;model;[mcp='z > 0'] z=0;end;\n",
+        ),
+        (
+            "var y(long_name='y');model;[name='😀 y',note='y',endogenous='y',mcp='  y  >  0'] y=1;end;\n",
+            "y',mcp",
+            "var z(long_name='y');model;[name='😀 y',note='y',endogenous='z',mcp='  z  >  0'] z=1;end;\n",
+        ),
+        (
+            "model;[endogenous='y'] y=0;end;\n",
+            "y']",
+            "model;[endogenous='z'] z=0;end;\n",
+        ),
+        (
+            "@#define bound=0\nvar y;model;[mcp='y  >  @{bound}'] y=0;end;\n",
+            "y  >",
+            "@#define bound=0\nvar z;model;[mcp='z  >  @{bound}'] z=0;end;\n",
+        ),
+        (
+            "var y;model;\n@#for i in [1,2]\n[endogenous='y',mcp='y>0'] y=0;\n@#endfor\nend;\n",
+            "y;",
+            "var z;model;\n@#for i in [1,2]\n[endogenous='z',mcp='z>0'] z=0;\n@#endfor\nend;\n",
+        ),
     ] {
         let root = fixture.write("semantic_tag.mod", text);
         let (service, _socket) = new_service();
         open(service.inner(), &root, text, 1).await;
-        assert!(service
-            .inner()
-            .prepare_rename(position(&root, text, selected))
-            .await
-            .unwrap()
-            .is_some(), "Prepare {text}");
-        let changes = edits(rename(service.inner(), &root, text, selected, "z").await.unwrap_or_else(|| panic!("Rename {text}")));
+        assert!(
+            service
+                .inner()
+                .prepare_rename(position(&root, text, selected))
+                .await
+                .unwrap()
+                .is_some(),
+            "Prepare {text}"
+        );
+        let changes = edits(
+            rename(service.inner(), &root, text, selected, "z")
+                .await
+                .unwrap_or_else(|| panic!("Rename {text}")),
+        );
         assert_eq!(apply(text, &changes[&root].1), expected);
     }
 }
@@ -821,24 +909,30 @@ async fn rename_refuses_unproved_tag_names_and_tag_declaration_collisions() {
         let root = fixture.write("unproved.mod", text);
         let (service, _socket) = new_service();
         open(service.inner(), &root, text, 1).await;
-        assert!(!service
-            .inner()
-            .prepare_rename(position(&root, text, "y;"))
-            .await
-            .expect_err("refused Rename must explain its cause")
-            .message
-            .is_empty());
-        assert!(rename(service.inner(), &root, text, "y;", "z")
-            .await
-            .is_none());
+        assert!(
+            !service
+                .inner()
+                .prepare_rename(position(&root, text, "y;"))
+                .await
+                .expect_err("refused Rename must explain its cause")
+                .message
+                .is_empty()
+        );
+        assert!(
+            rename(service.inner(), &root, text, "y;", "z")
+                .await
+                .is_none()
+        );
     }
     let text = "var y;model;[endogenous='z'] z=y;y=1;end;\n";
     let root = fixture.write("tag_collision.mod", text);
     let (service, _socket) = new_service();
     open(service.inner(), &root, text, 1).await;
-    assert!(rename(service.inner(), &root, text, "y;", "z")
-        .await
-        .is_none());
+    assert!(
+        rename(service.inner(), &root, text, "y;", "z")
+            .await
+            .is_none()
+    );
 }
 
 // Guards compatible literal tag includes requiring all owner edits, and
@@ -893,22 +987,56 @@ async fn rename_semantic_tag_include_requires_compatible_owners() {
 async fn rename_refuses_tag_literal_with_incompatible_macro_roles() {
     let fixture = Fixture::new();
     for (text, selected) in [
-        ("var y;model;\n@#for key in [\"endogenous\",\"name\"]\n[@{key}='y'] y=0;\n@#endfor\nend;\n", "y;"),
-        ("var y;model;\n@#for key in [\"endogenous\",\"name\"]\n@#if key == \"name\"\n@#define prefix=\"label_\"\n@#else\n@#define prefix=\"\"\n@#endif\n[@{key}='@{prefix}y'] y=0;\n@#endfor\nend;\n", "y;"),
-        ("var aa;model;\n@#for key in [\"endogenous\",\"name\"]\n@#if key == \"name\"\n@#define prefix=\"a\"\n@#else\n@#define prefix=\"\"\n@#endif\n[@{key}='@{prefix}aa'] aa=0;\n@#endfor\nend;\n", "aa;"),
+        (
+            "var y;model;\n@#for key in [\"endogenous\",\"name\"]\n[@{key}='y'] y=0;\n@#endfor\nend;\n",
+            "y;",
+        ),
+        (
+            "var y;model;\n@#for key in [\"endogenous\",\"name\"]\n@#if key == \"name\"\n@#define prefix=\"label_\"\n@#else\n@#define prefix=\"\"\n@#endif\n[@{key}='@{prefix}y'] y=0;\n@#endfor\nend;\n",
+            "y;",
+        ),
+        (
+            "var aa;model;\n@#for key in [\"endogenous\",\"name\"]\n@#if key == \"name\"\n@#define prefix=\"a\"\n@#else\n@#define prefix=\"\"\n@#endif\n[@{key}='@{prefix}aa'] aa=0;\n@#endfor\nend;\n",
+            "aa;",
+        ),
     ] {
         // The same macro structure is editable when every execution is the
         // semantic reference. This rules out invalid syntax as the refusal.
-        let control = text.replace("[\"endogenous\",\"name\"]", "[\"endogenous\",\"endogenous\"]");
+        let control = text.replace(
+            "[\"endogenous\",\"name\"]",
+            "[\"endogenous\",\"endogenous\"]",
+        );
         let control_uri = fixture.write("tag_control.mod", &control);
         let (control_service, _control_socket) = new_service();
         open(control_service.inner(), &control_uri, &control, 1).await;
-        assert!(rename(control_service.inner(), &control_uri, &control, selected, "z").await.is_some());
+        assert!(
+            rename(
+                control_service.inner(),
+                &control_uri,
+                &control,
+                selected,
+                "z"
+            )
+            .await
+            .is_some()
+        );
         let root = fixture.write("tag_roles.mod", text);
         let (service, _socket) = new_service();
         open(service.inner(), &root, text, 1).await;
-        assert!(!service.inner().prepare_rename(position(&root, text, selected)).await.expect_err("refused Rename must explain its cause").message.is_empty());
-        assert!(rename(service.inner(), &root, text, selected, "z").await.is_none());
+        assert!(
+            !service
+                .inner()
+                .prepare_rename(position(&root, text, selected))
+                .await
+                .expect_err("refused Rename must explain its cause")
+                .message
+                .is_empty()
+        );
+        assert!(
+            rename(service.inner(), &root, text, selected, "z")
+                .await
+                .is_none()
+        );
     }
 }
 
@@ -967,12 +1095,14 @@ async fn rename_preserves_unrelated_equation_and_long_name_labels() {
     let root = fixture.write("labels.mod", text);
     let (service, _socket) = new_service();
     open(service.inner(), &root, text, 1).await;
-    assert!(service
-        .inner()
-        .prepare_rename(position(&root, text, "y"))
-        .await
-        .unwrap()
-        .is_some());
+    assert!(
+        service
+            .inner()
+            .prepare_rename(position(&root, text, "y"))
+            .await
+            .unwrap()
+            .is_some()
+    );
     let changes = edits(
         rename(service.inner(), &root, text, "y", "z")
             .await

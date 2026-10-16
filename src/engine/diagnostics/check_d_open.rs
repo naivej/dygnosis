@@ -380,9 +380,22 @@ fn epilogue_parse_refusals(model: &Model) -> Vec<(Diagnostic, usize)> {
         }
         let name = model.name(usage.name);
         let (code, message) = match model.symbol_kind_in_context(usage.name, usage.context) {
-            None => ("E288", format!("Variable {name} used in the epilogue block but was not declared.")),
-            Some("varexo") if !model.heterogeneous_in_context(usage.name, usage.context) => ("E289", format!("Symbol '{name}' cannot be used inside the epilogue block, because it is an exogenous variable.")),
-            Some("varexo_det") if !model.heterogeneous_in_context(usage.name, usage.context) => ("E290", format!("Symbol '{name}' cannot be used inside the epilogue block, because it is an exogenous deterministic variable.")),
+            None => (
+                "E288",
+                format!("Variable {name} used in the epilogue block but was not declared."),
+            ),
+            Some("varexo") if !model.heterogeneous_in_context(usage.name, usage.context) => (
+                "E289",
+                format!(
+                    "Symbol '{name}' cannot be used inside the epilogue block, because it is an exogenous variable."
+                ),
+            ),
+            Some("varexo_det") if !model.heterogeneous_in_context(usage.name, usage.context) => (
+                "E290",
+                format!(
+                    "Symbol '{name}' cannot be used inside the epilogue block, because it is an exogenous deterministic variable."
+                ),
+            ),
             _ => continue,
         };
         out.push((err(usage.span, code, message), usage.parse_order + 1));
@@ -822,8 +835,8 @@ fn check_filter_initial_state_with_orders(model: &Model) -> Vec<(Diagnostic, usi
                     entry.span,
                     "E311",
                     format!(
-                    "filter_initial_state: {name} should be an endogenous or exogenous variable"
-                ),
+                        "filter_initial_state: {name} should be an endogenous or exogenous variable"
+                    ),
                 ),
                 entry.active_tokens.end,
             ));
@@ -1448,17 +1461,23 @@ mod parse_receipt_tests {
         // Guards later nonstationary declarations changing earlier acceptance,
         // while requiring every name in the current declaration to be visible.
         let model = crate::parse("var y;var(deflator=y) x;database kept;var(deflator=1) y;");
-        assert!(!parse_refusals(&model)
-            .iter()
-            .any(|(row, _)| row.code == "E309"));
+        assert!(
+            !parse_refusals(&model)
+                .iter()
+                .any(|(row, _)| row.code == "E309")
+        );
         let model = crate::parse("var y;var(deflator=y) x y;");
-        assert!(parse_refusals(&model)
-            .iter()
-            .any(|(row, _)| row.code == "E309"));
+        assert!(
+            parse_refusals(&model)
+                .iter()
+                .any(|(row, _)| row.code == "E309")
+        );
         let model = crate::parse("var y;var(deflator=y-y+1) x;database kept;var(deflator=1) y;");
-        assert!(!parse_refusals(&model)
-            .iter()
-            .any(|(row, _)| row.code == "E309"));
+        assert!(
+            !parse_refusals(&model)
+                .iter()
+                .any(|(row, _)| row.code == "E309")
+        );
     }
 
     #[test]
@@ -1468,10 +1487,14 @@ mod parse_receipt_tests {
         let model = crate::parse(
             "var y;filter_initial_state;y(0)=0;end;database leaked;model;y=y(-1);end;",
         );
-        assert!(parse_refusals(&model)
-            .iter()
-            .any(|(row, _)| row.code == "E314"));
-        let model = crate::parse("heterogeneity_dimension h;var(heterogeneity=h) y;model(heterogeneity=h);y=y(-1);end;filter_initial_state;y(0)=0;end;");
+        assert!(
+            parse_refusals(&model)
+                .iter()
+                .any(|(row, _)| row.code == "E314")
+        );
+        let model = crate::parse(
+            "heterogeneity_dimension h;var(heterogeneity=h) y;model(heterogeneity=h);y=y(-1);end;filter_initial_state;y(0)=0;end;",
+        );
         assert_eq!(
             min_model_lag(
                 &model,
@@ -1483,19 +1506,27 @@ mod parse_receipt_tests {
         let model = crate::parse(
             "var y;model;[name='Y']y=y(-1);end;model_remove('Y');filter_initial_state;y(0)=0;end;",
         );
-        assert!(parse_refusals(&model)
-            .iter()
-            .any(|(row, _)| row.code == "E311"));
-        assert!(!parse_refusals(&model)
-            .iter()
-            .any(|(row, _)| row.code == "E314"));
+        assert!(
+            parse_refusals(&model)
+                .iter()
+                .any(|(row, _)| row.code == "E311")
+        );
+        assert!(
+            !parse_refusals(&model)
+                .iter()
+                .any(|(row, _)| row.code == "E314")
+        );
         let name = model.filter_initial_state[0].name;
         assert_eq!(min_model_lag(&model, name, model.expanded_tokens.len()), -1);
 
-        let model = crate::parse("heterogeneity_dimension h;var(heterogeneity=h) x;filter_initial_state;x(1)=0;end;database leaked;");
-        assert!(parse_refusals(&model)
-            .iter()
-            .any(|(row, _)| row.code == "E311"));
+        let model = crate::parse(
+            "heterogeneity_dimension h;var(heterogeneity=h) x;filter_initial_state;x(1)=0;end;database leaked;",
+        );
+        assert!(
+            parse_refusals(&model)
+                .iter()
+                .any(|(row, _)| row.code == "E311")
+        );
     }
 
     #[test]
@@ -1506,11 +1537,17 @@ mod parse_receipt_tests {
             "parameters p;change_type(var) p;ramsey_constraints;p>0;end;database kept;",
         );
         assert!(parse_refusals(&model).is_empty());
-        let model = crate::parse("heterogeneity_dimension h;var(heterogeneity=h) x;ramsey_constraints;x>0;end;database leaked;");
-        assert!(parse_refusals(&model)
-            .iter()
-            .any(|(row, _)| row.code == "E321"));
-        let model = crate::parse("heterogeneity_dimension h;var(heterogeneity=h) x;var y;ramsey_constraints;y>x;end;database kept;");
+        let model = crate::parse(
+            "heterogeneity_dimension h;var(heterogeneity=h) x;ramsey_constraints;x>0;end;database leaked;",
+        );
+        assert!(
+            parse_refusals(&model)
+                .iter()
+                .any(|(row, _)| row.code == "E321")
+        );
+        let model = crate::parse(
+            "heterogeneity_dimension h;var(heterogeneity=h) x;var y;ramsey_constraints;y>x;end;database kept;",
+        );
         assert!(parse_refusals(&model).is_empty());
         for text in [
             "var y;ramsey_constraints;(y+0)>1;end;database kept;",
@@ -1521,9 +1558,11 @@ mod parse_receipt_tests {
         }
         let model =
             crate::parse("var y;model;#a=y;y=1;end;ramsey_constraints;y>a;end;database leaked;");
-        assert!(parse_refusals(&model)
-            .iter()
-            .any(|(row, _)| row.code == "E320"));
+        assert!(
+            parse_refusals(&model)
+                .iter()
+                .any(|(row, _)| row.code == "E320")
+        );
         let model =
             crate::parse("var y;ramsey_constraints;1;y>pac_expectation(m);end;database later;");
         let (_, order) = parse_refusals(&model)

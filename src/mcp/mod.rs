@@ -15,41 +15,41 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::Path;
 
-use rmcp::{tool_handler, ServerHandler, ServiceExt};
+use rmcp::{ServerHandler, ServiceExt, tool_handler};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::engine::analysis::equations::{
-    count_gap, equations, explain_equation, heterogeneous_equations, CountGap, EquationRow,
+    CountGap, EquationRow, count_gap, equations, explain_equation, heterogeneous_equations,
 };
 use crate::engine::analysis::model_info::incomplete_model_status;
 use crate::engine::analysis::model_info::{
     heterogeneous_dimension_names, model_info_json, related_files_json,
 };
 use crate::engine::catalog::list_options;
-use crate::engine::comparison::{compare_models_with_sources, CompareSource};
+use crate::engine::comparison::{CompareSource, compare_models_with_sources};
 use crate::engine::diagnostics::explain;
-use crate::engine::diagnostics::{analyze, Diagnostic, Severity};
+use crate::engine::diagnostics::{Diagnostic, Severity, analyze};
 use crate::engine::editing::auto_fix::auto_fix;
 use crate::engine::editing::extract::{
-    extract, EquationDomain, EquationRole, ExtractError, ExtractRequest, ExtractResult,
-    ExtractStatus,
+    EquationDomain, EquationRole, ExtractError, ExtractRequest, ExtractResult, ExtractStatus,
+    extract,
 };
-use crate::engine::editing::format::{format_outcome, parse_format_indent, FormatOutcome};
+use crate::engine::editing::format::{FormatOutcome, format_outcome, parse_format_indent};
 use crate::engine::editing::refs::is_legal_ident;
-use crate::engine::language::expand::{expand_report, EquationOrigin, ExpandReport, OriginFrame};
+use crate::engine::language::expand::{EquationOrigin, ExpandReport, OriginFrame, expand_report};
 use crate::engine::language::model::Model;
 use crate::engine::language::parser::{normalize_newlines, parse};
 use crate::engine::language::span::{LineIndex, Span};
-use crate::engine::workspace::include_resolver::normalize_uri;
 use crate::engine::workspace::Workspace;
+use crate::engine::workspace::include_resolver::normalize_uri;
 use crate::mcp::repository_compare::RepositorySelector;
 #[cfg(test)]
-use crate::mcp::repository_compare::{compare_repository, RepositoryComparison};
+use crate::mcp::repository_compare::{RepositoryComparison, compare_repository};
 use crate::mcp::workspace_diagnose::{
-    diagnose_map, diagnose_paths, RootStatus, WorkspaceDiagnoseError, WorkspaceDiagnoseReport,
-    WorkspaceDiagnostic, WorkspaceRootReport,
+    RootStatus, WorkspaceDiagnoseError, WorkspaceDiagnoseReport, WorkspaceDiagnostic,
+    WorkspaceRootReport, diagnose_map, diagnose_paths,
 };
 
 const OUT_CODES: &[&str] = &[
@@ -773,25 +773,27 @@ fn macro_messages_json(
     messages: &[crate::engine::language::macro_expand::MacroMessage],
     unit: &McpUnit,
 ) -> Value {
-    json!(messages
-        .iter()
-        .map(|message| {
-            let text = message
-                .file
-                .as_deref()
-                .and_then(|file| unit.sources.get(file).map(String::as_str))
-                .unwrap_or(unit.raw.as_str());
-            let mut row = json!({
-                "kind": message.kind,
-                "message": message.message,
-                "location": range_json(message.span, text),
-            });
-            if let Some(file) = &message.file {
-                row["file"] = json!(file);
-            }
-            row
-        })
-        .collect::<Vec<_>>())
+    json!(
+        messages
+            .iter()
+            .map(|message| {
+                let text = message
+                    .file
+                    .as_deref()
+                    .and_then(|file| unit.sources.get(file).map(String::as_str))
+                    .unwrap_or(unit.raw.as_str());
+                let mut row = json!({
+                    "kind": message.kind,
+                    "message": message.message,
+                    "location": range_json(message.span, text),
+                });
+                if let Some(file) = &message.file {
+                    row["file"] = json!(file);
+                }
+                row
+            })
+            .collect::<Vec<_>>()
+    )
 }
 
 fn range_json(span: Span, text: &str) -> Value {
@@ -943,28 +945,30 @@ fn comparison_incomplete_reasons(
     files: Option<&HashMap<String, String>>,
 ) -> Value {
     let causes = crate::engine::analysis::model_info::incomplete_causes(workspace, root, model);
-    json!(causes
-        .into_iter()
-        .map(|cause| {
-            let mut reason = cause.outcome_json();
-            let mut location = |site: &crate::engine::workspace::IncludeSite| {
-                let text = workspace.source_for_normalized_key(&site.file)?;
-                let mut result = json!({"range":range_json(site.span, text)});
-                if let Some(files) = files {
-                    result["file"] = json!(related_file_path(Path::new(&site.file), files));
+    json!(
+        causes
+            .into_iter()
+            .map(|cause| {
+                let mut reason = cause.outcome_json();
+                let mut location = |site: &crate::engine::workspace::IncludeSite| {
+                    let text = workspace.source_for_normalized_key(&site.file)?;
+                    let mut result = json!({"range":range_json(site.span, text)});
+                    if let Some(files) = files {
+                        result["file"] = json!(related_file_path(Path::new(&site.file), files));
+                    }
+                    Some(result)
+                };
+                if let Some(Value::Object(source)) = cause.origin.as_ref().and_then(&mut location) {
+                    reason.as_object_mut().unwrap().extend(source);
                 }
-                Some(result)
-            };
-            if let Some(Value::Object(source)) = cause.origin.as_ref().and_then(&mut location) {
-                reason.as_object_mut().unwrap().extend(source);
-            }
-            let chain: Vec<_> = cause.include_chain.iter().filter_map(location).collect();
-            if !chain.is_empty() {
-                reason["include_chain"] = json!(chain);
-            }
-            reason
-        })
-        .collect::<Vec<_>>())
+                let chain: Vec<_> = cause.include_chain.iter().filter_map(location).collect();
+                if !chain.is_empty() {
+                    reason["include_chain"] = json!(chain);
+                }
+                reason
+            })
+            .collect::<Vec<_>>()
+    )
 }
 
 /// Python `files_a or files`: an empty map is missing and the fallback is used.
@@ -1523,31 +1527,33 @@ fn extract_origin_json(
     value["role"] = json!(role_name(origin.role));
     value["file"] = json!(extract_caller_file(origin.file.as_deref(), files));
     if !origin.frames.is_empty() {
-        value["frames"] = json!(origin
-            .frames
-            .iter()
-            .map(|frame| {
-                let frame_text = extract_source(frame.file.as_deref(), file_content, files);
-                let mut row = match frame_text {
-                    Some(text) if span_fits(text, frame.span) => range_json(frame.span, text),
-                    _ => json!({
-                        "line": null,
-                        "column": null,
-                        "end_line": null,
-                        "end_column": null,
-                    }),
-                };
-                row["kind"] = json!(frame.kind);
-                if let Some(variable) = &frame.variable {
-                    row["variable"] = json!(variable);
-                }
-                if let Some(value) = &frame.value {
-                    row["value"] = json!(value);
-                }
-                row["file"] = json!(extract_caller_file(frame.file.as_deref(), files));
-                row
-            })
-            .collect::<Vec<_>>());
+        value["frames"] = json!(
+            origin
+                .frames
+                .iter()
+                .map(|frame| {
+                    let frame_text = extract_source(frame.file.as_deref(), file_content, files);
+                    let mut row = match frame_text {
+                        Some(text) if span_fits(text, frame.span) => range_json(frame.span, text),
+                        _ => json!({
+                            "line": null,
+                            "column": null,
+                            "end_line": null,
+                            "end_column": null,
+                        }),
+                    };
+                    row["kind"] = json!(frame.kind);
+                    if let Some(variable) = &frame.variable {
+                        row["variable"] = json!(variable);
+                    }
+                    if let Some(value) = &frame.value {
+                        row["value"] = json!(value);
+                    }
+                    row["file"] = json!(extract_caller_file(frame.file.as_deref(), files));
+                    row
+                })
+                .collect::<Vec<_>>()
+        );
     }
     value
 }
@@ -1854,8 +1860,8 @@ impl ServerHandler for DygnosisMcp {
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
         use std::sync::{
-            atomic::{AtomicBool, Ordering},
             Arc,
+            atomic::{AtomicBool, Ordering},
         };
         struct StopWorker(Arc<AtomicBool>);
         impl Drop for StopWorker {
@@ -1871,7 +1877,9 @@ impl ServerHandler for DygnosisMcp {
         let name = request.name.to_string();
         if !canonical::TOOL_NAMES.contains(&name.as_str()) {
             return Err(rmcp::ErrorData::invalid_params(
-                format!("Tool {name} is not available. Read tools/list for the supported tool names and arguments."),
+                format!(
+                    "Tool {name} is not available. Read tools/list for the supported tool names and arguments."
+                ),
                 None,
             ));
         }
@@ -1955,10 +1963,12 @@ mod tests {
         for field in COMPARE_TEXT_KEYS {
             let mut mixed = repository.clone();
             mixed[*field] = Value::Null;
-            assert!(serde_json::from_value::<CompareModelsParams>(mixed)
-                .unwrap_err()
-                .to_string()
-                .contains("do not combine"));
+            assert!(
+                serde_json::from_value::<CompareModelsParams>(mixed)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("do not combine")
+            );
         }
         for invalid in [
             json!({}),
@@ -2014,11 +2024,13 @@ mod tests {
     #[test]
     fn library_queries_keep_macro_causes_and_builtin_references() {
         let info = dynare_model_info("@#define x = \"s\" + 1\nvar y;model;y=0;end;", None, None);
-        assert!(info["incomplete_reasons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|reason| reason["code"] == "E285"));
+        assert!(
+            info["incomplete_reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason["code"] == "E285")
+        );
         let references = dynare_find_references("var y;model;y=sin(y);end;", "sin", None, None);
         assert_eq!(references.as_array().unwrap().len(), 1);
     }

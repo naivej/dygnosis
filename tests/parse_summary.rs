@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use dygnosis::{parse, ParseSummary};
+use dygnosis::{ParseSummary, parse};
 
 fn copilot_mod(archive_dir: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

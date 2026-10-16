@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use super::model_locals::ModelLocals;
 use crate::engine::editing::refs::{ident_at, is_legal_ident};
 use crate::engine::language::intern::Name;
-use crate::engine::language::lexer::{tokenize, TokenKind};
+use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::language::model::Model;
 use crate::engine::language::span::Span;
 use crate::engine::workspace::Workspace;
@@ -19,7 +19,10 @@ pub(crate) const SOURCE: Refusal = Refusal::new(
     "SOURCE_UNAVAILABLE",
     "Rename source is unavailable. Open the model root and its required includes.",
 );
-pub(crate) const MAPPING: Refusal = Refusal::new("UNVERIFIED_TARGET", "Rename cannot verify a literal written target for every occurrence. Resolve generated names or incomplete source locations.");
+pub(crate) const MAPPING: Refusal = Refusal::new(
+    "UNVERIFIED_TARGET",
+    "Rename cannot verify a literal written target for every occurrence. Resolve generated names or incomplete source locations.",
+);
 pub(crate) const INCOMPLETE: Refusal = Refusal::new(
     "INCOMPLETE_INPUT",
     "Rename was withheld because required includes, parsing, or macro expansion are incomplete.",
@@ -36,7 +39,10 @@ pub(crate) const IDENTIFIER: Refusal = Refusal::new(
     "INVALID_IDENTIFIER",
     "Rename requires a legal, non-reserved Dynare identifier.",
 );
-pub(crate) const BINDING_CAPTURE: Refusal = Refusal::new("BINDING_CAPTURE", "The new name would bind existing unresolved uses in an affected scope. Choose a name that has no unresolved uses there.");
+pub(crate) const BINDING_CAPTURE: Refusal = Refusal::new(
+    "BINDING_CAPTURE",
+    "The new name would bind existing unresolved uses in an affected scope. Choose a name that has no unresolved uses there.",
+);
 
 const CANCELLED: Refusal = Refusal::new(
     "CANCELLED",
@@ -529,7 +535,13 @@ impl SemanticModel {
         match candidates.len() {
             0 => Ok(None),
             1 => Ok(candidates.into_iter().next()),
-            _ => Err(SelectionError { reason: Refusal::new("AMBIGUOUS_SYMBOL", "The selected name or written source has more than one symbol binding. Select a candidate binding or a source position in one scope."), candidates }),
+            _ => Err(SelectionError {
+                reason: Refusal::new(
+                    "AMBIGUOUS_SYMBOL",
+                    "The selected name or written source has more than one symbol binding. Select a candidate binding or a source position in one scope.",
+                ),
+                candidates,
+            }),
         }
     }
 
@@ -1019,7 +1031,7 @@ pub(crate) fn rename(
             return Err(Refusal::new(
                 "BUILTIN_SYMBOL",
                 "Built-in function names cannot be renamed.",
-            ))
+            ));
         }
     };
     let mut affected = vec![selected_owner];

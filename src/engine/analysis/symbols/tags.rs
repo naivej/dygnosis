@@ -4,7 +4,7 @@ use super::SemanticModel;
 use crate::engine::editing::refs::is_legal_ident;
 use crate::engine::language::lexer::Token;
 use crate::engine::language::{
-    lexer::{tokenize, TokenKind},
+    lexer::{TokenKind, tokenize},
     model::Model,
     span::Span,
 };

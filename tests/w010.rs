@@ -169,9 +169,11 @@ fn w010_unassigned_referenced_param() {
     assert_eq!(got.len(), 2);
     let unassigned = by_code(&got, "W010");
     assert_eq!(unassigned.severity, 2);
-    assert!(unassigned
-        .message
-        .contains("Parameter 'orphan_p' is declared but never assigned"));
+    assert!(
+        unassigned
+            .message
+            .contains("Parameter 'orphan_p' is declared but never assigned")
+    );
     assert_last_ident(
         &text,
         unassigned,
@@ -191,15 +193,17 @@ fn w010_and_w022_unassigned_unref_param() {
     assert_eq!(got.len(), 2);
     let w010 = by_code(&got, "W010");
     assert_eq!(w010.severity, 2);
-    assert!(w010
-        .message
-        .contains("Parameter 'orphan_p' is declared but never assigned"));
+    assert!(
+        w010.message
+            .contains("Parameter 'orphan_p' is declared but never assigned")
+    );
     assert_last_ident(&text, w010, "parameters rho betta orphan_p;", "orphan_p");
     let w022 = by_code(&got, "W022");
     assert_eq!(w022.severity, 2);
-    assert!(w022
-        .message
-        .contains("Parameter(s) orphan_p not used in model equations or steady_state_model"));
+    assert!(
+        w022.message
+            .contains("Parameter(s) orphan_p not used in model equations or steady_state_model")
+    );
     assert_last_ident(&text, w022, "parameters rho betta orphan_p;", "orphan_p");
 }
 
@@ -256,9 +260,12 @@ fn w011_repeated_checks_keep_written_assignment_order() {
             assert_eq!(diagnostic.span.end, start + assignment.len() as u32);
             assert_eq!(diagnostic.code, "W011");
             assert_eq!(diagnostic.severity, dygnosis::Severity::Warning);
-            assert_eq!(diagnostic.message, format!(
-                "Parameter '{name}' assignment could not be evaluated: {name} = {expression}. Check that all referenced names are declared and assigned."
-            ));
+            assert_eq!(
+                diagnostic.message,
+                format!(
+                    "Parameter '{name}' assignment could not be evaluated: {name} = {expression}. Check that all referenced names are declared and assigned."
+                )
+            );
         }
     }
 }
@@ -275,9 +282,11 @@ fn w011_shared_macro_span_keeps_message_order() {
     for _ in 0..16 {
         let diagnostics = check_w011(&parse(source));
         assert_eq!(diagnostics.len(), expected.len());
-        assert!(diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.span == diagnostics[0].span));
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.span == diagnostics[0].span)
+        );
         assert_eq!(
             diagnostics
                 .iter()

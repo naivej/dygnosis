@@ -19,8 +19,8 @@ mod tests;
 pub use budget::{alignment_availability, enforce_output_budget};
 pub use schema::*;
 pub use source::{
-    populate_captured_sources, CaptureBoundary, CapturedSourceInput, SourceFilePair,
-    SourceIdentityProof, SourceInputError,
+    CaptureBoundary, CapturedSourceInput, SourceFilePair, SourceIdentityProof, SourceInputError,
+    populate_captured_sources,
 };
 
 use crate::engine::comparison::ModelDiff;

@@ -1,6 +1,6 @@
 //! Native INITIAL boundaries and refused Dynare rows preserve the recorded tree.
 
-use dygnosis::{analyze, parse, Diagnostic, Severity};
+use dygnosis::{Diagnostic, Severity, analyze, parse};
 
 const HEADER: &str = "var y;\nvarexo e;\nparameters rho beta;\nrho = .8; beta = .9;\nmodel;\ny = rho*y(-1) + e;\nend;\n";
 const NAMESPACE: &str = "Namespace-qualified symbol pp.rho not allowed in this context";
@@ -234,17 +234,21 @@ fn rejected_model_rows_add_no_equation_use_or_complete_model_claim() {
         assert!(model.model_expression_uses.is_empty(), "{row}");
         assert!(model.namespace_qualified.is_empty());
         assert!(dygnosis::check_w010::check_w021(&model).is_empty());
-        assert!(!analyze(&model)
-            .iter()
-            .any(|d| matches!(d.code.as_str(), "E021" | "E188" | "W013" | "I208" | "I209")));
+        assert!(
+            !analyze(&model)
+                .iter()
+                .any(|d| matches!(d.code.as_str(), "E021" | "E188" | "W013" | "I208" | "I209"))
+        );
     }
     let source = "var y; varexo e; model; y=0; y={1}; end;";
     let model = parse(source);
     assert_eq!(model.equations.len(), 1);
     assert!(dygnosis::check_w010::check_w021(&model).is_empty());
-    assert!(errors("var y; varexo e; model; y=0; end;")
-        .iter()
-        .any(|d| d.code == "E021"));
+    assert!(
+        errors("var y; varexo e; model; y=0; end;")
+            .iter()
+            .any(|d| d.code == "E021")
+    );
     let quoted = "var y(long_name='a\n{b}'); model; y=0; end;";
     assert!(
         !errors(quoted).iter().any(|d| d.code == "E001"),
@@ -294,11 +298,13 @@ fn repeated_macro_heads_use_the_current_execution_symbol_history() {
     );
     let model = parse(source);
     assert_eq!(model.ms_unparsed_spans.len(), 2);
-    assert!(model
-        .shape_refuses
-        .iter()
-        .any(|row| row.official_message.as_deref()
-            == Some("syntax error, unexpected '(', expecting EQUAL or '.'")));
+    assert!(
+        model
+            .shape_refuses
+            .iter()
+            .any(|row| row.official_message.as_deref()
+                == Some("syntax error, unexpected '(', expecting EQUAL or '.'"))
+    );
 }
 
 #[test]
@@ -445,11 +451,13 @@ fn multiline_string_origin_projection_keeps_include_and_macro_evidence() {
             declaration.origin_frames[0].value.as_deref(),
             Some(if index == 0 { "1" } else { "2" })
         );
-        assert!(declaration.segments[0]
-            .file
-            .as_deref()
-            .unwrap()
-            .ends_with("child.mod"));
+        assert!(
+            declaration.segments[0]
+                .file
+                .as_deref()
+                .unwrap()
+                .ends_with("child.mod")
+        );
         let span = declaration.segments[0].span;
         assert_eq!(
             &child_source[span.start as usize..span.end as usize],
@@ -457,10 +465,12 @@ fn multiline_string_origin_projection_keeps_include_and_macro_evidence() {
         );
     }
     assert_eq!(report.navigation.len(), 2);
-    assert!(report
-        .navigation
-        .iter()
-        .all(|row| row.macro_frames.is_empty()));
+    assert!(
+        report
+            .navigation
+            .iter()
+            .all(|row| row.macro_frames.is_empty())
+    );
     for origin in &report.origins {
         assert!(origin.origin_frames.is_empty());
         assert!(origin.origin_uri.as_deref().unwrap().ends_with("root.mod"));
@@ -523,17 +533,20 @@ fn parse_action_priority_uses_macro_execution_before_written_source_order() {
         (2, "E378", "x is not a parameter"),
     ] {
         let source = format!(
-            "model_local_variable x;\n@#for i in 1:2\n@#if i == {}\nx=1;\n@#endif\n@#if i == {syntax_iteration}\nparameters rho; rho={{1}};\n@#endif\n@#endfor\n", 3 - syntax_iteration
+            "model_local_variable x;\n@#for i in 1:2\n@#if i == {}\nx=1;\n@#endif\n@#if i == {syntax_iteration}\nparameters rho; rho={{1}};\n@#endif\n@#endfor\n",
+            3 - syntax_iteration
         );
         refusal(&source, code, sentence);
         assert_eq!(errors(&source).len(), 1, "{:?}", errors(&source));
         let mcp = dygnosis::dynare_diagnose(&source, None, None);
-        assert!(mcp
-            .iter()
-            .any(|row| row.code == code && row.message == sentence));
-        assert!(!mcp
-            .iter()
-            .any(|row| row.code == if code == "E001" { "E378" } else { "E001" }));
+        assert!(
+            mcp.iter()
+                .any(|row| row.code == code && row.message == sentence)
+        );
+        assert!(
+            !mcp.iter()
+                .any(|row| row.code == if code == "E001" { "E378" } else { "E001" })
+        );
         if let Some(binary) = dygnosis::find_preprocessor(None) {
             let result = dygnosis::run_preprocessor(
                 &source,
@@ -591,9 +604,10 @@ fn repeated_invalid_prior_shape_precedes_its_type_and_a_later_lexer_refusal() {
     );
     assert!(!errors(source).iter().any(|d| d.code == "E378"));
     let mcp = dygnosis::dynare_diagnose(source, None, None);
-    assert!(mcp
-        .iter()
-        .any(|d| d.code == "E001" && d.message.contains("prior")));
+    assert!(
+        mcp.iter()
+            .any(|d| d.code == "E001" && d.message.contains("prior"))
+    );
     assert!(!mcp.iter().any(|d| d.code == "E378"));
     if let Some(binary) = dygnosis::find_preprocessor(None) {
         let result = dygnosis::run_preprocessor(
@@ -630,7 +644,9 @@ fn repeated_completed_shock_actions_precede_a_later_lexer_refusal() {
             "Unknown symbol: bad",
         ),
     ] {
-        let source = format!("var y; varexo e; model; y=e; end;\n@#for i in 1:2\nshocks; {row} end;\n@#endfor\nshocks; var e={{1}}; end;\n");
+        let source = format!(
+            "var y; varexo e; model; y=e; end;\n@#for i in 1:2\nshocks; {row} end;\n@#endfor\nshocks; var e={{1}}; end;\n"
+        );
         refusal(&source, code, sentence);
         assert!(!errors(&source).iter().any(|d| d.code == "E001"));
         let mcp = dygnosis::dynare_diagnose(&source, None, None);
@@ -666,14 +682,18 @@ fn regular_shock_shape_and_name_refusals_follow_macro_execution_order() {
             "syntax error, unexpected END, expecting PERIODS",
         ),
     ] {
-        let source = format!("var y; varexo e; model; y=e; end;\n@#for i in 1:2\n@#if i == {syntax_iteration}\nshocks; var e; end;\n@#endif\n@#if i == {}\nshocks; var bad=1; end;\n@#endif\n@#endfor\n", 3 - syntax_iteration);
+        let source = format!(
+            "var y; varexo e; model; y=e; end;\n@#for i in 1:2\n@#if i == {syntax_iteration}\nshocks; var e; end;\n@#endif\n@#if i == {}\nshocks; var bad=1; end;\n@#endif\n@#endfor\n",
+            3 - syntax_iteration
+        );
         refusal(&source, code, sentence);
         assert_eq!(errors(&source).len(), 1);
         let mcp = dygnosis::dynare_diagnose(&source, None, None);
         assert!(mcp.iter().any(|d| d.code == code && d.message == sentence));
-        assert!(!mcp
-            .iter()
-            .any(|d| d.code == if code == "E001" { "E058" } else { "E001" }));
+        assert!(
+            !mcp.iter()
+                .any(|d| d.code == if code == "E001" { "E058" } else { "E001" })
+        );
         if let Some(binary) = dygnosis::find_preprocessor(None) {
             let result = dygnosis::run_preprocessor(
                 &source,
@@ -791,9 +811,10 @@ fn generated_shapes_keep_producer_order_when_tokens_share_written_spans() {
             }
             let mcp = dygnosis::dynare_diagnose(&source, None, None);
             assert!(mcp.iter().any(|d| d.code == expected));
-            assert!(!mcp
-                .iter()
-                .any(|d| d.code == if action_first { "E001" } else { "E378" }));
+            assert!(
+                !mcp.iter()
+                    .any(|d| d.code == if action_first { "E001" } else { "E378" })
+            );
             if let Some(binary) = dygnosis::find_preprocessor(None) {
                 let result = dygnosis::run_preprocessor(
                     &source,
@@ -855,9 +876,10 @@ fn lexer_refused_family_bodies_do_not_reach_later_empty_body_shapes() {
         let source = format!("{HEADER}{body}");
         refusal(&source, "E001", "character unrecognized by lexer");
         let mcp = dygnosis::dynare_diagnose(&source, None, None);
-        assert!(mcp
-            .iter()
-            .any(|d| d.code == "E001" && d.message == "character unrecognized by lexer"));
+        assert!(
+            mcp.iter()
+                .any(|d| d.code == "E001" && d.message == "character unrecognized by lexer")
+        );
         if let Some(binary) = dygnosis::find_preprocessor(None) {
             let result = dygnosis::run_preprocessor(
                 &source,

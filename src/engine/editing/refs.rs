@@ -1,7 +1,7 @@
 //! Lexer-based identifier occurrences. Shared by LSP and MCP.
 
 use crate::engine::diagnostics::check_parse::reserved_reason;
-use crate::engine::language::lexer::{tokenize, TokenKind};
+use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::language::span::Span;
 
 /// Dynare NAME token: letter or underscore, then letters, digits, underscores.

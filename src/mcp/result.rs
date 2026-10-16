@@ -3,7 +3,7 @@
 use rmcp::model::{CallToolResult, ContentBlock};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 /// Serialized result ceiling. A complete edit proposal must fit in one response.
@@ -399,13 +399,15 @@ mod tests {
             ..options
         };
         assert!(Pages::new("diagnose", "two", &query, &next).is_err());
-        assert!(Pages::new(
-            "diagnose",
-            "one",
-            &json!({"code":"E001","page_size":1}),
-            &next
-        )
-        .is_err());
+        assert!(
+            Pages::new(
+                "diagnose",
+                "one",
+                &json!({"code":"E001","page_size":1}),
+                &next
+            )
+            .is_err()
+        );
         let mut pages = Pages::new("diagnose", "one", &query, &next).unwrap();
         let mut rows = vec![json!(1), json!(2)];
         pages.collection("diagnostics", &mut rows);
@@ -437,11 +439,13 @@ mod tests {
         let canonical = wire.structured_content.unwrap();
         assert!(canonical["proposal"].is_null());
         assert_eq!(canonical["outcome"]["status"], "refused");
-        assert!(canonical["limits"][0]["original_outcome_codes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|code| code == "UNKNOWN_COMMAND"));
+        assert!(
+            canonical["limits"][0]["original_outcome_codes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|code| code == "UNKNOWN_COMMAND")
+        );
     }
 
     #[test]

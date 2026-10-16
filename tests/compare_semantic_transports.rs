@@ -3,14 +3,14 @@
 use std::collections::BTreeMap;
 
 use dygnosis::compare_snapshots::{
-    capture_git_snapshot, compare_captured_snapshots, CapturedSnapshot, GitSnapshotInput,
-    ManifestEntry, SnapshotCapture, SnapshotCoordinates, SourceFact,
+    CapturedSnapshot, GitSnapshotInput, ManifestEntry, SnapshotCapture, SnapshotCoordinates,
+    SourceFact, capture_git_snapshot, compare_captured_snapshots,
 };
 use dygnosis::dynare_compare_models;
-use dygnosis::server::{new_service, Backend};
-use serde_json::{json, Value};
-use tower_lsp::lsp_types::*;
+use dygnosis::server::{Backend, new_service};
+use serde_json::{Value, json};
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 const BASE: &str = "var y c x v; varexo e u; parameters a b; a=.5; b=.9; model; y=a*y(-1)+e; c=y; x=c+u; v=x; end;\n";
 
@@ -534,11 +534,13 @@ fn estimation_option_changes_have_one_complete_written_command_owner() {
             .find(|expression| expression["field"] == "statement_text")
             .unwrap();
         assert!(text["after"]["text"].as_str().unwrap().contains(to));
-        assert!(rows[0]["fields"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|field| field["name"] == "data_options"));
+        assert!(
+            rows[0]["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|field| field["name"] == "data_options")
+        );
         if from == "order=1" {
             let edits: String = text["after"]["runs"]
                 .as_array()
@@ -605,9 +607,10 @@ fn observable_lists_have_only_their_individual_name_owners() {
                 })
                 .collect();
             assert_eq!(rows.len(), names.len(), "{keyword} {change}: {rows:?}");
-            assert!(rows
-                .iter()
-                .all(|row| row["family"] == "observables" && row["change"] == change));
+            assert!(
+                rows.iter()
+                    .all(|row| row["family"] == "observables" && row["change"] == change)
+            );
             assert_eq!(
                 rows.iter()
                     .map(|row| row["name"].as_str().unwrap())
@@ -644,15 +647,15 @@ fn uncertain_moments_use_only_added_and_removed_change_types() {
             .count(),
         3
     );
-    assert!(rows.iter().all(
-        |row| row["fields"]
+    assert!(
+        rows.iter().all(|row| row["fields"]
             .as_array()
             .unwrap()
             .iter()
             .any(|field| field["name"] == "expression"
                 && field["before"]["value"]["value"] != "c*y"
-                && field["after"]["value"]["value"] != "c*y")
-    ));
+                && field["after"]["value"]["value"] != "c*y"))
+    );
 }
 
 fn captured(id: &str, text: &str) -> CapturedSnapshot {
@@ -976,10 +979,12 @@ async fn equation_surgery_written_source_is_exact_across_compare_adapters() {
             .is_empty(),
         "display context must not count a formatting edit as a model change"
     );
-    assert!(!source_only["source_changes"]["files"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        !source_only["source_changes"]["files"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1207,7 +1212,9 @@ fn written_block_boundaries_follow_parent_presence() {
 #[test]
 fn new_moment_block_cards_highlight_their_whole_definition() {
     let before = format!("{BASE}matched_moments;\ny;\nc*y;\nend;");
-    let after = format!("{before}\nsteady_state_model; y=0; c=0; end;\nshocks; var e; stderr 0.02; end;\nestimated_params; a, beta_pdf, 0.6, 0.1; end;\nmatched_irfs; var y; varexo e; periods 1 2 3; values 0.02 0.015 0.01; end;\nmatched_irfs_weights; y(1), e, c(2), e, 0.75; end;");
+    let after = format!(
+        "{before}\nsteady_state_model; y=0; c=0; end;\nshocks; var e; stderr 0.02; end;\nestimated_params; a, beta_pdf, 0.6, 0.1; end;\nmatched_irfs; var y; varexo e; periods 1 2 3; values 0.02 0.015 0.01; end;\nmatched_irfs_weights; y(1), e, c(2), e, 0.75; end;"
+    );
     for (old, new, side, role) in [
         (&before, &after, "after", "added"),
         (&after, &before, "before", "removed"),

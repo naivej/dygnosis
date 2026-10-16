@@ -8,9 +8,9 @@ use std::time::Duration;
 
 use dygnosis::model::{HeterogeneityCommandKind, ShockBlockKind, ShockKind};
 use dygnosis::{
-    analyze, classify_variable_timing, dynare_equations, dynare_expand, dynare_model_info,
-    expand_report, find_preprocessor, parse, run_preprocessor, structure_summary, JsonStage,
-    TimingClass,
+    JsonStage, TimingClass, analyze, classify_variable_timing, dynare_equations, dynare_expand,
+    dynare_model_info, expand_report, find_preprocessor, parse, run_preprocessor,
+    structure_summary,
 };
 
 fn fixture(name: &str) -> String {
@@ -380,10 +380,12 @@ fn accepted_family_keeps_written_structure() {
         "both overwrite orders and all four row kinds parse"
     );
     // The stderr rows keep their written tree; the `=` rows fold.
-    assert!(het_blocks[0]
-        .stochastic
-        .iter()
-        .all(|stmt| stmt.rhs_expr.is_some()));
+    assert!(
+        het_blocks[0]
+            .stochastic
+            .iter()
+            .all(|stmt| stmt.rhs_expr.is_some())
+    );
     assert!(het_blocks[0].stochastic[1].rhs.is_some());
     assert!(het_blocks[0].stochastic[2].rhs.is_some());
     assert!(het_blocks[0].stochastic[3].rhs.is_some());
@@ -486,9 +488,11 @@ fn perp_spellings_parse_in_heterogeneous_bodies() {
         let comp = eq.complementarity.as_ref().expect("perpendicular stored");
         assert!(comp.matched.is_some(), "{}", comp.text);
     }
-    assert!(!analyze(&parse(&fixture("quiet_perp_spellings.mod")))
-        .iter()
-        .any(|diag| diag.code == "E183"));
+    assert!(
+        !analyze(&parse(&fixture("quiet_perp_spellings.mod")))
+            .iter()
+            .any(|diag| diag.code == "E183")
+    );
 }
 
 #[test]
@@ -907,13 +911,17 @@ fn simulate_comma_list_is_fully_stored() {
         .map(|(name, _)| model.name(*name))
         .collect();
     assert_eq!(names, ["y", "c"]);
-    assert!(model.heterogeneity_commands[0]
-        .simulate_names
-        .iter()
-        .all(|(_, span)| span.end > span.start));
-    assert!(!analyze(&parse(&source))
-        .iter()
-        .any(|diag| diag.code == "E058"));
+    assert!(
+        model.heterogeneity_commands[0]
+            .simulate_names
+            .iter()
+            .all(|(_, span)| span.end > span.start)
+    );
+    assert!(
+        !analyze(&parse(&source))
+            .iter()
+            .any(|diag| diag.code == "E058")
+    );
 }
 
 #[test]
@@ -1015,10 +1023,12 @@ fn installed_hank_example_keeps_written_view() {
         .map(|decl| model.name(decl.name))
         .collect();
     assert_eq!(het_endo, ["c", "n", "ns", "a", "Va"]);
-    assert!(model
-        .exogenous
-        .iter()
-        .any(|decl| model.name(decl.name) == "e" && decl.heterogeneity.is_some()));
+    assert!(
+        model
+            .exogenous
+            .iter()
+            .any(|decl| model.name(decl.name) == "e" && decl.heterogeneity.is_some())
+    );
     if let Some(ref binary) = binary {
         let (accepted, report) = official_check(&source, binary);
         assert!(accepted, "7.2 refused the installed example: {report}");

@@ -3,15 +3,15 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower_lsp::lsp_types::*;
 
-use crate::engine::analysis::model_info::{classify_variable_timing, TimingInfo};
+use crate::engine::analysis::model_info::{TimingInfo, classify_variable_timing};
 use crate::engine::language::model::{Model, StatementKind, WrittenDeclaration};
 use crate::engine::language::span::{LineIndex, Span};
+use crate::engine::workspace::Workspace;
 use crate::engine::workspace::include_resolver::{is_virtual_uri, normalize_uri};
 use crate::engine::workspace::model_map::{SourceOccurrence, WrittenModelMap, WrittenSegment};
-use crate::engine::workspace::Workspace;
 use crate::lsp::settings::PresentationSettings;
 
 pub(crate) struct WrittenView<'a> {
@@ -266,23 +266,27 @@ impl<'a> WrittenView<'a> {
                 row["statement_id"] = json!(format!("s{}", written.statement_id));
                 row["name"] = json!(self.model.name(declaration.name));
                 row["written_kind"] = json!(written.written_kind);
-                row["final_kind"] = json!(self
-                    .authoritative
-                    .then(|| self.model.final_symbol_kind(declaration.name))
-                    .flatten());
+                row["final_kind"] = json!(
+                    self.authoritative
+                        .then(|| self.model.final_symbol_kind(declaration.name))
+                        .flatten()
+                );
                 row["long_name"] = json!(declaration.long_name);
                 row["tex_name"] = json!(declaration.tex_name);
                 row["log_transform"] = json!(declaration.log_transform);
-                row["written_dimension"] = json!(declaration
-                    .heterogeneity
-                    .map(|(name, _)| self.model.name(name)));
-                row["dimension"] = json!(self
-                    .authoritative
-                    .then(|| self
-                        .model
-                        .final_heterogeneity(declaration)
-                        .map(|name| self.model.name(name)))
-                    .flatten());
+                row["written_dimension"] = json!(
+                    declaration
+                        .heterogeneity
+                        .map(|(name, _)| self.model.name(name))
+                );
+                row["dimension"] = json!(
+                    self.authoritative
+                        .then(|| self
+                            .model
+                            .final_heterogeneity(declaration)
+                            .map(|name| self.model.name(name)))
+                        .flatten()
+                );
                 row["timing"] = if self.authoritative {
                     timing
                         .get(self.model.name(declaration.name))

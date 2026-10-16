@@ -1,15 +1,15 @@
 //! Native recursive-descent parser over the token stream.
 
-use std::collections::{hash_map::Entry, BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, hash_map::Entry};
 use std::ops::Range;
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::{Arc, atomic::AtomicBool};
 
 use crate::engine::language::constructor::{
     ConstructorContext, ConstructorTree, DataTreeScope, NodeId,
 };
 use crate::engine::language::expr::{BinOp, ExprId, ExprKind, UnOp};
 use crate::engine::language::intern::{Interner, Name};
-use crate::engine::language::lexer::{tokenize, Token, TokenKind};
+use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::model::{
     Assignment, CalibrationRange, ConditionalForecastPath, ConditionalForecastPaths, DataStatement,
     Decl, DottedHead, DottedKind, DottedStatement, Equation, EstimationStatement, FamilyOption,
@@ -2992,11 +2992,7 @@ impl Parser<'_> {
         let id = eq.lhs_expr?;
         let mut names: Vec<String> = Vec::new();
         self.collect_names(id, true, &mut names);
-        if names.len() == 1 {
-            names.pop()
-        } else {
-            None
-        }
+        if names.len() == 1 { names.pop() } else { None }
     }
 
     /// Distinct names used by an expression tree (`endogenous_only` keeps just declared
@@ -10773,7 +10769,7 @@ impl Parser<'_> {
                             .model
                             .heterogeneous_in_context(name, self.model.symbol_context()) =>
                     {
-                        continue
+                        continue;
                     }
                     Some(_) => return,
                     None => {}
@@ -12415,9 +12411,13 @@ impl Parser<'_> {
             // official sentences.
             None
         } else if self.model.external_function_names.contains(&callee) {
-            Some(format!("Using a derivative of an external function ({name}) in the model block is currently not allowed."))
+            Some(format!(
+                "Using a derivative of an external function ({name}) in the model block is currently not allowed."
+            ))
         } else {
-            Some(format!("To use an external function ({name}) within the model block, you must first declare it via the external_function() statement."))
+            Some(format!(
+                "To use an external function ({name}) within the model block, you must first declare it via the external_function() statement."
+            ))
         };
         if let Some(message) = message {
             self.record_shape_refusal(ShapeRefuse::official(span, "external_function", message));
@@ -14442,11 +14442,7 @@ fn leading_ident(s: &str) -> Option<&str> {
             break;
         }
     }
-    if end == 0 {
-        None
-    } else {
-        Some(&s[..end])
-    }
+    if end == 0 { None } else { Some(&s[..end]) }
 }
 
 fn strip_line_comment(line: &str) -> &str {
@@ -15025,9 +15021,11 @@ mod tests {
         assert_eq!(model.macro_incomplete_span, Some(Span::new(0, 0)));
         assert_eq!(model.incomplete_reasons.len(), 1);
         assert_eq!(model.incomplete_reasons[0].code, "I211");
-        assert!(model.incomplete_reasons[0]
-            .message
-            .contains("iteration work"));
+        assert!(
+            model.incomplete_reasons[0]
+                .message
+                .contains("iteration work")
+        );
         assert_eq!(budget.remaining_work(), 4);
         let diagnostics = crate::engine::diagnostics::analyze(&model);
         assert!(diagnostics.iter().any(|row| row.code == "I211"));
@@ -15310,10 +15308,12 @@ mod tests {
         assert!(model.is_linear);
         assert!(model.use_dll_span.is_some());
         assert!(model.no_static_span.is_some());
-        assert!(model
-            .deprecated_option_spans
-            .iter()
-            .any(|(o, _)| *o == DeprecatedOption::Bytecode));
+        assert!(
+            model
+                .deprecated_option_spans
+                .iter()
+                .any(|(o, _)| *o == DeprecatedOption::Bytecode)
+        );
     }
 
     #[test]
@@ -15414,27 +15414,33 @@ mod pinned_literal_tests {
                 "{source}: {:?}",
                 model.parse_issues
             );
-            assert!(model
-                .symbol_type_events
-                .iter()
-                .all(|event| !["d3", "D", "Inf", "NaN"].contains(&model.name(event.name))));
-            assert!(model
-                .equations
-                .first()
-                .and_then(|equation| equation.rhs_expr)
-                .or_else(|| model
-                    .param_assignments
+            assert!(
+                model
+                    .symbol_type_events
+                    .iter()
+                    .all(|event| !["d3", "D", "Inf", "NaN"].contains(&model.name(event.name)))
+            );
+            assert!(
+                model
+                    .equations
                     .first()
-                    .and_then(|assignment| assignment.expr))
-                .is_some_and(|id| matches!(model.exprs.get(id).kind, ExprKind::Number)));
+                    .and_then(|equation| equation.rhs_expr)
+                    .or_else(|| model
+                        .param_assignments
+                        .first()
+                        .and_then(|assignment| assignment.expr))
+                    .is_some_and(|id| matches!(model.exprs.get(id).kind, ExprKind::Number))
+            );
         }
         // The pin accepts D lexically but its strtod constructor reads the
         // mantissa. 1d3-1 therefore constructs zero and the division refuses.
         let model = parse("parameters p;p=1/(1d3-1);");
-        assert!(model
-            .const_fold_errors
-            .iter()
-            .any(|(_, code, _)| *code == "E278"));
+        assert!(
+            model
+                .const_fold_errors
+                .iter()
+                .any(|(_, code, _)| *code == "E278")
+        );
         let model = parse("var y;model;y=Inf;end;");
         assert!(model.parse_issues.iter().any(|issue| matches!(&issue.kind, ParseIssueKind::BisonSyntax(message) if message.contains("INF_CONSTANT"))));
     }

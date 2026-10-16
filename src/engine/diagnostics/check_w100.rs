@@ -13,8 +13,7 @@ const E100_MSG: &str = "A planner_objective statement must be used with a ramsey
 const E202_MSG: &str = "You cannot use the discretionary_policy command when you use either ramsey_model or ramsey_policy and vice versa";
 const E203_MSG: &str =
     "A ramsey_constraints block requires the presence of a ramsey_model or ramsey_policy statement";
-const E204_MSG: &str =
-    "The osr statement cannot have both optim_weights and a planner_objective; they are mutually exclusive.";
+const E204_MSG: &str = "The osr statement cannot have both optim_weights and a planner_objective; they are mutually exclusive.";
 const E215_MSG: &str = "discretionary_policy: the instruments option is required.";
 
 pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
@@ -343,8 +342,10 @@ mod parse_receipt_tests {
         }
         let model = crate::parse("parameters p;change_type(var) p;ramsey_model(instruments=(p));");
         assert!(parse_refusals(&model).is_empty());
-        assert!(check_w100(&model)
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E100"));
+        assert!(
+            check_w100(&model)
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E100")
+        );
     }
 }

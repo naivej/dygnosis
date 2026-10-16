@@ -3,7 +3,7 @@
 use rmcp::model::CallToolResult;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -230,7 +230,9 @@ pub(super) fn dispatch_batch(
                 if params.output.continuation.is_some()
                     && !params.expected_revisions.contains_key(root)
                 {
-                    return Err(invalid("A batch continuation requires expected_revisions for every available checked root"));
+                    return Err(invalid(
+                        "A batch continuation requires expected_revisions for every available checked root",
+                    ));
                 }
                 let new_bytes: usize = snapshot
                     .sources
@@ -374,7 +376,7 @@ pub(super) fn dispatch_batch(
     let mut pages = match Pages::new("v3:dynare_diagnose", &revision, &arguments, &params.output) {
         Ok(pages) => pages,
         Err(message) if message.starts_with("INPUT_CHANGED") => {
-            return Ok(ToolResult::refused("INPUT_CHANGED", message).wire())
+            return Ok(ToolResult::refused("INPUT_CHANGED", message).wire());
         }
         Err(message) => return Err(invalid(message)),
     };
@@ -644,7 +646,7 @@ fn comparison_mode(
                     .len()
                 > control.limits.max_files
         {
-            let mut result=ToolResult::refused(
+            let mut result = ToolResult::refused(
                 "SOURCE_LIMIT",
                 "The two comparison inputs exceed the request source-byte or checked-file and lookup-candidate limit. No comparison facts were produced.",
             );
@@ -796,7 +798,7 @@ fn compare_supplied(
 ) -> Result<Value, rmcp::ErrorData> {
     use crate::engine::comparison::compare_navigation::{self, ComparisonInput, Coordinates};
     use crate::engine::comparison::semantic_diff::{self, CaptureBoundary, Side};
-    use crate::engine::comparison::{compare_models_with_sources, CompareSource};
+    use crate::engine::comparison::{CompareSource, compare_models_with_sources};
     control.check().map_err(source_error)?;
     let mut diff = compare_models_with_sources(
         &before.model,
@@ -1097,9 +1099,11 @@ mod tests {
         );
         assert_eq!(result["outcome"]["status"], "partial");
         let roots = result["data"]["roots"].as_array().unwrap();
-        assert!(roots
-            .iter()
-            .any(|root| root["root"] == "Models\\Root.mod" && root["status"] == "ok"));
+        assert!(
+            roots
+                .iter()
+                .any(|root| root["root"] == "Models\\Root.mod" && root["status"] == "ok")
+        );
         assert!(roots.iter().any(|root| root["root"] == "missing.mod"
             && root["status"] == "failed"
             && root["code"] == "ROOT_NOT_FOUND"));
@@ -1117,11 +1121,13 @@ mod tests {
         );
         assert_eq!(result["inputs"][0]["revision"].as_str().unwrap().len(), 64);
         for root in roots {
-            assert!(root["diagnostics"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|row| row["code"] == "E020"));
+            assert!(
+                root["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|row| row["code"] == "E020")
+            );
         }
     }
 
@@ -1140,11 +1146,13 @@ mod tests {
         assert_eq!(result["data"]["summary"]["unfinished"], 1);
         assert_eq!(result["data"]["roots"][1]["root"], "b.mod");
         assert_eq!(result["data"]["roots"][1]["status"], "unfinished");
-        assert!(result["limits"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|limit| limit["code"] == "WORK_LIMIT"));
+        assert!(
+            result["limits"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|limit| limit["code"] == "WORK_LIMIT")
+        );
     }
 
     // Per-root input guards reject a changed dependency, including unedited text.
@@ -1162,10 +1170,12 @@ mod tests {
         let second = run("dynare_workspace_diagnose", next, RequestControl::default());
         assert_eq!(second["outcome"]["status"], "refused");
         assert_eq!(second["data"]["roots"][0]["code"], "INPUT_CHANGED");
-        assert!(second["data"]["roots"][0]["diagnostics"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            second["data"]["roots"][0]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     // Compact comparison keeps selected row targets while dropping supporting
@@ -1212,11 +1222,13 @@ mod tests {
                 value["data"].pointer(pointer).is_some(),
                 "selected row pointer must resolve"
             );
-            assert!(value["data"]["navigation"]["rows"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|target| target["id"] == pointer));
+            assert!(
+                value["data"]["navigation"]["rows"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|target| target["id"] == pointer)
+            );
         }
     }
 
@@ -1321,11 +1333,13 @@ mod tests {
             .as_str()
             .unwrap();
         assert!(second["data"].pointer(pointer).is_some());
-        assert!(second["data"]["navigation"]["rows"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| row["id"] == pointer));
+        assert!(
+            second["data"]["navigation"]["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["id"] == pointer)
+        );
     }
 
     // A continued query cannot change its diagnostic filter and return stale
@@ -1381,17 +1395,21 @@ mod tests {
             RequestControl::default(),
         );
         assert_ne!(result["outcome"]["status"], "refused");
-        assert!(result["inputs"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|input| input["synthetic_root"] == true
-                && input["root"].is_null()
-                && input["source_policy"] == "map"));
-        assert!(!result["data"]["semantic"]["rows"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            result["inputs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|input| input["synthetic_root"] == true
+                    && input["root"].is_null()
+                    && input["source_policy"] == "map")
+        );
+        assert!(
+            !result["data"]["semantic"]["rows"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     // Two individually valid snapshots must still obey one request file cap.
@@ -1483,10 +1501,12 @@ mod tests {
         assert_eq!(result["outcome"]["status"], "partial");
         assert_eq!(result["data"]["roots"][0]["status"], "partial");
         assert_eq!(result["data"]["summary"]["partial"], 1);
-        assert!(!result["data"]["roots"][0]["reasons"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            !result["data"]["roots"][0]["reasons"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         assert!(result["selection"]["collections"]["diagnostics:a.mod"]["total_matches"].is_null());
     }
 
@@ -1494,8 +1514,7 @@ mod tests {
     // Batch and comparison outcomes must retain that typed stop receipt.
     #[test]
     fn actual_macro_work_stop_survives_batch_and_comparison_results() {
-        let source =
-            "var y;\nmodel;\n@#for i in 1:1000\n@#for j in 1:1000\ny=0;\n@#endfor\n@#endfor\nend;\n";
+        let source = "var y;\nmodel;\n@#for i in 1:1000\n@#for j in 1:1000\ny=0;\n@#endfor\n@#endfor\nend;\n";
         let batch = run(
             "dynare_workspace_diagnose",
             json!({"files":{"root.mod":source},"roots":["root.mod"],"detail":"compact"}),
@@ -1508,15 +1527,19 @@ mod tests {
         );
         assert_eq!(batch["data"]["roots"][0]["status"], "partial", "{batch}");
         assert_eq!(batch["data"]["roots"][0]["code"], "INCOMPLETE_INPUT");
-        assert!(batch["data"]["roots"][0]["diagnostics"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| row["code"] == "I211"));
-        assert!(!batch["data"]["roots"][0]["failure"]
-            .as_str()
-            .unwrap()
-            .contains("include is unresolved"));
+        assert!(
+            batch["data"]["roots"][0]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["code"] == "I211")
+        );
+        assert!(
+            !batch["data"]["roots"][0]["failure"]
+                .as_str()
+                .unwrap()
+                .contains("include is unresolved")
+        );
         for result in [&batch, &comparison] {
             assert_ne!(result["outcome"]["status"], "ok", "{result}");
             let receipt = result["limits"]

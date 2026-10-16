@@ -69,7 +69,7 @@ pub use test_support::preprocessor;
 
 pub use auto_fix::{apply_fix, auto_fix};
 pub use catalog::{
-    command_options, is_known_command, list_options, option_doc, ListOptions, NamedOption,
+    ListOptions, NamedOption, command_options, is_known_command, list_options, option_doc,
 };
 pub use check_clash::check_clash;
 pub use check_context::check_context;
@@ -100,23 +100,23 @@ pub use check_w130::check_w130;
 pub use check_w160::{check_w160, quiet_i050};
 pub use companion::{CompanionKind, CompanionRecord};
 pub use diagnostic::{
-    analyze, check_file, check_file_with_origins, Diagnostic, DiagnosticSet, Severity, TextEdit,
-    WritingContext, WritingRows,
+    Diagnostic, DiagnosticSet, Severity, TextEdit, WritingContext, WritingRows, analyze,
+    check_file, check_file_with_origins,
 };
 pub use e010::check_e010;
 pub use equations::{
-    count_gap, equations, explain_equation, CountGap, EquationIdent, EquationRow, IdentClass,
+    CountGap, EquationIdent, EquationRow, IdentClass, count_gap, equations, explain_equation,
 };
-pub use expand::{expand_report, EquationOrigin, ExpandReport, OriginFrame};
+pub use expand::{EquationOrigin, ExpandReport, OriginFrame, expand_report};
 pub use expr::{BinOp, Expr, ExprArena, ExprId, ExprKind, IdentRef, UnOp};
 pub use format::{format_range, format_text};
 pub use include_resolver::{find_workspace_root, resolve_companion_path, resolve_include_path};
 pub use mcp::{
-    dynare_auto_fix, dynare_compare_models, dynare_diagnose, dynare_equations, dynare_expand,
-    dynare_explain, dynare_extract, dynare_find_references, dynare_format,
-    dynare_list_diagnostic_codes, dynare_list_options, dynare_model_info, dynare_related_files,
-    dynare_rename, dynare_workspace_diagnose, registered_tool_names, tools_list_json,
-    DiagnosticCodeItem, McpDiagnostic, McpReference, McpWorkspaceReference,
+    DiagnosticCodeItem, McpDiagnostic, McpReference, McpWorkspaceReference, dynare_auto_fix,
+    dynare_compare_models, dynare_diagnose, dynare_equations, dynare_expand, dynare_explain,
+    dynare_extract, dynare_find_references, dynare_format, dynare_list_diagnostic_codes,
+    dynare_list_options, dynare_model_info, dynare_related_files, dynare_rename,
+    dynare_workspace_diagnose, registered_tool_names, tools_list_json,
 };
 pub use model::{
     CalibrationRange, Complementarity, ComplementarityTriple, DeprecatedOption, EstimatedParam,
@@ -128,13 +128,13 @@ pub use model::{
     ShocksSemiFamily,
 };
 pub use model_diff::{
-    compare_models, compare_models_with_sources, CompareSource, EquationChange, IndexedEquation,
-    ModelDiff, ParameterChange, ShockSetting, ShockSetupChange, SourceLocation, SymbolChange,
-    SymbolSide, UnmatchedSameName, WrittenPeriod,
+    CompareSource, EquationChange, IndexedEquation, ModelDiff, ParameterChange, ShockSetting,
+    ShockSetupChange, SourceLocation, SymbolChange, SymbolSide, UnmatchedSameName, WrittenPeriod,
+    compare_models, compare_models_with_sources,
 };
 pub use model_info::{
-    assigned_number, classify_variable_timing, format_timing_line, structure_summary,
-    StructureSummary, TimingClass, TimingInfo,
+    StructureSummary, TimingClass, TimingInfo, assigned_number, classify_variable_timing,
+    format_timing_line, structure_summary,
 };
 pub use parser::parse;
 
@@ -145,7 +145,7 @@ pub fn block_openers() -> &'static [&'static str] {
     parser::BLOCK_OPENERS
 }
 #[doc(hidden)]
-pub use preprocessor::{find_preprocessor, run_preprocessor, JsonStage, PreprocessorResult};
+pub use preprocessor::{JsonStage, PreprocessorResult, find_preprocessor, run_preprocessor};
 pub use refs::{
     ident_at, is_legal_ident, occurrences, option_command_at, option_owner_at, rename_in_text,
 };

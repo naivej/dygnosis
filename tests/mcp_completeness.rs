@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use dygnosis::{dynare_compare_models, dynare_equations, dynare_model_info};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn assert_incomplete_equations(result: &Value, status: &Value) {
     assert_eq!(result["status"], "incomplete", "{result}");
@@ -36,9 +36,11 @@ fn equations_use_model_info_completeness_for_all_required_inputs() {
 
 fn assert_incomplete_compare(result: Value) {
     assert_eq!(result["status"], "incomplete", "{result}");
-    assert!(result["message"]
-        .as_str()
-        .is_some_and(|message| !message.is_empty()));
+    assert!(
+        result["message"]
+            .as_str()
+            .is_some_and(|message| !message.is_empty())
+    );
     assert!(
         result
             .as_object()
@@ -111,10 +113,12 @@ fn identical_roots_with_one_missing_include_do_not_claim_equation_changes() {
             Some(after),
             None,
         );
-        assert!(result["message"]
-            .as_str()
-            .unwrap()
-            .contains("change arrays"));
+        assert!(
+            result["message"]
+                .as_str()
+                .unwrap()
+                .contains("change arrays")
+        );
         assert!(result["inputs"].to_string().contains("incomplete_reasons"));
         assert_incomplete_compare(result);
     }

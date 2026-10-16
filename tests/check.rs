@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use dygnosis::{check_file, check_walk, dynare_workspace_diagnose, Diagnostic, Severity};
+use dygnosis::{Diagnostic, Severity, check_file, check_walk, dynare_workspace_diagnose};
 
 const OUT: &[&str] = &[
     "E040", "W040", "W041", "I041", "W071", "I070", "I071", "W080", "W081", "DYNR",

@@ -1,4 +1,4 @@
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage};
+use dygnosis::{JsonStage, analyze, find_preprocessor, parse, run_preprocessor};
 use std::time::Duration;
 
 fn check_list(source: &str, refuses: bool, needle: &str) {
@@ -155,7 +155,9 @@ fn heterogeneous_names_are_wrong_types_until_successfully_made_ordinary() {
             } else {
                 String::new()
             };
-            let source = format!("heterogeneity_dimension h; var y; {written}(heterogeneity=h) p; {change} model; y=0; end; {command} p;");
+            let source = format!(
+                "heterogeneity_dimension h; var y; {written}(heterogeneity=h) p; {change} model; y=0; end; {command} p;"
+            );
             check_list(
                 &source,
                 !ordinary,

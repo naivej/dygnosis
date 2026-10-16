@@ -73,7 +73,16 @@ fn assert_fixture(
 
 #[test]
 fn whole_construct_matrix_keeps_baseline_messages_severity_and_multiplicity() {
-    assert_fixture("shape/i050_none.mod", "I050", "model", 0, &[(3, "No initval or steady_state_model block. Add an initval block with initial guesses, or a steady_state_model block with closed-form assignments.")]);
+    assert_fixture(
+        "shape/i050_none.mod",
+        "I050",
+        "model",
+        0,
+        &[(
+            3,
+            "No initval or steady_state_model block. Add an initval block with initial guesses, or a steady_state_model block with closed-form assignments.",
+        )],
+    );
     assert_fixture(
         "shape/w042_missing.mod",
         "W042",
@@ -91,7 +100,16 @@ fn whole_construct_matrix_keeps_baseline_messages_severity_and_multiplicity() {
             "1 endogenous variable(s) missing from initval (will default to 0): c",
         )],
     );
-    assert_fixture("d_ms/quiet_prior_std_endo.mod", "W092", "varobs", 0, &[(2, "3 observed variable(s) but only 1 shock source(s) found (structural shocks plus measurement errors). Review the observed variables and shock sources before estimation.")]);
+    assert_fixture(
+        "d_ms/quiet_prior_std_endo.mod",
+        "W092",
+        "varobs",
+        0,
+        &[(
+            2,
+            "3 observed variable(s) but only 1 shock source(s) found (structural shocks plus measurement errors). Review the observed variables and shock sources before estimation.",
+        )],
+    );
     assert_fixture(
         "compare/groups_after.mod",
         "E188",
@@ -99,10 +117,46 @@ fn whole_construct_matrix_keeps_baseline_messages_severity_and_multiplicity() {
         0,
         &[(1, "There are 4 equations but 2 endogenous variables!")],
     );
-    assert_fixture("clash/e027_ramsey_varexo_det.mod", "W013", "model", 0, &[(2, "Equation count mismatch: 1 equation(s) but 1 endogenous variable(s). ramsey_model with 1 instrument(s) expects delta = -1.")]);
-    assert_fixture("compare/het_rewrite_before.mod", "E192", "model", 1, &[(1, "There are 1 equations but 2 endogenous variables in the model for heterogeneity dimension 'h'!")]);
-    assert_fixture("compare/het_repeat_after.mod", "W208", "model", 1, &[(2, "Equation count mismatch: 2 equation(s) but 1 endogenous variable(s) in heterogeneity dimension 'h'.")]);
-    assert_fixture("w100/w100_planner.mod", "E100", "planner_objective", 0, &[(1, "A planner_objective statement must be used with a ramsey_model, a ramsey_policy, osr, or a discretionary_policy statement and vice versa.")]);
+    assert_fixture(
+        "clash/e027_ramsey_varexo_det.mod",
+        "W013",
+        "model",
+        0,
+        &[(
+            2,
+            "Equation count mismatch: 1 equation(s) but 1 endogenous variable(s). ramsey_model with 1 instrument(s) expects delta = -1.",
+        )],
+    );
+    assert_fixture(
+        "compare/het_rewrite_before.mod",
+        "E192",
+        "model",
+        1,
+        &[(
+            1,
+            "There are 1 equations but 2 endogenous variables in the model for heterogeneity dimension 'h'!",
+        )],
+    );
+    assert_fixture(
+        "compare/het_repeat_after.mod",
+        "W208",
+        "model",
+        1,
+        &[(
+            2,
+            "Equation count mismatch: 2 equation(s) but 1 endogenous variable(s) in heterogeneity dimension 'h'.",
+        )],
+    );
+    assert_fixture(
+        "w100/w100_planner.mod",
+        "E100",
+        "planner_objective",
+        0,
+        &[(
+            1,
+            "A planner_objective statement must be used with a ramsey_model, a ramsey_policy, osr, or a discretionary_policy statement and vice versa.",
+        )],
+    );
     assert_fixture(
         "clash/e104_two_planner.mod",
         "E104",
@@ -117,8 +171,26 @@ fn whole_construct_matrix_keeps_baseline_messages_severity_and_multiplicity() {
         1,
         &[(1, "Multiple 'occbin_constraints' blocks are not allowed")],
     );
-    assert_fixture("w100/e203_ramsey_constraints.mod", "E203", "ramsey_constraints", 0, &[(1, "A ramsey_constraints block requires the presence of a ramsey_model or ramsey_policy statement")]);
-    assert_fixture("d_check/e212_estimated_shock.mod", "E212", "estimated_params", 0, &[(1, "some estimated parameters (rho) also appear in the expressions defining the variance/covariance matrix of shocks; this is not allowed.")]);
+    assert_fixture(
+        "w100/e203_ramsey_constraints.mod",
+        "E203",
+        "ramsey_constraints",
+        0,
+        &[(
+            1,
+            "A ramsey_constraints block requires the presence of a ramsey_model or ramsey_policy statement",
+        )],
+    );
+    assert_fixture(
+        "d_check/e212_estimated_shock.mod",
+        "E212",
+        "estimated_params",
+        0,
+        &[(
+            1,
+            "some estimated parameters (rho) also appear in the expressions defining the variance/covariance matrix of shocks; this is not allowed.",
+        )],
+    );
     assert_fixture(
         "d_check/e217_initval_after_endval.mod",
         "E217",
@@ -239,7 +311,16 @@ fn whole_construct_matrix_keeps_baseline_messages_severity_and_multiplicity() {
             "You may only have one svar_identification block in your .mod file.",
         )],
     );
-    assert_fixture("d_ms/e357_svar_identification_two_cholesky.mod", "E357", "svar_identification", 0, &[(1, "Within the svar_identification statement, you may only have one of upper_cholesky and lower_cholesky.")]);
+    assert_fixture(
+        "d_ms/e357_svar_identification_two_cholesky.mod",
+        "E357",
+        "svar_identification",
+        0,
+        &[(
+            1,
+            "Within the svar_identification statement, you may only have one of upper_cholesky and lower_cholesky.",
+        )],
+    );
     assert_fixture(
         "d_pac/e438_pac_missing_target.mod",
         "E438",
@@ -250,8 +331,26 @@ fn whole_construct_matrix_keeps_baseline_messages_severity_and_multiplicity() {
             "the block 'pac_target_info(q)' is missing the 'target' statement",
         )],
     );
-    assert_fixture("d_pac/e438_pac_missing_nonstat_aux.mod", "E438", "pac_target_info", 0, &[(1, "the block 'pac_target_info(q)' is missing the 'auxname_target_nonstationary' statement")]);
-    assert_fixture("d_pac/e438_pac_no_nonstat.mod", "E438", "pac_target_info", 0, &[(1, "the block 'pac_target_info(q)' must contain at least one nonstationary component (i.e. of 'kind' equal to either 'dd' or 'dl').")]);
+    assert_fixture(
+        "d_pac/e438_pac_missing_nonstat_aux.mod",
+        "E438",
+        "pac_target_info",
+        0,
+        &[(
+            1,
+            "the block 'pac_target_info(q)' is missing the 'auxname_target_nonstationary' statement",
+        )],
+    );
+    assert_fixture(
+        "d_pac/e438_pac_no_nonstat.mod",
+        "E438",
+        "pac_target_info",
+        0,
+        &[(
+            1,
+            "the block 'pac_target_info(q)' must contain at least one nonstationary component (i.e. of 'kind' equal to either 'dd' or 'dl').",
+        )],
+    );
     assert_fixture(
         "d_hank/e474_optim.mod",
         "E474",
@@ -282,7 +381,16 @@ fn whole_construct_matrix_keeps_baseline_messages_severity_and_multiplicity() {
             "The file or series option must be passed to the data statement.",
         )],
     );
-    assert_fixture("d_ms/e341_ms_estimation_missing.mod", "E341", "ms_estimation", 0, &[(1, "If you do not pass no_create_init to ms_estimation, you must pass the datafile and initial_year options.")]);
+    assert_fixture(
+        "d_ms/e341_ms_estimation_missing.mod",
+        "E341",
+        "ms_estimation",
+        0,
+        &[(
+            1,
+            "If you do not pass no_create_init to ms_estimation, you must pass the datafile and initial_year options.",
+        )],
+    );
     assert_fixture(
         "d_ms/e342_conditional_forecast_no_parameter_set.mod",
         "E342",
@@ -323,8 +431,26 @@ fn whole_construct_matrix_keeps_baseline_messages_severity_and_multiplicity() {
             "A 'chain' option must be passed to the 'svar' statement.",
         )],
     );
-    assert_fixture("mom/mom_no_method.mod", "E382", "method_of_moments", 0, &[(1, "The 'method_of_moments' statement requires a method to be supplied via the 'mom_method' option. Possible values are 'GMM', 'SMM', or 'IRF_MATCHING'.")]);
-    assert_fixture("mom/mom_gmm_no_datafile.mod", "E383", "method_of_moments", 0, &[(1, "The 'method_of_moments' statement requires a data file to be supplied via the 'datafile' option.")]);
+    assert_fixture(
+        "mom/mom_no_method.mod",
+        "E382",
+        "method_of_moments",
+        0,
+        &[(
+            1,
+            "The 'method_of_moments' statement requires a method to be supplied via the 'mom_method' option. Possible values are 'GMM', 'SMM', or 'IRF_MATCHING'.",
+        )],
+    );
+    assert_fixture(
+        "mom/mom_gmm_no_datafile.mod",
+        "E383",
+        "method_of_moments",
+        0,
+        &[(
+            1,
+            "The 'method_of_moments' statement requires a data file to be supplied via the 'datafile' option.",
+        )],
+    );
     assert_fixture(
         "d_pac/e439_var_required.mod",
         "E439",
@@ -365,7 +491,16 @@ fn whole_construct_matrix_keeps_baseline_messages_severity_and_multiplicity() {
             "You must pass the 'discount' option to the 'pac_model' statement.",
         )],
     );
-    assert_fixture("d_pac/e441_vem_neither.mod", "E441", "var_expectation_model", 0, &[(1, "You must pass either the 'variable' or the 'expression' option to the var_expectation_model statement.")]);
+    assert_fixture(
+        "d_pac/e441_vem_neither.mod",
+        "E441",
+        "var_expectation_model",
+        0,
+        &[(
+            1,
+            "You must pass either the 'variable' or the 'expression' option to the var_expectation_model statement.",
+        )],
+    );
 }
 
 #[test]
@@ -413,9 +548,11 @@ fn prior_refusal_still_suppresses_later_shock_paths_after_range_change() {
     let source = "var y; varexo e u; parameters p; p=1; model; y=e+u+p; end; estimated_params; p, 0.8, 0, 1, beta_pdf, 0.8, 0.1; end; shocks; var e; stderr p; end; shock_paths; var u; periods 1; values self.u; end;";
     let diagnostics = analyze(&parse(source));
     assert_eq!(selected(source, "E212"), ["estimated_params"]);
-    assert!(!diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "E420"));
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E420")
+    );
     let quiet_earlier = source.replace(
         "estimated_params; p, 0.8, 0, 1, beta_pdf, 0.8, 0.1; end;",
         "",
@@ -545,9 +682,11 @@ fn shared_include_summary_multiplicity_remains_separate_for_each_root() {
     .unwrap();
     for root in report["roots"].as_array().unwrap() {
         let diagnostics = root["diagnostics"].as_array().unwrap();
-        assert!(!diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic["code"] == "W042"));
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic["code"] == "W042")
+        );
         let repeat: Vec<_> = diagnostics
             .iter()
             .filter(|diagnostic| diagnostic["code"] == "E258")
@@ -642,8 +781,26 @@ fn shared_macro_count_owner_uses_the_correct_file_for_each_root() {
 
 #[test]
 fn first_child_matrix_keeps_baseline_messages_severity_and_multiplicity() {
-    assert_fixture("clash/e026_varexo_det_simul.mod", "E026", "varexo_det", 0, &[(1, "A .mod file cannot contain both one of {perfect_foresight_solver, simul, perfect_foresight_with_expectation_errors_solver} and varexo_det declaration (all exogenous variables are deterministic in this case)")]);
-    assert_fixture("clash/e027_ramsey_varexo_det.mod", "E027", "varexo_det", 0, &[(1, "ramsey_model and ramsey_policy are incompatible with deterministic exogenous variables")]);
+    assert_fixture(
+        "clash/e026_varexo_det_simul.mod",
+        "E026",
+        "varexo_det",
+        0,
+        &[(
+            1,
+            "A .mod file cannot contain both one of {perfect_foresight_solver, simul, perfect_foresight_with_expectation_errors_solver} and varexo_det declaration (all exogenous variables are deterministic in this case)",
+        )],
+    );
+    assert_fixture(
+        "clash/e027_ramsey_varexo_det.mod",
+        "E027",
+        "varexo_det",
+        0,
+        &[(
+            1,
+            "ramsey_model and ramsey_policy are incompatible with deterministic exogenous variables",
+        )],
+    );
     assert_fixture(
         "occbin/e171_three.mod",
         "E171",
@@ -654,7 +811,16 @@ fn first_child_matrix_keeps_baseline_messages_severity_and_multiplicity() {
             "only up to two constraints are supported in 'occbin_constraints' block",
         )],
     );
-    assert_fixture("w120/w121_dynamic.mod", "E208", "model", 0, &[(1, "the number of equations marked [static] must be equal to the number of equations marked [dynamic]")]);
+    assert_fixture(
+        "w120/w121_dynamic.mod",
+        "E208",
+        "model",
+        0,
+        &[(
+            1,
+            "the number of equations marked [static] must be equal to the number of equations marked [dynamic]",
+        )],
+    );
 }
 
 #[test]
@@ -718,9 +884,11 @@ fn earlier_tag_count_still_suppresses_later_shock_path_refusal() {
     let source = "var y; varexo e; model; [dynamic] y=e; end; shock_paths; var e; periods 1; values self.e; end;";
     let diagnostics = analyze(&parse(source));
     assert_eq!(selected(source, "E208"), ["model"]);
-    assert!(!diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "E420"));
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E420")
+    );
     assert_eq!(
         selected(&source.replace("[dynamic]", ""), "E420"),
         ["self.e"]

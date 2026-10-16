@@ -1,7 +1,7 @@
 //! D-open family locks: thin parse of named openers with no later owner.
 
 use dygnosis::model::DerivSpec;
-use dygnosis::{analyze, check_file, parse, Diagnostic};
+use dygnosis::{Diagnostic, analyze, check_file, parse};
 
 fn fixture(rel: &str) -> String {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -78,14 +78,12 @@ const FIRES: &[Fire] = &[
     Fire {
         code: "E289",
         fixture: "d_open/e289_epilogue_exo.mod",
-        message:
-            "Symbol 'e' cannot be used inside the epilogue block, because it is an exogenous variable.",
+        message: "Symbol 'e' cannot be used inside the epilogue block, because it is an exogenous variable.",
     },
     Fire {
         code: "E290",
         fixture: "d_open/e290_epilogue_exo_det.mod",
-        message:
-            "Symbol 'ed' cannot be used inside the epilogue block, because it is an exogenous deterministic variable.",
+        message: "Symbol 'ed' cannot be used inside the epilogue block, because it is an exogenous deterministic variable.",
     },
     Fire {
         code: "E291",
@@ -270,8 +268,7 @@ const FIRES: &[Fire] = &[
     Fire {
         code: "E329",
         fixture: "d_open/e329_init2shocks_dup.mod",
-        message:
-            "Init2shocks(default): enogenous variable 'y' appears more than once in the init2shocks statement",
+        message: "Init2shocks(default): enogenous variable 'y' appears more than once in the init2shocks statement",
     },
     Fire {
         code: "E330",
@@ -672,10 +669,12 @@ fn external_function_options_are_parsed() {
         other => panic!("expected named first derivative, got {other:?}"),
     }
     assert!(matches!(stmt.second_deriv, Some(DerivSpec::Bare(_))));
-    assert!(model
-        .external_function_names
-        .iter()
-        .any(|n| model.name(*n) == "foo"));
+    assert!(
+        model
+            .external_function_names
+            .iter()
+            .any(|n| model.name(*n) == "foo")
+    );
 }
 
 #[test]

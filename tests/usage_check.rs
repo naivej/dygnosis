@@ -1,8 +1,8 @@
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 
 use dygnosis::{
-    analyze, check_w021, check_w022, dynare_diagnose, find_preprocessor, parse, run_preprocessor,
-    JsonStage, Severity,
+    JsonStage, Severity, analyze, check_w021, check_w022, dynare_diagnose, find_preprocessor,
+    parse, run_preprocessor,
 };
 
 fn official(source: &str, accepted: bool, warning: Option<&str>) {
@@ -176,10 +176,12 @@ fn usage_builtin_tokens_and_parse_rewrites_match_dynare() {
             model.equations[0].rhs.replace(' ', "").contains(term),
             "written RHS changed: {source}"
         );
-        assert!(model
-            .ident_refs(&model.equations[0])
-            .iter()
-            .any(|reference| model.name(reference.name) == "p"));
+        assert!(
+            model
+                .ident_refs(&model.equations[0])
+                .iter()
+                .any(|reference| model.name(reference.name) == "p")
+        );
     }
     for term in [
         "log(1.0/p)+log(p)",
@@ -237,7 +239,9 @@ fn usage_keeps_model_local_definitions_in_their_data_tree() {
         ("#loc=p; y=e+loc;", "#loc=1; yh=eh+loc;", true),
         ("#loc=1; y=e+loc;", "#loc=p; yh=eh+loc;", true),
     ] {
-        let source = format!("heterogeneity_dimension d; var y; varexo e; var(heterogeneity=d) yh; varexo(heterogeneity=d) eh; parameters p; p=1; model; {aggregate} end; model(heterogeneity=d); {heterogeneous} end;");
+        let source = format!(
+            "heterogeneity_dimension d; var y; varexo e; var(heterogeneity=d) yh; varexo(heterogeneity=d) eh; parameters p; p=1; model; {aggregate} end; model(heterogeneity=d); {heterogeneous} end;"
+        );
         official(&source, true, (!used).then_some("p"));
         assert_eq!(check_w022(&parse(&source)).is_empty(), used, "{source}");
     }
@@ -258,7 +262,14 @@ fn usage_w022_roots_match_official_consumers() {
             "Parameter(s) p not used in model equations or steady_state_model"
         );
     }
-    for source in ["var y; parameters p; p=1; model; y=p; end;", "var y; parameters p; p=1; model; [static] y=p; [dynamic] y=0; end;", "var y; parameters p; p=1; model; y=0; end; steady_state_model; y=p; end;", "var y; parameters p; model; y=0; end; steady_state_model; p=1; y=0; end;", "var y; parameters p; model; y=0; end; steady_state_model; [y,p]=helper(1); end;", "heterogeneity_dimension d; var(heterogeneity=d) yh; parameters p; p=1; model(heterogeneity=d); yh=p; end;"] {
+    for source in [
+        "var y; parameters p; p=1; model; y=p; end;",
+        "var y; parameters p; p=1; model; [static] y=p; [dynamic] y=0; end;",
+        "var y; parameters p; p=1; model; y=0; end; steady_state_model; y=p; end;",
+        "var y; parameters p; model; y=0; end; steady_state_model; p=1; y=0; end;",
+        "var y; parameters p; model; y=0; end; steady_state_model; [y,p]=helper(1); end;",
+        "heterogeneity_dimension d; var(heterogeneity=d) yh; parameters p; p=1; model(heterogeneity=d); yh=p; end;",
+    ] {
         official(source, true, None);
         assert!(check_w022(&parse(source)).is_empty(), "{source}");
     }
@@ -276,15 +287,28 @@ fn usage_exogenous_simplifications_and_exemptions_match_dynare() {
         assert_eq!(rows.len(), 1, "{term}: {rows:?}");
         assert_eq!(rows[0].code, "E021");
         assert_eq!(rows[0].severity, Severity::Error);
-        assert_eq!(rows[0].message, "e not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior.");
+        assert_eq!(
+            rows[0].message,
+            "e not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior."
+        );
         assert_eq!(
             &source[rows[0].span.start as usize..rows[0].span.end as usize],
             "e"
         );
     }
-    for source in ["var y; varexo e; varexobs e; model; y=0*e; end;", "var y; varexo_det e; model; y=0*e; end;", "var y; varexo e; model; [static] y=e; [dynamic] y=0; end;", "var y; varexo e; var_remove e; model; y=0; end;", "var y e; change_type(varexo) e; varexobs e; model; y=0; end;", "var y z; varexo e e2; parameters b; b=0.8; model; [name='Y'] y=b*y(-1)+e; [name='Z'] z=z(-1)+e2; end; pac_model(model_name=q,discount=b,growth=ghost);"] {
+    for source in [
+        "var y; varexo e; varexobs e; model; y=0*e; end;",
+        "var y; varexo_det e; model; y=0*e; end;",
+        "var y; varexo e; model; [static] y=e; [dynamic] y=0; end;",
+        "var y; varexo e; var_remove e; model; y=0; end;",
+        "var y e; change_type(varexo) e; varexobs e; model; y=0; end;",
+        "var y z; varexo e e2; parameters b; b=0.8; model; [name='Y'] y=b*y(-1)+e; [name='Z'] z=z(-1)+e2; end; pac_model(model_name=q,discount=b,growth=ghost);",
+    ] {
         official(source, true, None);
-        assert!(!analyze(&parse(source)).iter().any(|row| row.code == "E021"), "{source}");
+        assert!(
+            !analyze(&parse(source)).iter().any(|row| row.code == "E021"),
+            "{source}"
+        );
     }
 }
 
@@ -332,14 +356,18 @@ fn usage_discarded_terms_keep_generic_parse_reach() {
     }
     let duplicate = "var y; model; #q=0; #q=1; y=0*q; end;";
     official(duplicate, false, None);
-    assert!(analyze(&parse(duplicate))
-        .iter()
-        .any(|row| row.code == "E030"));
+    assert!(
+        analyze(&parse(duplicate))
+            .iter()
+            .any(|row| row.code == "E030")
+    );
     let zero_denominator = "var y; parameters p; p=1; model; y=0/(p-p); end;";
     official(zero_denominator, false, None);
-    assert!(analyze(&parse(zero_denominator))
-        .iter()
-        .any(|row| row.code == "E278"));
+    assert!(
+        analyze(&parse(zero_denominator))
+            .iter()
+            .any(|row| row.code == "E278")
+    );
 }
 
 #[test]
@@ -361,10 +389,12 @@ fn usage_written_references_and_include_owners_stay_available() {
     let source = parameter_source("0*p");
     let model = parse(&source);
     assert_eq!(model.equations[0].rhs, "e+(0*p)");
-    assert!(model
-        .ident_refs(&model.equations[0])
-        .iter()
-        .any(|reference| model.name(reference.name) == "p"));
+    assert!(
+        model
+            .ident_refs(&model.equations[0])
+            .iter()
+            .any(|reference| model.name(reference.name) == "p")
+    );
 }
 
 #[test]
@@ -378,7 +408,9 @@ fn pac_model_only_parameters_warn_until_used_in_model_equations() {
     ] {
         for used_in_equation in [false, true] {
             let term = if used_in_equation { name } else { "0" };
-            let source = format!("var y; varexo e; parameters {name} {other} unused; {name}=0.99; {other}=0.01; unused=0.5; model; y=0.9*y(-1)+e+{other}+{term}; end; pac_model(model_name=pac_y, auxiliary_model_name=target_var, {options});");
+            let source = format!(
+                "var y; varexo e; parameters {name} {other} unused; {name}=0.99; {other}=0.01; unused=0.5; model; y=0.9*y(-1)+e+{other}+{term}; end; pac_model(model_name=pac_y, auxiliary_model_name=target_var, {options});"
+            );
             official(
                 &source,
                 true,
@@ -401,7 +433,9 @@ fn pac_model_only_parameters_warn_until_used_in_model_equations() {
                 for (row, parameter) in rows.iter().zip(expected) {
                     assert_eq!(
                         row.message,
-                        format!("Parameter(s) {parameter} not used in model equations or steady_state_model")
+                        format!(
+                            "Parameter(s) {parameter} not used in model equations or steady_state_model"
+                        )
                     );
                     assert_eq!(row.severity, Severity::Warning);
                     assert_eq!(

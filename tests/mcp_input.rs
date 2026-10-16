@@ -1,7 +1,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 struct McpWire {
     child: Child,
@@ -351,11 +351,13 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
     for result in [&historical, &saved, &supplied] {
         assert_eq!(result["source_changes"]["schema_version"], 1);
         assert_eq!(result["source_changes"]["availability"], "complete");
-        assert!(result["coverage"]["limits"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|limit| limit["code"] == "sources_not_captured"));
+        assert!(
+            result["coverage"]["limits"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|limit| limit["code"] == "sources_not_captured")
+        );
     }
     // Exercise relative sibling folders through the published JSON arguments,
     // not only through the repository adapter's internal entry point.
@@ -424,7 +426,10 @@ fn constructor_refusals_use_unsaved_include_text_and_clear_on_decimal_denominato
     assert_eq!(errors.len(), 1, "{rows:?}");
     assert_eq!(errors[0]["file"], "body.inc");
     assert_eq!(errors[0]["severity"], "ERROR");
-    assert_eq!(errors[0]["message"], "Division by zero when forming (1)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0).");
+    assert_eq!(
+        errors[0]["message"],
+        "Division by zero when forming (1)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0)."
+    );
     assert_eq!(errors[0]["line"], 1);
     assert_eq!(errors[0]["column"], 8);
     assert_eq!(errors[0]["end_column"], 17);
@@ -723,11 +728,13 @@ fn batch_and_comparison_apply_work_per_root_and_per_side_over_stdio() {
     let batch_args = json!({"batch":{"kind":"map","files":{"a.mod":source,"b.mod":source},"roots":["a.mod","b.mod"]},"macro_work_limit":50000,"detail":"compact"});
     let large = canonical(wire.call("dynare_diagnose", batch_args.clone()));
     assert_eq!(large["data"]["summary"]["checked"], 2, "{large}");
-    assert!(large["inputs"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|input| input["macro_work_limit"] == 50000));
+    assert!(
+        large["inputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|input| input["macro_work_limit"] == 50000)
+    );
     let mut small_args = batch_args.clone();
     small_args["macro_work_limit"] = json!(1000);
     let small = canonical(wire.call("dynare_diagnose", small_args.clone()));
@@ -753,16 +760,20 @@ fn batch_and_comparison_apply_work_per_root_and_per_side_over_stdio() {
     let large = canonical(wire.call("dynare_compare_models", compare_args.clone()));
     assert_eq!(large["coverage"]["inputs"]["before"]["complete"], true);
     assert_eq!(large["coverage"]["inputs"]["after"]["complete"], true);
-    assert!(!large["limits"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|limit| limit["code"] == "MACRO_LIMIT"));
-    assert!(large["inputs"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|input| input["macro_work_limit"] == 50000));
+    assert!(
+        !large["limits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|limit| limit["code"] == "MACRO_LIMIT")
+    );
+    assert!(
+        large["inputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|input| input["macro_work_limit"] == 50000)
+    );
     let mut small_args = compare_args.clone();
     small_args["macro_work_limit"] = json!(1000);
     let small = canonical(wire.call("dynare_compare_models", small_args.clone()));

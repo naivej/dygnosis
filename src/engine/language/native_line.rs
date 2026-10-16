@@ -308,11 +308,7 @@ fn quoted(bytes: &[u8], i: usize, quote: u8) -> Option<usize> {
 
 fn one_or_two_dots(bytes: &[u8], i: usize) -> Option<usize> {
     let dots = count_dots(bytes, i);
-    if dots == 0 {
-        None
-    } else {
-        Some(dots.min(2))
-    }
+    if dots == 0 { None } else { Some(dots.min(2)) }
 }
 
 fn count_dots(bytes: &[u8], i: usize) -> usize {

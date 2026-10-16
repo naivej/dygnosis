@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::engine::language::command_skip::{command_stmt_spans, is_parse_skip_command};
 use crate::engine::language::expr::{ExprId, ExprKind};
-use crate::engine::language::lexer::{tokenize, Token, TokenKind};
+use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::macro_expand::expand_macros;
 use crate::engine::language::model::Model;
 use crate::engine::language::span::Span;

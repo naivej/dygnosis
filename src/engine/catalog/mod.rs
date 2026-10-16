@@ -14,7 +14,7 @@ mod option_names;
 pub mod syntax;
 
 pub(crate) use catalog_data::{
-    FAMILY_COMMAND_HELP, FAMILY_OPERATOR_HELP, HETEROGENEITY_OPTION, HET_SHOCKS_OVERWRITE,
+    FAMILY_COMMAND_HELP, FAMILY_OPERATOR_HELP, HET_SHOCKS_OVERWRITE, HETEROGENEITY_OPTION,
 };
 
 /// Short help for the semi-structural command, block, and operator names.

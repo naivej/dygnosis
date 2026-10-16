@@ -158,10 +158,20 @@ pub(crate) fn collect(model: &Model) -> Accepted {
             {
                 let label = model.name(slot.name);
                 let cause = match slot.owner {
-                    NamedSlotOwner::DimensionDeclaration => format!("Heterogeneity dimension '{label}' already declared"),
-                    NamedSlotOwner::DatabaseDeclaration => format!("Database '{label}' already declared"),
-                    NamedSlotOwner::DimensionLookup | NamedSlotOwner::HeterogeneousShock(_) => format!("The heterogeneity dimension '{label}' lookup did not complete its Parse callback."),
-                    NamedSlotOwner::DatabaseReference => format!("The database '{label}' is not declared before this reference."),
+                    NamedSlotOwner::DimensionDeclaration => {
+                        format!("Heterogeneity dimension '{label}' already declared")
+                    }
+                    NamedSlotOwner::DatabaseDeclaration => {
+                        format!("Database '{label}' already declared")
+                    }
+                    NamedSlotOwner::DimensionLookup | NamedSlotOwner::HeterogeneousShock(_) => {
+                        format!(
+                            "The heterogeneity dimension '{label}' lookup did not complete its Parse callback."
+                        )
+                    }
+                    NamedSlotOwner::DatabaseReference => {
+                        format!("The database '{label}' is not declared before this reference.")
+                    }
                     _ => "A named Parse callback did not complete.".into(),
                 };
                 accepted.refusal = Some(ParseRefusal {

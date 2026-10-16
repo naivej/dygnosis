@@ -1,8 +1,8 @@
 use std::{collections::HashMap, time::Duration};
 
-use dygnosis::server::{new_service, Backend};
-use dygnosis::{analyze, dynare_diagnose, find_preprocessor, parse, run_preprocessor, JsonStage};
-use tower_lsp::{lsp_types::*, LanguageServer};
+use dygnosis::server::{Backend, new_service};
+use dygnosis::{JsonStage, analyze, dynare_diagnose, find_preprocessor, parse, run_preprocessor};
+use tower_lsp::{LanguageServer, lsp_types::*};
 
 const PREFIX: &str = "var y; model; y=0; end; steady_state_model; ";
 
@@ -80,10 +80,12 @@ fn malformed_output_lists_match_the_exact_check_sentence_and_range() {
         );
         assert_eq!(model.steady_state_equations.len(), 1, "{source}");
         assert_eq!(model.steady_state_equations[0].lhs, "y");
-        assert!(!model
-            .mod_file_locals
-            .iter()
-            .any(|name| model.name(*name) == "tmp"));
+        assert!(
+            !model
+                .mod_file_locals
+                .iter()
+                .any(|name| model.name(*name) == "tmp")
+        );
     }
 }
 
@@ -266,9 +268,11 @@ fn assigned_sets_and_forward_endogenous_checks_consume_all_outputs() {
     let source = "varexo z; change_type(parameters) z; var y; model; y=z; end; steady_state_model; [y,z]=foo(1); end;";
     official(source, true, None);
     let model = parse(source);
-    assert!(analyze(&model)
-        .iter()
-        .all(|row| row.code != "W010" && row.code != "W042" && !row.code.starts_with('E')));
+    assert!(
+        analyze(&model)
+            .iter()
+            .all(|row| row.code != "W010" && row.code != "W042" && !row.code.starts_with('E'))
+    );
 }
 
 #[test]
@@ -310,7 +314,9 @@ fn written_ramsey_commands_exempt_rhs_order_but_preserve_duplicate_warnings() {
                 );
             }
         }
-        let source = format!("var y; model; y=0; end; planner_objective y^2; {command}steady_state_model; [y,tmp]=foo(y); [y,tmp]=foo(y); end;");
+        let source = format!(
+            "var y; model; y=0; end; planner_objective y^2; {command}steady_state_model; [y,tmp]=foo(y); [y,tmp]=foo(y); end;"
+        );
         let rows = analyze(&parse(&source));
         assert!(
             !rows.iter().any(|row| row.code == "E130"),

@@ -9,7 +9,7 @@
 //! `estimated_params` may name it, a block expression may not — that use is a parse
 //! refuse (**E001**), the same family as `var sin;`.
 
-use dygnosis::{analyze, check_file, parse, Diagnostic};
+use dygnosis::{Diagnostic, analyze, check_file, parse};
 
 const GATE_MSG: &str = "Invalid use of 'dsge_prior_weight' in a Dynare block: reserved preprocessor symbol. Choose a different name.";
 

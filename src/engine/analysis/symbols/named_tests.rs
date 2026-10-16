@@ -121,7 +121,9 @@ fn var_and_trend_model_names_keep_distinct_lookup_priority() {
 // from an ordinary model binding, and repeated member reads remain visible.
 #[test]
 fn databases_and_members_are_known_with_specific_external_refusals() {
-    let model = view("var y;varexo e;database db;model;y=e;end;shock_paths;var e;periods 1,2;values db.foreign,db.foreign;end;");
+    let model = view(
+        "var y;varexo e;database db;model;y=e;end;shock_paths;var e;periods 1,2;values db.foreign,db.foreign;end;",
+    );
     let database = choose(&model, "db", "database");
     assert_eq!(model.references(&database, true).len(), 3);
     assert_eq!(
@@ -269,7 +271,9 @@ fn subsamples_keep_head_namespaces_and_copy_dependency_closure() {
 // A later declaration cannot bind a previously unresolved copy operand.
 #[test]
 fn subsample_copy_operands_do_not_acquire_later_definitions() {
-    let model = view("parameters a b;a=.5;b=.5;a.early.options=b.early.options;a.subsamples(early=2000Q1:2001Q1);");
+    let model = view(
+        "parameters a b;a=.5;b=.5;a.early.options=b.early.options;a.subsamples(early=2000Q1:2001Q1);",
+    );
     let candidates: Vec<_> = model
         .bindings()
         .into_iter()
@@ -438,13 +442,12 @@ fn ordinary_database_field_rename_refuses_the_whole_edit() {
     ] {
         let model = view(&format!("{base}{tail}"));
         let binding = choose(&model, "y", "var");
-        assert!(model.references(&binding, false).iter().any(|site| site
-            .written
-            .as_ref()
-            .is_some_and(|(_, span)| model.sources["root.mod"]
-                .get(span.start as usize..span.end as usize)
-                == Some("y")
-                && model.sources["root.mod"][..span.start as usize].ends_with("db."))));
+        assert!(model.references(&binding, false).iter().any(|site| {
+            site.written.as_ref().is_some_and(|(_, span)| {
+                model.sources["root.mod"].get(span.start as usize..span.end as usize) == Some("y")
+                    && model.sources["root.mod"][..span.start as usize].ends_with("db.")
+            })
+        }));
         let refused = rename(std::slice::from_ref(&model), 0, &binding, "z").unwrap_err();
         assert_eq!(refused.code, "EXTERNAL_DATABASE_MEMBER");
         assert!(refused.message.contains("column"));
@@ -455,26 +458,62 @@ fn ordinary_database_field_rename_refuses_the_whole_edit() {
 // stage checks stay separate: these probes stop at json=parse.
 #[test]
 fn named_callback_shapes_match_the_pinned_parse_stage() {
-    use crate::test_support::preprocessor::{find_preprocessor, run_preprocessor, JsonStage};
+    use crate::test_support::preprocessor::{JsonStage, find_preprocessor, run_preprocessor};
     use std::time::Duration;
     let Some(binary) = find_preprocessor(None) else {
         return;
     };
     let base = "var y;parameters p;p=.9;model;[name='Y']y=0;end;";
     for (tail, accepted) in [
-        ("heterogeneity_dimension ghost;", true), ("heterogeneity_dimension ghost other,third;", true),
-        ("heterogeneity_dimension ghost", false), ("heterogeneity_dimension ghost,;", false), ("heterogeneity_dimension ghost 1;", false),
-        ("database ghost;", true), ("database ghost other,third;", true), ("database ghost", false), ("database ghost,;", false), ("database ghost=1;", false),
-        ("var_model(model_name=ghost,eqtags=['Y']);", true), ("var_model(model_name=ghost,", false), ("var_model(model_name=ghost,eqtags=['Y'])", false),
-        ("trend_component_model(model_name=ghost,eqtags=['Y'],targets=['Y']);", true), ("trend_component_model(model_name=ghost,eqtags=['Y'],targets=['Y'],);", false),
-        ("var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1);", true), ("var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1", false),
-        ("pac_model(model_name=ghost,discount=p);", true), ("pac_model(model_name=ghost,discount=p", false),
+        ("heterogeneity_dimension ghost;", true),
+        ("heterogeneity_dimension ghost other,third;", true),
+        ("heterogeneity_dimension ghost", false),
+        ("heterogeneity_dimension ghost,;", false),
+        ("heterogeneity_dimension ghost 1;", false),
+        ("database ghost;", true),
+        ("database ghost other,third;", true),
+        ("database ghost", false),
+        ("database ghost,;", false),
+        ("database ghost=1;", false),
+        ("var_model(model_name=ghost,eqtags=['Y']);", true),
+        ("var_model(model_name=ghost,", false),
+        ("var_model(model_name=ghost,eqtags=['Y'])", false),
+        (
+            "trend_component_model(model_name=ghost,eqtags=['Y'],targets=['Y']);",
+            true,
+        ),
+        (
+            "trend_component_model(model_name=ghost,eqtags=['Y'],targets=['Y'],);",
+            false,
+        ),
+        (
+            "var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1);",
+            true,
+        ),
+        (
+            "var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1",
+            false,
+        ),
+        ("pac_model(model_name=ghost,discount=p);", true),
+        ("pac_model(model_name=ghost,discount=p", false),
     ] {
         let source = format!("{base}{tail}");
-        let official = run_preprocessor(&source, &binary, None, Duration::from_secs(30), JsonStage::Parse);
-        assert_eq!(official.success, accepted, "{tail}: {} {}", official.raw_stdout, official.raw_stderr);
+        let official = run_preprocessor(
+            &source,
+            &binary,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Parse,
+        );
+        assert_eq!(
+            official.success, accepted,
+            "{tail}: {} {}",
+            official.raw_stdout, official.raw_stderr
+        );
         let parsed = crate::engine::language::parser::parse(&source);
-        let has_syntax = crate::engine::diagnostics::analyze(&parsed).iter().any(|diagnostic| diagnostic.code == "E001");
+        let has_syntax = crate::engine::diagnostics::analyze(&parsed)
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E001");
         assert_eq!(has_syntax, !accepted, "{tail}");
     }
     for operator in [
@@ -522,17 +561,32 @@ fn named_model_bindings_require_successful_semantic_parse_callbacks() {
         "var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux);",
         "var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1,discount=p+p);",
         "var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1,time_shift=1);",
-        "pac_model(model_name=ghost);", "pac_model(model_name=ghost,discount=y);", "pac_model(model_name=ghost,discount=absent);",
+        "pac_model(model_name=ghost);",
+        "pac_model(model_name=ghost,discount=y);",
+        "pac_model(model_name=ghost,discount=absent);",
     ] {
         let model = view(&format!("{base}{command}"));
         assert!(!model.complete, "{command}");
-        assert!(model.select(Selector::Name("ghost")).unwrap().is_none(), "{command}");
-        assert_eq!(model.model.semi_structural_commands.len(), 1, "diagnostic receipt: {command}");
+        assert!(
+            model.select(Selector::Name("ghost")).unwrap().is_none(),
+            "{command}"
+        );
+        assert_eq!(
+            model.model.semi_structural_commands.len(),
+            1,
+            "diagnostic receipt: {command}"
+        );
     }
     for (kind, command) in [
         ("var_model", "var_model(model_name=ghost,eqtags=['Y']);"),
-        ("trend_component_model", "trend_component_model(model_name=ghost,eqtags=['Y'],targets=['Y']);"),
-        ("var_expectation_model", "var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1);"),
+        (
+            "trend_component_model",
+            "trend_component_model(model_name=ghost,eqtags=['Y'],targets=['Y']);",
+        ),
+        (
+            "var_expectation_model",
+            "var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1);",
+        ),
         ("pac_model", "pac_model(model_name=ghost,discount=p);"),
     ] {
         let valid = view(&format!("{base}{command}"));
@@ -541,9 +595,15 @@ fn named_model_bindings_require_successful_semantic_parse_callbacks() {
         let duplicate = view(&format!("{base}{command}{command}"));
         assert!(!duplicate.complete);
         let binding = choose(&duplicate, "ghost", kind);
-        assert_eq!(duplicate.references(&binding, true).len(), 1, "duplicate callback: {command}");
+        assert_eq!(
+            duplicate.references(&binding, true).len(),
+            1,
+            "duplicate callback: {command}"
+        );
     }
-    let nested = view(&format!("{base}var_expectation_model(model_name=outer,expression=pac_expectation(inner),auxiliary_model_name=aux,horizon=1,time_shift=1);"));
+    let nested = view(&format!(
+        "{base}var_expectation_model(model_name=outer,expression=pac_expectation(inner),auxiliary_model_name=aux,horizon=1,time_shift=1);"
+    ));
     assert!(nested.select(Selector::Name("outer")).unwrap().is_none());
     assert!(nested.select(Selector::Name("inner")).unwrap().is_some());
 }
@@ -645,11 +705,15 @@ fn callback_owners_distinguish_macro_copies_and_forbidden_operator_contexts() {
 #[test]
 fn named_callback_frontier_keeps_only_completed_prefix_actions() {
     let base = "var y;parameters p;p=.9;model;[name='Y']y=0;end;";
-    let model = view(&format!("{base}var_expectation_model(model_name=outer,expression=pac_expectation(kept),auxiliary_model_name=aux,horizon=1,time_shift=1);database later;"));
+    let model = view(&format!(
+        "{base}var_expectation_model(model_name=outer,expression=pac_expectation(kept),auxiliary_model_name=aux,horizon=1,time_shift=1);database later;"
+    ));
     assert!(model.select(Selector::Name("kept")).unwrap().is_some());
     assert!(model.select(Selector::Name("outer")).unwrap().is_none());
     assert!(model.select(Selector::Name("later")).unwrap().is_none());
-    let model = view(&format!("{base}var_expectation_model(model_name=outer,model_name=outer,expression=pac_expectation(later),auxiliary_model_name=aux,horizon=1);"));
+    let model = view(&format!(
+        "{base}var_expectation_model(model_name=outer,model_name=outer,expression=pac_expectation(later),auxiliary_model_name=aux,horizon=1);"
+    ));
     assert!(model.select(Selector::Name("later")).unwrap().is_none());
 }
 
@@ -657,7 +721,7 @@ fn named_callback_frontier_keeps_only_completed_prefix_actions() {
 // all four model families at Parse, including accepted later-stage lookups.
 #[test]
 fn named_semantic_callbacks_match_the_pinned_parse_stage() {
-    use crate::test_support::preprocessor::{find_preprocessor, run_preprocessor, JsonStage};
+    use crate::test_support::preprocessor::{JsonStage, find_preprocessor, run_preprocessor};
     use std::time::Duration;
     let Some(binary) = find_preprocessor(None) else {
         return;
@@ -666,25 +730,69 @@ fn named_semantic_callbacks_match_the_pinned_parse_stage() {
     for (command, accepted) in [
         ("var_model(model_name=ghost);", false),
         ("var_model(model_name=ghost,eqtags=['later_tag']);", true),
-        ("trend_component_model(model_name=ghost,eqtags=['Y']);", false),
-        ("trend_component_model(model_name=ghost,eqtags=['later_tag'],targets=['later_tag']);", true),
-        ("var_expectation_model(model_name=ghost,auxiliary_model_name=aux,horizon=1);", false),
-        ("var_expectation_model(model_name=ghost,variable=y,expression=y,auxiliary_model_name=aux,horizon=1);", false),
-        ("var_expectation_model(model_name=ghost,variable=absent,auxiliary_model_name=aux,horizon=1);", false),
-        ("var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux);", false),
-        ("var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1,discount=p+p);", false),
-        ("var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1,time_shift=1);", false),
-        ("var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=later_model,horizon=1);", true),
+        (
+            "trend_component_model(model_name=ghost,eqtags=['Y']);",
+            false,
+        ),
+        (
+            "trend_component_model(model_name=ghost,eqtags=['later_tag'],targets=['later_tag']);",
+            true,
+        ),
+        (
+            "var_expectation_model(model_name=ghost,auxiliary_model_name=aux,horizon=1);",
+            false,
+        ),
+        (
+            "var_expectation_model(model_name=ghost,variable=y,expression=y,auxiliary_model_name=aux,horizon=1);",
+            false,
+        ),
+        (
+            "var_expectation_model(model_name=ghost,variable=absent,auxiliary_model_name=aux,horizon=1);",
+            false,
+        ),
+        (
+            "var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux);",
+            false,
+        ),
+        (
+            "var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1,discount=p+p);",
+            false,
+        ),
+        (
+            "var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=aux,horizon=1,time_shift=1);",
+            false,
+        ),
+        (
+            "var_expectation_model(model_name=ghost,variable=y,auxiliary_model_name=later_model,horizon=1);",
+            true,
+        ),
         ("pac_model(model_name=ghost);", false),
         ("pac_model(model_name=ghost,discount=y);", false),
         ("pac_model(model_name=ghost,discount=absent);", false),
-        ("pac_model(model_name=ghost,discount=p,auxiliary_model_name=later_model);", true),
+        (
+            "pac_model(model_name=ghost,discount=p,auxiliary_model_name=later_model);",
+            true,
+        ),
     ] {
         let source = format!("{base}{command}");
-        let official = run_preprocessor(&source, &binary, None, Duration::from_secs(30), JsonStage::Parse);
-        assert_eq!(official.success, accepted, "{command}: {} {}", official.raw_stdout, official.raw_stderr);
+        let official = run_preprocessor(
+            &source,
+            &binary,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Parse,
+        );
+        assert_eq!(
+            official.success, accepted,
+            "{command}: {} {}",
+            official.raw_stdout, official.raw_stderr
+        );
         let model = view(&source);
-        assert_eq!(model.select(Selector::Name("ghost")).unwrap().is_some(), accepted, "{command}");
+        assert_eq!(
+            model.select(Selector::Name("ghost")).unwrap().is_some(),
+            accepted,
+            "{command}"
+        );
         assert_eq!(model.complete, accepted, "{command}");
     }
     for tail in [
@@ -717,13 +825,29 @@ fn heterogeneous_shock_dimension_use_requires_successful_row_callbacks() {
     let base = "heterogeneity_dimension h;varexo(heterogeneity=h) e u;";
     for (tail, references, complete) in [
         ("shocks(heterogeneity=h);var e;stderr 1;end;", 3, true),
-        ("shocks(heterogeneity=h);var e;stderr 1;var e;stderr 2;end;", 2, false),
-        ("shocks(heterogeneity=h);var e,u=.2;corr u,e=.3;end;", 2, false),
-        ("shocks(heterogeneity=h);var e;stderr 1;end;shocks(heterogeneity=h);var e;stderr 2;end;", 4, true),
+        (
+            "shocks(heterogeneity=h);var e;stderr 1;var e;stderr 2;end;",
+            2,
+            false,
+        ),
+        (
+            "shocks(heterogeneity=h);var e,u=.2;corr u,e=.3;end;",
+            2,
+            false,
+        ),
+        (
+            "shocks(heterogeneity=h);var e;stderr 1;end;shocks(heterogeneity=h);var e;stderr 2;end;",
+            4,
+            true,
+        ),
     ] {
         let model = view(&format!("{base}{tail}"));
         let dimension = choose(&model, "h", "heterogeneity_dimension");
-        assert_eq!(model.references(&dimension, true).len(), references, "{tail}");
+        assert_eq!(
+            model.references(&dimension, true).len(),
+            references,
+            "{tail}"
+        );
         assert_eq!(model.complete, complete, "{tail}");
     }
     let model =
@@ -787,28 +911,66 @@ fn dotted_macro_callback_identity_survives_duplicate_options_and_kind_changes() 
 // Check/Transform failures leave Parse-complete accepted actions available.
 #[test]
 fn ordinary_semantic_parse_frontier_withholds_only_later_named_callbacks() {
-    use crate::test_support::preprocessor::{find_preprocessor, run_preprocessor, JsonStage};
+    use crate::test_support::preprocessor::{JsonStage, find_preprocessor, run_preprocessor};
     use std::time::Duration;
     for (source, accepted) in [
         ("var y;y=1;database later;", false),
         ("var y;model;y=absent;end;database later;", false),
         ("var y;model;y=0;end;database later;", true),
-        ("var y;varexo e;model;y=STEADY_STATE(e);end;database later;", false),
-        ("var y;varexo e;model;#v=e;y=STEADY_STATE(v);end;database later;", false),
-        ("var y;varexo e;model;y=STEADY_STATE(0*e);end;database later;", true),
-        ("varexo e;shocks(learnt_in=0);var e;periods 1;values 1;end;database later;", false),
+        (
+            "var y;varexo e;model;y=STEADY_STATE(e);end;database later;",
+            false,
+        ),
+        (
+            "var y;varexo e;model;#v=e;y=STEADY_STATE(v);end;database later;",
+            false,
+        ),
+        (
+            "var y;varexo e;model;y=STEADY_STATE(0*e);end;database later;",
+            true,
+        ),
+        (
+            "varexo e;shocks(learnt_in=0);var e;periods 1;values 1;end;database later;",
+            false,
+        ),
         ("var y;endval(learnt_in=0);y=0;end;database later;", false),
-        ("parameters p;shocks;var p;periods 1;values 1;end;database later;", false),
-        ("varexo e;shock_paths;var e;periods 1;values self.e;end;database later;", true),
-        ("parameters p;var y;var_expectation_model(model_name=m,expression=absent,auxiliary_model_name=aux,horizon=1);database later;", true),
-        ("parameters p;pac_model(model_name=m,discount=p,growth=absent);database later;", true),
+        (
+            "parameters p;shocks;var p;periods 1;values 1;end;database later;",
+            false,
+        ),
+        (
+            "varexo e;shock_paths;var e;periods 1;values self.e;end;database later;",
+            true,
+        ),
+        (
+            "parameters p;var y;var_expectation_model(model_name=m,expression=absent,auxiliary_model_name=aux,horizon=1);database later;",
+            true,
+        ),
+        (
+            "parameters p;pac_model(model_name=m,discount=p,growth=absent);database later;",
+            true,
+        ),
     ] {
         let model = view(source);
-        assert_eq!(model.select(Selector::Name("later")).unwrap().is_some(), accepted, "{source}");
+        assert_eq!(
+            model.select(Selector::Name("later")).unwrap().is_some(),
+            accepted,
+            "{source}"
+        );
         assert_eq!(model.complete, accepted, "{source}");
         if let Some(binary) = find_preprocessor(None) {
-            let official = run_preprocessor(source, &binary, None, Duration::from_secs(30), JsonStage::Parse);
-            assert_eq!(official.success, accepted, "{source}: {} {}", official.raw_stdout, official.raw_stderr);
+            let official = run_preprocessor(
+                source,
+                &binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Parse,
+            );
+            assert_eq!(
+                official.success, accepted,
+                "{source}: {} {}",
+                official.raw_stdout, official.raw_stderr
+            );
         }
     }
     let source = "var y;\n@#for i in 1:2\n@#if i == 1\n@#define command = \"database kept\"\n@#else\n@#define command = \"y=1\"\n@#endif\n@{command};\n@#endfor\ndatabase later;\n";
@@ -952,11 +1114,15 @@ fn nested_sum_callbacks_use_constructed_argument_and_execution_order() {
     let cause = crate::engine::diagnostics::parse_preflight::first_refusal(&model.model).unwrap();
     assert!(cause.cause.contains("heterogeneous endogenous"));
     for argument in ["x+0", "1*x", "x-x+x"] {
-        let model = view(&format!("heterogeneity_dimension h;var(heterogeneity=h)x;var y;model;y=SUM({argument});end;database kept;"));
+        let model = view(&format!(
+            "heterogeneity_dimension h;var(heterogeneity=h)x;var y;model;y=SUM({argument});end;database kept;"
+        ));
         assert!(model.complete, "{argument}");
         assert!(model.select(Selector::Name("kept")).unwrap().is_some());
     }
-    let model = view("heterogeneity_dimension h;var(heterogeneity=h)x;var y;model;y=SUM(x(-1)+0);end;database later;");
+    let model = view(
+        "heterogeneity_dimension h;var(heterogeneity=h)x;var y;model;y=SUM(x(-1)+0);end;database later;",
+    );
     assert!(model.select(Selector::Name("later")).unwrap().is_none());
 }
 
@@ -985,7 +1151,9 @@ fn equation_tag_callbacks_update_symbol_types_without_fabricated_source() {
             .cause
             .contains("different types")
     );
-    let model = view("heterogeneity_dimension h;varexo(heterogeneity=h)e;var y;model;y=STEADY_STATE(e);end;database kept;");
+    let model = view(
+        "heterogeneity_dimension h;varexo(heterogeneity=h)e;var y;model;y=STEADY_STATE(e);end;database kept;",
+    );
     assert!(model.complete);
     assert!(model.select(Selector::Name("kept")).unwrap().is_some());
 }

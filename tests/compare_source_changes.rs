@@ -2,12 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use dygnosis::model_diff::{compare_models, compare_models_with_budgets, ModelDiff};
+use dygnosis::model_diff::{ModelDiff, compare_models, compare_models_with_budgets};
 use dygnosis::parser::parse;
 use dygnosis::semantic_diff::{
-    enforce_output_budget, populate_captured_sources, Availability, CaptureBoundary,
-    CapturedSourceInput, ChangeKind, ComparisonBudgets, SourceCorrespondence, SourceFilePair,
-    SourceIdentityProof, TokenRole,
+    Availability, CaptureBoundary, CapturedSourceInput, ChangeKind, ComparisonBudgets,
+    SourceCorrespondence, SourceFilePair, SourceIdentityProof, TokenRole, enforce_output_budget,
+    populate_captured_sources,
 };
 
 fn files(items: &[(&str, &str)]) -> BTreeMap<String, String> {
@@ -467,21 +467,25 @@ fn supplied_boundary_names_unexamined_files_without_downgrading_captured_file_de
         diff.coverage.source_boundary,
         "supplied_roots_and_executed_includes"
     );
-    assert!(diff
-        .coverage
-        .limits
-        .iter()
-        .any(|limit| limit.code == "sources_not_captured"));
-    assert!(diff
-        .coverage
-        .limits
-        .iter()
-        .any(|limit| limit.code == "supplied_source_boundary"));
-    assert!(!diff
-        .coverage
-        .limits
-        .iter()
-        .any(|limit| limit.code == "capture_boundary_unavailable"));
+    assert!(
+        diff.coverage
+            .limits
+            .iter()
+            .any(|limit| limit.code == "sources_not_captured")
+    );
+    assert!(
+        diff.coverage
+            .limits
+            .iter()
+            .any(|limit| limit.code == "supplied_source_boundary")
+    );
+    assert!(
+        !diff
+            .coverage
+            .limits
+            .iter()
+            .any(|limit| limit.code == "capture_boundary_unavailable")
+    );
 }
 
 #[test]
@@ -489,13 +493,15 @@ fn missing_captured_root_withholds_source_rows_and_actions() {
     let before = files(&[("child.mod", "captured prefix\n")]);
     let after = files(&[("root.mod", "root\n")]);
     let mut diff = comparison();
-    assert!(populate_captured_sources(
-        &mut diff,
-        captured("before", "root.mod", &before),
-        captured("after", "root.mod", &after),
-        &[]
-    )
-    .is_err());
+    assert!(
+        populate_captured_sources(
+            &mut diff,
+            captured("before", "root.mod", &before),
+            captured("after", "root.mod", &after),
+            &[]
+        )
+        .is_err()
+    );
     assert_eq!(diff.source_changes.availability, Availability::NotAvailable);
     assert!(diff.source_changes.files.is_empty());
     assert_eq!(diff.coverage.source_boundary, "capture_unavailable");
@@ -516,13 +522,15 @@ fn duplicate_or_missing_or_root_or_mismatched_key_proofs_are_rejected() {
         }],
     ] {
         let mut diff = comparison();
-        assert!(populate_captured_sources(
-            &mut diff,
-            captured("before", "root.mod", &before),
-            captured("after", "root.mod", &after),
-            &pairs
-        )
-        .is_err());
+        assert!(
+            populate_captured_sources(
+                &mut diff,
+                captured("before", "root.mod", &before),
+                captured("after", "root.mod", &after),
+                &pairs
+            )
+            .is_err()
+        );
         assert!(diff.source_changes.files.is_empty());
     }
 }
@@ -531,13 +539,15 @@ fn duplicate_or_missing_or_root_or_mismatched_key_proofs_are_rejected() {
 fn duplicate_input_ids_reject_a_source_registry_ambiguity() {
     let sources = files(&[("root.mod", "")]);
     let mut diff = comparison();
-    assert!(populate_captured_sources(
-        &mut diff,
-        captured("same", "root.mod", &sources),
-        captured("same", "root.mod", &sources),
-        &[],
-    )
-    .is_err());
+    assert!(
+        populate_captured_sources(
+            &mut diff,
+            captured("same", "root.mod", &sources),
+            captured("same", "root.mod", &sources),
+            &[],
+        )
+        .is_err()
+    );
     assert_eq!(diff.source_changes.availability, Availability::NotAvailable);
     assert!(diff.source_changes.files.is_empty());
 }

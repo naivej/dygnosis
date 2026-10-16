@@ -143,7 +143,12 @@ pub(super) fn collect(
             &block.opener_tokens,
             &["matched_irfs", "overwrite"],
         );
-        gap(&mut value, "matched_irf_expression_positions", "Direct accepted item receipts retain every bare/parenthesized value and weight in order, and period range endpoints. Parenthesized-only expression vectors have no positional link to mixed lists; their ordered supporting trees are kept separately and never zipped to items.", "parser_matched_irf_retention");
+        gap(
+            &mut value,
+            "matched_irf_expression_positions",
+            "Direct accepted item receipts retain every bare/parenthesized value and weight in order, and period range endpoints. Parenthesized-only expression vectors have no positional link to mixed lists; their ordered supporting trees are kept separately and never zipped to items.",
+            "parser_matched_irf_retention",
+        );
         facts.push(value);
     }
     for (index, block) in model.matched_irfs_weights.iter().enumerate() {
@@ -339,7 +344,12 @@ pub(super) fn collect(
             FieldState::unknown(),
             ChangeFacet::Options,
         );
-        gap(&mut value, "generate_irf_coefficients_not_retained", "Signed coefficients are consumed by the parser but are not retained. The ordered label and exogenous names are compared; coefficient edits remain accepted statement context and Source.", "parser_generate_irf_retention");
+        gap(
+            &mut value,
+            "generate_irf_coefficients_not_retained",
+            "Signed coefficients are consumed by the parser but are not retained. The ordered label and exogenous names are compared; coefficient edits remain accepted statement context and Source.",
+            "parser_generate_irf_retention",
+        );
         facts.push(value);
     }
     ms(model, facts, work);

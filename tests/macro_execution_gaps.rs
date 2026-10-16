@@ -9,7 +9,7 @@ use std::time::Duration;
 use dygnosis::diagnostic::{analyze, check_file};
 use dygnosis::expand::expand_report;
 use dygnosis::parse;
-use dygnosis::{dynare_expand, JsonStage, Workspace};
+use dygnosis::{JsonStage, Workspace, dynare_expand};
 
 fn codes(source: &str) -> Vec<String> {
     analyze(&parse(source))
@@ -74,9 +74,11 @@ end;
         "{}",
         report.effective_text
     );
-    assert!(!analyze(&parse(commented))
-        .iter()
-        .any(|row| row.code == "E020"));
+    assert!(
+        !analyze(&parse(commented))
+            .iter()
+            .any(|row| row.code == "E020")
+    );
 
     let closed = "\
 @#define close = \"*/\"
@@ -320,10 +322,12 @@ fn disk_search_path_include_reads_only_executed_files() {
     assert!(!names.iter().any(|name| name == "dormant_hit"), "{names:?}");
     let records = ws.include_records(&uri).unwrap();
     assert!(records.unresolved.is_empty(), "{:?}", records.unresolved);
-    assert!(!records
-        .resolved
-        .iter()
-        .any(|record| record.filename.contains("dormant")));
+    assert!(
+        !records
+            .resolved
+            .iter()
+            .any(|record| record.filename.contains("dormant"))
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -400,9 +404,11 @@ var y; model; y=1; end;
     assert!(messages
         .iter()
         .any(|row| row["kind"] == "echo" && row["message"].as_str().unwrap().contains("before")));
-    assert!(!messages
-        .iter()
-        .any(|row| row["message"].as_str().unwrap_or("").contains("after")));
+    assert!(
+        !messages
+            .iter()
+            .any(|row| row["message"].as_str().unwrap_or("").contains("after"))
+    );
     assert!(messages[0].get("location").is_some());
     let quiet = dynare_expand("var y; model; y=0; end;", None, None);
     assert!(quiet.get("status").is_none(), "{quiet}");

@@ -129,7 +129,7 @@ pub(super) fn decide(
                         Ok(metadata)
                             if !metadata.is_file() || metadata.permissions().readonly() =>
                         {
-                            return Err(WRITABLE)
+                            return Err(WRITABLE);
                         }
                         Err(_) if inner.document(&target_uri).is_none() => return Err(SOURCE),
                         _ => {}

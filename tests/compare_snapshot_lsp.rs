@@ -1,7 +1,7 @@
-use dygnosis::server::{initialize_result, new_service, Backend};
-use serde_json::{json, Value};
-use tower_lsp::lsp_types::*;
+use dygnosis::server::{Backend, initialize_result, new_service};
+use serde_json::{Value, json};
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 async fn command(server: &Backend, name: &str, input: Value) -> Value {
     server
@@ -59,11 +59,13 @@ fn historical(id: &str, value: u8, load_include: bool) -> Value {
 #[test]
 fn snapshot_capability_is_additive_and_advertises_bounded_source_negotiation() {
     let capabilities = initialize_result().capabilities;
-    assert!(capabilities
-        .execute_command_provider
-        .unwrap()
-        .commands
-        .contains(&"dynare/compareModelSnapshots".to_owned()));
+    assert!(
+        capabilities
+            .execute_command_provider
+            .unwrap()
+            .commands
+            .contains(&"dynare/compareModelSnapshots".to_owned())
+    );
     let extensions = capabilities.experimental.unwrap();
     for command in ["compareModels", "compareModelSnapshots"] {
         for field in [

@@ -15,7 +15,7 @@ use crate::engine::diagnostics::{Diagnostic, Severity};
 use crate::engine::language::parser::parse;
 use crate::engine::language::span::{LineIndex, Position, Span};
 use crate::engine::workspace::include_resolver::{normalize_uri, uri_to_path};
-use crate::engine::workspace::{includepath_literal, Workspace};
+use crate::engine::workspace::{Workspace, includepath_literal};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -969,11 +969,7 @@ fn common_prefix(a: &Path, b: &Path) -> Option<PathBuf> {
         out.push(ca);
         matched = true;
     }
-    if matched {
-        Some(out)
-    } else {
-        None
-    }
+    if matched { Some(out) } else { None }
 }
 
 fn map_absolute(

@@ -1,11 +1,11 @@
 use std::{collections::HashMap, time::Duration};
 
-use dygnosis::server::{new_service, Backend};
+use dygnosis::server::{Backend, new_service};
 use dygnosis::{
-    analyze, dynare_diagnose, dynare_model_info, find_preprocessor, parse, run_preprocessor,
-    ExprKind, JsonStage, Severity,
+    ExprKind, JsonStage, Severity, analyze, dynare_diagnose, dynare_model_info, find_preprocessor,
+    parse, run_preprocessor,
 };
-use tower_lsp::{lsp_types::*, LanguageServer};
+use tower_lsp::{LanguageServer, lsp_types::*};
 
 fn official(source: &str, accepted: bool, sentence: Option<&str>) {
     let Some(preprocessor) = find_preprocessor(None) else {
@@ -88,16 +88,22 @@ fn undeclared_qualified_calls_use_the_external_declaration_refusal() {
             if !declaration.is_empty() && name == "pkg.foo" {
                 continue;
             }
-            let source = format!("{declaration}var y; model; y={name}(y(-1)); end; external_function(name={name},nargs=1);");
-            let sentence = format!("To use an external function ({name}) within the model block, you must first declare it via the external_function() statement.");
+            let source = format!(
+                "{declaration}var y; model; y={name}(y(-1)); end; external_function(name={name},nargs=1);"
+            );
+            let sentence = format!(
+                "To use an external function ({name}) within the model block, you must first declare it via the external_function() statement."
+            );
             let row = error(&source, "E001", &sentence);
             assert_eq!(
                 &source[row.span.start as usize..row.span.end as usize],
                 name
             );
-            assert!(!analyze(&parse(&source))
-                .iter()
-                .any(|row| row.code == "E275"));
+            assert!(
+                !analyze(&parse(&source))
+                    .iter()
+                    .any(|row| row.code == "E275")
+            );
         }
     }
 }
@@ -105,31 +111,82 @@ fn undeclared_qualified_calls_use_the_external_declaration_refusal() {
 #[test]
 fn qualified_primary_calls_match_nargs_and_derivative_only_names_refuse() {
     for (options, rhs, name, sentence) in [
-        ("name=pkg.foo", "pkg.foo(y,y)", "pkg.foo", "The number of arguments passed to pkg.foo() does not match those of a previous call or declaration of this function."),
-        ("name=pkg.sub.foo,nargs=2", "pkg.sub.foo(y)", "pkg.sub.foo", "The number of arguments passed to pkg.sub.foo() does not match those of a previous call or declaration of this function."),
-        ("name=pkg.foo,nargs=1,first_deriv_provided=pkg.jac", "pkg.jac(y)", "pkg.jac", "Using a derivative of an external function (pkg.jac) in the model block is currently not allowed."),
+        (
+            "name=pkg.foo",
+            "pkg.foo(y,y)",
+            "pkg.foo",
+            "The number of arguments passed to pkg.foo() does not match those of a previous call or declaration of this function.",
+        ),
+        (
+            "name=pkg.sub.foo,nargs=2",
+            "pkg.sub.foo(y)",
+            "pkg.sub.foo",
+            "The number of arguments passed to pkg.sub.foo() does not match those of a previous call or declaration of this function.",
+        ),
+        (
+            "name=pkg.foo,nargs=1,first_deriv_provided=pkg.jac",
+            "pkg.jac(y)",
+            "pkg.jac",
+            "Using a derivative of an external function (pkg.jac) in the model block is currently not allowed.",
+        ),
     ] {
         let source = format!("external_function({options}); var y; model; y={rhs}; end;");
-        let row = error(&source,"E001",sentence);
-        assert_eq!(&source[row.span.start as usize..row.span.end as usize], name);
+        let row = error(&source, "E001", sentence);
+        assert_eq!(
+            &source[row.span.start as usize..row.span.end as usize],
+            name
+        );
     }
 }
 
 #[test]
 fn qualified_call_arguments_reach_unknown_role_and_excluded_checks() {
     for (prefix, argument, code, sentence) in [
-        ("", "missing", "E020", "Undeclared identifier 'missing' in equation. Fix: add 'missing' to a var, varexo, or parameters declaration."),
-        ("external_function(name=bar,nargs=1);", "bar", "E280", "Symbol bar is a function name external to Dynare. It cannot be used like a variable without input argument inside model."),
-        ("parameters p; p=local;", "local", "E281", "Variable local not allowed inside model declaration. Its scope is only outside model."),
-        ("var gone; var_remove gone;", "gone", "E426", "Variable 'gone' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement"),
+        (
+            "",
+            "missing",
+            "E020",
+            "Undeclared identifier 'missing' in equation. Fix: add 'missing' to a var, varexo, or parameters declaration.",
+        ),
+        (
+            "external_function(name=bar,nargs=1);",
+            "bar",
+            "E280",
+            "Symbol bar is a function name external to Dynare. It cannot be used like a variable without input argument inside model.",
+        ),
+        (
+            "parameters p; p=local;",
+            "local",
+            "E281",
+            "Variable local not allowed inside model declaration. Its scope is only outside model.",
+        ),
+        (
+            "var gone; var_remove gone;",
+            "gone",
+            "E426",
+            "Variable 'gone' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement",
+        ),
     ] {
-        let source = format!("{prefix}external_function(name=pkg.sub.foo,nargs=1); var y; model; y=pkg.sub.foo({argument}); end;");
+        let source = format!(
+            "{prefix}external_function(name=pkg.sub.foo,nargs=1); var y; model; y=pkg.sub.foo({argument}); end;"
+        );
         // E020 has the existing editor wording warrant.
-        let official_sentence = if code == "E020" { "Unknown symbol: missing" } else { sentence };
+        let official_sentence = if code == "E020" {
+            "Unknown symbol: missing"
+        } else {
+            sentence
+        };
         official(&source, false, Some(official_sentence));
         let rows = analyze(&parse(&source));
-        assert!(rows.iter().any(|row| row.code == code && row.message == sentence), "{source}: {rows:?}");
-        assert!(!rows.iter().any(|row| row.code == "E275"), "{source}: {rows:?}");
+        assert!(
+            rows.iter()
+                .any(|row| row.code == code && row.message == sentence),
+            "{source}: {rows:?}"
+        );
+        assert!(
+            !rows.iter().any(|row| row.code == "E275"),
+            "{source}: {rows:?}"
+        );
     }
 }
 
@@ -261,11 +318,15 @@ fn qualified_model_arguments_require_complete_grouped_expressions() {
         "pkg.fn(((y+y)),(y))",
         "pkg.fn((pkg.inner(y,y)),y)",
     ] {
-        let source = format!("external_function(name=pkg.fn,nargs=2); external_function(name=pkg.inner,nargs=2); var y; model; y={rhs}; end;");
+        let source = format!(
+            "external_function(name=pkg.fn,nargs=2); external_function(name=pkg.inner,nargs=2); var y; model; y={rhs}; end;"
+        );
         official(&source, true, None);
-        assert!(!analyze(&parse(&source))
-            .iter()
-            .any(|row| row.severity == Severity::Error));
+        assert!(
+            !analyze(&parse(&source))
+                .iter()
+                .any(|row| row.severity == Severity::Error)
+        );
     }
 }
 
@@ -276,12 +337,14 @@ fn qualified_model_calls_keep_model_facts_and_macro_execution_order() {
     let model = parse(source);
     let refs = model.ident_refs(&model.equations[0]);
     assert_eq!(refs.len(), 3);
-    assert!(refs
-        .iter()
-        .any(|r| model.name(r.name) == "p" && r.timing == 0));
-    assert!(refs
-        .iter()
-        .any(|r| model.name(r.name) == "y" && r.timing == -1));
+    assert!(
+        refs.iter()
+            .any(|r| model.name(r.name) == "p" && r.timing == 0)
+    );
+    assert!(
+        refs.iter()
+            .any(|r| model.name(r.name) == "y" && r.timing == -1)
+    );
     assert!(!analyze(&model).iter().any(|row| row.code == "W022"));
     let info = dynare_model_info(source, None, None);
     assert_eq!(info["n_model_equations"], 1);
@@ -294,9 +357,11 @@ fn qualified_model_calls_keep_model_facts_and_macro_execution_order() {
     assert_eq!(rows.iter().filter(|row| row.message == sentence).count(), 1);
     let accepted = "var y;\n@#for i in 1:2\nexternal_function(name=pkg.sub.foo,nargs=1);\nmodel; y=pkg.sub.foo(y(-1)); end;\n@#endfor\n";
     official(accepted, true, None);
-    assert!(!analyze(&parse(accepted))
-        .iter()
-        .any(|row| row.severity == Severity::Error));
+    assert!(
+        !analyze(&parse(accepted))
+            .iter()
+            .any(|row| row.severity == Severity::Error)
+    );
 }
 
 #[test]
@@ -318,9 +383,11 @@ fn qualified_model_refusals_keep_include_origins_in_mcp() {
     assert_eq!(row.end_column as usize, included[..end].chars().count() + 1);
 
     let declared = format!("external_function(name=pkg.sub.foo,nargs=1); {source}");
-    assert!(!dynare_diagnose(&declared, Some(root), Some(&files))
-        .iter()
-        .any(|row| row.severity == "ERROR"));
+    assert!(
+        !dynare_diagnose(&declared, Some(root), Some(&files))
+            .iter()
+            .any(|row| row.severity == "ERROR")
+    );
 }
 
 async fn pull(server: &Backend, uri: &Url) -> Vec<tower_lsp::lsp_types::Diagnostic> {
@@ -370,7 +437,10 @@ async fn lsp_qualified_model_call_range_uses_utf16_and_clears_after_declaration(
         row.range,
         Range::new(Position::new(1, start), Position::new(1, end))
     );
-    assert_eq!(row.message, "To use an external function (pkg.sub.foo) within the model block, you must first declare it via the external_function() statement.");
+    assert_eq!(
+        row.message,
+        "To use an external function (pkg.sub.foo) within the model block, you must first declare it via the external_function() statement."
+    );
     server
         .did_change(DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {
@@ -406,9 +476,19 @@ fn model_expression_consumers_keep_qualified_call_identity_and_refusals() {
         "trend_var(growth_factor=1) t; var(deflator=pkg.sub.foo(t)) y; model; y=t; end;",
     ] {
         let source = format!("external_function(name=pkg.sub.foo,nargs=1); {body}");
-        official(&source,true,None);
-        assert!(!analyze(&parse(&source)).iter().any(|row| row.severity == Severity::Error),"{source}: {:?}",analyze(&parse(&source)));
+        official(&source, true, None);
+        assert!(
+            !analyze(&parse(&source))
+                .iter()
+                .any(|row| row.severity == Severity::Error),
+            "{source}: {:?}",
+            analyze(&parse(&source))
+        );
         let wrong_arity = source.replace("nargs=1", "nargs=2");
-        let _ = error(&wrong_arity, "E001", "The number of arguments passed to pkg.sub.foo() does not match those of a previous call or declaration of this function.");
+        let _ = error(
+            &wrong_arity,
+            "E001",
+            "The number of arguments passed to pkg.sub.foo() does not match those of a previous call or declaration of this function.",
+        );
     }
 }

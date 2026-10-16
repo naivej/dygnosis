@@ -1,7 +1,7 @@
 use dygnosis::diagnostic::{Diagnostic, Severity};
 use dygnosis::preprocessor::find_preprocessor;
+use dygnosis::{JsonStage, run_preprocessor};
 use dygnosis::{analyze, parse};
-use dygnosis::{run_preprocessor, JsonStage};
 use std::time::Duration;
 
 fn diagnostics(source: &str) -> Vec<Diagnostic> {
@@ -373,11 +373,7 @@ fn parameter_checks_follow_change_type() {
             unassigned,
             "{source}: {rows:?}"
         );
-        assert_eq!(
-            !hits(&rows, "W121").is_empty(),
-            timed,
-            "{source}: {rows:?}"
-        );
+        assert_eq!(!hits(&rows, "W121").is_empty(), timed, "{source}: {rows:?}");
         if let Some(pp) = find_preprocessor(None) {
             let official =
                 run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);

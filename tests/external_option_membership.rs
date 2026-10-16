@@ -1,4 +1,4 @@
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage, Severity};
+use dygnosis::{JsonStage, Severity, analyze, find_preprocessor, parse, run_preprocessor};
 use std::time::Duration;
 
 fn source(options: &str) -> String {

@@ -5,19 +5,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::engine::comparison::compare_snapshots::{
+    CapturedSnapshot, GitSnapshotInput, MAX_SNAPSHOT_FILES, MAX_SNAPSHOT_SOURCE_BYTES,
+    ManifestEntry, SnapshotCapture, SnapshotCoordinates, SnapshotFailure, SourceFact,
     capture_git_snapshot_with_limit, capture_working_snapshot, compare_captured_snapshots,
-    tree_path, CapturedSnapshot, GitSnapshotInput, ManifestEntry, SnapshotCapture,
-    SnapshotCoordinates, SnapshotFailure, SourceFact, MAX_SNAPSHOT_FILES,
-    MAX_SNAPSHOT_SOURCE_BYTES,
+    tree_path,
 };
 use crate::engine::workspace::Workspace;
 
@@ -359,7 +359,7 @@ impl Acquisition<'_> {
                                         "CANCELLED" | "CAPTURE_LIMIT"
                                     ) =>
                                 {
-                                    return Err(failure)
+                                    return Err(failure);
                                 }
                                 Err(failure) => SourceFact::Failure {
                                     code: failure.code,
@@ -441,7 +441,7 @@ impl Acquisition<'_> {
                         "SOURCE_READ_FAILED",
                         "Saved model capture requested deferred sources",
                         None,
-                    ))
+                    ));
                 }
             }
         };
@@ -465,10 +465,12 @@ impl Acquisition<'_> {
         captured.inputs["root_file"] = json!(root_file);
         captured.inputs["search_paths"] = json!(search_paths);
         captured.inputs["macro_work_limit"] = json!(self.macro_work_limit);
-        captured.inputs["resolved_search_paths"] = json!(search_paths
-            .iter()
-            .map(|path| self.repository.join(path).to_string_lossy().into_owned())
-            .collect::<Vec<_>>());
+        captured.inputs["resolved_search_paths"] = json!(
+            search_paths
+                .iter()
+                .map(|path| self.repository.join(path).to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+        );
         let guards = captured.input_guards();
         self.checked_keys.extend(
             guards
@@ -482,7 +484,11 @@ impl Acquisition<'_> {
                 .map(|file| (side.to_owned(), file.clone())),
         );
         if self.checked_keys.len() > self.limits.max_files {
-            return Err(SnapshotFailure::new("SOURCE_LIMIT", "The two comparison inputs exceed the request checked-file and lookup-candidate limit. No comparison facts were produced.", None));
+            return Err(SnapshotFailure::new(
+                "SOURCE_LIMIT",
+                "The two comparison inputs exceed the request checked-file and lookup-candidate limit. No comparison facts were produced.",
+                None,
+            ));
         }
         let mut identity = captured.inputs.clone();
         identity
@@ -490,11 +496,13 @@ impl Acquisition<'_> {
             .expect("snapshot identity")
             .remove("revision");
         identity["guards"] = json!(guards);
-        identity["source_digests"] = json!(captured
-            .sources
-            .iter()
-            .map(|(file, text)| (file.clone(), super::source::sha256(text.as_bytes())))
-            .collect::<BTreeMap<_, _>>());
+        identity["source_digests"] = json!(
+            captured
+                .sources
+                .iter()
+                .map(|(file, text)| (file.clone(), super::source::sha256(text.as_bytes())))
+                .collect::<BTreeMap<_, _>>()
+        );
         let revision =
             super::source::sha256(serde_json::to_vec(&identity).expect("snapshot identity"));
         captured.inputs["guards"] = json!(guards);
@@ -700,7 +708,7 @@ fn compare_repository_inner(
                 "repository_path is not an accessible directory on this server host",
                 None,
             )
-            .response("before")
+            .response("before");
         }
     };
     let mut acquisition = Acquisition {
@@ -895,12 +903,16 @@ mod tests {
             compare_repository_bounded(params(), &super::super::source::RequestControl::default());
         assert_eq!(first["state"], "result", "{first}");
         let guards = first["inputs"]["before"]["guards"].as_array().unwrap();
-        assert!(guards
-            .iter()
-            .any(|guard| { guard["file"] == "models/equations.inc" && guard["exists"] == false }));
-        assert!(guards
-            .iter()
-            .any(|guard| { guard["file"] == "missing/equations.inc" && guard["exists"] == false }));
+        assert!(
+            guards.iter().any(|guard| {
+                guard["file"] == "models/equations.inc" && guard["exists"] == false
+            })
+        );
+        assert!(
+            guards.iter().any(|guard| {
+                guard["file"] == "missing/equations.inc" && guard["exists"] == false
+            })
+        );
         let mut control = super::super::source::RequestControl::default();
         // Four source bodies still fit; the two guarded candidate sets do not.
         control.limits.max_files = guards.len().max(4);

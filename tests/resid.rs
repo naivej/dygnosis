@@ -6,10 +6,10 @@ use std::time::Duration;
 
 use dygnosis::server::new_service;
 use dygnosis::{
-    analyze, apply_fix, auto_fix, dynare_diagnose, parse, run_preprocessor, JsonStage, Severity,
+    JsonStage, Severity, analyze, apply_fix, auto_fix, dynare_diagnose, parse, run_preprocessor,
 };
-use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 const MODEL: &str = "var y; varexo e; model; y=e; end;\n";
 
@@ -118,10 +118,12 @@ fn resid_recovers_a_following_statement_without_generic_option_uses() {
     ] {
         let text = format!("{MODEL}{command}");
         let model = parse(&text);
-        assert!(model
-            .endogenous
-            .iter()
-            .any(|decl| model.name(decl.name) == "z"));
+        assert!(
+            model
+                .endogenous
+                .iter()
+                .any(|decl| model.name(decl.name) == "z")
+        );
         assert!(analyze(&model).iter().all(|row| row.code == "E001"));
         assert!(!model.statements.iter().any(|row| row.name == "resid"));
     }
@@ -141,10 +143,12 @@ fn resid_earlier_grammar_refusal_precedes_later_lexer_junk() {
         let diagnostics = analyze(&parse(&text));
         assert_eq!(diagnostics.len(), 1, "{command}: {diagnostics:?}");
         assert_eq!(diagnostics[0].message, expected);
-        assert!(!parse(&text)
-            .statements
-            .iter()
-            .any(|row| row.name == "resid"));
+        assert!(
+            !parse(&text)
+                .statements
+                .iter()
+                .any(|row| row.name == "resid")
+        );
     }
 }
 
@@ -252,17 +256,21 @@ fn resid_mcp_uses_unsaved_includes_and_retains_refusing_token_ownership() {
         diagnostic.message,
         "syntax error, unexpected INT_NUMBER, expecting NON_ZERO"
     );
-    assert!(diagnostic
-        .file
-        .as_deref()
-        .is_some_and(|file| file.ends_with("command.inc")));
+    assert!(
+        diagnostic
+            .file
+            .as_deref()
+            .is_some_and(|file| file.ends_with("command.inc"))
+    );
     assert_eq!(diagnostic.line, 1);
     assert_eq!(diagnostic.column, 7);
     let mut files = files;
     files.insert(child.to_string(), "resid(non_zero);\n".to_string());
-    assert!(dynare_diagnose(&text, Some(root), Some(&files))
-        .iter()
-        .all(|row| row.severity != "error"));
+    assert!(
+        dynare_diagnose(&text, Some(root), Some(&files))
+            .iter()
+            .all(|row| row.severity != "error")
+    );
 }
 
 #[tokio::test]
@@ -337,11 +345,12 @@ async fn resid_lsp_reads_unsaved_include_changes_with_utf16_token_ranges() {
         else {
             panic!("expected full report after change");
         };
-        assert!(full
-            .full_document_diagnostic_report
-            .items
-            .iter()
-            .all(|row| row.severity != Some(DiagnosticSeverity::ERROR)));
+        assert!(
+            full.full_document_diagnostic_report
+                .items
+                .iter()
+                .all(|row| row.severity != Some(DiagnosticSeverity::ERROR))
+        );
     }
 }
 
@@ -457,9 +466,11 @@ fn resid_honesty_at_check_locks_refusals_and_legal_forms() {
             result.diagnostics.iter().any(|row| row.message == expected),
             "{command}: {result:?}"
         );
-        assert!(analyze(&parse(&text))
-            .iter()
-            .any(|row| row.message == expected));
+        assert!(
+            analyze(&parse(&text))
+                .iter()
+                .any(|row| row.message == expected)
+        );
     }
     for (command, expected) in [
         (
@@ -497,8 +508,10 @@ fn resid_honesty_at_check_locks_refusals_and_legal_forms() {
             JsonStage::Check,
         );
         assert!(result.success, "{command}: {result:?}");
-        assert!(analyze(&parse(&text))
-            .iter()
-            .all(|row| row.severity != Severity::Error));
+        assert!(
+            analyze(&parse(&text))
+                .iter()
+                .all(|row| row.severity != Severity::Error)
+        );
     }
 }

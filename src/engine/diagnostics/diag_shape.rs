@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::engine::diagnostics::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::engine::language::intern::Name;
-use crate::engine::language::lexer::{tokenize, Token, TokenKind};
+use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::model::{Equation, Model, PolicyCommand};
 use crate::engine::language::span::{LineIndex, Span};
 

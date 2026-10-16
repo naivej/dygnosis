@@ -1,4 +1,4 @@
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage};
+use dygnosis::{JsonStage, analyze, find_preprocessor, parse, run_preprocessor};
 use std::time::Duration;
 
 #[test]
@@ -56,9 +56,14 @@ fn retyped_trends_reach_lists_and_unused_exogenous_checks() {
         ("varexo", "shocks"),
     ] {
         let source = if command == "shocks" {
-            format!("var y; trend_var(growth_factor=1.01) A; change_type({kind}) A; model; y=A; end; shocks; var A; stderr 1; end;")
+            format!(
+                "var y; trend_var(growth_factor=1.01) A; change_type({kind}) A; model; y=A; end; shocks; var A; stderr 1; end;"
+            )
         } else {
-            format!("var y; trend_var(growth_factor=1.01) A; change_type({kind}) A; model; y=A; {} end; {command} A;", if kind == "var" { "A=0;" } else { "" })
+            format!(
+                "var y; trend_var(growth_factor=1.01) A; change_type({kind}) A; model; y=A; {} end; {command} A;",
+                if kind == "var" { "A=0;" } else { "" }
+            )
         };
         assert!(
             !analyze(&parse(&source))
@@ -101,13 +106,34 @@ fn ordinary_trend_roles_reach_existing_statement_readers() {
             let source = format!("parameters p; {declaration} A; {suffix}");
             let model = parse(&source);
             let diagnostics = analyze(&model);
-            assert!(!diagnostics.iter().any(|row| row.severity == dygnosis::Severity::Error), "{source}: {diagnostics:?}");
+            assert!(
+                !diagnostics
+                    .iter()
+                    .any(|row| row.severity == dygnosis::Severity::Error),
+                "{source}: {diagnostics:?}"
+            );
             if suffix.starts_with("change_type(parameters)") {
-                assert!(model.param_assignments.iter().any(|row| model.name(row.name) == "A" && !row.native));
-                assert!(!diagnostics.iter().any(|row| row.code == "W010" && row.message.contains("'A'")), "{diagnostics:?}");
+                assert!(
+                    model
+                        .param_assignments
+                        .iter()
+                        .any(|row| model.name(row.name) == "A" && !row.native)
+                );
+                assert!(
+                    !diagnostics
+                        .iter()
+                        .any(|row| row.code == "W010" && row.message.contains("'A'")),
+                    "{diagnostics:?}"
+                );
             }
             if let Some(pp) = find_preprocessor(None) {
-                let official = run_preprocessor(&source, &pp, None, Duration::from_secs(30), JsonStage::Check);
+                let official = run_preprocessor(
+                    &source,
+                    &pp,
+                    None,
+                    Duration::from_secs(30),
+                    JsonStage::Check,
+                );
                 assert!(official.success, "{source}: {official:?}");
             }
         }
@@ -117,7 +143,7 @@ fn ordinary_trend_roles_reach_existing_statement_readers() {
 #[tokio::test]
 async fn retyped_trend_hover_and_definition_keep_the_written_location() {
     use dygnosis::server::new_service;
-    use tower_lsp::{lsp_types::*, LanguageServer};
+    use tower_lsp::{LanguageServer, lsp_types::*};
     let source = "trend_var(growth_factor=1.01) A;\nchange_type(var) A;\nmodel; A=0; end;";
     let uri = Url::parse("file:///trend_retype.mod").unwrap();
     let (service, _) = new_service();
@@ -260,7 +286,9 @@ fn backward_macro_order_uses_the_captured_trend_type() {
         ("var", "predetermined_variables A;", "y=A; A=0;"),
         ("parameters", "A=.9;", "y=A;"),
     ] {
-        let source = format!("trend_var(growth_factor=1.01) A;\n@#for j in 1:2\n@#if j==2\n{target}\n@#endif\n@#if j==1\nchange_type({kind}) A;\n@#endif\n@#endfor\nvar y; model; {body} end;");
+        let source = format!(
+            "trend_var(growth_factor=1.01) A;\n@#for j in 1:2\n@#if j==2\n{target}\n@#endif\n@#if j==1\nchange_type({kind}) A;\n@#endif\n@#endfor\nvar y; model; {body} end;"
+        );
         let diagnostics = analyze(&parse(&source));
         assert!(
             !diagnostics

@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use dygnosis::span::Span;
 use dygnosis::{
-    analyze, check_file, check_w160, parse, quiet_i050, CompanionKind, CompanionRecord, Diagnostic,
-    Severity, Workspace,
+    CompanionKind, CompanionRecord, Diagnostic, Severity, Workspace, analyze, check_file,
+    check_w160, parse, quiet_i050,
 };
 
 fn fixtures_root() -> PathBuf {

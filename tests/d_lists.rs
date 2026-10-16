@@ -8,7 +8,7 @@
 //! character for character (see `honesty.rs` for the run against the installed
 //! preprocessor).
 
-use dygnosis::{analyze, parse, Diagnostic};
+use dygnosis::{Diagnostic, analyze, parse};
 
 fn fixture(rel: &str) -> String {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

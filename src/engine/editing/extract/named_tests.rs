@@ -41,11 +41,13 @@ fn var_expectation_closes_auxiliary_equations_and_definition_expressions() {
     assert!(parsed.semi_structural_commands.iter().any(
         |command| command.kind == crate::engine::language::model::SemiStructuralKind::VarModel
     ));
-    assert!(parsed
-        .semi_structural_commands
-        .iter()
-        .any(|command| command.kind
-            == crate::engine::language::model::SemiStructuralKind::VarExpectationModel));
+    assert!(
+        parsed
+            .semi_structural_commands
+            .iter()
+            .any(|command| command.kind
+                == crate::engine::language::model::SemiStructuralKind::VarExpectationModel)
+    );
     let local = parsed.equations.iter().find(|equation| equation.is_local && equation.lhs_expr.is_some_and(|id| matches!(parsed.exprs.get(id).kind, ExprKind::Ident { name, .. } if parsed.name(name) == "scale"))).expect("scale definition");
     assert!(
         parsed
@@ -68,10 +70,12 @@ fn var_expectation_closes_auxiliary_equations_and_definition_expressions() {
             .any(|declaration| parsed.name(declaration.name) == "unused"),
         "{text}"
     );
-    assert!(result
-        .selected_equations
-        .iter()
-        .any(|row| row.name.as_deref() == Some("aux") && row.role == EquationRole::Companion));
+    assert!(
+        result
+            .selected_equations
+            .iter()
+            .any(|row| row.name.as_deref() == Some("aux") && row.role == EquationRole::Companion)
+    );
     assert!(result
         .selected_equations
         .iter()
@@ -97,18 +101,24 @@ fn pac_keeps_composite_target_block_target_equation_and_auxiliary_model() {
     let result = fragment(PAC, "wanted");
     let text = result.fragment.as_deref().unwrap();
     let parsed = parse(text);
-    assert!(parsed
-        .pac_target_info
-        .iter()
-        .any(|block| parsed.name(block.name) == "pm"));
-    assert!(parsed
-        .equations
-        .iter()
-        .any(|equation| equation.name == "target"));
-    assert!(parsed
-        .equations
-        .iter()
-        .any(|equation| equation.name == "aux"));
+    assert!(
+        parsed
+            .pac_target_info
+            .iter()
+            .any(|block| parsed.name(block.name) == "pm")
+    );
+    assert!(
+        parsed
+            .equations
+            .iter()
+            .any(|equation| equation.name == "target")
+    );
+    assert!(
+        parsed
+            .equations
+            .iter()
+            .any(|equation| equation.name == "aux")
+    );
     assert!(!text.contains("unused"), "{text}");
     assert!(text.contains("auxname_target_nonstationary vns"), "{text}");
     assert!(text.contains("component x"), "{text}");
@@ -179,14 +189,18 @@ fn included_macro_copies_keep_selected_named_context_and_unsaved_root() {
         )),
         "{text}"
     );
-    assert!(result.origins.iter().any(|origin| origin
-        .frames
-        .iter()
-        .any(|frame| frame.kind == "for" && frame.value.as_deref() == Some("2"))));
-    assert!(result.origins.iter().all(|origin| origin
-        .file
-        .as_deref()
-        .is_some_and(|file| file.ends_with("models.inc"))));
+    assert!(result.origins.iter().any(|origin| {
+        origin
+            .frames
+            .iter()
+            .any(|frame| frame.kind == "for" && frame.value.as_deref() == Some("2"))
+    }));
+    assert!(result.origins.iter().all(|origin| {
+        origin
+            .file
+            .as_deref()
+            .is_some_and(|file| file.ends_with("models.inc"))
+    }));
     accepted_at_check(text);
 }
 
@@ -276,19 +290,23 @@ fn auxiliary_names_follow_each_callers_pinned_namespace_precedence() {
     assert!(parsed.semi_structural_commands.iter().any(
         |command| command.kind == crate::engine::language::model::SemiStructuralKind::VarModel
     ));
-    assert!(!parsed
-        .semi_structural_commands
-        .iter()
-        .any(|command| command.kind
-            == crate::engine::language::model::SemiStructuralKind::TrendComponentModel));
+    assert!(
+        !parsed
+            .semi_structural_commands
+            .iter()
+            .any(|command| command.kind
+                == crate::engine::language::model::SemiStructuralKind::TrendComponentModel)
+    );
     let source = format!("{PAC}{extra}");
     let result = fragment(&source, "wanted");
     let parsed = parse(result.fragment.as_deref().unwrap());
-    assert!(parsed
-        .semi_structural_commands
-        .iter()
-        .any(|command| command.kind
-            == crate::engine::language::model::SemiStructuralKind::TrendComponentModel));
+    assert!(
+        parsed
+            .semi_structural_commands
+            .iter()
+            .any(|command| command.kind
+                == crate::engine::language::model::SemiStructuralKind::TrendComponentModel)
+    );
     assert!(!parsed.semi_structural_commands.iter().any(
         |command| command.kind == crate::engine::language::model::SemiStructuralKind::VarModel
     ));
@@ -315,25 +333,33 @@ fn named_commands_stay_between_source_order_type_changes() {
         parsed.symbol_kind_in_context(betta, command.symbol_type_context),
         Some("parameters")
     );
-    assert!(parsed
-        .final_endogenous()
-        .iter()
-        .any(|declaration| parsed.name(declaration.name) == "betta"));
+    assert!(
+        parsed
+            .final_endogenous()
+            .iter()
+            .any(|declaration| parsed.name(declaration.name) == "betta")
+    );
 }
 
 #[test]
 fn omitted_native_initialization_and_unrelated_models_are_explained() {
     // Guards silently dropping the original runtime setup or unrelated named definitions.
-    let source = format!("{VAR}var_model(model_name=unrelated,eqtags=['unused']);\nvar_expectation.initialize('ve');\n");
+    let source = format!(
+        "{VAR}var_model(model_name=unrelated,eqtags=['unused']);\nvar_expectation.initialize('ve');\n"
+    );
     let result = fragment(&source, "wanted");
-    assert!(result
-        .omitted_context
-        .iter()
-        .any(|note| note.kind == "native" && note.detail.contains("initialization")));
-    assert!(result
-        .omitted_context
-        .iter()
-        .any(|note| note.kind == "named_models" && note.detail.contains("unrelated")));
+    assert!(
+        result
+            .omitted_context
+            .iter()
+            .any(|note| note.kind == "native" && note.detail.contains("initialization"))
+    );
+    assert!(
+        result
+            .omitted_context
+            .iter()
+            .any(|note| note.kind == "named_models" && note.detail.contains("unrelated"))
+    );
     let parsed = parse(result.fragment.as_deref().unwrap());
     assert!(!parsed.execution_steps.iter().any(|step| matches!(
         step,

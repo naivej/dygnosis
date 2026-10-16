@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::engine::diagnostics::{Diagnostic, Severity};
 use crate::engine::language::expr::{BinOp, ExprId, ExprKind, UnOp};
 use crate::engine::language::intern::Name;
-use crate::engine::language::lexer::{tokenize, TokenKind};
+use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::language::model::{Assignment, Model};
 use crate::engine::language::span::{LineIndex, Span};
 
@@ -481,11 +481,7 @@ fn erf(x: f64) -> f64 {
                                 + t * (-1.13520398
                                     + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))),
     );
-    if x >= 0.0 {
-        1.0 - ans
-    } else {
-        ans - 1.0
-    }
+    if x >= 0.0 { 1.0 - ans } else { ans - 1.0 }
 }
 
 /// Acklam's inverse normal CDF, then affine scale.

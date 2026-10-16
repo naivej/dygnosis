@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use dygnosis::{analyze, apply_fix, auto_fix, has_structural_error, parse, TextEdit};
+use dygnosis::{TextEdit, analyze, apply_fix, auto_fix, has_structural_error, parse};
 
 const OUT: &[&str] = &["E040", "W040", "W041", "I041"];
 

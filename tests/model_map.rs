@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use dygnosis::expand::expand_report;
 use dygnosis::model::{AssignmentIndex, ExecutionStep, StatementKind};
 use dygnosis::model_map::{BLOCK_CATEGORIES, SUPPORTED_BLOCKS};
-use dygnosis::{parse, Workspace};
+use dygnosis::{Workspace, parse};
 
 #[test]
 fn records_execution_order_and_every_model_opener() {
@@ -157,7 +157,9 @@ fn removed_static_local_and_replacement_rows_keep_written_structure() {
 
 #[test]
 fn dimensions_have_separate_surviving_sequences() {
-    let report = expand_report("heterogeneity_dimension hh ff; var Y; var(heterogeneity=hh) c; var(heterogeneity=ff) q; model(heterogeneity=hh); c=0; end; model; Y=0; end; model(heterogeneity=ff); q=0; end; model(heterogeneity=hh); c=1; end;");
+    let report = expand_report(
+        "heterogeneity_dimension hh ff; var Y; var(heterogeneity=hh) c; var(heterogeneity=ff) q; model(heterogeneity=hh); c=0; end; model; Y=0; end; model(heterogeneity=ff); q=0; end; model(heterogeneity=hh); c=1; end;",
+    );
     assert_eq!(
         report
             .model_map
@@ -176,7 +178,9 @@ fn dimensions_have_separate_surviving_sequences() {
 
 #[test]
 fn declaration_owners_and_opaque_barriers_keep_final_type_queries() {
-    let model = parse("var y $Y$ (long_name='Output'); parameters p; change_type(var) p; mystery(); p=2; model; p=y; end;");
+    let model = parse(
+        "var y $Y$ (long_name='Output'); parameters p; change_type(var) p; mystery(); p=2; model; p=y; end;",
+    );
     let decl = &model.written_declarations[1];
     assert_eq!(decl.written_kind, "parameters");
     assert_eq!(decl.statement_id, 1);
@@ -195,15 +199,21 @@ fn declaration_owners_and_opaque_barriers_keep_final_type_queries() {
             .as_deref(),
         Some("Y")
     );
-    assert!(model
-        .execution_steps
-        .iter()
-        .any(|step| matches!(step, ExecutionStep::Opaque(_))));
-    assert!(!model
-        .statements
-        .iter()
-        .any(|statement| statement.name == "mystery"));
-    let functions = parse("external_function(name=f,nargs=1,first_deriv_provided=df); model_local_variable a; trend_var(growth_factor=1) T;");
+    assert!(
+        model
+            .execution_steps
+            .iter()
+            .any(|step| matches!(step, ExecutionStep::Opaque(_)))
+    );
+    assert!(
+        !model
+            .statements
+            .iter()
+            .any(|statement| statement.name == "mystery")
+    );
+    let functions = parse(
+        "external_function(name=f,nargs=1,first_deriv_provided=df); model_local_variable a; trend_var(growth_factor=1) T;",
+    );
     assert_eq!(
         functions
             .written_declarations
@@ -240,7 +250,9 @@ fn assignment_and_dotted_command_names_keep_written_symbol_case() {
     assert_eq!(model.statements[1].name, "Alpha");
     assert_eq!(model.statements[2].kind, StatementKind::Command);
     assert_eq!(model.statements[2].name, "Alpha.prior");
-    let model = parse("parameters Alpha;\n@#for j in 1:2\n@#if j == 1\n@#define action = \"Alpha.prior(shape=normal_pdf,mean=0,stdev=1)\"\n@#else\n@#define action = \"data(file=values.prior)\"\n@#endif\n@{action};\n@#endfor\n");
+    let model = parse(
+        "parameters Alpha;\n@#for j in 1:2\n@#if j == 1\n@#define action = \"Alpha.prior(shape=normal_pdf,mean=0,stdev=1)\"\n@#else\n@#define action = \"data(file=values.prior)\"\n@#endif\n@{action};\n@#endfor\n",
+    );
     assert_eq!(
         model
             .statements
@@ -261,18 +273,22 @@ fn partial_blocks_do_not_fabricate_closers_or_numbers() {
     assert!(!model.statements[2].complete);
     let partial = expand_report("var y; model; y=0; initval; y=1;");
     assert!(!partial.model_map.complete);
-    assert!(partial
-        .model_map
-        .equations
-        .iter()
-        .all(|row| row.number.is_none()));
+    assert!(
+        partial
+            .model_map
+            .equations
+            .iter()
+            .all(|row| row.number.is_none())
+    );
     let report = expand_report("var y; @#if unavailable\nmodel; y=0; end;\n@#endif\n");
     assert!(!report.complete);
-    assert!(report
-        .model_map
-        .equations
-        .iter()
-        .all(|row| row.number.is_none()));
+    assert!(
+        report
+            .model_map
+            .equations
+            .iter()
+            .all(|row| row.number.is_none())
+    );
 }
 
 #[test]
@@ -288,27 +304,32 @@ fn split_blocks_map_only_verified_segments() {
         let report = workspace.expand_report("C:/dygnosis-map/root.mod").unwrap();
         source = report.model_map.statements[1].clone();
         assert_eq!(source.segments.len(), 3);
-        assert!(source
-            .anchor
-            .as_ref()
-            .unwrap()
-            .file
-            .as_ref()
-            .unwrap()
-            .ends_with("root.mod"));
-        assert!(report.model_map.equations[0].source.segments[0]
-            .file
-            .as_ref()
-            .unwrap()
-            .ends_with("body.inc"));
+        assert!(
+            source
+                .anchor
+                .as_ref()
+                .unwrap()
+                .file
+                .as_ref()
+                .unwrap()
+                .ends_with("root.mod")
+        );
+        assert!(
+            report.model_map.equations[0].source.segments[0]
+                .file
+                .as_ref()
+                .unwrap()
+                .ends_with("body.inc")
+        );
     }
     for segment in &source.segments {
         let text = workspace
             .get_source(segment.file.as_deref().unwrap())
             .unwrap();
-        assert!(text
-            .get(segment.span.start as usize..segment.span.end as usize)
-            .is_some());
+        assert!(
+            text.get(segment.span.start as usize..segment.span.end as usize)
+                .is_some()
+        );
     }
 }
 
@@ -331,9 +352,10 @@ fn cross_file_rows_and_type_events_keep_independent_occurrences() {
         let text = workspace
             .get_source(segment.file.as_deref().unwrap())
             .unwrap();
-        assert!(text
-            .get(segment.span.start as usize..segment.span.end as usize)
-            .is_some());
+        assert!(
+            text.get(segment.span.start as usize..segment.span.end as usize)
+                .is_some()
+        );
     }
     let text = "@#for k in 1:2\nvar y;\n@#endfor\nmodel; y=0; end;\nnative_function()";
     let report = expand_report(text);

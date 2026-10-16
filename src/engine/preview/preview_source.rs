@@ -1,10 +1,10 @@
 //! Source-layout editor display copy. Keeps written spaces and line breaks.
 
 use crate::engine::language::expand::ExpandReport;
-use crate::engine::language::lexer::{tokenize, Token, TokenKind};
+use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::macro_expand::{
-    expand_macros_with_source_layout_and_evaluations, IncompleteReason, MacroReplay,
-    SourceFragment, SourceLayoutGap,
+    IncompleteReason, MacroReplay, SourceFragment, SourceLayoutGap,
+    expand_macros_with_source_layout_and_evaluations,
 };
 use crate::engine::language::model::Model;
 use crate::engine::language::parser::{join_lexemes_recorded, parse_expanded_controlled};

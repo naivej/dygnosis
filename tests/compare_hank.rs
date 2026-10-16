@@ -1,6 +1,6 @@
 //! Heterogeneous `shocks(heterogeneity=…)` rows in the existing `shock_setup_changes` field.
 
-use dygnosis::model_diff::{compare_models_with_sources, CompareSource};
+use dygnosis::model_diff::{CompareSource, compare_models_with_sources};
 use dygnosis::{compare_models, parse};
 
 fn compare(before: &str, after: &str) -> serde_json::Value {
@@ -220,10 +220,12 @@ end;
         "{diff}"
     );
     assert!(rows(&diff).iter().all(|row| row["target"] != "z"), "{diff}");
-    assert!(diff["markdown"]
-        .as_str()
-        .unwrap()
-        .contains("superseded by overwrite"));
+    assert!(
+        diff["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("superseded by overwrite")
+    );
 
     let empty_after = "\
 heterogeneity_dimension d, e;

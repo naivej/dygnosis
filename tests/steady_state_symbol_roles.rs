@@ -1,8 +1,8 @@
 use std::{collections::HashMap, time::Duration};
 
-use dygnosis::server::{new_service, Backend};
-use dygnosis::{analyze, dynare_diagnose, find_preprocessor, parse, run_preprocessor, JsonStage};
-use tower_lsp::{lsp_types::*, LanguageServer};
+use dygnosis::server::{Backend, new_service};
+use dygnosis::{JsonStage, analyze, dynare_diagnose, find_preprocessor, parse, run_preprocessor};
+use tower_lsp::{LanguageServer, lsp_types::*};
 
 const PREFIX: &str = "var y; model; y=0; end; ";
 
@@ -110,7 +110,9 @@ fn target_type_uses_rhs_first_parser_context_instead_of_final_type() {
                 "{source}"
             );
         }
-        let source = format!("parameters z; var y; steady_state_model;{body}end;change_type(varexo) z; model; y=z; end;");
+        let source = format!(
+            "parameters z; var y; steady_state_model;{body}end;change_type(varexo) z; model; y=z; end;"
+        );
         official(&source, true, None);
         assert!(owned(&source).is_empty(), "{source}: {:?}", owned(&source));
     }
@@ -126,7 +128,9 @@ fn heterogeneous_targets_require_a_prior_change_to_an_ordinary_type() {
                 } else {
                     ""
                 };
-                let source = format!("heterogeneity_dimension h; {kind}(heterogeneity=h) z; {PREFIX}{change}steady_state_model;{body}end;");
+                let source = format!(
+                    "heterogeneity_dimension h; {kind}(heterogeneity=h) z; {PREFIX}{change}steady_state_model;{body}end;"
+                );
                 official(&source, before, (!before).then_some("z has incorrect type"));
                 let model = parse(&source);
                 assert_eq!(
@@ -138,7 +142,9 @@ fn heterogeneous_targets_require_a_prior_change_to_an_ordinary_type() {
                     model.steady_state_equations
                 );
             }
-            let source = format!("heterogeneity_dimension h; {kind}(heterogeneity=h) z; {PREFIX}steady_state_model;{body}end;change_type(parameters) z;");
+            let source = format!(
+                "heterogeneity_dimension h; {kind}(heterogeneity=h) z; {PREFIX}steady_state_model;{body}end;change_type(parameters) z;"
+            );
             official(&source, false, Some("z has incorrect type"));
             assert!(
                 owned(&source).iter().any(|row| row.code == "E481"),
@@ -273,7 +279,9 @@ fn ramsey_exempts_local_rhs_order_without_exempting_wrong_target_types() {
                 assert!(owned(&source).is_empty(), "{source}: {:?}", owned(&source));
             }
         }
-        let source = format!("varexo e;var y;model;y=e;end;planner_objective y^2;{command}steady_state_model;e=1;y=0;end;");
+        let source = format!(
+            "varexo e;var y;model;y=e;end;planner_objective y^2;{command}steady_state_model;e=1;y=0;end;"
+        );
         official(&source, false, Some("e has incorrect type"));
         assert!(owned(&source).iter().any(|row| row.code == "E481"));
     }
@@ -350,7 +358,9 @@ fn recorded_special_roles_can_be_retyped_before_steady_state_use() {
         ("model_local_variable loc;", "loc"),
         ("external_function(name=foo,nargs=1);", "foo"),
     ] {
-        let source = format!("{PREFIX}{declaration}\nnative={name};\nchange_type(parameters) {name};steady_state_model;{name}=1;y={name};end;");
+        let source = format!(
+            "{PREFIX}{declaration}\nnative={name};\nchange_type(parameters) {name};steady_state_model;{name}=1;y={name};end;"
+        );
         official(&source, true, None);
         assert!(owned(&source).is_empty(), "{source}: {:?}", owned(&source));
         assert!(
@@ -457,7 +467,9 @@ fn ordinary_retypes_have_shared_check_counts_and_first_written_metadata() {
             } else {
                 "y=0;"
             };
-            let source = format!("var y;{declaration}change_type({kind}) {name};model;{model_body}end;steady_state_model;{ss_body}end;");
+            let source = format!(
+                "var y;{declaration}change_type({kind}) {name};model;{model_body}end;steady_state_model;{ss_body}end;"
+            );
             official(&source, true, None);
             let model = parse(&source);
             let info = dygnosis::model_info::model_info_json(&model);

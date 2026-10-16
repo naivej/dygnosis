@@ -104,7 +104,9 @@ fn special_operators_have_queryable_calls_and_no_editable_declaration() {
 // Rename, even if all ordinary declarations and equations remain available.
 #[test]
 fn refused_controlled_path_withholds_complete_source_claim() {
-    let view = model("var y;varexo e;model;y=e;end;perfect_foresight_controlled_paths;exogenize y;endogenize e;periods 1;values 2;end;");
+    let view = model(
+        "var y;varexo e;model;y=e;end;perfect_foresight_controlled_paths;exogenize y;endogenize e;periods 1;values 2;end;",
+    );
     assert!(!view.model.controlled_paths[0].completed);
     assert!(!view.complete);
     assert_eq!(
@@ -142,13 +144,25 @@ fn refused_ordinary_path_lists_withhold_completion_and_callbacks() {
         ("1:", "2"),
     ] {
         for tail in [
-            format!("perfect_foresight_controlled_paths;exogenize y;periods {periods};values {values};endogenize e;end;"),
+            format!(
+                "perfect_foresight_controlled_paths;exogenize y;periods {periods};values {values};endogenize e;end;"
+            ),
             format!("conditional_forecast_paths;var y;periods {periods};values {values};end;"),
         ] {
             let view = model(&format!("var y;varexo e;model;y=e;end;{tail}"));
             assert!(!view.complete, "{tail}");
-            assert!(view.model.controlled_paths.iter().all(|block| !block.completed && block.stanzas.iter().all(|row| !row.callback_completed)), "{tail}");
-            assert_eq!(rename(std::slice::from_ref(&view), 0, &choose(&view, "y"), "z").unwrap_err(), INCOMPLETE);
+            assert!(
+                view.model
+                    .controlled_paths
+                    .iter()
+                    .all(|block| !block.completed
+                        && block.stanzas.iter().all(|row| !row.callback_completed)),
+                "{tail}"
+            );
+            assert_eq!(
+                rename(std::slice::from_ref(&view), 0, &choose(&view, "y"), "z").unwrap_err(),
+                INCOMPLETE
+            );
         }
     }
 }
@@ -170,7 +184,7 @@ fn conditional_date_callback_withholds_complete_source_claim() {
 // its unfinished result; pure calls outside that worker scope still complete.
 #[test]
 fn cancellation_discards_symbol_reference_and_rename_work() {
-    use std::sync::{atomic::AtomicBool, Arc};
+    use std::sync::{Arc, atomic::AtomicBool};
     let view = model("var y;parameters p;model;\n@#for i in 1:100\ny=p;\n@#endfor\nend;");
     let binding = choose(&view, "p");
     let flag = Arc::new(AtomicBool::new(false));
@@ -189,10 +203,12 @@ fn cancellation_discards_symbol_reference_and_rename_work() {
         result.is_err(),
         "cancelled verification must not publish edits"
     );
-    assert!(!rename(&[view], 0, &binding, "rho")
-        .unwrap()
-        .edits
-        .is_empty());
+    assert!(
+        !rename(&[view], 0, &binding, "rho")
+            .unwrap()
+            .edits
+            .is_empty()
+    );
 }
 
 // A filename, option key, native line or comment cannot become a bound use.
@@ -214,22 +230,29 @@ fn ordinary_references_use_accepted_name_slots() {
             "unbound slot: {marker}"
         );
     }
-    assert!(written
-        .iter()
-        .any(|span| span.start as usize == text.find("order;").unwrap()));
-    assert!(written
-        .iter()
-        .any(|span| span.start as usize == text.find("order=0.9").unwrap()));
-    assert!(written
-        .iter()
-        .any(|span| span.start as usize == text.find("y=order").unwrap() + 2));
-    assert!(view
-        .select(Selector::Target {
+    assert!(
+        written
+            .iter()
+            .any(|span| span.start as usize == text.find("order;").unwrap())
+    );
+    assert!(
+        written
+            .iter()
+            .any(|span| span.start as usize == text.find("order=0.9").unwrap())
+    );
+    assert!(
+        written
+            .iter()
+            .any(|span| span.start as usize == text.find("y=order").unwrap() + 2)
+    );
+    assert!(
+        view.select(Selector::Target {
             file: "root.mod",
             byte: text.find("order=1").unwrap() as u32
         })
         .unwrap()
-        .is_none());
+        .is_none()
+    );
     assert_eq!(rename(&[view], 0, &binding, "rho").unwrap_err(), BINDING);
 }
 
@@ -240,14 +263,18 @@ fn local_candidates_and_selected_scope_are_distinct() {
     let view = model(text);
     let ambiguous = view.select(Selector::Name("helper")).unwrap_err();
     assert_eq!(ambiguous.reason.code, "AMBIGUOUS_SYMBOL");
-    assert!(ambiguous
-        .candidates
-        .iter()
-        .any(|binding| binding.dimension.as_deref() == Some("h")));
-    assert!(ambiguous
-        .candidates
-        .iter()
-        .any(|binding| binding.dimension.as_deref() == Some("k")));
+    assert!(
+        ambiguous
+            .candidates
+            .iter()
+            .any(|binding| binding.dimension.as_deref() == Some("h"))
+    );
+    assert!(
+        ambiguous
+            .candidates
+            .iter()
+            .any(|binding| binding.dimension.as_deref() == Some("k"))
+    );
     let byte = text.find("b=helper").unwrap() + 2;
     let binding = view
         .select(Selector::Target {
@@ -257,21 +284,26 @@ fn local_candidates_and_selected_scope_are_distinct() {
         .unwrap()
         .unwrap();
     assert_eq!(binding.dimension.as_deref(), Some("k"));
-    assert!(view
-        .references(&binding, true)
-        .iter()
-        .all(|site| site.dimension.as_deref() == Some("k")));
+    assert!(
+        view.references(&binding, true)
+            .iter()
+            .all(|site| site.dimension.as_deref() == Some("k"))
+    );
     let proposal = rename(&[view], 0, &binding, "firm_helper").unwrap();
-    assert!(proposal
-        .edits
-        .iter()
-        .all(|edit| edit.span.start as usize >= text.find("model(heterogeneity=k)").unwrap()));
+    assert!(
+        proposal
+            .edits
+            .iter()
+            .all(|edit| edit.span.start as usize >= text.find("model(heterogeneity=k)").unwrap())
+    );
 }
 
 // Selecting one shared declaration does not waive the other scopes' uses.
 #[test]
 fn shared_local_declaration_refuses_complete_rename() {
-    let view = model("model_local_variable helper;heterogeneity_dimension h k;var(heterogeneity=h) a;var(heterogeneity=k) b;model(heterogeneity=h);#helper=1;a=helper;end;model(heterogeneity=k);#helper=2;b=helper;end;");
+    let view = model(
+        "model_local_variable helper;heterogeneity_dimension h k;var(heterogeneity=h) a;var(heterogeneity=k) b;model(heterogeneity=h);#helper=1;a=helper;end;model(heterogeneity=k);#helper=2;b=helper;end;",
+    );
     let candidates = view
         .select(Selector::Name("helper"))
         .unwrap_err()
@@ -320,14 +352,13 @@ fn tag_references_and_generated_bounds_preserve_literal_edits() {
         })
         .unwrap()
         .unwrap();
-    assert!(view
-        .references(&binding, true)
-        .iter()
-        .any(|site| site.role == "tag_reference"
+    assert!(view.references(&binding, true).iter().any(|site| {
+        site.role == "tag_reference"
             && site
                 .written
                 .as_ref()
-                .is_some_and(|(_, span)| span.start == byte)));
+                .is_some_and(|(_, span)| span.start == byte)
+    }));
     let proposal = rename(&[view], 0, &binding, "z").unwrap();
     let mut result = text.to_owned();
     for edit in proposal.edits.iter().rev() {
@@ -402,10 +433,12 @@ fn rename_closes_over_only_affected_checked_owners() {
     let binding = choose(&first, "p");
     let proposal = rename(&[first, second, unrelated], 0, &binding, "rho").unwrap();
     assert_eq!(proposal.roots, vec!["first.mod", "second.mod"]);
-    assert!(proposal
-        .edits
-        .iter()
-        .all(|edit| edit.file == "decl.inc" || edit.file == "equation.inc"));
+    assert!(
+        proposal
+            .edits
+            .iter()
+            .all(|edit| edit.file == "decl.inc" || edit.file == "equation.inc")
+    );
 
     let first = capture("first.mod", &files, "revision");
     let collision_files = [
@@ -432,15 +465,17 @@ fn repeated_literal_with_native_execution_withholds_rename() {
     let view = model(text);
     let binding = choose(&view, "p");
     let native_orders = ordinary::native_orders(&view.model);
-    assert!(view
-        .model
-        .statements
-        .iter()
-        .any(|statement| statement.name == "verbatim"));
-    assert!(view
-        .references(&binding, true)
-        .iter()
-        .all(|site| !native_orders.contains(&site.order)));
+    assert!(
+        view.model
+            .statements
+            .iter()
+            .any(|statement| statement.name == "verbatim")
+    );
+    assert!(
+        view.references(&binding, true)
+            .iter()
+            .all(|site| !native_orders.contains(&site.order))
+    );
     assert_eq!(rename(&[view], 0, &binding, "rho").unwrap_err(), BINDING);
 }
 
@@ -460,7 +495,9 @@ fn rename_refuses_to_capture_unresolved_replacement_uses() {
     }
     // VAREXP's expression accepts an unresolved name at Parse. Rename still
     // must not give that existing read the parameter's binding.
-    let view = model("parameters helper;var_expectation_model(model_name=m,expression=helper+other,auxiliary_model_name=aux,horizon=1);");
+    let view = model(
+        "parameters helper;var_expectation_model(model_name=m,expression=helper+other,auxiliary_model_name=aux,horizon=1);",
+    );
     let binding = choose(&view, "helper");
     assert_eq!(
         rename(&[view], 0, &binding, "other").unwrap_err().code,
@@ -541,9 +578,11 @@ fn accepted_ordinary_inventory_excludes_native_and_named_lookalikes() {
     );
     let named_start = text.find("model_name=a").unwrap() as u32 + "model_name=".len() as u32;
     let native_start = text.find("verbatim;").unwrap() as u32;
-    assert!(sites
-        .iter()
-        .all(|(_, site)| site.span.start != named_start && site.span.start < native_start));
+    assert!(
+        sites
+            .iter()
+            .all(|(_, site)| site.span.start != named_start && site.span.start < native_start)
+    );
     let without_declaration = view.references(&ordinary, false);
     assert_eq!(without_declaration.len(), 2);
     assert!(without_declaration.iter().all(|site| !site.declaration));

@@ -4,11 +4,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use dygnosis::expand::expand_report;
 use dygnosis::mcp::dynare_expand;
-use dygnosis::server::{new_service, Backend};
+use dygnosis::server::{Backend, new_service};
 use dygnosis::span::{LineIndex, Position, Span};
-use serde_json::{json, Value};
-use tower_lsp::lsp_types::*;
+use serde_json::{Value, json};
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 fn byte_slice(text: &str, span: Span) -> &str {
     &text[span.start as usize..span.end as usize]
@@ -80,10 +80,12 @@ fn emitted_ranges_keep_all_scopes_locals_static_rows_and_utf16_text() {
             "[dynamic] a = a(-1)"
         ]
     );
-    assert!(report
-        .navigation
-        .windows(2)
-        .all(|rows| rows[0].effective_span.end < rows[1].effective_span.start));
+    assert!(
+        report
+            .navigation
+            .windows(2)
+            .all(|rows| rows[0].effective_span.end < rows[1].effective_span.start)
+    );
     assert_eq!(
         report
             .navigation
@@ -118,13 +120,15 @@ fn repeated_nested_macro_copies_keep_distinct_ranges_and_directive_sites() {
     let report = expand_report(source);
     assert_eq!(report.navigation.len(), 4);
     let rows = &report.navigation;
-    assert!(rows
-        .windows(2)
-        .all(|pair| pair[0].equation.id != pair[1].equation.id
-            && pair[0].effective_span != pair[1].effective_span));
-    assert!(rows
-        .iter()
-        .all(|row| row.equation.source.segments == rows[0].equation.source.segments));
+    assert!(
+        rows.windows(2)
+            .all(|pair| pair[0].equation.id != pair[1].equation.id
+                && pair[0].effective_span != pair[1].effective_span)
+    );
+    assert!(
+        rows.iter()
+            .all(|row| row.equation.source.segments == rows[0].equation.source.segments)
+    );
     for row in rows {
         assert_eq!(
             row.macro_frames
@@ -245,12 +249,14 @@ fn cross_file_rows_and_macro_bodies_are_clipped_into_verified_targets() {
         assert_eq!(frame["directive_locations"][0]["file"], "root.mod");
         assert!(frame["body_locations"].as_array().unwrap().len() >= 2);
         for target in frame["body_locations"].as_array().unwrap() {
-            assert!(!json_slice(
-                &files[target["file"].as_str().unwrap()],
-                &target["range"],
-                false
-            )
-            .is_empty());
+            assert!(
+                !json_slice(
+                    &files[target["file"].as_str().unwrap()],
+                    &target["range"],
+                    false
+                )
+                .is_empty()
+            );
         }
     }
 }
@@ -759,8 +765,8 @@ fn same_preview_facts(compact: &Value, layout: &Value) {
 }
 
 #[tokio::test]
-async fn readable_layout_separates_statements_tags_locals_and_blocks_without_changing_shared_output(
-) {
+async fn readable_layout_separates_statements_tags_locals_and_blocks_without_changing_shared_output()
+ {
     let source = "var y; parameters rho; rho=0.9; model; #k=1; [name='α😀'] y=\r\n rho*y(-1)+k; end; initval; y=1; end;";
     let root = Url::parse("file:///C:/dygnosis-preview/readable.mod").unwrap();
     let (service, _socket) = new_service();
@@ -794,7 +800,10 @@ async fn readable_layout_separates_statements_tags_locals_and_blocks_without_cha
     let formatted = dygnosis::format_text(source, "  ");
     let readable = readable_preview(backend, &root).await;
     assert_eq!(readable["complete"], true);
-    assert_eq!(readable["effective_text"], "var y ;\nparameters rho ;\nrho = 0.9 ;\nmodel ;\n    #k = 1 ;\n    [name = 'α😀'] y = rho*y(-1)+k ;\nend ;\ninitval ;\n    y = 1 ;\nend ;");
+    assert_eq!(
+        readable["effective_text"],
+        "var y ;\nparameters rho ;\nrho = 0.9 ;\nmodel ;\n    #k = 1 ;\n    [name = 'α😀'] y = rho*y(-1)+k ;\nend ;\ninitval ;\n    y = 1 ;\nend ;"
+    );
     same_preview_facts(&compact, &readable);
     assert_eq!(
         preview(backend, &root).await,
@@ -887,7 +896,10 @@ async fn readable_include_macro_copies_have_separate_ranges_and_keep_written_tar
     let first = readable_preview(backend, &root).await;
     same_preview_facts(&compact, &first);
     assert_eq!(first["complete"], true, "{first}");
-    assert_eq!(first["effective_text"], "var y ;\nmodel ;\n    #k1 = 1 ;\n    [name = '😀'] y = k1+\n1 ;\n    #k2 = 2 ;\n    [name = '😀'] y = k2+\n2 ;\nend ;");
+    assert_eq!(
+        first["effective_text"],
+        "var y ;\nmodel ;\n    #k1 = 1 ;\n    [name = '😀'] y = k1+\n1 ;\n    #k2 = 2 ;\n    [name = '😀'] y = k2+\n2 ;\nend ;"
+    );
     let rows = first["navigation"].as_array().unwrap();
     assert_eq!(rows.len(), 4);
     assert_eq!(rows[1]["written_locations"], rows[3]["written_locations"]);
@@ -917,10 +929,12 @@ async fn readable_include_macro_copies_have_separate_ranges_and_keep_written_tar
     open(backend, &include, &body.replace("k@{i}+", "k@{i}+1+"), 2).await;
     let refreshed = readable_preview(backend, &root).await;
     assert_ne!(refreshed["revision"], first["revision"]);
-    assert!(refreshed["effective_text"]
-        .as_str()
-        .unwrap()
-        .contains("    [name = '😀'] y = k2+1+\n2 ;"));
+    assert!(
+        refreshed["effective_text"]
+            .as_str()
+            .unwrap()
+            .contains("    [name = '😀'] y = k2+1+\n2 ;")
+    );
     same_preview_facts(&preview(backend, &root).await, &refreshed);
 }
 
@@ -1109,10 +1123,12 @@ async fn source_layout_dormant_include_emits_no_text() {
         source_view["effective_text"],
         "var y;\nmodel;\ny=1;\nend;\n"
     );
-    assert!(!source_view["effective_text"]
-        .as_str()
-        .unwrap()
-        .contains("leaked"));
+    assert!(
+        !source_view["effective_text"]
+            .as_str()
+            .unwrap()
+            .contains("leaked")
+    );
 }
 
 #[tokio::test]
@@ -1126,8 +1142,7 @@ async fn lsp_and_mcp_agree_on_utf16_scalar_ranges_and_written_source_versions() 
         .await
         .unwrap();
     assert_eq!(
-        initialized.capabilities.experimental.unwrap()["dygnosis"]["effectivePreview"]
-            ["navigation_schema_version"],
+        initialized.capabilities.experimental.unwrap()["dygnosis"]["effectivePreview"]["navigation_schema_version"],
         1
     );
     open(backend, &root, source, 7).await;
@@ -1217,10 +1232,12 @@ async fn unopened_roots_refresh_disk_include_overlay_and_settings_revisions() {
     open(backend, &include, "y=3;", 4).await;
     let overlay = preview(backend, &root).await;
     assert_ne!(overlay["revision"], disk["revision"]);
-    assert!(overlay["effective_text"]
-        .as_str()
-        .unwrap()
-        .contains("y = 3"));
+    assert!(
+        overlay["effective_text"]
+            .as_str()
+            .unwrap()
+            .contains("y = 3")
+    );
     assert_eq!(
         overlay["navigation"][0]["written_locations"][0]["document_version"],
         4
@@ -1285,11 +1302,13 @@ async fn root_ownership_virtual_targets_and_missing_includes_never_guess() {
     .await;
     let incomplete = preview(backend, &missing).await;
     assert_eq!(incomplete["navigation"], json!([]));
-    assert!(incomplete["dependency_candidates"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|uri| uri.as_str().unwrap().ends_with("/absent.inc")));
+    assert!(
+        incomplete["dependency_candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|uri| uri.as_str().unwrap().ends_with("/absent.inc"))
+    );
     let virtual_root = Url::parse("custom-preview://test/root.mod").unwrap();
     open(backend, &virtual_root, "var y; model; y=1; end;", 1).await;
     let virtual_preview = preview(backend, &virtual_root).await;
@@ -1316,8 +1335,7 @@ async fn source_navigation_maps_declarations_macros_includes_and_identifiers() {
         .await
         .unwrap();
     assert_eq!(
-        initialized.capabilities.experimental.unwrap()["dygnosis"]["effectivePreview"]
-            ["source_navigation_schema_version"],
+        initialized.capabilities.experimental.unwrap()["dygnosis"]["effectivePreview"]["source_navigation_schema_version"],
         1
     );
     open(
@@ -1718,12 +1736,16 @@ async fn ordinary_diagnostic_pull_rows_have_the_published_root_revision() {
         .find(|row| row["code"] == "E020")
         .unwrap();
     assert_eq!(ordinary["data"]["root"], root.as_str());
-    assert!(ordinary["data"]["input_revision"]
-        .as_str()
-        .is_some_and(|value| !value.is_empty()));
-    assert!(view["revision"]
-        .as_str()
-        .is_some_and(|value| !value.is_empty()));
+    assert!(
+        ordinary["data"]["input_revision"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
+    assert!(
+        view["revision"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
 }
 
 #[tokio::test]

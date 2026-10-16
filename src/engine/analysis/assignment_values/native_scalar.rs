@@ -77,11 +77,7 @@ impl ScalarReader<'_> {
                 // an ordinary unary sign binds after power: -2^2, 2^-3^2.
                 let unary_bp = if min_bp == 10 { 11 } else { 7 };
                 let value = self.expression(unary_bp, depth + 1)?;
-                if sign == b'-' {
-                    -value
-                } else {
-                    value
-                }
+                if sign == b'-' { -value } else { value }
             }
             b'(' => {
                 self.plain = false;

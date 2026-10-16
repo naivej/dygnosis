@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use dygnosis::{analyze, parse, Diagnostic};
+use dygnosis::{Diagnostic, analyze, parse};
 
 fn fixture(rel: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -38,9 +38,11 @@ fn quiet(got: &[Diagnostic], code: &str) {
 #[test]
 fn e200_write_latex_without_ssm() {
     let got = diags("d_check/e200_write_latex.mod");
-    assert!(find(&got, "E200")
-        .message
-        .contains("write_latex_steady_state_model statement without a steady_state_model block"));
+    assert!(
+        find(&got, "E200").message.contains(
+            "write_latex_steady_state_model statement without a steady_state_model block"
+        )
+    );
 }
 
 #[test]
@@ -65,9 +67,11 @@ fn e201_empty_model_without_run_is_quiet() {
 #[test]
 fn e205_pf_and_stoch() {
     let got = diags("d_check/e205_pf_stoch.mod");
-    assert!(find(&got, "E205")
-        .message
-        .contains("cannot mix perfect foresight context with stochastic context"));
+    assert!(
+        find(&got, "E205")
+            .message
+            .contains("cannot mix perfect foresight context with stochastic context")
+    );
     quiet(&got, "E026");
     quiet(&got, "E179");
 }
@@ -75,66 +79,82 @@ fn e205_pf_and_stoch() {
 #[test]
 fn e206_use_dll_bytecode() {
     let got = diags("d_check/e206_use_dll_bytecode.mod");
-    assert!(find(&got, "E206")
-        .message
-        .contains("'use_dll' option is not compatible with 'bytecode'"));
+    assert!(
+        find(&got, "E206")
+            .message
+            .contains("'use_dll' option is not compatible with 'bytecode'")
+    );
 }
 
 #[test]
 fn e207_no_static() {
     let got = diags("d_check/e207_no_static.mod");
-    assert!(find(&got, "E207")
-        .message
-        .contains("no_static option is incompatible"));
+    assert!(
+        find(&got, "E207")
+            .message
+            .contains("no_static option is incompatible")
+    );
 }
 
 #[test]
 fn e208_static_dynamic_count() {
     let got = diags("d_check/e208_static_dynamic.mod");
-    assert!(find(&got, "E208")
-        .message
-        .contains("equations marked [static]"));
+    assert!(
+        find(&got, "E208")
+            .message
+            .contains("equations marked [static]")
+    );
 }
 
 #[test]
 fn e209_tags_with_ramsey() {
     let got = diags("d_check/e209_tags_ramsey.mod");
-    assert!(find(&got, "E209")
-        .message
-        .contains("marking equations as [static] or [dynamic]"));
+    assert!(
+        find(&got, "E209")
+            .message
+            .contains("marking equations as [static] or [dynamic]")
+    );
 }
 
 #[test]
 fn w200_stoch_abs() {
     let got = diags("d_check/w200_stoch_abs.mod");
-    assert!(find(&got, "W200")
-        .message
-        .contains("unsuitable for a stochastic context"));
+    assert!(
+        find(&got, "W200")
+            .message
+            .contains("unsuitable for a stochastic context")
+    );
 }
 
 #[test]
 fn w200_stoch_abs_in_local() {
     let got = diags("d_check/w200_stoch_local.mod");
-    assert!(find(&got, "W200")
-        .message
-        .contains("unsuitable for a stochastic context"));
+    assert!(
+        find(&got, "W200")
+            .message
+            .contains("unsuitable for a stochastic context")
+    );
 }
 
 #[test]
 fn e210_linear_abs_endo() {
     let got = diags("d_check/e210_linear_abs.mod");
-    assert!(find(&got, "E210")
-        .message
-        .contains("on an endogenous variable"));
+    assert!(
+        find(&got, "E210")
+            .message
+            .contains("on an endogenous variable")
+    );
     quiet(&got, "W140");
 }
 
 #[test]
 fn e211_linear_abs_exo() {
     let got = diags("d_check/e211_linear_exo.mod");
-    assert!(find(&got, "E211")
-        .message
-        .contains("on an exogenous variable"));
+    assert!(
+        find(&got, "E211")
+            .message
+            .contains("on an exogenous variable")
+    );
     quiet(&got, "W140");
 }
 
@@ -170,41 +190,51 @@ fn e212_estimated_in_shock_expr() {
 #[test]
 fn e213_solver_before_setup() {
     let got = diags("d_check/e213_pf_order.mod");
-    assert!(find(&got, "E213")
-        .message
-        .contains("perfect_foresight_setup"));
+    assert!(
+        find(&got, "E213")
+            .message
+            .contains("perfect_foresight_setup")
+    );
 }
 
 #[test]
 fn e214_pfee_solver_before_setup() {
     let got = diags("d_check/e214_pfee_order.mod");
-    assert!(find(&got, "E214")
-        .message
-        .contains("perfect_foresight_with_expectation_errors_setup"));
+    assert!(
+        find(&got, "E214")
+            .message
+            .contains("perfect_foresight_with_expectation_errors_setup")
+    );
 }
 
 #[test]
 fn e216_extended_path_periods() {
     let got = diags("d_check/e216_extended_path.mod");
-    assert!(find(&got, "E216")
-        .message
-        .contains("'periods' option of 'extended_path' is mandatory"));
+    assert!(
+        find(&got, "E216")
+            .message
+            .contains("'periods' option of 'extended_path' is mandatory")
+    );
 }
 
 #[test]
 fn e217_initval_after_endval() {
     let got = diags("d_check/e217_initval_after_endval.mod");
-    assert!(find(&got, "E217")
-        .message
-        .contains("initval' block cannot appear after an 'endval'"));
+    assert!(
+        find(&got, "E217")
+            .message
+            .contains("initval' block cannot appear after an 'endval'")
+    );
 }
 
 #[test]
 fn e218_all_values_required() {
     let got = diags("d_check/e218_all_values.mod");
-    assert!(find(&got, "E218")
-        .message
-        .contains("You have not set the following"));
+    assert!(
+        find(&got, "E218")
+            .message
+            .contains("You have not set the following")
+    );
 }
 
 #[test]

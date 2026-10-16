@@ -113,7 +113,9 @@ fn includes_and_heterogeneous_retypes_keep_required_directives() {
     assert_eq!(parse(text).final_parameters().len(), 1, "{text}");
     check_fragment(text);
 
-    let text = fragment("heterogeneity_dimension h; var y; var(heterogeneity=h) z; change_type(parameters) z; model; [name='Y'] y=z; end;");
+    let text = fragment(
+        "heterogeneity_dimension h; var y; var(heterogeneity=h) z; change_type(parameters) z; model; [name='Y'] y=z; end;",
+    );
     let model = parse(&text);
     assert_eq!(model.final_parameters().len(), 1, "{text}");
     assert!(text.contains("heterogeneity_dimension h"), "{text}");
@@ -130,14 +132,20 @@ fn type_dependent_declarations_stay_between_their_changes() {
         check_fragment(source);
         let text = fragment(source);
         check_fragment(&text);
-        assert_eq!(parse(&text).final_parameters().len(), parse(source).final_parameters().len(), "{text}");
+        assert_eq!(
+            parse(&text).final_parameters().len(),
+            parse(source).final_parameters().len(),
+            "{text}"
+        );
     }
 }
 
 #[test]
 fn declaration_words_and_semicolons_inside_metadata_are_not_boundaries() {
     for description in ["var wrong", "A; parameters fake; (level)"] {
-        let source = format!("var y; var a(long_name='{description}') b $B$ (long_name='B'); change_type(parameters) b; model; [name='Y'] y=b; end;");
+        let source = format!(
+            "var y; var a(long_name='{description}') b $B$ (long_name='B'); change_type(parameters) b; model; [name='Y'] y=b; end;"
+        );
         let text = fragment(&source);
         let model = parse(&text);
         let parameters = model.final_parameters();
@@ -150,7 +158,7 @@ fn declaration_words_and_semicolons_inside_metadata_are_not_boundaries() {
 
 #[test]
 fn repeated_type_changes_with_the_same_span_keep_every_execution() {
-    let source="var y z;\n@#for j in 1:2\nchange_type(parameters) z;\n@#if j==1\nchange_type(varexo) z;\n@#endif\n@#endfor\nmodel; [name='Y'] y=z; end;";
+    let source = "var y z;\n@#for j in 1:2\nchange_type(parameters) z;\n@#if j==1\nchange_type(varexo) z;\n@#endif\n@#endfor\nmodel; [name='Y'] y=z; end;";
     let text = fragment(source);
     assert_eq!(
         text.matches("change_type(parameters) z;").count(),

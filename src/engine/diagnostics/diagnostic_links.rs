@@ -6,8 +6,8 @@ use std::sync::Arc;
 use crate::engine::diagnostics::{Diagnostic, DiagnosticOrigin};
 use crate::engine::language::model::{Equation, Model};
 use crate::engine::language::span::Span;
-use crate::engine::workspace::model_map::{SourceOccurrence, WrittenSegment};
 use crate::engine::workspace::Workspace;
+use crate::engine::workspace::model_map::{SourceOccurrence, WrittenSegment};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RelatedOccurrence {

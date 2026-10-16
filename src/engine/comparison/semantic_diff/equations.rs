@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 use crate::engine::analysis::equations::{self as counted, EquationRow, IdentClass};
 use crate::engine::analysis::model_locals::ModelLocals;
-use crate::engine::comparison::{normalize_equation, ModelDiff};
+use crate::engine::comparison::{ModelDiff, normalize_equation};
 use crate::engine::language::expr::ExprKind;
-use crate::engine::language::lexer::{tokenize, TokenKind};
+use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::language::model::{Equation, Model};
 
 use super::*;
@@ -698,7 +698,15 @@ fn unpaired_detail(
         .fold(0_usize, |sum, text| sum.saturating_add(text.len()));
     // A linear candidate-set pass has a conservative one-cell-per-byte charge.
     if semantic.charge_token_alignment(1, total_bytes.max(1)) != Availability::Complete {
-        return plain("expression", before, after, Availability::LimitExceeded, Some("Unpaired text highlight limit; exact candidate text is retained without highlights."));
+        return plain(
+            "expression",
+            before,
+            after,
+            Availability::LimitExceeded,
+            Some(
+                "Unpaired text highlight limit; exact candidate text is retained without highlights.",
+            ),
+        );
     }
     let old = candidate_tokens(before_candidates);
     let new = candidate_tokens(after_candidates);

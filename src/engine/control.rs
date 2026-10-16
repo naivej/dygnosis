@@ -2,8 +2,8 @@
 
 use std::cell::RefCell;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

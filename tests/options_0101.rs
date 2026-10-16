@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use dygnosis::preprocessor::find_preprocessor;
-use dygnosis::{check_file, run_preprocessor, JsonStage, Severity};
+use dygnosis::{JsonStage, Severity, check_file, run_preprocessor};
 
 const BASE: &str = "var y; varexo e f; parameters beta; beta=.9; model; y=beta+e+f; end;";
 
@@ -205,16 +205,56 @@ fn estimated_params_remove_generic_reach_pairs() {
 #[test]
 fn removal_uses_parse_order_roles_and_exact_opener() {
     for (source, code, accepted) in [
-        ("var y; model; y=1; end; estimated_params_remove; beta; end; parameters beta;", "E058", false),
-        ("parameters beta; var y; model; y=1; end; estimated_params_remove; beta; end;", "", true),
-        ("var beta y; change_type(parameters) beta; model; y=1; end; estimated_params_remove; beta; end;", "", true),
-        ("var beta y; model; y=1; end; estimated_params_remove; beta; end; change_type(parameters) beta;", "E059", false),
-        ("parameters beta; var y; model; y=1; end; var_remove beta; estimated_params_remove; beta; end;", "E059", false),
-        ("parameters model; var y; model; y=1; end; estimated_params_remove; model; end;", "", true),
-        ("parameters beta; var y; model; y=1; end; estimated_params_remove(foo); beta; end;", "E001", false),
-        ("parameters beta; var y; model; y=1; end; estimated_params_remove(overwrite); beta; end;", "E001", false),
-        ("parameters beta; var y; model; y=1; end; estimated_params_remove; ; end;", "E001", false),
-        ("parameters beta; var y; model; y=1; end; estimated_params_remove; beta end;", "E001", false),
+        (
+            "var y; model; y=1; end; estimated_params_remove; beta; end; parameters beta;",
+            "E058",
+            false,
+        ),
+        (
+            "parameters beta; var y; model; y=1; end; estimated_params_remove; beta; end;",
+            "",
+            true,
+        ),
+        (
+            "var beta y; change_type(parameters) beta; model; y=1; end; estimated_params_remove; beta; end;",
+            "",
+            true,
+        ),
+        (
+            "var beta y; model; y=1; end; estimated_params_remove; beta; end; change_type(parameters) beta;",
+            "E059",
+            false,
+        ),
+        (
+            "parameters beta; var y; model; y=1; end; var_remove beta; estimated_params_remove; beta; end;",
+            "E059",
+            false,
+        ),
+        (
+            "parameters model; var y; model; y=1; end; estimated_params_remove; model; end;",
+            "",
+            true,
+        ),
+        (
+            "parameters beta; var y; model; y=1; end; estimated_params_remove(foo); beta; end;",
+            "E001",
+            false,
+        ),
+        (
+            "parameters beta; var y; model; y=1; end; estimated_params_remove(overwrite); beta; end;",
+            "E001",
+            false,
+        ),
+        (
+            "parameters beta; var y; model; y=1; end; estimated_params_remove; ; end;",
+            "E001",
+            false,
+        ),
+        (
+            "parameters beta; var y; model; y=1; end; estimated_params_remove; beta end;",
+            "E001",
+            false,
+        ),
     ] {
         let ours = errors(source);
         if code.is_empty() {
@@ -223,7 +263,8 @@ fn removal_uses_parse_order_roles_and_exact_opener() {
             assert!(ours.iter().any(|d| d.code == code), "{source}: {ours:?}");
         }
         if let Some(pp) = find_preprocessor(None) {
-            let result = run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
+            let result =
+                run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
             assert_eq!(result.success, accepted, "{source}: {result:?}");
         }
     }
@@ -280,9 +321,11 @@ fn command_values_and_separators_use_entire_production() {
         }
     }
     // Dynare recognizes this numeric spelling even if later conversion fails.
-    assert!(errors("var y; model(cutoff=1e400); y=1; end;")
-        .iter()
-        .all(|d| d.code != "E001"));
+    assert!(
+        errors("var y; model(cutoff=1e400); y=1; end;")
+            .iter()
+            .all(|d| d.code != "E001")
+    );
 }
 
 #[test]
@@ -371,8 +414,10 @@ fn macro_copies_use_effective_role_order_despite_reused_spans() {
     if let Some(pp) = find_preprocessor(None) {
         let result = run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
         assert!(!result.success);
-        assert!(format!("{}{}", result.raw_stdout, result.raw_stderr)
-            .contains("beta is not a parameter"));
+        assert!(
+            format!("{}{}", result.raw_stdout, result.raw_stderr)
+                .contains("beta is not a parameter")
+        );
     }
 }
 

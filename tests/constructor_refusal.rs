@@ -2,22 +2,26 @@
 
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 
-use dygnosis::server::{new_service, Backend};
+use dygnosis::server::{Backend, new_service};
 use dygnosis::{
-    analyze, dynare_diagnose, parse, run_preprocessor, Diagnostic, JsonStage, Severity,
+    Diagnostic, JsonStage, Severity, analyze, dynare_diagnose, parse, run_preprocessor,
 };
-use tower_lsp::{lsp_types::*, LanguageServer};
+use tower_lsp::{LanguageServer, lsp_types::*};
 
 fn source(term: &str) -> String {
     format!("var y; varexo e; parameters p; p=0; model; y=e+({term}); end;")
 }
 
 fn sentence(numerator: &str) -> String {
-    format!("Division by zero when forming ({numerator})/(0); denominator simplified to 0 (possibly after substituting a variable set to 0).")
+    format!(
+        "Division by zero when forming ({numerator})/(0); denominator simplified to 0 (possibly after substituting a variable set to 0)."
+    )
 }
 
 fn path_source(term: &str) -> String {
-    format!("var y; varexo e u; parameters p q; p=0; model; y=e+u+p+q; end; shock_paths; var e; periods 2; values {term}; end;")
+    format!(
+        "var y; varexo e u; parameters p q; p=0; model; y=e+u+p+q; end; shock_paths; var e; periods 2; values {term}; end;"
+    )
 }
 
 #[test]
@@ -158,10 +162,22 @@ fn path_constructor_scope_persists_across_stanzas_blocks_and_overwrite() {
     let prefix = "var y; varexo e u; parameters p q; p=0; model; y=e+u+p+q; end;";
     for (body, numerator) in [
         ("shock_paths; var e; periods 2; values (q+p)/0; end;", "q+p"),
-        ("shock_paths; var u; periods 2; values p; var e; periods 2; values (q+p)/0; end;", "p+q"),
-        ("shock_paths; var u; periods 2; values p; end; shock_paths; var e; periods 2; values (q+p)/0; end;", "p+q"),
-        ("shock_paths; var u; periods 2; values p; end; shock_paths(overwrite); var e; periods 2; values (q+p)/0; end;", "p+q"),
-        ("shock_paths; exogenize y; periods 2; values (q+p)/0; endogenize e; end;", "q+p"),
+        (
+            "shock_paths; var u; periods 2; values p; var e; periods 2; values (q+p)/0; end;",
+            "p+q",
+        ),
+        (
+            "shock_paths; var u; periods 2; values p; end; shock_paths; var e; periods 2; values (q+p)/0; end;",
+            "p+q",
+        ),
+        (
+            "shock_paths; var u; periods 2; values p; end; shock_paths(overwrite); var e; periods 2; values (q+p)/0; end;",
+            "p+q",
+        ),
+        (
+            "shock_paths; exogenize y; periods 2; values (q+p)/0; endogenize e; end;",
+            "q+p",
+        ),
     ] {
         let source = format!("{prefix}{body}");
         let expected = sentence(numerator);
@@ -170,14 +186,19 @@ fn path_constructor_scope_persists_across_stanzas_blocks_and_overwrite() {
         let errors: Vec<_> = rows.iter().filter(|row| row.code == "E278").collect();
         assert_eq!(errors.len(), 1, "{source}: {rows:?}");
         assert_eq!(errors[0].message, expected);
-        assert_eq!(&source[errors[0].span.start as usize..errors[0].span.end as usize], "(q+p)/0");
+        assert_eq!(
+            &source[errors[0].span.start as usize..errors[0].span.end as usize],
+            "(q+p)/0"
+        );
     }
     let source =
         format!("{prefix}shock_paths; exogenize y; periods 2; values init.y+p; endogenize e; end;");
     official(&source, true, None);
-    assert!(analyze(&parse(&source))
-        .iter()
-        .all(|row| row.severity != Severity::Error));
+    assert!(
+        analyze(&parse(&source))
+            .iter()
+            .all(|row| row.severity != Severity::Error)
+    );
 }
 
 #[test]
@@ -196,21 +217,54 @@ fn path_namespace_date_display_uses_emitted_tokens_after_macro_substitution() {
 #[test]
 fn path_parse_refusals_withhold_all_owned_check_results_anywhere_in_the_unit() {
     for (source, code) in [
-        ("var y z; varexo e; parameters p; p=1; model; y=0*e; z=y; end; steady_state_model; y=1; end;", "E021"),
-        ("var y z; varexo e; parameters p; p=1; model; y=e+p; z=y; end; steady_state_model; y=z; z=1; end;", "E130"),
-        ("var y; varexo e; parameters p; p=1; model; y=e+p; end; planner_objective e;", "E251"),
-        ("var y z; varexo e; parameters p; p=1; model; y=0*e; z=y; end; steady_state_model; y=1; end;", "W022"),
-        ("var y z; varexo e; parameters p; p=1; model; y=0*e; z=y; end; steady_state_model; y=1; end;", "W042"),
-        ("var y; varexo e; parameters p; p=1; model; y=e+p; end; steady_state_model; y=0; y=1; end;", "W131"),
+        (
+            "var y z; varexo e; parameters p; p=1; model; y=0*e; z=y; end; steady_state_model; y=1; end;",
+            "E021",
+        ),
+        (
+            "var y z; varexo e; parameters p; p=1; model; y=e+p; z=y; end; steady_state_model; y=z; z=1; end;",
+            "E130",
+        ),
+        (
+            "var y; varexo e; parameters p; p=1; model; y=e+p; end; planner_objective e;",
+            "E251",
+        ),
+        (
+            "var y z; varexo e; parameters p; p=1; model; y=0*e; z=y; end; steady_state_model; y=1; end;",
+            "W022",
+        ),
+        (
+            "var y z; varexo e; parameters p; p=1; model; y=0*e; z=y; end; steady_state_model; y=1; end;",
+            "W042",
+        ),
+        (
+            "var y; varexo e; parameters p; p=1; model; y=e+p; end; steady_state_model; y=0; y=1; end;",
+            "W131",
+        ),
     ] {
         let control = analyze(&parse(source));
-        assert!(control.iter().any(|row| row.code == code), "{code}: {control:?}");
+        assert!(
+            control.iter().any(|row| row.code == code),
+            "{code}: {control:?}"
+        );
         let refusal = "shock_paths; var e; periods 1; values 1/0; end;";
-        for refused in [format!("{source}{refusal}"), source.replacen("model;", &format!("{refusal}model;"), 1)] {
+        for refused in [
+            format!("{source}{refusal}"),
+            source.replacen("model;", &format!("{refusal}model;"), 1),
+        ] {
             official(&refused, false, Some(&sentence("1")));
             let rows = analyze(&parse(&refused));
-            assert!(rows.iter().any(|row| row.code == "E278"), "{code}: {rows:?}");
-            assert!(rows.iter().all(|row| !matches!(row.code.as_str(), "E420" | "E021" | "E130" | "E251" | "W022" | "W042" | "W131")), "{code}: {rows:?}");
+            assert!(
+                rows.iter().any(|row| row.code == "E278"),
+                "{code}: {rows:?}"
+            );
+            assert!(
+                rows.iter().all(|row| !matches!(
+                    row.code.as_str(),
+                    "E420" | "E021" | "E130" | "E251" | "W022" | "W042" | "W131"
+                )),
+                "{code}: {rows:?}"
+            );
         }
     }
 }
@@ -389,10 +443,12 @@ fn pound_binding_targets_do_not_change_constructor_order_or_written_checks() {
             format!("({numerator})/0")
         );
         let target = model.equations[0].lhs_expr.unwrap();
-        assert!(model
-            .exprs
-            .walk_idents(target)
-            .any(|reference| model.name(reference.name) == "q"));
+        assert!(
+            model
+                .exprs
+                .walk_idents(target)
+                .any(|reference| model.name(reference.name) == "q")
+        );
         withheld(&rows);
     }
     for (source, code, message) in [
@@ -446,11 +502,13 @@ fn refused_pound_rhs_withholds_only_its_unreached_binding_callback() {
         assert_eq!(errors.len(), 1, "{source}: {rows:?}");
         assert_eq!(errors[0].code, "E278");
         assert_eq!(errors[0].message, expected);
-        assert!(model
-            .equations
-            .iter()
-            .filter(|row| row.is_local)
-            .all(|row| row.lhs_expr.is_some()));
+        assert!(
+            model
+                .equations
+                .iter()
+                .filter(|row| row.is_local)
+                .all(|row| row.lhs_expr.is_some())
+        );
         if source.contains("#q=1;") {
             let q = model.intern.lookup("q").unwrap();
             assert_eq!(model.final_symbol_kind(q), Some("model_local_variable"));
@@ -516,8 +574,14 @@ fn refused_pound_rhs_withholds_only_its_unreached_binding_callback() {
 #[test]
 fn steady_constructor_order_uses_its_own_tree_across_repeated_blocks() {
     for (source, numerator) in [
-        ("var y; parameters p q; p=p; model; y=0; end; steady_state_model; y=(q+p)/0; end;", "q+p"),
-        ("var y; parameters p q; p=p; model; y=0; end; steady_state_model; y=p; end; steady_state_model; y=(q+p)/0; end;", "p+q"),
+        (
+            "var y; parameters p q; p=p; model; y=0; end; steady_state_model; y=(q+p)/0; end;",
+            "q+p",
+        ),
+        (
+            "var y; parameters p q; p=p; model; y=0; end; steady_state_model; y=p; end; steady_state_model; y=(q+p)/0; end;",
+            "p+q",
+        ),
     ] {
         let expected = sentence(numerator);
         official(source, false, Some(&expected));
@@ -525,7 +589,10 @@ fn steady_constructor_order_uses_its_own_tree_across_repeated_blocks() {
         let errors: Vec<_> = rows.iter().filter(|row| row.code == "E278").collect();
         assert_eq!(errors.len(), 1, "{source}: {rows:?}");
         assert_eq!(errors[0].message, expected);
-        assert_eq!(&source[errors[0].span.start as usize..errors[0].span.end as usize], "(q+p)/0");
+        assert_eq!(
+            &source[errors[0].span.start as usize..errors[0].span.end as usize],
+            "(q+p)/0"
+        );
         withheld(&rows);
     }
 }
@@ -575,7 +642,14 @@ fn each_separate_official_tree_keeps_its_own_constructor_order() {
         let expected = sentence("q+p");
         official(source, false, Some(&expected));
         let rows = analyze(&parse(source));
-        assert_eq!(rows.iter().find(|row| row.code == "E278").unwrap_or_else(|| panic!("{source}: {rows:?}")).message, expected, "{source}: {rows:?}");
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.code == "E278")
+                .unwrap_or_else(|| panic!("{source}: {rows:?}"))
+                .message,
+            expected,
+            "{source}: {rows:?}"
+        );
     }
 }
 
@@ -604,9 +678,11 @@ fn repeated_heterogeneous_blocks_share_the_dimension_constructor_and_local_scope
         false,
         Some("Local model variable loc declared twice."),
     );
-    assert!(analyze(&parse(&source))
-        .iter()
-        .any(|row| row.code == "E030"));
+    assert!(
+        analyze(&parse(&source))
+            .iter()
+            .any(|row| row.code == "E030")
+    );
     let source = "heterogeneity_dimension d; var y; var(heterogeneity=d) yh; parameters p; p=1; model; y=0; end; model(heterogeneity=d); #loc=p; yh=0; end; model(heterogeneity=d); yh=loc; end;";
     official(source, true, None);
     assert!(
@@ -627,11 +703,13 @@ fn synthetic_steady_targets_do_not_enter_constructor_or_rhs_role_evidence() {
         .collect();
     assert_eq!(errors.len(), 1, "{rows:?}");
     assert_eq!(errors[0].code, "E481");
-    assert!(model
-        .exprs
-        .walk_idents(model.steady_state_equations[0].lhs_expr.unwrap())
-        .next()
-        .is_some());
+    assert!(
+        model
+            .exprs
+            .walk_idents(model.steady_state_equations[0].lhs_expr.unwrap())
+            .next()
+            .is_some()
+    );
     let source = "var y; parameters p q; model; y=0; end; steady_state_model; y=0; end; q=(p+y)/0;";
     let expected = sentence("p+y");
     official(source, false, Some(&expected));
@@ -653,9 +731,17 @@ fn known_ordinary_roles_stop_construction_while_unknown_model_names_are_deferred
     ] {
         official(source, false, None);
         let model = parse(source);
-        assert!(model.const_fold_errors.is_empty(), "{source}: {:?}", model.const_fold_errors);
+        assert!(
+            model.const_fold_errors.is_empty(),
+            "{source}: {:?}",
+            model.const_fold_errors
+        );
         let rows = analyze(&model);
-        assert!(rows.iter().any(|row| matches!(row.code.as_str(), "E294" | "E463")), "{rows:?}");
+        assert!(
+            rows.iter()
+                .any(|row| matches!(row.code.as_str(), "E294" | "E463")),
+            "{rows:?}"
+        );
     }
     let source = "var y; model; y=unknown/0; end;";
     let expected = sentence("unknown");
@@ -668,9 +754,11 @@ fn known_ordinary_roles_stop_construction_while_unknown_model_names_are_deferred
     assert!(rows.iter().all(|row| row.code != "E020"), "{rows:?}");
     let completed = "var y; model; y=0*missing; end;";
     official(completed, false, Some("Unknown symbol: missing"));
-    assert!(analyze(&parse(completed))
-        .iter()
-        .any(|row| row.code == "E020"));
+    assert!(
+        analyze(&parse(completed))
+            .iter()
+            .any(|row| row.code == "E020")
+    );
     let distinct = "var y; model; y=0*missing; end; model; y=1/0; end;";
     let rows = analyze(&parse(distinct));
     assert!(rows.iter().any(|row| row.code == "E020"), "{rows:?}");
@@ -767,7 +855,9 @@ fn generic_refusals_in_discarded_terms_withhold_checks_across_the_unit() {
         ("", "fun(y)", "E001"),
         ("external_function(name=fun,nargs=2);", "fun(y)", "E001"),
     ] {
-        let source = format!("{prefix}var y z; varexo e; parameters p; p=1; model; y=0*e; z=y; end; steady_state_model; y=1; end; model; y=0*({term}); end;");
+        let source = format!(
+            "{prefix}var y z; varexo e; parameters p; p=1; model; y=0*e; z=y; end; steady_state_model; y=1; end; model; y=0*({term}); end;"
+        );
         official(&source, false, None);
         let rows = analyze(&parse(&source));
         assert!(
@@ -811,7 +901,9 @@ fn constructor_parse_phase_blocks_prior_checks_and_keeps_later_stage_warning_con
         ),
         ("varexo_det d;", "d.subsamples(s=2000Q1:2000Q2);", "E431"),
     ] {
-        let source = format!("{declarations}{extra_declarations}model; y=e+1/0.0; z=y; end; steady_state_model; y=1; end;{tail}");
+        let source = format!(
+            "{declarations}{extra_declarations}model; y=e+1/0.0; z=y; end; steady_state_model; y=1; end;{tail}"
+        );
         official(&source, true, None);
         let rows = analyze(&parse(&source));
         for code in [code, "W022", "W042"] {
@@ -841,7 +933,9 @@ fn macro_and_include_refusals_keep_written_multiplicity_and_literal_spelling() {
         assert_eq!(error.message, sentence("1"));
     }
     for (literal, fires) in [("0", true), ("0.0", false)] {
-        let source = format!("@#define denominator = \"{literal}\"\nvar y; varexo e; model; y=e+1/@{{denominator}}; end;\n");
+        let source = format!(
+            "@#define denominator = \"{literal}\"\nvar y; varexo e; model; y=e+1/@{{denominator}}; end;\n"
+        );
         official(&source, !fires, fires.then_some(sentence("1")).as_deref());
         let rows = analyze(&parse(&source));
         assert_eq!(

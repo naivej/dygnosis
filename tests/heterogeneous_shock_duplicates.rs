@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use dygnosis::server::{new_service, Backend};
-use dygnosis::{analyze, dynare_diagnose, parse, run_preprocessor, JsonStage, Severity};
-use tower_lsp::lsp_types::*;
+use dygnosis::server::{Backend, new_service};
+use dygnosis::{JsonStage, Severity, analyze, dynare_diagnose, parse, run_preprocessor};
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 const PREFIX: &str = "heterogeneity_dimension d;\nvar y;\nvarexo e;\nvar(heterogeneity=d) a;\nvarexo(heterogeneity=d) eh fh gh;\nmodel; y=SUM(a)+e; end;\nmodel(heterogeneity=d); a=a(-1)+eh+fh+gh; end;\n";
 const CASES: [(&str, &str, &str, &str); 12] = [
@@ -145,9 +145,10 @@ fn twelve_recorded_shapes_keep_official_wording_and_first_row() {
         let rows = dynare_diagnose(&source, None, None);
         let rows: Vec<_> = rows.iter().filter(|row| row.code == code).collect();
         assert_eq!(rows.len(), 2);
-        assert!(rows
-            .iter()
-            .all(|row| row.related[0]["line"] == 9 && row.related[0]["column"] == 1));
+        assert!(
+            rows.iter()
+                .all(|row| row.related[0]["line"] == 9 && row.related[0]["column"] == 1)
+        );
         let quiet = format!("{PREFIX}{}", block(first));
         assert!(duplicate_codes(&quiet).is_empty());
         pinned_check(&quiet, None);
@@ -173,13 +174,26 @@ fn block_resets_match_the_pinned_skew_map_lifetime() {
         }
     }
     for (body, message) in [
-        ("shocks(heterogeneity=d); skew eh=.1; end; shocks; skew eh=.2; end;", Some("shocks: skewness of eh declared twice")),
-        ("shocks; skew e=.1; end; shocks(heterogeneity=d); skew e=.2; end;", None),
-        ("shocks(heterogeneity=d); skew e=.1; end; shocks; var e=.1; end; shocks(heterogeneity=d); skew e=.2; end;", None),
+        (
+            "shocks(heterogeneity=d); skew eh=.1; end; shocks; skew eh=.2; end;",
+            Some("shocks: skewness of eh declared twice"),
+        ),
+        (
+            "shocks; skew e=.1; end; shocks(heterogeneity=d); skew e=.2; end;",
+            None,
+        ),
+        (
+            "shocks(heterogeneity=d); skew e=.1; end; shocks; var e=.1; end; shocks(heterogeneity=d); skew e=.2; end;",
+            None,
+        ),
         ("shocks; skew e=.1; end; shocks; skew e=.2; end;", None),
     ] {
         let source = format!("{PREFIX}{body}");
-        assert_eq!(!duplicate_codes(&source).is_empty(), message.is_some(), "{source}");
+        assert_eq!(
+            !duplicate_codes(&source).is_empty(),
+            message.is_some(),
+            "{source}"
+        );
         pinned_check(&source, message);
     }
     let source = format!(
@@ -212,7 +226,12 @@ fn permutations_same_name_triples_and_retyping_preserve_keys() {
     );
     let quiet = retyped.replace("var eh=.2;", "");
     assert!(duplicate_codes(&quiet).is_empty());
-    pinned_check(&quiet, Some("shocks: setting a variance on 'eh' is not allowed, because it is not a heterogeneous exogenous variable"));
+    pinned_check(
+        &quiet,
+        Some(
+            "shocks: setting a variance on 'eh' is not allowed, because it is not a heterogeneous exogenous variable",
+        ),
+    );
     assert!(analyze(&parse(&quiet)).iter().any(|row| row.code == "E465"));
     assert_eq!(duplicate_codes(&retyped).len(), 1);
 }
@@ -283,9 +302,11 @@ fn shipped_generic_checks_reach_existing_row_variants() {
     // by HeterogeneousShocksStatement::checkPass on the pin.
     for body in ["skew y=.1;", "skew y,eh,gh=.1;"] {
         let source = format!("{PREFIX}{}", block(body));
-        assert!(analyze(&parse(&source))
-            .iter()
-            .all(|row| row.code != "E270"));
+        assert!(
+            analyze(&parse(&source))
+                .iter()
+                .all(|row| row.code != "E270")
+        );
         pinned_check(&source, None);
     }
 }
@@ -370,10 +391,12 @@ async fn lsp_first_sites_use_utf16_and_clear_after_row_removal() {
                 }],
             })
             .await;
-        assert!(!pull(server, &uri)
-            .await
-            .iter()
-            .any(|row| row.code == Some(NumberOrString::String(code.into()))));
+        assert!(
+            !pull(server, &uri)
+                .await
+                .iter()
+                .any(|row| row.code == Some(NumberOrString::String(code.into())))
+        );
         version += 1;
         server
             .did_change(DidChangeTextDocumentParams {
@@ -438,16 +461,34 @@ async fn lsp_include_and_repeated_macro_sites_keep_written_locations() {
 #[test]
 fn ordinary_blocks_check_retained_skew_types_at_the_written_row() {
     for (body, name, message) in [
-        ("shocks(heterogeneity=d); skew eh=.1; end; shocks; var e=.1; end;", "skew eh=.1;", "shocks: setting skewness for 'eh', 'eh', 'eh' is not allowed; skewness can only be specified for exogenous variables"),
-        ("shocks(heterogeneity=d); skew eh,fh,gh=.1; end; shocks; var e=.1; end;", "skew eh,fh,gh=.1;", "shocks: setting skewness for 'eh', 'fh', 'gh' is not allowed; skewness can only be specified for exogenous variables"),
-        ("shocks; skew eh=.1; end;", "skew eh=.1;", "shocks: setting skewness for 'eh', 'eh', 'eh' is not allowed; skewness can only be specified for exogenous variables"),
+        (
+            "shocks(heterogeneity=d); skew eh=.1; end; shocks; var e=.1; end;",
+            "skew eh=.1;",
+            "shocks: setting skewness for 'eh', 'eh', 'eh' is not allowed; skewness can only be specified for exogenous variables",
+        ),
+        (
+            "shocks(heterogeneity=d); skew eh,fh,gh=.1; end; shocks; var e=.1; end;",
+            "skew eh,fh,gh=.1;",
+            "shocks: setting skewness for 'eh', 'fh', 'gh' is not allowed; skewness can only be specified for exogenous variables",
+        ),
+        (
+            "shocks; skew eh=.1; end;",
+            "skew eh=.1;",
+            "shocks: setting skewness for 'eh', 'eh', 'eh' is not allowed; skewness can only be specified for exogenous variables",
+        ),
     ] {
         let source = format!("{PREFIX}{body}");
         let rows = analyze(&parse(&source));
-        let row = rows.iter().find(|row| row.code == "E270").unwrap_or_else(|| panic!("{source}: {rows:?}"));
+        let row = rows
+            .iter()
+            .find(|row| row.code == "E270")
+            .unwrap_or_else(|| panic!("{source}: {rows:?}"));
         assert_eq!(row.message, message);
         assert_eq!(row.span.start as usize, source.find(name).unwrap());
-        assert_eq!(row.span.end as usize, source.find(name).unwrap() + name.len());
+        assert_eq!(
+            row.span.end as usize,
+            source.find(name).unwrap() + name.len()
+        );
         pinned_check(&source, Some(message));
     }
     let source = format!(
@@ -463,9 +504,11 @@ fn ordinary_blocks_check_retained_skew_types_at_the_written_row() {
         "shocks(heterogeneity=d); skew eh=.1; end; change_type(varexo) eh; shocks; var e=.1; end;",
     ] {
         let source = format!("{PREFIX}{body}");
-        assert!(analyze(&parse(&source))
-            .iter()
-            .all(|row| row.code != "E270"));
+        assert!(
+            analyze(&parse(&source))
+                .iter()
+                .all(|row| row.code != "E270")
+        );
         pinned_check(&source, None);
     }
     let source = format!(
@@ -474,9 +517,11 @@ fn ordinary_blocks_check_retained_skew_types_at_the_written_row() {
             .replace("varexo e;", "varexo e; trend_var(growth_factor=1) t; shocks(heterogeneity=d); skew t=.1; end; change_type(varexo) t;")
             .replace("y=SUM(a)+e;", "y=SUM(a)+e+t;")
     );
-    assert!(analyze(&parse(&source))
-        .iter()
-        .all(|row| row.code != "E270"));
+    assert!(
+        analyze(&parse(&source))
+            .iter()
+            .all(|row| row.code != "E270")
+    );
     pinned_check(&source, None);
 }
 
@@ -530,27 +575,35 @@ async fn retained_skew_type_error_maps_to_its_included_row_in_both_transports() 
         2,
     )
     .await;
-    assert!(!pull(server, &child)
-        .await
-        .iter()
-        .any(|row| row.code == Some(NumberOrString::String("E270".into()))));
+    assert!(
+        !pull(server, &child)
+            .await
+            .iter()
+            .any(|row| row.code == Some(NumberOrString::String("E270".into())))
+    );
     open(server, &root, &source, 3).await;
-    assert!(pull(server, &child)
-        .await
-        .iter()
-        .any(|row| row.code == Some(NumberOrString::String("E270".into()))));
+    assert!(
+        pull(server, &child)
+            .await
+            .iter()
+            .any(|row| row.code == Some(NumberOrString::String("E270".into())))
+    );
 }
 
 #[test]
 fn review_learnt_in_one_consumes_and_resets_retained_skewness() {
-    let source = format!("{PREFIX}shocks(heterogeneity=d); skew e=.1; end; shocks(learnt_in=1); var e; periods 1; values .1; end; shocks(heterogeneity=d); skew e=.2; end;");
+    let source = format!(
+        "{PREFIX}shocks(heterogeneity=d); skew e=.1; end; shocks(learnt_in=1); var e; periods 1; values .1; end; shocks(heterogeneity=d); skew e=.2; end;"
+    );
     pinned_check(&source, None);
     assert!(
         duplicate_codes(&source).is_empty(),
         "{source}: {:?}",
         duplicate_codes(&source)
     );
-    let source = format!("{PREFIX}shocks(heterogeneity=d); skew eh=.1; end; shocks(learnt_in=1); var e; periods 1; values .1; end;");
+    let source = format!(
+        "{PREFIX}shocks(heterogeneity=d); skew eh=.1; end; shocks(learnt_in=1); var e; periods 1; values .1; end;"
+    );
     let message = "shocks: setting skewness for 'eh', 'eh', 'eh' is not allowed; skewness can only be specified for exogenous variables";
     pinned_check(&source, Some(message));
     let rows = analyze(&parse(&source));
@@ -571,7 +624,9 @@ fn review_whole_block_macro_copies_own_only_their_execution_rows() {
         "skew e=@{k};",
         "skew e,f,g=@{k};",
     ] {
-        let source = format!("var y; varexo e f g; model; y=e+f+g; end;\n@#for k in 1:2\nshocks;\n{body}\nend;\n@#endfor\n");
+        let source = format!(
+            "var y; varexo e f g; model; y=e+f+g; end;\n@#for k in 1:2\nshocks;\n{body}\nend;\n@#endfor\n"
+        );
         pinned_check(&source, None);
         let model = parse(&source);
         assert_eq!(model.shock_blocks.len(), 2);
@@ -600,10 +655,12 @@ fn review_whole_block_macro_copies_own_only_their_execution_rows() {
     );
     pinned_check(&source, None);
     let model = parse(&source);
-    assert!(model
-        .shock_blocks
-        .iter()
-        .all(|block| block.stochastic.len() == 1));
+    assert!(
+        model
+            .shock_blocks
+            .iter()
+            .all(|block| block.stochastic.len() == 1)
+    );
     assert!(duplicate_codes(&source).is_empty());
     let source = source.replace("var eh", "skew eh");
     pinned_check(&source, Some("shocks: skewness of eh declared twice"));
@@ -620,15 +677,19 @@ fn review_other_shock_boundaries_keep_retained_skewness() {
         "mshocks(learnt_in=1); var e; periods 1; values 1.1; end;",
         "mshocks(learnt_in=2); var e; periods 2; values 1.1; end;",
     ] {
-        let source = format!("{PREFIX}shocks(heterogeneity=d); skew e=.1; end; {boundary} shocks(heterogeneity=d); skew e=.2; end;");
+        let source = format!(
+            "{PREFIX}shocks(heterogeneity=d); skew e=.1; end; {boundary} shocks(heterogeneity=d); skew e=.2; end;"
+        );
         let message = "shocks: skewness of e declared twice";
         pinned_check(&source, Some(message));
         assert_eq!(duplicate_codes(&source)[0].message, message);
         let source = format!("{PREFIX}shocks(heterogeneity=d); skew eh=.1; end; {boundary}");
         pinned_check(&source, None);
-        assert!(analyze(&parse(&source))
-            .iter()
-            .all(|row| row.code != "E270"));
+        assert!(
+            analyze(&parse(&source))
+                .iter()
+                .all(|row| row.code != "E270")
+        );
     }
 }
 
@@ -637,7 +698,9 @@ async fn review_boundary_and_whole_macro_ranges_agree_in_both_transports() {
     let (service, _socket) = new_service();
     let server = service.inner();
     let uri = Url::parse("untitled:review-shock-boundaries.mod").unwrap();
-    let source = format!("{PREFIX}shocks(heterogeneity=d);\n/* 🚀 */ skew eh=.1;\nend;\nshocks(learnt_in=1); var e; periods 1; values .1; end;\n");
+    let source = format!(
+        "{PREFIX}shocks(heterogeneity=d);\n/* 🚀 */ skew eh=.1;\nend;\nshocks(learnt_in=1); var e; periods 1; values .1; end;\n"
+    );
     open(server, &uri, &source, 1).await;
     let rows = pull(server, &uri).await;
     let row = rows
@@ -659,19 +722,25 @@ async fn review_boundary_and_whole_macro_ranges_agree_in_both_transports() {
         source.replace("skew eh=.1;", "skew e=.1;") + "shocks(heterogeneity=d); skew e=.2; end;";
     open(server, &uri, &quiet, 2).await;
     assert!(!pull(server, &uri).await.iter().any(|row| matches!(&row.code, Some(NumberOrString::String(code)) if code == "E393" || code == "E270")));
-    assert!(dynare_diagnose(&quiet, None, None)
-        .iter()
-        .all(|row| row.code != "E393" && row.code != "E270"));
+    assert!(
+        dynare_diagnose(&quiet, None, None)
+            .iter()
+            .all(|row| row.code != "E393" && row.code != "E270")
+    );
     for (index, body) in ["var e=@{k};", "corr e,f=@{k}/10;", "skew e=@{k};"]
         .iter()
         .enumerate()
     {
-        let quiet = format!("var y; varexo e f g; model; y=e+f+g; end;\n@#for k in 1:2\nshocks;\n/* 🚀 */ {body}\nend;\n@#endfor\n");
+        let quiet = format!(
+            "var y; varexo e f g; model; y=e+f+g; end;\n@#for k in 1:2\nshocks;\n/* 🚀 */ {body}\nend;\n@#endfor\n"
+        );
         open(server, &uri, &quiet, 3 + index as i32 * 2).await;
         assert!(!pull(server, &uri).await.iter().any(|row| matches!(&row.code, Some(NumberOrString::String(code)) if code == "E111" || code == "E393")));
-        assert!(dynare_diagnose(&quiet, None, None)
-            .iter()
-            .all(|row| row.code != "E111" && row.code != "E393"));
+        assert!(
+            dynare_diagnose(&quiet, None, None)
+                .iter()
+                .all(|row| row.code != "E111" && row.code != "E393")
+        );
         let fire = quiet.replace("\nend;", &format!("\n/* 🧮 */ {body}\nend;"));
         open(server, &uri, &fire, 4 + index as i32 * 2).await;
         let rows = pull(server, &uri).await;

@@ -2,7 +2,7 @@
 
 use crate::engine::diagnostics::{Diagnostic, Severity, TextEdit};
 use crate::engine::language::intern::Name;
-use crate::engine::language::lexer::{tokenize, Token, TokenKind};
+use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::model::{Decl, Model, ParseIssueKind, ShocksSemiFamily};
 use crate::engine::language::span::{LineIndex, Span};
 
@@ -464,11 +464,7 @@ fn leading_ident(s: &str) -> Option<&str> {
             break;
         }
     }
-    if end == 0 {
-        None
-    } else {
-        Some(&s[..end])
-    }
+    if end == 0 { None } else { Some(&s[..end]) }
 }
 
 fn format_recorded_issues(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
@@ -1502,11 +1498,7 @@ fn skip_tag_tokens(toks: &[Token], mut i: usize) -> usize {
         }
         i += 1;
     }
-    if i < toks.len() {
-        i + 1
-    } else {
-        i
-    }
+    if i < toks.len() { i + 1 } else { i }
 }
 
 fn standalone_eq_indices(toks: &[Token]) -> Vec<usize> {

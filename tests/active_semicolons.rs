@@ -7,11 +7,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dygnosis::server::new_service;
 use dygnosis::{
-    analyze, apply_fix, auto_fix, check_file, check_parse, dynare_diagnose, dynare_expand, parse,
-    run_preprocessor, ExprId, ExprKind, JsonStage, Model,
+    ExprId, ExprKind, JsonStage, Model, analyze, apply_fix, auto_fix, check_file, check_parse,
+    dynare_diagnose, dynare_expand, parse, run_preprocessor,
 };
-use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 const MERGED: &str = "merged due to a missing semicolon";
 const UNBALANCED: &str = "Unbalanced parentheses";
@@ -323,9 +323,11 @@ fn archive_text() -> (PathBuf, String, String) {
         1,
     );
     assert!(disabled.contains("// @#include \"set_parameters.m\""));
-    assert!(!disabled
-        .lines()
-        .any(|line| line.trim_start() == "@#include \"set_parameters.m\""));
+    assert!(
+        !disabled
+            .lines()
+            .any(|line| line.trim_start() == "@#include \"set_parameters.m\"")
+    );
     (path, text, disabled)
 }
 
@@ -396,11 +398,12 @@ async fn archive_lsp_include_disabled_has_no_merged_semicolon() {
     else {
         panic!("expected a full report");
     };
-    assert!(full
-        .full_document_diagnostic_report
-        .items
-        .iter()
-        .all(|diag| !diag.message.contains(MERGED)));
+    assert!(
+        full.full_document_diagnostic_report
+            .items
+            .iter()
+            .all(|diag| !diag.message.contains(MERGED))
+    );
 }
 
 fn expr_has_error(model: &Model, id: ExprId) -> bool {

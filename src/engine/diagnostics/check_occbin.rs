@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use crate::engine::diagnostics::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::engine::language::expr::{BinOp, ExprId, ExprKind};
 use crate::engine::language::intern::Name;
-use crate::engine::language::lexer::{tokenize, Token, TokenKind};
+use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::model::{
     Equation, Model, OccbinConstraint, OccbinExpr, SymbolContext,
 };
@@ -266,7 +266,9 @@ mod parse_receipt_tests {
         let (diagnostic, order) = rows.first().unwrap();
         assert_eq!(diagnostic.code, "E182");
         assert_eq!(model.expanded_tokens[order - 1].text(&model.source), "e");
-        let model = parse("var y;model;[name='c',bind='c']y=0;[name='d',bind='d']y=0;end;occbin_constraints;name 'c';bind y>0;end;occbin_constraints;name 'd';bind y>0;end;");
+        let model = parse(
+            "var y;model;[name='c',bind='c']y=0;[name='d',bind='d']y=0;end;occbin_constraints;name 'c';bind y>0;end;occbin_constraints;name 'd';bind y>0;end;",
+        );
         assert!(check_occbin(&model).iter().any(|row| row.code == "E170"));
         assert!(parse_refusals(&model).is_empty());
     }
@@ -276,16 +278,20 @@ mod parse_receipt_tests {
         // Guards equation Parse errors and end-block refusals from becoming
         // complete named prefixes. A duplicate tag refuses before RHS calls.
         let model = parse("var y;model;[bind='c']y=0;end;database later;");
-        assert!(parse_refusals(&model)
-            .iter()
-            .any(|(diagnostic, _)| diagnostic.code == "E173"));
+        assert!(
+            parse_refusals(&model)
+                .iter()
+                .any(|(diagnostic, _)| diagnostic.code == "E173")
+        );
         let model = parse("var y;model;[name='a',name='b']y=pac_expectation(m);end;");
         let (_, order) = parse_refusals(&model)
             .into_iter()
             .find(|(diagnostic, _)| diagnostic.code == "E256")
             .unwrap();
         assert!(order < model.named_model_operators[0].keyword_order);
-        let model = parse("var y;model;[name='a',bind='c']y=0;end;occbin_constraints;name 'c';relax y>0;end;database later;");
+        let model = parse(
+            "var y;model;[name='a',bind='c']y=0;end;occbin_constraints;name 'c';relax y>0;end;database later;",
+        );
         let (diagnostic, order) = parse_refusals(&model)
             .into_iter()
             .find(|(diagnostic, _)| diagnostic.code == "E174")
@@ -293,10 +299,14 @@ mod parse_receipt_tests {
         assert_eq!(model.expanded_tokens[order].text(&model.source), "database");
         assert_eq!(model.expanded_tokens[order - 2].text(&model.source), "end");
         assert!(diagnostic.span.start < model.expanded_tokens[order - 2].span.start);
-        let model = parse("var y;occbin_constraints;name 'c';bind y>0;end;database later;model;[name='a',bind='c']y=0;end;");
-        assert!(parse_refusals(&model)
-            .iter()
-            .any(|(diagnostic, _)| diagnostic.code == "E175"));
+        let model = parse(
+            "var y;occbin_constraints;name 'c';bind y>0;end;database later;model;[name='a',bind='c']y=0;end;",
+        );
+        assert!(
+            parse_refusals(&model)
+                .iter()
+                .any(|(diagnostic, _)| diagnostic.code == "E175")
+        );
     }
 
     #[test]
@@ -312,9 +322,11 @@ mod parse_receipt_tests {
         let model = parse("var y;model;[mcp='y>1+p']y=0;end;");
         assert!(parse_refusals(&model).is_empty());
         let model = parse("var y;model;[mcp='y(-1)>0']y=0;end;");
-        assert!(parse_refusals(&model)
-            .iter()
-            .any(|(diagnostic, _)| diagnostic.code == "E262"));
+        assert!(
+            parse_refusals(&model)
+                .iter()
+                .any(|(diagnostic, _)| diagnostic.code == "E262")
+        );
     }
 }
 
