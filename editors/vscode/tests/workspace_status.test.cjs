@@ -136,7 +136,7 @@ function setup(options = {}) {
   const configure = (key, value) => { host.settings[key] = value; host.configured.fire({ affectsConfiguration: section => section === "dynare" || `dynare.${key}`.startsWith(section) }); };
   return { host, service, changed, updated, configure };
 }
-function rows(env) { return env.host.views[0].options.treeDataProvider.getChildren().filter(row => row.id !== "help"); }
+function rows(env) { return env.host.views[0].options.treeDataProvider.getChildren(); }
 function child(item, label) { return item.children.find(row => row.label === label); }
 function liveWatchers(env, pattern) { return env.host.watchers.filter(watcher => !watcher.disposed && (!pattern || watcher.pattern.pattern === pattern)); }
 
@@ -166,7 +166,7 @@ test("coverage is independent of diagnostics and distinguishes failure, incomple
   assert.equal(checked.text, "$(check) Dynare workspace: 1/1 checked");
   assert.equal(checked.accessibilityLabel, "Dynare workspace: 1/1 checked. Checked: 1. Open workspace checks.");
   assert.match(checked.tooltip.value, /^\*\*Models in workspace\*\*/);
-  assert.match(checked.tooltip.value, /\| Checked \| 1 \|/);
+  assert.match(checked.tooltip.value, /<td align="left">Checked<\/td><td align="right">1<\/td>/);
   assert.doesNotMatch(tooltipText(checked.tooltip), /Errors|Warnings|Click|Recheck|unopened|saved|Not fully checked|Excluded|Pending|Checking|discovery failures/);
   for (const state of ["incomplete", "failed"]) assert.equal(workspaceStatusContent(parseWorkspaceStatus(facts([root(state)]))).text, "$(warning) Dynare workspace: 0/1 checked");
   assert.match(workspaceStatusContent(parseWorkspaceStatus(facts([root("pending")]))).text, /0\/1 finished/);
@@ -183,9 +183,9 @@ test("workspace hover combines incomplete and failed without counting queued wor
     .map((state, index) => root(state, { root_uri: `${workspace}/${index}.mod`, errors: state === "checked" ? 2 : 0 }));
   const content = workspaceStatusContent(parseWorkspaceStatus(facts(entries)));
   assert.match(content.text, /4\/6 finished/);
-  assert.match(content.tooltip.value, /\| Checked \| 2 \|/);
-  assert.match(content.tooltip.value, /\| Not fully checked \| 2 \|/);
-  assert.match(content.tooltip.value, /\| Excluded \| 1 \|/);
+  assert.match(content.tooltip.value, /<td align="left">Checked<\/td><td align="right">2<\/td>/);
+  assert.match(content.tooltip.value, /<td align="left">Not fully checked<\/td><td align="right">2<\/td>/);
+  assert.match(content.tooltip.value, /<td align="left">Excluded<\/td><td align="right">1<\/td>/);
   assert.doesNotMatch(content.tooltip.value, /Pending|Checking|Incomplete|Failed/);
   assert.match(content.accessibilityLabel, /Checked: 2\. Not fully checked: 2\. Excluded: 1\./);
 });
@@ -214,7 +214,7 @@ test("default-on folder-only startup uses native coverage and folder tree withou
   assert.equal(rows(env)[0].children[0].description, "Checked · 0 Errors, 0 Warnings");
   assert.equal(rows(env)[0].children[0].command.command, "vscode.open");
   assert.ok(env.service.queries.every(query => query.args.length === 0));
-  await env.host.commands.get("dygnosis.workspaceStatus")(); assert.equal(env.host.executed[0].name, "dygnosis.workspace.focus");
+  await env.host.commands.get("dygnosis.workspaceStatus")(); assert.equal(env.host.executed.at(-1).name, "dygnosis.workspace.focus");
   registration.dispose();
 });
 test("off and virtual/no-folder windows do not start workspace work", async () => {
@@ -308,17 +308,99 @@ test("folder discovery failure cannot make another folder's successful roots loo
   registration.dispose();
 });
 
-test("completed empty, excluded, incomplete and failed coverage offers contextual Help", async () => {
+test("workspace outcomes use the toolbar Help instead of an extra tree row", async () => {
   const states = [facts([]), facts([root("excluded")]), facts([root("incomplete")]), facts([root("failed")]),
     facts([], { coverage_complete: false, discovery_failures: [{ folder_uri: workspace, failure: "Permission denied" }] })];
   for (const status of states) {
     const env = setup({ status }), registration = registerWorkspaceStatus(env.service); await flush();
     const help = env.host.views[0].options.treeDataProvider.getChildren().find(row => row.id === "help");
-    assert.equal(help?.command?.command, "dygnosis.openHelp");
-    assert.deepEqual(help.command.arguments, ["workspace-checks"]);
+    assert.equal(help, undefined);
+    if (status.counts.incomplete || status.counts.failed) assert.equal(env.host.views[0].message, undefined);
     registration.dispose();
   }
 });
+test("not fully checked filter reveals affected paths and restores full-tree collapse choices", async () => {
+  // Guards hiding affected models beneath collapsed folders or mixing queued/diagnostic-error models into the filter.
+  const entries = [root("incomplete", { root_uri: `${workspace}/models/deep/partial.mod` }),
+    root("failed", { root_uri: `${other}/broken.dyn`, failure: "Could not read model" }),
+    root("checked", { root_uri: `${workspace}/checked.mod`, errors: 2 }),
+    ...["pending", "checking", "excluded"].map(state => root(state, { root_uri: `${workspace}/${state}.mod` }))];
+  const env = setup({ folders: [folder(), folder(other, "other"), folder("file:///C:/empty", "empty")],
+    status: facts(entries, { include_files: [`${workspace}/models/part.inc`] }) });
+  const registration = registerWorkspaceStatus(env.service); await flush();
+  const branch = child(rows(env)[0], "models");
+  env.host.collapsed.fire({ element: rows(env)[0] }); env.host.collapsed.fire({ element: branch });
+  const queries = env.service.queries.length;
+  assert.equal(env.host.views[0].description, "1 checked · 2 not fully checked");
+  assert.equal(env.host.views[0].message, undefined);
+  await env.host.commands.get("dygnosis.showNotFullyCheckedModels")();
+  assert.deepEqual(rows(env).map(row => row.label), ["workspace", "other"]);
+  const top = rows(env)[0], models = child(top, "models"), deep = child(models, "deep");
+  assert.deepEqual(top.children.map(row => row.label), ["models"]);
+  assert.deepEqual(models.children.map(row => row.label), ["deep"]);
+  assert.deepEqual(deep.children.map(row => row.label), ["partial.mod"]);
+  for (const row of [top, models, deep]) assert.equal(row.collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
+  assert.equal(deep.children[0].command.arguments[0].toString(), entries[0].root_uri);
+  const failed = rows(env)[1].children[0];
+  assert.equal(failed.label, "broken.dyn"); assert.match(failed.tooltip, /Could not read model/);
+  assert.equal(env.host.views[0].description, "2 not fully checked");
+  assert.equal(env.host.executed.findLast(call => call.name === "setContext").args[1], true);
+  await env.host.commands.get("dygnosis.showAllWorkspaceFiles")();
+  assert.equal(rows(env)[0].collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+  assert.equal(child(rows(env)[0], "models").collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+  assert.ok(child(child(rows(env)[0], "models"), "part.inc"));
+  assert.ok(child(rows(env)[0], "checked.mod")); assert.equal(rows(env).length, 3);
+  assert.equal(env.host.executed.findLast(call => call.name === "setContext").args[1], false);
+  assert.equal(env.service.queries.length, queries, "filtering uses the existing status without running checks");
+  registration.dispose();
+});
+
+test("filtered results follow current status and retain unreadable-folder failures", async () => {
+  // Guards stale affected files after a successful recheck and silently hiding failed folder discovery.
+  const env = setup({ status: facts([root("incomplete")]) });
+  const registration = registerWorkspaceStatus(env.service); await flush();
+  await env.host.commands.get("dygnosis.showNotFullyCheckedModels")();
+  env.service.client.notify(facts([root()]));
+  assert.deepEqual(rows(env), []);
+  assert.equal(env.host.views[0].description, "0 not fully checked");
+  assert.equal(env.host.views[0].message, "No incomplete or failed checks.");
+  assert.match(env.host.items[0].text, /1\/1 checked/);
+  env.service.client.notify(facts([], { coverage_complete: false,
+    discovery_failures: [{ folder_uri: workspace, failure: "Permission denied" }] }));
+  assert.equal(rows(env)[0].children[0].label, "Discovery failed");
+  assert.equal(rows(env)[0].children[0].tooltip, "Permission denied");
+  assert.match(env.host.views[0].message, /folder discovery failed/);
+  env.service.client.notify(facts([root("failed", { root_uri: `${workspace}/new.dyn`, failure: "Read failed" })]));
+  assert.equal(rows(env)[0].children[0].label, "new.dyn");
+  assert.equal(env.host.views[0].description, "1 not fully checked");
+  registration.dispose();
+});
+
+test("replacing a saved preview model keeps the workspace tree during refresh", async t => {
+  // Opening another model can close its previous preview tab; the close event must not erase the browsed tree.
+  const env = setup({ status: facts([root("incomplete", { root_uri: `${workspace}/models/partial.mod` })]) });
+  const registration = registerWorkspaceStatus(env.service); t.after(() => registration.dispose()); await flush();
+  await env.host.commands.get("dygnosis.showNotFullyCheckedModels")();
+  const previous = rows(env);
+  env.host.closed.fire(document(`${workspace}/previous.mod`));
+  assert.deepEqual(rows(env), previous, "the last tree stays visible while the next status is pending");
+});
+
+test("a filtered affected model stays visible while its replacement check is pending", async t => {
+  // Guards opening an affected model removing it from the filtered list before its new result arrives.
+  const env = setup({ status: facts([root("incomplete")]) });
+  const registration = registerWorkspaceStatus(env.service); t.after(() => registration.dispose()); await flush();
+  await env.host.commands.get("dygnosis.showNotFullyCheckedModels")();
+  env.service.client.notify(facts([root("pending")], { pass_revision: 2 }));
+  assert.equal(rows(env)[0]?.children[0]?.label, "main.mod");
+  assert.equal(rows(env)[0].children[0].description, "Pending");
+  assert.equal(env.host.views[0].message, undefined);
+  env.service.client.notify(facts([root("checking")], { pass_revision: 2 }));
+  assert.equal(rows(env)[0].children[0].description, "Checking");
+  env.service.client.notify(facts([root("checked")], { pass_revision: 2 }));
+  assert.deepEqual(rows(env), [], "a completed successful check removes the model from the affected list");
+});
+
 test("only the chosen owner is sent for priority, including include roots, null and untitled", async () => {
   const doc = document(`${workspace}/fragment.inc`), env = setup({ editor: { document: doc } });
   const registration = registerWorkspaceStatus(env.service); await flush();
@@ -520,23 +602,37 @@ test("Recheck and Cancel use advertised commands and preserve their different li
   registration.dispose();
 });
 
-// Guards explicit workspace actions dropping their request promise and losing the refusal cause.
-test("Recheck and Cancel wait for the request and show its cause once", async () => {
+// Guards explicit actions dropping their promise or retaining stale rows after a failed request/startup.
+test("Recheck and Cancel wait for failure, clear retained rows and show the cause once", async () => {
   for (const command of ["dygnosis.recheckWorkspace", "dygnosis.cancelWorkspace"]) {
-    const env = setup(), registration = registerWorkspaceStatus(env.service); await flush();
-    const pending = deferred(); env.service.execute = () => pending.promise;
-    let finished = false; const action = env.host.commands.get(command)().then(() => { finished = true; }); await flush();
-    assert.equal(finished, false); pending.reject(new Error("engine request failed")); await action;
-    assert.deepEqual(env.host.notifications, ["engine request failed"]); registration.dispose();
+    for (const stage of ["execute", "ensureStarted"]) {
+      const env = setup({ status: facts([root("incomplete")]) }), registration = registerWorkspaceStatus(env.service); await flush();
+      await env.host.commands.get("dygnosis.showNotFullyCheckedModels")();
+      assert.equal(rows(env)[0].children[0].label, "main.mod");
+      const pending = deferred(); env.service[stage] = () => pending.promise;
+      let finished = false; const action = env.host.commands.get(command)().then(() => { finished = true; }); await flush();
+      assert.equal(finished, false); pending.reject(new Error("engine request failed")); await action;
+      assert.deepEqual(env.host.notifications, ["engine request failed"]);
+      assert.match(env.host.items[0].text, /unavailable/); assert.match(env.host.views[0].message, /engine request failed/);
+      assert.equal(rows(env).length, 0);
+      await env.host.commands.get("dygnosis.showAllWorkspaceFiles")(); assert.equal(rows(env).length, 0);
+      assert.match(env.host.items[0].text, /unavailable/); assert.match(env.host.views[0].message, /engine request failed/);
+      registration.dispose();
+    }
   }
 });
 
-// Guards an automatic workspace refresh leaking a startup rejection after an engine failure.
-test("a background workspace refresh logs a startup failure without notifying", async () => {
-  const env = setup(), registration = registerWorkspaceStatus(env.service); await flush();
+// Guards automatic startup failure retaining stale rows or leaking a rejection into a notification.
+test("a background workspace startup failure clears retained rows and logs without notifying", async () => {
+  const env = setup({ status: facts([root("incomplete")]) }), registration = registerWorkspaceStatus(env.service); await flush();
+  await env.host.commands.get("dygnosis.showNotFullyCheckedModels")(); assert.equal(rows(env)[0].children[0].label, "main.mod");
   env.service.ensureStarted = async () => { throw new Error("startup failed"); };
   env.host.edited.fire({ document: document() }); await new Promise(resolve => setTimeout(resolve, 90)); await flush();
-  assert.ok(env.service.logged.some(message => /startup failed/.test(message))); assert.deepEqual(env.host.notifications, []); registration.dispose();
+  assert.ok(env.service.logged.some(message => /startup failed/.test(message))); assert.deepEqual(env.host.notifications, []);
+  assert.match(env.host.items[0].text, /unavailable/); assert.match(env.host.views[0].message, /startup failed/);
+  assert.equal(rows(env).length, 0);
+  await env.host.commands.get("dygnosis.showAllWorkspaceFiles")(); assert.equal(rows(env).length, 0);
+  assert.match(env.host.items[0].text, /unavailable/); assert.match(env.host.views[0].message, /startup failed/); registration.dispose();
 });
 test("rapid overlay edits coalesce a status query and close refreshes saved coverage", async () => {
   const env = setup(), registration = registerWorkspaceStatus(env.service); await flush();

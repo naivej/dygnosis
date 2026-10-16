@@ -13,9 +13,16 @@
   and every heterogeneous dimension. The hover keeps their separate breakdowns.
 - The **Models in workspace** hover shows a compact count table. Incomplete and
   failed checks share **Not fully checked**; that row and **Excluded** appear
-  only when nonzero. Column headers align with their labels and counts.
+  only when nonzero. Labels and counts align in a headerless table.
   The status bar shows the checked ratio without an incomplete prefix.
   Cancellation and unreadable folders retain short messages.
+- Workspace checks can show only models that were not fully checked. Their
+  folder paths expand, and **Show all workspace files** restores the full list
+  and previous folder collapse choices. The extra Help row and routine
+  incomplete-coverage message are removed from the panel.
+- Opening models and background updates preserve the workspace checks tree.
+  Affected models remain visible in the filter while their next check is pending
+  or running, and leave the list after a successful result.
 
 ## v0.11.28
 

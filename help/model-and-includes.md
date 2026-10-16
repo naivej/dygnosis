@@ -32,16 +32,8 @@ loose file).
 
 ## Model structure and counts
 
-For the active `.mod` or `.dyn` file, the status bar shows endogenous,
-exogenous and equation totals beside their icons on the left. Totals combine
-the counts from the aggregate model and all heterogeneous dimensions. Hover over
-the counts for separate breakdowns under **Aggregate model** and
-each **Heterogeneous model: `<dimension>`**, including static, predetermined,
-forward-looking and mixed endogenous counts. Click the status bar item to focus
-**Outline**.
-
-If macro expansion or parsing is incomplete, the status bar item shows
-**Dynare: incomplete** and its hover explains the cause.
+Status bar model counts combine the aggregate model and all heterogeneous
+dimensions.
 
 Toggle the status bar item with [Dynare › Status Bar:
 Enabled](settings:dynare.statusBar.enabled) and choose which counts appear (and

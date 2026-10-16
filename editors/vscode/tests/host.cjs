@@ -580,7 +580,7 @@ exports.run = async function run() {
       return;
     }
     if (scope === "workspace") {
-      await require("./helpers/workspace_host.cjs").checkWorkspaceHost(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor });
+      await require("./helpers/workspace_host.cjs").checkWorkspaceHost(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, currentSnapshot });
       await service.shutdown();
       evidence.artifacts_after = await historyArtifacts();
       assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "the engine and compiled extension must remain unchanged throughout the host gate");

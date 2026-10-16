@@ -44,10 +44,9 @@ output.
 For external agents, open a trusted workspace folder and run **Dygnosis: Set up
 MCP for this workspace** from the Command Palette. This creates or updates
 `.mcp.json` in the selected folder's Git repository root, or in the selected
-workspace folder when it has no Git repository, using a managed copy of the bundled executable
-(or the custom binary set in [Dynare: Server
-Path](settings:dynare.serverPath), available from [GitHub
-Releases](https://github.com/naivej/dygnosis/releases)):
+workspace folder when it has no Git repository. Use [Dynare: Server
+Path](settings:dynare.serverPath) to select a custom executable instead of the
+bundled one. A manual stdio configuration uses:
 
 ```json
 {

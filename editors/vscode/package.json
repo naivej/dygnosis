@@ -196,6 +196,18 @@
         "icon": "$(list-tree)"
       },
       {
+        "command": "dygnosis.showNotFullyCheckedModels",
+        "title": "Show not fully checked models",
+        "category": "Dygnosis",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "dygnosis.showAllWorkspaceFiles",
+        "title": "Show all workspace files",
+        "category": "Dygnosis",
+        "icon": "$(filter-filled)"
+      },
+      {
         "command": "dygnosis.recheckWorkspace",
         "title": "Recheck workspace",
         "category": "Dygnosis",
@@ -288,6 +300,14 @@
       ],
       "commandPalette": [
         {
+          "command": "dygnosis.showNotFullyCheckedModels",
+          "when": "!dygnosis.workspaceNotFullyCheckedOnly"
+        },
+        {
+          "command": "dygnosis.showAllWorkspaceFiles",
+          "when": "dygnosis.workspaceNotFullyCheckedOnly"
+        },
+        {
           "command": "dygnosis.ignoreWorkspaceFolder",
           "when": "false"
         },
@@ -325,6 +345,16 @@
         }
       ],
       "view/title": [
+        {
+          "command": "dygnosis.showNotFullyCheckedModels",
+          "when": "view == dygnosis.workspace && !dygnosis.workspaceNotFullyCheckedOnly",
+          "group": "navigation@0"
+        },
+        {
+          "command": "dygnosis.showAllWorkspaceFiles",
+          "when": "view == dygnosis.workspace && dygnosis.workspaceNotFullyCheckedOnly",
+          "group": "navigation@0"
+        },
         {
           "command": "dygnosis.recheckWorkspace",
           "when": "view == dygnosis.workspace",
@@ -1480,7 +1510,8 @@
     "viewsWelcome": [
       {
         "view": "dygnosis.workspace",
-        "contents": "Open a folder to check saved .mod and .dyn models and browse saved .inc files.\n[Open Dygnosis Help](command:dygnosis.openHelp)"
+        "contents": "Open a folder to check saved .mod and .dyn models and browse saved .inc files.",
+        "when": "workspaceFolderCount == 0"
       }
     ],
     "walkthroughs": [

@@ -21,5 +21,7 @@
   "dygnosis.configureWorkspaceExclusions": "workspace-checks",
   "dygnosis.ignoreWorkspaceFolder": "workspace-checks",
   "dygnosis.openChanges": "structural-diff",
-  "dygnosis.renameSymbol": "navigate-code"
+  "dygnosis.renameSymbol": "navigate-code",
+  "dygnosis.showNotFullyCheckedModels": "workspace-checks",
+  "dygnosis.showAllWorkspaceFiles": "workspace-checks"
 }

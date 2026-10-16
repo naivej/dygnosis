@@ -136,7 +136,10 @@ export function workspaceStatusContent(status: WorkspaceStatus): StatusContent {
     if (failures) notes.push(`Could not read ${failures} folder${failures === 1 ? "" : "s"}. The model list may be incomplete.`);
   }
   const tooltip = new vscode.MarkdownString("**Models in workspace**\n\n");
-  if (status.enabled) tooltip.appendMarkdown(["| Models | Count |", "|:---|---:|", ...rows.map(([name, count]) => `| ${name} | ${count} |`)].join("\n"));
+  if (status.enabled) {
+    tooltip.supportHtml = true;
+    tooltip.appendMarkdown(`<table><tbody>${rows.map(([name, count]) => `<tr><td align="left">${name}</td><td align="right">${count}</td></tr>`).join("")}</tbody></table>`);
+  }
   for (const note of notes) tooltip.appendMarkdown("\n\n").appendText(note);
   return { text: `$(${icon}) Dynare workspace: ${label}`, tooltip,
     accessibilityLabel: [`Dynare workspace: ${label}.`, ...(status.enabled ? rows.map(([name, count]) => `${name}: ${count}.`) : []), ...notes, "Open workspace checks."].join(" ") };
@@ -164,13 +167,15 @@ function containingFolder(uri: vscode.Uri, candidates: readonly vscode.Workspace
   return candidates.filter(folder => { const base = identity(folder.uri).replace(/[\\/]$/, ""); return key === base || key.startsWith(`${base}${uri.scheme === "file" && process.platform === "win32" ? path.sep : "/"}`); })
     .sort((left, right) => right.uri.path.length - left.uri.path.length)[0];
 }
-function treeRows(status: WorkspaceStatus, currentFolders: readonly vscode.WorkspaceFolder[], collapsed: ReadonlySet<string>): WorkspaceItem[] {
+function treeRows(status: WorkspaceStatus, currentFolders: readonly vscode.WorkspaceFolder[], collapsed: ReadonlySet<string>, affectedRoots?: ReadonlySet<string>): WorkspaceItem[] {
+  // Separate identities let the filtered paths expand without changing the full tree's collapse state.
+  const keyFor = (uri: vscode.Uri): string => `${affectedRoots ? "filtered:" : ""}${identity(uri)}`;
   return currentFolders.map(folder => {
-    const row = new WorkspaceItem(identity(folder.uri), folder.name, "folder", [], folder);
+    const row = new WorkspaceItem(keyFor(folder.uri), folder.name, "folder", [], folder);
     row.contextValue = "dygnosis.workspaceFolder"; row.resourceUri = folder.uri;
-    const directories = new Map<string, WorkspaceItem>([[identity(folder.uri), row]]);
+    const directories = new Map<string, WorkspaceItem>([[keyFor(folder.uri), row]]);
     const directory = (uri: vscode.Uri): WorkspaceItem => {
-      const key = identity(uri), existing = directories.get(key);
+      const key = keyFor(uri), existing = directories.get(key);
       if (existing) return existing;
       const item = new WorkspaceItem(key, path.basename(uri.fsPath), "folder", [], folder);
       item.contextValue = "dygnosis.workspaceDirectory";
@@ -181,11 +186,12 @@ function treeRows(status: WorkspaceStatus, currentFolders: readonly vscode.Works
     const addFile = (uri: vscode.Uri, item: WorkspaceItem): void => {
       directory(vscode.Uri.file(path.dirname(uri.fsPath))).children.push(item);
     };
-    const roots = status.roots.filter(root => containingFolder(vscode.Uri.parse(root.root_uri), currentFolders) === folder);
+    const roots = status.roots.filter(root => (!affectedRoots || affectedRoots.has(identity(vscode.Uri.parse(root.root_uri)))) &&
+      containingFolder(vscode.Uri.parse(root.root_uri), currentFolders) === folder);
     for (const root of roots) {
       const uri = vscode.Uri.parse(root.root_uri), label = path.basename(uri.fsPath);
       const detail = `${root.state === "checked" ? "Checked" : root.state[0].toUpperCase() + root.state.slice(1)}${root.state === "checked" ? ` · ${diagnostics(root.errors, "Error")}, ${diagnostics(root.warnings, "Warning")}` : ""}`;
-      const item = new WorkspaceItem(identity(uri), label, root.state === "failed" || root.state === "incomplete" ? "warning" :
+      const item = new WorkspaceItem(keyFor(uri), label, root.state === "failed" || root.state === "incomplete" ? "warning" :
         root.state === "checked" ? root.errors ? "error" : "check" : root.state === "checking" ? "sync~spin" : root.state === "excluded" ? "circle-slash" : "clock");
       item.resourceUri = uri; item.description = detail;
       item.tooltip = `${uri.fsPath}\n${detail}${root.failure ? `\n${root.failure}` : ""}`;
@@ -193,7 +199,7 @@ function treeRows(status: WorkspaceStatus, currentFolders: readonly vscode.Works
       item.command = { command: "vscode.open", title: "Open model", arguments: [uri] };
       addFile(uri, item);
     }
-    for (const file of status.include_files ?? []) {
+    for (const file of affectedRoots ? [] : status.include_files ?? []) {
       const uri = vscode.Uri.parse(file);
       if (containingFolder(uri, currentFolders) !== folder) continue;
       const item = new WorkspaceItem(identity(uri), path.basename(uri.fsPath), "file-code");
@@ -213,12 +219,12 @@ function treeRows(status: WorkspaceStatus, currentFolders: readonly vscode.Works
         left.label.localeCompare(right.label));
       item.collapsibleState = collapsed.has(item.id!) ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded;
     }
-    if (!roots.length && !failures.length) row.children.push(new WorkspaceItem(`${folder.uri.toString()}:empty`,
+    if (!affectedRoots && !roots.length && !failures.length) row.children.push(new WorkspaceItem(`${folder.uri.toString()}:empty`,
       status.discovery === "pending" || status.discovery === "discovering" ? "Discovering root models…" :
         status.discovery === "cancelled" ? "Discovery cancelled" : "No root .mod or .dyn models", "info"));
     row.children.unshift(...failures);
     return row;
-  });
+  }).filter(row => !affectedRoots || row.children.length > 0);
 }
 
 /** Presentation and watcher adapter only; analysis stays in the server. */
@@ -227,6 +233,9 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
   item.name = "Dynare workspace coverage"; item.command = "dygnosis.workspaceStatus";
   const tree = new WorkspaceTree(), view = vscode.window.createTreeView("dygnosis.workspace", { treeDataProvider: tree, showCollapseAll: true });
   const collapsed = new Set<string>();
+  const affectedRoots = new Set<string>();
+  let notFullyCheckedOnly = false;
+  let retainedStatus: WorkspaceStatus | undefined;
   let disposed = false, connection: WorkspaceConnection | undefined, instance = -1;
   let capability: WorkspaceCapability | undefined, status: WorkspaceStatus | undefined, generation = 0, response = 0, minPass = 0;
   let barrier = false, activeRoot: string | null | undefined;
@@ -244,13 +253,12 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
   const cancelRequest = (): void => { request?.cancel(); request?.dispose(); request = undefined; };
   const beginBarrier = (): void => { barrier = true; bufferedNotification = undefined; };
   const message = (label: string, icon = "info", detail = label): void => {
+    retainedStatus = undefined; affectedRoots.clear();
     item.text = `$(${icon}) Dynare workspace: ${label}`;
     item.tooltip = new vscode.MarkdownString("**Models in workspace**\n\n").appendText(detail);
     item.accessibilityInformation = { label: `Dynare workspace: ${label}. Open workspace checks.` };
     item.show(); view.message = detail; view.description = undefined;
-    const help = new WorkspaceItem("help", "Open Dygnosis Help", "question");
-    help.command = { command: "dygnosis.openHelp", title: "Open Dygnosis Help", arguments: [label === "unavailable" ? "troubleshoot" : "workspace-checks"] };
-    tree.replace([help]);
+    tree.replace([]);
   };
   const render = (): void => {
     if (disposed) return;
@@ -259,34 +267,58 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
       message("no folders", "info", "Open a file-backed workspace folder to list Dynare files and check saved .mod and .dyn models.");
       view.message = undefined; tree.replace([]); return;
     }
+    if (!status && retainedStatus) {
+      item.text = "$(sync~spin) Dynare workspace: updating";
+      item.tooltip = new vscode.MarkdownString("**Models in workspace**\n\n").appendText("Updating workspace checks.");
+      item.accessibilityInformation = { label: "Dynare workspace checks are updating. Open workspace checks." };
+      item.show(); view.description = "updating"; view.message = undefined;
+      return;
+    }
     if (!status) { message(capability ? "updating" : connection || startupFailed ? "unavailable" : "starting", capability || (!connection && !startupFailed) ? "sync~spin" : "warning",
       capability ? "Refreshing workspace coverage." : connection ? "Workspace checks require a compatible engine. Use the bundled binary or update dynare.serverPath." :
         startupFailed ? "Dygnosis is unavailable. Restart the language server or open Dygnosis Output for details." : "Starting Dygnosis workspace checks."); return; }
+    retainedStatus = status;
+    const currentRoots = new Set(status.roots.map(root => identity(vscode.Uri.parse(root.root_uri))));
+    for (const root of affectedRoots) if (!currentRoots.has(root)) affectedRoots.delete(root);
+    for (const root of status.roots) {
+      const key = identity(vscode.Uri.parse(root.root_uri));
+      if (root.state === "incomplete" || root.state === "failed") affectedRoots.add(key);
+      else if (root.state === "checked" || root.state === "excluded") affectedRoots.delete(key);
+      // Keep a previous affected result visible while its replacement is queued or running.
+    }
     const content = workspaceStatusContent(status); item.text = content.text; item.tooltip = content.tooltip;
     item.accessibilityInformation = { label: content.accessibilityLabel }; item.show();
+    const notFullyChecked = status.counts.incomplete + status.counts.failed;
     const outcome = status.cancelled ? "Cancelled until a file edit/change or Recheck." :
       status.discovery_failures.length ? "Coverage and the file list are incomplete: folder discovery failed. Previous entries remain visible for folders that could not be read." :
-      status.counts.failed || status.counts.incomplete ? "Coverage is incomplete. Open affected models for details." : undefined;
+      notFullyCheckedOnly && !affectedRoots.size && status.complete ? "No incomplete or failed checks." : undefined;
     view.message = [outcome, status.include_files === undefined ? "Include files are not listed by this engine. Use the bundled binary or update dynare.serverPath." : undefined].filter(Boolean).join("\n") || undefined;
-    view.description = `${status.counts.checked} checked`;
-    const rows = treeRows(status, folders(), collapsed);
-    if (status.discovery_failures.length || status.counts.failed || status.counts.incomplete || status.roots.every(root => root.state === "excluded")) {
-      const help = new WorkspaceItem("help", "Open Dygnosis Help", "question");
-      help.command = { command: "dygnosis.openHelp", title: "Open Dygnosis Help", arguments: ["workspace-checks"] };
-      rows.push(help);
-    }
-    tree.replace(rows);
+    view.description = notFullyCheckedOnly ? `${affectedRoots.size} not fully checked` :
+      `${status.counts.checked} checked${notFullyChecked ? ` · ${notFullyChecked} not fully checked` : ""}`;
+    tree.replace(treeRows(status, folders(), collapsed, notFullyCheckedOnly ? affectedRoots : undefined));
+  };
+  const filterModels = (only: boolean): Thenable<unknown> => {
+    if (disposed) return Promise.resolve();
+    notFullyCheckedOnly = only;
+    if (!status && retainedStatus) tree.replace(treeRows(retainedStatus, folders(), collapsed, only ? affectedRoots : undefined));
+    if (status || retainedStatus) render();
+    return vscode.commands.executeCommand("setContext", "dygnosis.workspaceNotFullyCheckedOnly", only);
   };
   const current = (client: WorkspaceConnection, expectedInstance: number, expectedGeneration: number, expectedSnapshot: string): boolean =>
     !disposed && service.client === client && service.currentInstance === expectedInstance && connection === client &&
     generation === expectedGeneration && snapshot() === expectedSnapshot && (client.isRunning?.() ?? true);
   const refresh = async (command?: string): Promise<void> => {
     if (!connection && (!enabled() || !folders().length)) return;
+    const startupGeneration = generation, startupResponse = response, startupInstance = service.currentInstance;
     try { await service.ensureStarted(); }
     catch (error) {
       if (disposed) return;
+      if (generation === startupGeneration && response === startupResponse && service.currentInstance === startupInstance) {
+        startupFailed = true; status = undefined; clearWatchers(dependencies);
+        message("unavailable", "warning", String(error));
+      }
       if (command) throw error;
-      startupFailed = true; service.log(String(error)); render(); return;
+      service.log(String(error)); return;
     }
     synchronize();
     const client = connection, supported = capability;
@@ -315,14 +347,15 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
     } catch (error) {
       if (!cancellation.token.isCancellationRequested && serial === response && current(client, expectedInstance, expectedGeneration, expectedSnapshot)) {
         barrier = false; bufferedNotification = undefined; status = undefined; clearWatchers(dependencies);
-        if (command) { render(); throw error; }
-        service.log(String(error));
         message("unavailable", "warning", String(error));
+        if (command) throw error;
+        service.log(String(error));
       }
     } finally { if (request === cancellation) request = undefined; cancellation.dispose(); }
   };
   const changedInputs = (): void => {
     ++generation; ++response; cancelRequest(); beginBarrier();
+    retainedStatus = undefined; affectedRoots.clear();
     status = undefined; render(); void refresh();
   };
   const documentChanged = (document: vscode.TextDocument): void => {
@@ -390,7 +423,8 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
     if (connection === client && instance === service.currentInstance && (client?.isRunning?.() ?? true)) { sendActiveRoot(); return; }
     startupFailed = client && (client.isRunning?.() ?? true) ? false : startupFailed || !!connection;
     ++generation; ++response; cancelRequest(); notification?.dispose(); notification = undefined;
-    clearWatchers(watchers); clearWatchers(dependencies); status = undefined; minPass = 0; barrier = false; bufferedNotification = undefined; activeRoot = undefined;
+    clearWatchers(watchers); clearWatchers(dependencies); status = undefined; retainedStatus = undefined; affectedRoots.clear();
+    minPass = 0; barrier = false; bufferedNotification = undefined; activeRoot = undefined;
     dependencyTargets.clear();
     connection = client?.isRunning?.() === false ? undefined : client; instance = service.currentInstance;
     capability = parseWorkspaceCapability(connection?.initializeResult);
@@ -502,12 +536,15 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
     vscode.workspace.onDidCloseTextDocument(documentChanged),
     vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration("dynare")) reconfigure(); }),
     vscode.commands.registerCommand("dygnosis.workspaceStatus", () => vscode.commands.executeCommand("dygnosis.workspace.focus")),
+    vscode.commands.registerCommand("dygnosis.showNotFullyCheckedModels", async () => { await filterModels(true); await vscode.commands.executeCommand("dygnosis.workspace.focus"); }),
+    vscode.commands.registerCommand("dygnosis.showAllWorkspaceFiles", async () => { await filterModels(false); await vscode.commands.executeCommand("dygnosis.workspace.focus"); }),
     vscode.commands.registerCommand("dygnosis.recheckWorkspace", () => runCommand(service, () => runAction("recheck"), () => !disposed)),
     vscode.commands.registerCommand("dygnosis.cancelWorkspace", () => runCommand(service, () => runAction("cancel"), () => !disposed)),
     vscode.commands.registerCommand("dygnosis.configureWorkspaceExclusions", (target: unknown) => runCommand(service, () => configureExclusions(target), () => !disposed)),
     vscode.commands.registerCommand("dygnosis.ignoreWorkspaceFolder", (target: unknown) => runCommand(service, () => ignoreFolder(target), () => !disposed)),
   ];
   if (service.onDidReady) subscriptions.push(service.onDidReady(synchronize));
+  void vscode.commands.executeCommand("setContext", "dygnosis.workspaceNotFullyCheckedOnly", false);
   synchronize(); startFolders();
   return new vscode.Disposable(() => {
     disposed = true; ++generation; ++response; cancelRequest(); notification?.dispose();
@@ -517,5 +554,6 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
     dependencyTargets.clear();
     for (const subscription of subscriptions) subscription.dispose();
     tree.dispose(); view.dispose(); item.hide(); item.dispose();
+    void vscode.commands.executeCommand("setContext", "dygnosis.workspaceNotFullyCheckedOnly", false);
   });
 }

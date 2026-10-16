@@ -76,8 +76,8 @@ async function checkStatusHovers(service, evidence, waitFor) {
   await waitFor(async () => (await service.execute("dynare/workspaceStatus"))?.complete, "workspace counts finish before native hover");
   const workspace = await hover("dygnosis.workspaceCoverage", "Models in workspace");
   assert.ok(workspace.headings.includes("Models in workspace"));
-  assert.deepEqual(workspace.tables, [[["Models", "Count"], ["Checked", "1"]]]);
-  assert.deepEqual(workspace.tableAlignments, [[["left", "right"], ["left", "right"]]], "workspace headers align with their values");
+  assert.deepEqual(workspace.tables, [[["Checked", "1"]]]);
+  assert.deepEqual(workspace.tableAlignments, [[["left", "right"]]], "headerless workspace counts retain column alignment");
   assert.doesNotMatch(workspace.text, /Not fully checked|Excluded|Pending|Checking|Click|Warnings|Errors|unopened/);
   evidence.checks.push("native status hovers render bold headings, inline endogenous timing and a workspace count table without filenames, scope, click instructions or zero-state rows");
 }

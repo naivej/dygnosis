@@ -143,7 +143,7 @@ async function ignoreFolderRow(label, workspaceRoot, waitFor, occurrence = 0) {
   return expected;
 }
 
-async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor }) {
+async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, currentSnapshot }) {
   assert.ok(process.env.DYGNOSIS_HOST_CDP_PORT, "Workspace acceptance requires the isolated native host CDP port");
   await waitFor(() => service.client && service.supportsModelInfo, "workspace status language client startup");
 
@@ -287,6 +287,67 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor })
   const includePath = path.join(workspaceRoot, "only-includes", "standalone.inc").toLowerCase();
   await waitFor(() => vscode.window.activeTextEditor?.document.uri.fsPath.toLowerCase() === includePath, "native Open file action targets the exact include URI");
   evidence.checks.push("saved include creation, rename and deletion refresh the tree; opening an include targets its exact URI");
+
+  // The filter must reveal a model under a collapsed branch and restore that branch afterwards.
+  const policyPath = path.join(workspaceRoot, "models/variants/policy.dyn");
+  await fs.writeFile(policyPath, '@#include "missing-workspace-check.inc"\n');
+  await waitFor(async () => {
+    workspaceStatus = await status(service);
+    return workspaceStatus?.complete && workspaceStatus.counts.incomplete === 1;
+  }, "missing include produces one model that is not fully checked");
+  const clickFilter = async title => {
+    const clicked = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); const action=[...pane.querySelectorAll('.pane-header .action-label')].find(value=>(value.getAttribute('aria-label')||value.title||'').includes(${JSON.stringify(title)})); if(!action) return false; action.click(); return true; })()`);
+    assert.equal(clicked, true, `native workspace toolbar contains ${title}`);
+  };
+  await clickFilter("Show not fully checked models");
+  await scrollWorkspaceTreeToTop();
+  await waitFor(async () => rowTextIncludes(await treeRows(), "policy.dyn"), "filter expands the path to the affected model");
+  const filteredRows = await treeRows();
+  assert.ok(rowTextIncludes(filteredRows, "models") && rowTextIncludes(filteredRows, "variants"));
+  for (const name of ["root.mod", "root.dyn", "same.mod", "shared.inc", "Open Dygnosis Help"])
+    assert.ok(!rowTextIncludes(filteredRows, name), `${name} is absent from the affected-model list`);
+  assert.equal(await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); return pane.textContent.includes('Coverage is incomplete. Open affected models for details.'); })()`), false);
+  const firstPreview = await vscode.window.showTextDocument(vscode.Uri.file(path.join(workspaceRoot, "root.mod")), { preview: true, viewColumn: vscode.ViewColumn.One });
+  assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab.isPreview, true, "first model is a preview tab");
+  await currentSnapshot(service, firstPreview.document, () => service.modelInfo(firstPreview.document.uri), "first preview model reaches the language server");
+  await waitFor(async () => (await status(service))?.complete, "first preview model finishes updating");
+  await waitFor(async () => rowTextIncludes(await treeRows(), "policy.dyn"), "affected model remains visible before opening its preview");
+  const closedPreviews = [];
+  const closeSubscription = vscode.window.tabGroups.onDidChangeTabs(event => {
+    for (const tab of event.closed) if (tab.input?.uri) closedPreviews.push(tab.input.uri.fsPath.toLowerCase());
+  });
+  await nativeValue(`(() => {
+    const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks'));
+    const trace={removed:false};
+    trace.observer=new MutationObserver(()=>{
+      const names=[...pane.querySelectorAll('.monaco-list-row .label-name')].map(value=>value.textContent.trim());
+      if(!names.includes('policy.dyn')) trace.removed=true;
+    });
+    trace.observer.observe(pane,{childList:true,subtree:true});
+    globalThis.dygnosisWorkspacePreviewTrace=trace;
+  })()`);
+  try {
+    const affectedPreview = await vscode.window.showTextDocument(vscode.Uri.file(policyPath), { preview: true, viewColumn: vscode.ViewColumn.One });
+    await waitFor(() => vscode.window.activeTextEditor?.document.uri.fsPath.toLowerCase() === policyPath.toLowerCase(), "affected model opens in the editor");
+    await waitFor(() => closedPreviews.includes(path.join(workspaceRoot, "root.mod").toLowerCase()), "opening the model closes its previous preview tab");
+    await currentSnapshot(service, affectedPreview.document, () => service.modelInfo(affectedPreview.document.uri), "affected preview reaches the language server");
+    await waitFor(async () => (await status(service))?.complete, "opened model finishes its replacement check");
+    assert.equal(await nativeValue("globalThis.dygnosisWorkspacePreviewTrace.removed"), false, "opening a model never removes it from the affected-model view during refresh");
+    for (const name of [path.basename(workspaceRoot), "models", "variants"])
+      assert.equal((await findRows(name))[0]?.expanded, "true", `${name} stays expanded after opening a model`);
+  } finally {
+    closeSubscription.dispose();
+    await nativeValue("globalThis.dygnosisWorkspacePreviewTrace.observer.disconnect(); delete globalThis.dygnosisWorkspacePreviewTrace;");
+  }
+  evidence.checks.push("opening an affected model replaces its previous preview tab without clearing the filtered view or its expanded paths during pending and running checks");
+  await clickFilter("Show all workspace files");
+  await waitFor(async () => (await findRows("models"))[0]?.expanded === "false", "clearing the filter restores the collapsed models folder");
+  await fs.writeFile(policyPath, files.get("models/variants/policy.dyn"));
+  await waitFor(async () => {
+    workspaceStatus = await status(service);
+    return workspaceStatus?.coverage_complete;
+  }, "restoring the include-free model completes workspace coverage");
+  evidence.checks.push("native filter buttons reveal incomplete models and their expanded paths, omit other files and duplicate Help rows, and restore full-tree collapse choices without the coverage banner");
 
   await ignoreFolderRow(path.basename(workspaceRoot), workspaceRoot, waitFor);
   await waitFor(async () => {
