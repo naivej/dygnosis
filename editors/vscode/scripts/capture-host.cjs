@@ -138,7 +138,7 @@ exports.run = async function run() {
     await vscode.commands.executeCommand("workbench.action.closeAllEditors");
     await runCommand("workbench.action.closePanel");
     await focusExplorer();
-    await showView("dygnosis.project");
+    await showView("dygnosis.workspace");
     for (let i = 0; i < 5; ++i) await runCommand("list.expand");
   });
 
@@ -244,11 +244,11 @@ exports.run = async function run() {
     await settle(400);
   });
 
-  await capture("project-checks", async () => {
+  await capture("workspace-checks", async () => {
     await vscode.commands.executeCommand("workbench.action.closeAllEditors");
     await runCommand("workbench.action.closePanel");
     await focusExplorer();
-    await waitFor(async () => (await service.execute("dynare/projectStatus"))?.complete, "project status");
+    await waitFor(async () => (await service.execute("dynare/workspaceStatus"))?.complete, "workspace status");
     await settle(300);
     clickAt(18, 720);
     await settle(150);
@@ -256,7 +256,7 @@ exports.run = async function run() {
     await settle(150);
     clickAt(18, 790);
     await settle(200);
-    await showView("dygnosis.project");
+    await showView("dygnosis.workspace");
     for (let i = 0; i < 6; ++i) await runCommand("list.expand");
     await settle(300);
   });

@@ -1156,7 +1156,7 @@ mod tests {
     #[test]
     fn sibling_search_folders_work_for_saved_inputs_and_fail_only_when_history_reaches_them() {
         let container = TestRepository::new();
-        let repo = TestRepository(container.0.join("project"));
+        let repo = TestRepository(container.0.join("workspace"));
         std::fs::create_dir(&repo.0).unwrap();
         repo.git(&["init", "--quiet"]);
         repo.git(&["config", "user.name", "Dygnosis test"]);

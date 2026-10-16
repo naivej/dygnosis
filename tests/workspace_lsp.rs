@@ -16,7 +16,7 @@ struct Files(PathBuf);
 impl Files {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
-            "dygnosis-project-{}-{}",
+            "dygnosis-workspace-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
@@ -128,10 +128,10 @@ impl Wire {
         .expect("request within 15 seconds")
     }
     async fn start(&mut self, folders: Vec<Value>, loose: Value, scoped: Vec<Value>, opt_in: bool) {
-        let response = self.request("initialize", json!({"workspaceFolders":folders,"capabilities":{"experimental":{"dygnosis":{"projectStatusChanged":opt_in}}},
+        let response = self.request("initialize", json!({"workspaceFolders":folders,"capabilities":{"experimental":{"dygnosis":{"workspaceStatusChanged":opt_in}}},
             "initializationOptions":{"dynare":{"configuration":{"schemaVersion":1,"loose":loose,"folders":scoped}}}})).await;
         assert_eq!(
-            response["capabilities"]["experimental"]["dygnosis"]["projectDiagnostics"]["schema_version"],
+            response["capabilities"]["experimental"]["dygnosis"]["workspaceDiagnostics"]["schema_version"],
             1
         );
         self.notify("initialized", json!({}));
@@ -150,13 +150,13 @@ impl Wire {
         )
         .await
     }
-    async fn start_context(&mut self, files: &Files, project: bool) {
+    async fn start_context(&mut self, files: &Files, workspace: bool) {
         let init = self
             .request(
                 "initialize",
                 json!({"workspaceFolders":[files.folder("")],
             "capabilities":{"experimental":{"dygnosis":{"documentContext":{"schema_version":1}}}},
-            "initializationOptions":{"dynare":{"projectDiagnostics":project}}}),
+            "initializationOptions":{"dynare":{"workspaceDiagnostics":workspace}}}),
             )
             .await;
         assert_eq!(
@@ -178,7 +178,7 @@ impl Wire {
     async fn complete(&mut self) -> Value {
         tokio::time::timeout(Duration::from_secs(15), async {
             loop {
-                let status = self.command("dynare/projectStatus").await;
+                let status = self.command("dynare/workspaceStatus").await;
                 if status["complete"] == true {
                     return status;
                 }
@@ -186,7 +186,7 @@ impl Wire {
             }
         })
         .await
-        .expect("project completed")
+        .expect("workspace completed")
     }
     async fn pull(&mut self, uri: &str) -> Vec<Value> {
         self.request(
@@ -236,11 +236,11 @@ fn root<'a>(status: &'a Value, uri: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("root absent {uri}: {status}"))
 }
 
-// Guards phantom standalone macro errors and project contributions leaking into
+// Guards phantom standalone macro errors and workspace contributions leaking into
 // a helper's selected editor context, including unsaved and reopened inputs.
 #[tokio::test]
-async fn mod_helper_context_routes_real_macro_cause_and_keeps_project_inventory() {
-    for project in [false, true] {
+async fn mod_helper_context_routes_real_macro_cause_and_keeps_workspace_inventory() {
+    for workspace in [false, true] {
         let files = Files::new();
         let parent = "@#define supplied = 1\n@#include \"helper.mod\"\n";
         let helper = "@#define rejected = supplied + \"text\"\n";
@@ -248,8 +248,8 @@ async fn mod_helper_context_routes_real_macro_cause_and_keeps_project_inventory(
         files.write("helper.mod", helper);
         let (p, h) = (files.uri("parent.mod"), files.uri("helper.mod"));
         let mut wire = Wire::new();
-        wire.start_context(&files, project).await;
-        if project {
+        wire.start_context(&files, workspace).await;
+        if workspace {
             wire.complete().await;
         }
         wire.open(&p, parent, 1);
@@ -264,7 +264,7 @@ async fn mod_helper_context_routes_real_macro_cause_and_keeps_project_inventory(
             notes.iter().find(|note| note["code"] == "E285").unwrap()["range"]["start"]["line"],
             0
         );
-        let before = if project {
+        let before = if workspace {
             Some(wire.complete().await)
         } else {
             None
@@ -311,7 +311,7 @@ async fn mod_helper_context_routes_real_macro_cause_and_keeps_project_inventory(
         wire.change(&p, "@#define supplied = 2\n", 3);
         assert!(
             has_code(&wire.pull(&h).await, "E063"),
-            "removed owner must restore ordinary resolution (project={project})"
+            "removed owner must restore ordinary resolution (workspace={workspace})"
         );
         wire.change(&p, parent, 4);
         wire.choose_context(&h, 2, &h).await;
@@ -432,7 +432,7 @@ async fn legacy_client_uses_unique_owner_without_enabling_explicit_context_comma
     let mut wire = Wire::new();
     wire.start(
         vec![files.folder("")],
-        json!({"projectDiagnostics":false}),
+        json!({"workspaceDiagnostics":false}),
         vec![],
         false,
     )
@@ -523,7 +523,7 @@ fn has_code(items: &[Value], code: &str) -> bool {
 fn first_checking(statuses: &[Value]) -> Option<&str> {
     statuses
         .iter()
-        .filter(|message| message["method"] == "dynare/projectStatusChanged")
+        .filter(|message| message["method"] == "dynare/workspaceStatusChanged")
         .flat_map(|message| message["params"]["roots"].as_array().into_iter().flatten())
         .find(|entry| entry["state"] == "checking")
         .and_then(|entry| entry["root_uri"].as_str())
@@ -579,7 +579,7 @@ async fn configured_work_reaches_inactive_checks_and_formatting_over_stdio() {
 
 #[tokio::test]
 async fn scoped_macro_work_limits_recheck_open_and_saved_models_over_stdio() {
-    // Guards project workers using a default or another root's setting, cached
+    // Guards workspace workers using a default or another root's setting, cached
     // facts surviving a work-limit change, and invalid editor values going quiet.
     let files = Files::new();
     let text = "@#for i in 1:100\nvar y@{i};\n@#endfor\nmodel;\n@#for i in 1:100\ny@{i}=0;\n@#endfor\nend;\n";
@@ -733,7 +733,7 @@ async fn folder_only_cli_discovery_checked_errors_and_identical_push_pull() {
     assert!(
         wire.seen
             .iter()
-            .any(|message| message["method"] == "dynare/projectStatusChanged")
+            .any(|message| message["method"] == "dynare/workspaceStatusChanged")
     );
     wire.open(&files.uri("ordinary.dyn"), "var y; model; y=x; end;", 1);
     assert!(has_code(
@@ -752,7 +752,7 @@ async fn include_inventory_and_dyn_roots_follow_saved_file_lifetimes() {
     wire.start(
         vec![files.folder(""), files.folder("includes")],
         json!({}),
-        vec![json!({"uri":files.uri(""),"settings":{"projectExcludePaths":["excluded/**"]}})],
+        vec![json!({"uri":files.uri(""),"settings":{"workspaceExcludePaths":["excluded/**"]}})],
         true,
     )
     .await;
@@ -821,7 +821,7 @@ async fn scoped_exclusions_open_roots_and_removal_clear_only_one_owner() {
     wire.start(
         vec![files.folder("a"), files.folder("b")],
         json!({}),
-        vec![json!({"uri":files.uri("a"),"settings":{"projectExcludePaths":["skip.mod"]}})],
+        vec![json!({"uri":files.uri("a"),"settings":{"workspaceExcludePaths":["skip.mod"]}})],
         false,
     )
     .await;
@@ -847,9 +847,9 @@ async fn scoped_exclusions_open_roots_and_removal_clear_only_one_owner() {
     assert!(has_code(&wire.pull(&files.uri("a/skip.mod")).await, "E020"));
     wire.notify(
         "workspace/didChangeConfiguration",
-        json!({"settings":{"dynare":{"projectDiagnostics":false}}}),
+        json!({"settings":{"dynare":{"workspaceDiagnostics":false}}}),
     );
-    let status = wire.command("dynare/projectStatus").await;
+    let status = wire.command("dynare/workspaceStatus").await;
     assert_eq!(status["enabled"], false);
     assert!(wire.pull(&files.uri("common.data")).await.is_empty());
     assert!(has_code(&wire.pull(&files.uri("a/skip.mod")).await, "E020"));
@@ -966,20 +966,20 @@ async fn cancel_recheck_edit_resume_and_off_reject_queued_reports() {
     wire.start(vec![files.folder("")], json!({}), vec![], false)
         .await;
     wire.complete().await;
-    let cancelled = wire.command("dynare/cancelProject").await;
+    let cancelled = wire.command("dynare/cancelWorkspace").await;
     assert_eq!(cancelled["cancelled"], true);
     files.write("new.mod", "var y; model; y=x; end;");
     assert_eq!(
-        wire.command("dynare/projectStatus").await["roots"]
+        wire.command("dynare/workspaceStatus").await["roots"]
             .as_array()
             .unwrap()
             .len(),
         1
     );
-    wire.command("dynare/recheckProject").await;
+    wire.command("dynare/recheckWorkspace").await;
     let rescanned = wire.complete().await;
     assert_eq!(rescanned["roots"].as_array().unwrap().len(), 2);
-    wire.command("dynare/cancelProject").await;
+    wire.command("dynare/cancelWorkspace").await;
     files.write("root.mod", "var y; model; y=x; end;");
     wire.changed(&files.uri("root.mod"), 2);
     assert_eq!(wire.complete().await["cancelled"], false);
@@ -987,13 +987,13 @@ async fn cancel_recheck_edit_resume_and_off_reject_queued_reports() {
     wire.changed(&files.uri("root.mod"), 2);
     wire.notify(
         "workspace/didChangeConfiguration",
-        json!({"settings":{"dynare":{"projectDiagnostics":false}}}),
+        json!({"settings":{"dynare":{"workspaceDiagnostics":false}}}),
     );
-    wire.command("dynare/projectStatus").await;
+    wire.command("dynare/workspaceStatus").await;
     tokio::time::sleep(Duration::from_millis(350)).await;
     assert!(wire.pull(&files.uri("root.mod")).await.is_empty());
     assert_eq!(
-        wire.command("dynare/recheckProject").await["enabled"],
+        wire.command("dynare/recheckWorkspace").await["enabled"],
         false
     );
 }
@@ -1044,7 +1044,7 @@ async fn failed_folder_walk_retains_include_inventory_until_folder_removal() {
     .await;
     let before = wire.complete().await;
     fs::rename(files.0.join("a"), files.0.join("unavailable-a")).unwrap();
-    wire.command("dynare/recheckProject").await;
+    wire.command("dynare/recheckWorkspace").await;
     let failed = wire.complete().await;
     assert_eq!(failed["include_files"], before["include_files"]);
     assert_eq!(failed["coverage_complete"], false);
@@ -1085,7 +1085,7 @@ async fn failed_discovery_is_not_complete_coverage_and_notifications_are_opt_in(
         !wire
             .seen
             .iter()
-            .any(|message| message["method"] == "dynare/projectStatusChanged")
+            .any(|message| message["method"] == "dynare/workspaceStatusChanged")
     );
 }
 
@@ -1096,7 +1096,7 @@ async fn chosen_active_root_is_first_and_checks_are_serial() {
         files.write(name, MODEL);
     }
     let mut wire = Wire::new();
-    wire.request("initialize", json!({"workspaceFolders":[files.folder("")],"capabilities":{"experimental":{"dygnosis":{"projectStatusChanged":true}}}})).await;
+    wire.request("initialize", json!({"workspaceFolders":[files.folder("")],"capabilities":{"experimental":{"dygnosis":{"workspaceStatusChanged":true}}}})).await;
     wire.notify(
         "dynare/activeModelChanged",
         json!({"root_uri":files.uri("chosen.mod")}),
@@ -1106,7 +1106,7 @@ async fn chosen_active_root_is_first_and_checks_are_serial() {
     let statuses: Vec<_> = wire
         .seen
         .iter()
-        .filter(|message| message["method"] == "dynare/projectStatusChanged")
+        .filter(|message| message["method"] == "dynare/workspaceStatusChanged")
         .map(|message| &message["params"])
         .collect();
     let checking: Vec<_> = statuses
@@ -1194,7 +1194,7 @@ async fn workspace_pull_clears_removed_previous_reports_and_server_restart_redis
     wire.complete().await;
     wire.notify(
         "workspace/didChangeConfiguration",
-        json!({"settings":{"dynare":{"projectDiagnostics":false}}}),
+        json!({"settings":{"dynare":{"workspaceDiagnostics":false}}}),
     );
     let reports = wire
         .request(
@@ -1216,7 +1216,7 @@ async fn workspace_pull_clears_removed_previous_reports_and_server_restart_redis
 }
 
 #[tokio::test]
-async fn turning_off_during_a_running_check_cannot_republish_project_diagnostics() {
+async fn turning_off_during_a_running_check_cannot_republish_workspace_diagnostics() {
     let files = Files::new();
     let mut large = String::from("var y; model;\n");
     for _ in 0..18000 {
@@ -1228,7 +1228,7 @@ async fn turning_off_during_a_running_check_cannot_republish_project_diagnostics
     wire.start(vec![files.folder("")], json!({}), vec![], true)
         .await;
     loop {
-        let status = wire.command("dynare/projectStatus").await;
+        let status = wire.command("dynare/workspaceStatus").await;
         if status["counts"]["checking"] == 1 {
             break;
         }
@@ -1236,9 +1236,12 @@ async fn turning_off_during_a_running_check_cannot_republish_project_diagnostics
     }
     wire.notify(
         "workspace/didChangeConfiguration",
-        json!({"settings":{"dynare":{"projectDiagnostics":false}}}),
+        json!({"settings":{"dynare":{"workspaceDiagnostics":false}}}),
     );
-    assert_eq!(wire.command("dynare/projectStatus").await["enabled"], false);
+    assert_eq!(
+        wire.command("dynare/workspaceStatus").await["enabled"],
+        false
+    );
     tokio::time::sleep(Duration::from_millis(700)).await;
     assert!(wire.pull(&files.uri("large.mod")).await.is_empty());
     assert!(!wire.seen.iter().any(|message| {
@@ -1294,7 +1297,7 @@ async fn unchanged_inputs_reuse_reports_but_explicit_recheck_computes_again() {
     let reused = wire.complete().await;
     assert_eq!(reused["metrics"]["completed_jobs"], 1);
     assert_eq!(reused["metrics"]["reused_jobs"], 1);
-    wire.command("dynare/recheckProject").await;
+    wire.command("dynare/recheckWorkspace").await;
     let recomputed = wire.complete().await;
     assert_eq!(recomputed["metrics"]["completed_jobs"], 1);
     assert_eq!(recomputed["metrics"]["reused_jobs"], 0);
@@ -1344,10 +1347,10 @@ async fn committed_dependency_candidates_wait_for_the_next_report() {
             .unwrap();
         assert!(result.status.success(), "{result:?}");
     }
-    let unchanged = wire.command("dynare/projectStatus").await;
+    let unchanged = wire.command("dynare/workspaceStatus").await;
     assert_eq!(root(&unchanged, &root_uri), &committed);
 
-    wire.command("dynare/recheckProject").await;
+    wire.command("dynare/recheckWorkspace").await;
     let after = wire.complete().await;
     let updated = root(&after, &root_uri);
     assert_ne!(updated["revision"], committed["revision"]);
@@ -1411,7 +1414,7 @@ async fn retargeted_include_routes_to_current_open_alias_version() {
 
     wire.seen.clear();
     wire.change(&alias, "parameters second_unused;\n", 8);
-    wire.command("dynare/recheckProject").await;
+    wire.command("dynare/recheckWorkspace").await;
     wire.complete().await;
     let current = wire.pull(&alias).await;
     assert!(current.iter().any(|item| {
@@ -1449,7 +1452,7 @@ async fn retargeted_include_routes_to_current_open_alias_version() {
 
 #[cfg(windows)]
 #[tokio::test]
-async fn a_case_alias_open_is_the_same_project_report_owner() {
+async fn a_case_alias_open_is_the_same_workspace_report_owner() {
     let files = Files::new();
     files.write("root.mod", MODEL);
     let mut wire = Wire::new();
@@ -1462,7 +1465,7 @@ async fn a_case_alias_open_is_the_same_project_report_owner() {
     assert_eq!(opened["roots"].as_array().unwrap().len(), 1);
     assert!(has_code(&wire.pull(&alias).await, "E020"));
     assert!(has_code(&wire.pull(&files.uri("root.mod")).await, "E020"));
-    wire.command("dynare/recheckProject").await;
+    wire.command("dynare/recheckWorkspace").await;
     assert_eq!(wire.complete().await["roots"].as_array().unwrap().len(), 1);
     wire.close(&alias);
     wire.complete().await;
@@ -1618,7 +1621,7 @@ async fn switching_off_alone_preserves_open_roots_folder_search_paths() {
     assert!(!has_code(&wire.pull(&files.uri("root.mod")).await, "E061"));
     wire.notify(
         "workspace/didChangeConfiguration",
-        json!({"settings":{"dynare":{"projectDiagnostics":false}}}),
+        json!({"settings":{"dynare":{"workspaceDiagnostics":false}}}),
     );
     assert!(!has_code(&wire.pull(&files.uri("root.mod")).await, "E061"));
 }
@@ -1632,7 +1635,7 @@ async fn explicit_owner_priority_survives_hidden_inputs_until_reroot_or_null_and
     }
     files.write("fragment.mod", "parameters p; p=0;\n");
     let mut wire = Wire::new();
-    wire.request("initialize", json!({"workspaceFolders":[files.folder("")],"capabilities":{"experimental":{"dygnosis":{"projectStatusChanged":true}}}})).await;
+    wire.request("initialize", json!({"workspaceFolders":[files.folder("")],"capabilities":{"experimental":{"dygnosis":{"workspaceStatusChanged":true}}}})).await;
     wire.notify(
         "dynare/activeModelChanged",
         json!({"root_uri":files.uri("chosen.mod")}),
@@ -1654,12 +1657,12 @@ async fn explicit_owner_priority_survives_hidden_inputs_until_reroot_or_null_and
         json!({"textDocument":{"uri":files.uri("other.mod")},"text":MODEL}),
     );
     assert_eq!(
-        wire.command("dynare/projectStatus").await["counts"]["checking"],
+        wire.command("dynare/workspaceStatus").await["counts"]["checking"],
         0
     );
     assert!(
         first_checking(&wire.seen).is_none(),
-        "project work waits for initialized"
+        "workspace work waits for initialized"
     );
     wire.notify("initialized", json!({}));
     wire.complete().await;
@@ -1671,14 +1674,14 @@ async fn explicit_owner_priority_survives_hidden_inputs_until_reroot_or_null_and
         wire.seen.clear();
         wire.notify("dynare/activeModelChanged", json!({"root_uri":choice}));
         wire.request("textDocument/hover", json!({"textDocument":{"uri":files.uri("other.mod")},"position":{"line":0,"character":4}})).await;
-        wire.command("dynare/recheckProject").await;
+        wire.command("dynare/recheckWorkspace").await;
         wire.complete().await;
         let expected = choice.unwrap_or_else(|| files.uri("other.mod"));
         assert_eq!(first_checking(&wire.seen), Some(expected.as_str()));
     }
     drop(wire);
     let mut restarted = Wire::new();
-    restarted.request("initialize", json!({"workspaceFolders":[files.folder("")],"capabilities":{"experimental":{"dygnosis":{"projectStatusChanged":true}}}})).await;
+    restarted.request("initialize", json!({"workspaceFolders":[files.folder("")],"capabilities":{"experimental":{"dygnosis":{"workspaceStatusChanged":true}}}})).await;
     restarted.open(&files.uri("other.mod"), MODEL, 1);
     restarted.notify("initialized", json!({}));
     restarted.complete().await;

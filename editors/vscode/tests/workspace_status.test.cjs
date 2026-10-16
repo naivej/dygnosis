@@ -1,5 +1,6 @@
 const { compiledModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
+const { MarkdownString, tooltipText } = require("./helpers/markdown.cjs");
 const test = require("node:test");
 const Module = require("node:module");
 const { URL } = require("node:url");
@@ -32,14 +33,14 @@ function file(value) {
   if (!pathname.startsWith("/")) pathname = `/${pathname}`;
   return uri(`file://${pathname.split("/").map(encodeURIComponent).join("/").replace(/%3A/i, ":")}`);
 }
-const project = "file:///C:/project", other = "file:///C:/other";
-function folder(value = project, name = "project") { return { uri: uri(value), name, index: 0 }; }
-function document(value = `${project}/main.mod`) { return { uri: uri(value), languageId: "dynare", version: 1, isClosed: false }; }
+const workspace = "file:///C:/workspace", other = "file:///C:/other";
+function folder(value = workspace, name = "workspace") { return { uri: uri(value), name, index: 0 }; }
+function document(value = `${workspace}/main.mod`) { return { uri: uri(value), languageId: "dynare", version: 1, isClosed: false }; }
 function deferred() { let resolve, reject; const promise = new Promise((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 let host;
 const vscode = {
-  Disposable, EventEmitter: Emitter, CancellationTokenSource,
+  Disposable, MarkdownString, EventEmitter: Emitter, CancellationTokenSource,
   Uri: { parse: uri, file }, ThemeIcon: class { constructor(id) { this.id = id; } },
   TreeItem: class { constructor(label, collapsibleState) { this.label = label; this.collapsibleState = collapsibleState; } },
   TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 }, StatusBarAlignment: { Left: 1 },
@@ -96,11 +97,11 @@ const vscode = {
 };
 const originalLoad = Module._load;
 Module._load = function(id, ...args) { if (id === "vscode") return vscode; return originalLoad.call(this, id, ...args); };
-const { parseProjectStatus, parseProjectCapability, projectStatusContent, registerProjectStatus } = require(compiledModule("project_status"));
+const { parseWorkspaceStatus, parseWorkspaceCapability, workspaceStatusContent, registerWorkspaceStatus } = require(compiledModule("workspace_status"));
 Module._load = originalLoad;
 
 function root(state = "checked", extra = {}) {
-  return { root_uri: `${project}/main.mod`, state, revision: "model-input-1", errors: 0, warnings: 0, failure: null, dependency_candidates: [], ...extra };
+  return { root_uri: `${workspace}/main.mod`, state, revision: "model-input-1", errors: 0, warnings: 0, failure: null, dependency_candidates: [], ...extra };
 }
 function facts(roots = [root()], extra = {}) {
   const counts = { pending: 0, checking: 0, checked: 0, incomplete: 0, failed: 0, excluded: 0 };
@@ -110,9 +111,9 @@ function facts(roots = [root()], extra = {}) {
     coverage_complete: complete && !counts.incomplete && !counts.failed, counts, roots, include_files: [], discovery_failures: [],
     metrics: { discovery_ms: 5, analysis_ms: 20, completed_jobs: 1, reused_jobs: 0, elapsed_ms: 25 }, ...extra };
 }
-const capability = { schema_version: 1, status_command: "dynare/projectStatus", recheck_command: "dynare/recheckProject", cancel_command: "dynare/cancelProject",
-  active_model_notification: "dynare/activeModelChanged", status_notification: "dynare/projectStatusChanged", typing_pause_ms: 250 };
-function initializeResult(extra = {}) { return { capabilities: { experimental: { dygnosis: { projectDiagnostics: { ...capability, ...extra } } },
+const capability = { schema_version: 1, status_command: "dynare/workspaceStatus", recheck_command: "dynare/recheckWorkspace", cancel_command: "dynare/cancelWorkspace",
+  active_model_notification: "dynare/activeModelChanged", status_notification: "dynare/workspaceStatusChanged", typing_pause_ms: 250 };
+function initializeResult(extra = {}) { return { capabilities: { experimental: { dygnosis: { workspaceDiagnostics: { ...capability, ...extra } } },
   executeCommandProvider: { commands: [capability.status_command, capability.recheck_command, capability.cancel_command] } } }; }
 function connection(result = initializeResult()) {
   const value = { initializeResult: result, running: true, subscriptions: new Map(), sent: [], isRunning() { return this.running; },
@@ -140,57 +141,85 @@ function child(item, label) { return item.children.find(row => row.label === lab
 function liveWatchers(env, pattern) { return env.host.watchers.filter(watcher => !watcher.disposed && (!pattern || watcher.pattern.pattern === pattern)); }
 
 test("capability requires supported schema, exact commands, notification names and command advertisement", () => {
-  assert.ok(parseProjectCapability(initializeResult()));
-  assert.ok(parseProjectCapability(initializeResult({ future_field: true })));
-  for (const extra of [{ schema_version: 2 }, { cancel_command: "somewhere/else" }, { active_model_notification: "other/active" }]) assert.equal(parseProjectCapability(initializeResult(extra)), undefined);
+  assert.ok(parseWorkspaceCapability(initializeResult()));
+  assert.ok(parseWorkspaceCapability(initializeResult({ future_field: true })));
+  for (const extra of [{ schema_version: 2 }, { cancel_command: "somewhere/else" }, { active_model_notification: "other/active" }]) assert.equal(parseWorkspaceCapability(initializeResult(extra)), undefined);
   const result = initializeResult(); result.capabilities.executeCommandProvider.commands.pop();
-  assert.equal(parseProjectCapability(result), undefined);
-  assert.equal(parseProjectCapability({ capabilities: {} }), undefined);
+  assert.equal(parseWorkspaceCapability(result), undefined);
+  assert.equal(parseWorkspaceCapability({ capabilities: {} }), undefined);
 });
 test("status schema checks required fields, counts and consistency but allows additions", () => {
-  assert.equal(parseProjectStatus({ ...facts(), future_field: 7 }).counts.checked, 1);
-  assert.equal(parseProjectStatus(facts([], { metrics: { discovery_ms: 0, analysis_ms: 0, completed_jobs: 0, reused_jobs: 0, elapsed_ms: null } })).roots.length, 0);
+  assert.equal(parseWorkspaceStatus({ ...facts(), future_field: 7 }).counts.checked, 1);
+  assert.equal(parseWorkspaceStatus(facts([], { metrics: { discovery_ms: 0, analysis_ms: 0, completed_jobs: 0, reused_jobs: 0, elapsed_ms: null } })).roots.length, 0);
   const cases = [
     { schema_version: 2 }, { pass_revision: -1 }, { counts: { checked: 1 } }, { metrics: {} }, { discovery: "guessing" },
     { roots: [root("checked", { dependency_candidates: ["http://external/file"] })] }, { roots: [root(), root()] },
     { roots: [root("checked", { revision: undefined })] }, { counts: { ...facts().counts, pending: 1 } },
-    { enabled: false }, { discovery_failures: [{ folder_uri: project, failure: 10 }] },
+    { enabled: false }, { discovery_failures: [{ folder_uri: workspace, failure: 10 }] },
   ];
-  for (const extra of cases) assert.throws(() => parseProjectStatus({ ...facts(), ...extra }), /Unsupported project status/);
-  assert.throws(() => parseProjectStatus(facts([root("pending")], { complete: true })), /Unsupported/);
-  assert.throws(() => parseProjectStatus(facts([root("failed")], { coverage_complete: true })), /Unsupported/);
+  for (const extra of cases) assert.throws(() => parseWorkspaceStatus({ ...facts(), ...extra }), /Unsupported workspace status/);
+  assert.throws(() => parseWorkspaceStatus(facts([root("pending")], { complete: true })), /Unsupported/);
+  assert.throws(() => parseWorkspaceStatus(facts([root("failed")], { coverage_complete: true })), /Unsupported/);
 });
 test("coverage is independent of diagnostics and distinguishes failure, incomplete, pending, cancellation, off and no roots", () => {
-  const checked = projectStatusContent(parseProjectStatus(facts([root("checked", { errors: 3, warnings: 2 })])));
-  assert.equal(checked.text, "$(check) Dynare project: 1/1 checked");
-  assert.equal(checked.accessibilityLabel, "Dynare project: 1/1 checked. Open project checks.");
-  assert.match(checked.tooltip, /Checked models may contain diagnostic Errors/);
-  for (const state of ["incomplete", "failed"]) assert.match(projectStatusContent(parseProjectStatus(facts([root(state)]))).text, /incomplete · 0\/1 checked/);
-  assert.match(projectStatusContent(parseProjectStatus(facts([root("pending")]))).text, /0\/1 finished/);
-  assert.match(projectStatusContent(parseProjectStatus(facts([root("checking")]))).text, /sync~spin/);
-  assert.match(projectStatusContent(parseProjectStatus(facts([root("pending")], { cancelled: true }))).text, /cancelled/);
-  assert.match(projectStatusContent(parseProjectStatus(facts([], { enabled: false, discovery: "disabled", complete: false, coverage_complete: false }))).text, /off/);
-  assert.match(projectStatusContent(parseProjectStatus(facts([]))).text, /no root models/);
-  assert.match(projectStatusContent(parseProjectStatus(facts([root("excluded")]))).text, /all root models excluded/);
-  assert.match(projectStatusContent(parseProjectStatus(facts([], { discovery: "discovering", complete: false, coverage_complete: false }))).text, /discovering/);
+  const checked = workspaceStatusContent(parseWorkspaceStatus(facts([root("checked", { errors: 3, warnings: 2 })])));
+  assert.equal(checked.text, "$(check) Dynare workspace: 1/1 checked");
+  assert.equal(checked.accessibilityLabel, "Dynare workspace: 1/1 checked. Checked: 1. Open workspace checks.");
+  assert.match(checked.tooltip.value, /^\*\*Models in workspace\*\*/);
+  assert.match(checked.tooltip.value, /\| Checked \| 1 \|/);
+  assert.doesNotMatch(tooltipText(checked.tooltip), /Errors|Warnings|Click|Recheck|unopened|saved|Not fully checked|Excluded|Pending|Checking|discovery failures/);
+  for (const state of ["incomplete", "failed"]) assert.equal(workspaceStatusContent(parseWorkspaceStatus(facts([root(state)]))).text, "$(warning) Dynare workspace: 0/1 checked");
+  assert.match(workspaceStatusContent(parseWorkspaceStatus(facts([root("pending")]))).text, /0\/1 finished/);
+  assert.match(workspaceStatusContent(parseWorkspaceStatus(facts([root("checking")]))).text, /sync~spin/);
+  assert.match(workspaceStatusContent(parseWorkspaceStatus(facts([root("pending")], { cancelled: true }))).text, /cancelled/);
+  assert.match(workspaceStatusContent(parseWorkspaceStatus(facts([], { enabled: false, discovery: "disabled", complete: false, coverage_complete: false }))).text, /off/);
+  assert.match(workspaceStatusContent(parseWorkspaceStatus(facts([]))).text, /no root models/);
+  assert.match(workspaceStatusContent(parseWorkspaceStatus(facts([root("excluded")]))).text, /all root models excluded/);
+  assert.match(workspaceStatusContent(parseWorkspaceStatus(facts([], { discovery: "discovering", complete: false, coverage_complete: false }))).text, /discovering/);
 });
+test("workspace hover combines incomplete and failed without counting queued work as a failure", () => {
+  // Guards the grouped total including queued work or counting diagnostic errors as failed checks.
+  const entries = ["checked", "checked", "incomplete", "failed", "pending", "checking", "excluded"]
+    .map((state, index) => root(state, { root_uri: `${workspace}/${index}.mod`, errors: state === "checked" ? 2 : 0 }));
+  const content = workspaceStatusContent(parseWorkspaceStatus(facts(entries)));
+  assert.match(content.text, /4\/6 finished/);
+  assert.match(content.tooltip.value, /\| Checked \| 2 \|/);
+  assert.match(content.tooltip.value, /\| Not fully checked \| 2 \|/);
+  assert.match(content.tooltip.value, /\| Excluded \| 1 \|/);
+  assert.doesNotMatch(content.tooltip.value, /Pending|Checking|Incomplete|Failed/);
+  assert.match(content.accessibilityLabel, /Checked: 2\. Not fully checked: 2\. Excluded: 1\./);
+});
+
+test("workspace hover retains cancellation, discovery and disabled outcomes beside the summary", () => {
+  // Guards simplification hiding unchecked models, an incomplete folder list, or the resume action.
+  const cancelled = workspaceStatusContent(parseWorkspaceStatus(facts([root("pending")], { cancelled: true })));
+  assert.match(tooltipText(cancelled.tooltip), /Cancelled\. 1 model was not checked\. Completed results remain/);
+  assert.match(tooltipText(cancelled.tooltip), /file edit\/change or Recheck/);
+  const discovery = workspaceStatusContent(parseWorkspaceStatus(facts([], { coverage_complete: false,
+    discovery_failures: [{ folder_uri: workspace, failure: "Permission denied" }] })));
+  assert.match(tooltipText(discovery.tooltip), /Could not read 1 folder\. The model list may be incomplete/);
+  const disabled = workspaceStatusContent(parseWorkspaceStatus(facts([], { enabled: false, discovery: "disabled", complete: false, coverage_complete: false })));
+  assert.match(tooltipText(disabled.tooltip), /Enable dynare\.workspaceDiagnostics in Settings/);
+  assert.doesNotMatch(disabled.tooltip.value, /\| Models \|/);
+});
+
 test("default-on folder-only startup uses native coverage and folder tree without opening documents", async () => {
-  const env = setup(); const registration = registerProjectStatus(env.service); await flush();
+  const env = setup(); const registration = registerWorkspaceStatus(env.service); await flush();
   assert.equal(env.service.starts, 1); assert.equal(env.host.editor, undefined);
-  assert.equal(env.host.items[0].id, "dygnosis.projectCoverage"); assert.equal(env.host.items[0].name, "Dynare project coverage");
-  assert.equal(env.host.items[0].command, "dygnosis.projectStatus"); assert.match(env.host.items[0].text, /1\/1 checked/);
-  assert.match(env.host.items[0].accessibilityInformation.label, /project/);
-  assert.equal(env.host.views[0].id, "dygnosis.project");
-  assert.equal(rows(env)[0].label, "project"); assert.equal(rows(env)[0].contextValue, "dygnosis.projectFolder");
+  assert.equal(env.host.items[0].id, "dygnosis.workspaceCoverage"); assert.equal(env.host.items[0].name, "Dynare workspace coverage");
+  assert.equal(env.host.items[0].command, "dygnosis.workspaceStatus"); assert.match(env.host.items[0].text, /1\/1 checked/);
+  assert.match(env.host.items[0].accessibilityInformation.label, /workspace/);
+  assert.equal(env.host.views[0].id, "dygnosis.workspace");
+  assert.equal(rows(env)[0].label, "workspace"); assert.equal(rows(env)[0].contextValue, "dygnosis.workspaceFolder");
   assert.equal(rows(env)[0].children[0].description, "Checked · 0 Errors, 0 Warnings");
   assert.equal(rows(env)[0].children[0].command.command, "vscode.open");
   assert.ok(env.service.queries.every(query => query.args.length === 0));
-  await env.host.commands.get("dygnosis.projectStatus")(); assert.equal(env.host.executed[0].name, "dygnosis.project.focus");
+  await env.host.commands.get("dygnosis.workspaceStatus")(); assert.equal(env.host.executed[0].name, "dygnosis.workspace.focus");
   registration.dispose();
 });
-test("off and virtual/no-folder windows do not start project work", async () => {
-  for (const options of [{ settings: { projectDiagnostics: false } }, { folders: [] }, { folders: [folder("remote:/project")] }]) {
-    const env = setup(options); const registration = registerProjectStatus(env.service); await flush();
+test("off and virtual/no-folder windows do not start workspace work", async () => {
+  for (const options of [{ settings: { workspaceDiagnostics: false } }, { folders: [] }, { folders: [folder("remote:/workspace")] }]) {
+    const env = setup(options); const registration = registerWorkspaceStatus(env.service); await flush();
     assert.equal(env.service.starts, 0); assert.equal(env.service.queries.length, 0); assert.equal(liveWatchers(env).length, 0);
     assert.match(env.host.items[0].text, options.settings ? /off/ : /no folders/); registration.dispose();
   }
@@ -198,27 +227,27 @@ test("off and virtual/no-folder windows do not start project work", async () => 
 
 test("nested model and include rows use basenames, sorted folders and exact open targets", async () => {
   const env = setup({ status: facts([
-    root("checked", { root_uri: `${project}/models/deep/variant.dyn`, errors: 1 }),
-    root("checked", { root_uri: `${project}/sibling/main.mod` }), root(),
-  ], { include_files: [`${project}/models/shared.inc`, `${project}/includes/unused.inc`] }) });
-  const registration = registerProjectStatus(env.service); await flush();
+    root("checked", { root_uri: `${workspace}/models/deep/variant.dyn`, errors: 1 }),
+    root("checked", { root_uri: `${workspace}/sibling/main.mod` }), root(),
+  ], { include_files: [`${workspace}/models/shared.inc`, `${workspace}/includes/unused.inc`] }) });
+  const registration = registerWorkspaceStatus(env.service); await flush();
   const top = rows(env)[0];
   assert.deepEqual(top.children.map(item => item.label), ["includes", "models", "sibling", "main.mod"]);
   const variant = child(child(child(top, "models"), "deep"), "variant.dyn");
   assert.equal(variant.description, "Checked · 1 Error, 0 Warnings");
-  assert.equal(variant.command.arguments[0].toString(), `${project}/models/deep/variant.dyn`);
+  assert.equal(variant.command.arguments[0].toString(), `${workspace}/models/deep/variant.dyn`);
   const include = child(child(top, "includes"), "unused.inc");
   assert.equal(include.description, "Include file");
   assert.equal(include.collapsibleState, vscode.TreeItemCollapsibleState.None);
-  assert.equal(include.command.arguments[0].toString(), `${project}/includes/unused.inc`);
+  assert.equal(include.command.arguments[0].toString(), `${workspace}/includes/unused.inc`);
   assert.match(env.host.items[0].text, /3\/3 checked/);
   registration.dispose();
 });
 
 test("collapsed branches survive refresh and removal preserves include-only folders", async () => {
-  const uri = `${project}/models/main.mod`, include = `${project}/models/part.inc`;
+  const uri = `${workspace}/models/main.mod`, include = `${workspace}/models/part.inc`;
   const env = setup({ status: facts([root("checked", { root_uri: uri })], { include_files: [include] }) });
-  const registration = registerProjectStatus(env.service); await flush();
+  const registration = registerWorkspaceStatus(env.service); await flush();
   const branch = child(rows(env)[0], "models");
   env.host.collapsed.fire({ element: branch });
   env.service.client.notify(facts([root("checked", { root_uri: uri, errors: 2 })], { include_files: [include] }));
@@ -236,44 +265,44 @@ test("collapsed branches survive refresh and removal preserves include-only fold
 });
 
 test("overlapping workspace folders own each file once, including trailing folder separators", async () => {
-  const env = setup({ folders: [folder(`${project}/`), folder(`${project}/models`, "nested")],
-    status: facts([root(), root("checked", { root_uri: `${project}/models/main.mod` })],
-      { include_files: [`${project}/models/part.inc`] }) });
-  const registration = registerProjectStatus(env.service); await flush();
+  const env = setup({ folders: [folder(`${workspace}/`), folder(`${workspace}/models`, "nested")],
+    status: facts([root(), root("checked", { root_uri: `${workspace}/models/main.mod` })],
+      { include_files: [`${workspace}/models/part.inc`] }) });
+  const registration = registerWorkspaceStatus(env.service); await flush();
   assert.deepEqual(rows(env)[0].children.map(item => item.label), ["main.mod"]);
   assert.deepEqual(rows(env)[1].children.map(item => item.label), ["main.mod", "part.inc"]);
-  assert.equal(rows(env)[1].children[0].command.arguments[0].toString(), `${project}/models/main.mod`);
-  assert.ok(rows(env).every(row => row.contextValue === "dygnosis.projectFolder"));
+  assert.equal(rows(env)[1].children[0].command.arguments[0].toString(), `${workspace}/models/main.mod`);
+  assert.ok(rows(env).every(row => row.contextValue === "dygnosis.workspaceFolder"));
   registration.dispose();
 });
 
 test("include inventory is validated and old engines explain the missing file list", async () => {
-  for (const include_files of ["bad", ["https://example.com/file.inc"], [`${project}/wrong.txt`], [`${project}/a.inc`, `${project}/a.inc`]]) {
-    assert.throws(() => parseProjectStatus(facts([], { include_files })), /Unsupported project status/);
+  for (const include_files of ["bad", ["https://example.com/file.inc"], [`${workspace}/wrong.txt`], [`${workspace}/a.inc`, `${workspace}/a.inc`]]) {
+    assert.throws(() => parseWorkspaceStatus(facts([], { include_files })), /Unsupported workspace status/);
   }
-  const env = setup({ status: facts([root("checked", { dependency_candidates: [`${project}/missing.inc`] })], { include_files: undefined }) });
-  const registration = registerProjectStatus(env.service); await flush();
+  const env = setup({ status: facts([root("checked", { dependency_candidates: [`${workspace}/missing.inc`] })], { include_files: undefined }) });
+  const registration = registerWorkspaceStatus(env.service); await flush();
   assert.match(env.host.views[0].message, /Include files are not listed by this engine/);
   assert.deepEqual(rows(env)[0].children.map(item => item.label), ["main.mod"]);
   registration.dispose();
 });
 test("failed startup is unavailable instead of indefinitely starting", async () => {
   const env = setup(); env.service.ensureStarted = async () => {};
-  const registration = registerProjectStatus(env.service); await flush();
-  assert.match(env.host.items[0].text, /unavailable/); assert.match(env.host.items[0].tooltip, /Restart.*Output/);
+  const registration = registerWorkspaceStatus(env.service); await flush();
+  assert.match(env.host.items[0].text, /unavailable/); assert.match(tooltipText(env.host.items[0].tooltip), /Restart.*Output/);
   registration.dispose();
 });
-test("unsupported engine stays visible with recovery and sends no project protocol messages", async () => {
+test("unsupported engine stays visible with recovery and sends no workspace protocol messages", async () => {
   const env = setup({ client: connection(initializeResult({ schema_version: 99 })) });
-  const registration = registerProjectStatus(env.service); await flush();
+  const registration = registerWorkspaceStatus(env.service); await flush();
   assert.equal(env.service.queries.length, 0); assert.equal(env.service.client.sent.length, 0); assert.equal(liveWatchers(env).length, 0);
-  assert.match(env.host.items[0].tooltip, /bundled binary.*dynare.serverPath/); registration.dispose();
+  assert.match(tooltipText(env.host.items[0].tooltip), /bundled binary.*dynare.serverPath/); registration.dispose();
 });
 test("folder discovery failure cannot make another folder's successful roots look fully covered", async () => {
   const env = setup({ folders: [folder(), folder(other, "other")], status: facts([root("checked", { errors: 2 })],
     { coverage_complete: false, discovery_failures: [{ folder_uri: other, failure: "Permission denied" }] }) });
-  const registration = registerProjectStatus(env.service); await flush();
-  assert.match(env.host.items[0].text, /incomplete/); assert.match(env.host.views[0].message, /discovery failed/);
+  const registration = registerWorkspaceStatus(env.service); await flush();
+  assert.equal(env.host.items[0].text, "$(warning) Dynare workspace: 1/1 checked"); assert.match(env.host.views[0].message, /discovery failed/);
   assert.equal(rows(env).length, 2); assert.equal(rows(env)[0].children[0].description, "Checked · 2 Errors, 0 Warnings");
   assert.equal(rows(env)[1].children[0].label, "Discovery failed"); assert.equal(rows(env)[1].children[0].tooltip, "Permission denied");
   registration.dispose();
@@ -281,18 +310,18 @@ test("folder discovery failure cannot make another folder's successful roots loo
 
 test("completed empty, excluded, incomplete and failed coverage offers contextual Help", async () => {
   const states = [facts([]), facts([root("excluded")]), facts([root("incomplete")]), facts([root("failed")]),
-    facts([], { coverage_complete: false, discovery_failures: [{ folder_uri: project, failure: "Permission denied" }] })];
+    facts([], { coverage_complete: false, discovery_failures: [{ folder_uri: workspace, failure: "Permission denied" }] })];
   for (const status of states) {
-    const env = setup({ status }), registration = registerProjectStatus(env.service); await flush();
+    const env = setup({ status }), registration = registerWorkspaceStatus(env.service); await flush();
     const help = env.host.views[0].options.treeDataProvider.getChildren().find(row => row.id === "help");
     assert.equal(help?.command?.command, "dygnosis.openHelp");
-    assert.deepEqual(help.command.arguments, ["project-checks"]);
+    assert.deepEqual(help.command.arguments, ["workspace-checks"]);
     registration.dispose();
   }
 });
 test("only the chosen owner is sent for priority, including include roots, null and untitled", async () => {
-  const doc = document(`${project}/fragment.inc`), env = setup({ editor: { document: doc } });
-  const registration = registerProjectStatus(env.service); await flush();
+  const doc = document(`${workspace}/fragment.inc`), env = setup({ editor: { document: doc } });
+  const registration = registerWorkspaceStatus(env.service); await flush();
   assert.deepEqual(env.service.client.sent.find(sent => sent.name === capability.active_model_notification).params, { root_uri: null });
   env.service.chosenRootForDocument = () => uri(`${other}/owner.mod`); env.changed.fire(); await flush();
   assert.deepEqual(env.service.client.sent.at(-1).params, { root_uri: `${other}/owner.mod` });
@@ -302,18 +331,18 @@ test("only the chosen owner is sent for priority, including include roots, null 
   env.host.active.fire(); assert.deepEqual(env.service.client.sent.at(-1).params, { root_uri: "untitled:/scratch.mod" });
   registration.dispose();
 });
-test("restored model facts signal chosen priority without project queries, broad invalidation or stale owner guesses", async () => {
-  const child = document(`${project}/shared.inc`), env = setup({ editor: { document: child } });
+test("restored model facts signal chosen priority without workspace queries, broad invalidation or stale owner guesses", async () => {
+  const child = document(`${workspace}/shared.inc`), env = setup({ editor: { document: child } });
   let chosen;
   env.service.chosenRootForDocument = () => chosen;
-  const registration = registerProjectStatus(env.service); await flush();
+  const registration = registerWorkspaceStatus(env.service); await flush();
   const beforeQueries = env.service.queries.length, beforeUpdates = env.service.client.sent.length;
   chosen = uri(`${other}/owner.mod`);
   env.updated.fire({ client_instance: env.service.currentInstance, root_uri: chosen.toString() });
   assert.equal(env.service.queries.length, beforeQueries);
   assert.equal(env.service.client.sent.length, beforeUpdates + 1);
   assert.deepEqual(env.service.client.sent.at(-1).params, { root_uri: `${other}/owner.mod` });
-  env.updated.fire({ client_instance: env.service.currentInstance, root_uri: `${project}/obsolete-owner.mod` });
+  env.updated.fire({ client_instance: env.service.currentInstance, root_uri: `${workspace}/obsolete-owner.mod` });
   assert.equal(env.service.client.sent.length, beforeUpdates + 1, "proof event payload cannot choose its own root");
   chosen = undefined; env.changed.fire(); assert.deepEqual(env.service.client.sent.at(-1).params, { root_uri: null });
   chosen = uri(`${other}/owner.mod`); const afterInvalidation = env.service.client.sent.length;
@@ -323,15 +352,15 @@ test("restored model facts signal chosen priority without project queries, broad
   assert.deepEqual(env.service.client.sent.at(-1).params, { root_uri: chosen.toString() });
   assert.equal(env.service.queries.length, beforeQueries); registration.dispose(); assert.equal(env.updated.listeners.size, 0);
 });
-test("metadata-only editor events preserve project coverage without querying or advancing the pass", async () => {
-  const env = setup(), registration = registerProjectStatus(env.service); await flush();
+test("metadata-only editor events preserve workspace coverage without querying or advancing the pass", async () => {
+  const env = setup(), registration = registerWorkspaceStatus(env.service); await flush();
   const before = env.service.queries.length; env.host.edited.fire({ document: document(), contentChanges: [] });
   assert.match(env.host.items[0].text, /1\/1 checked/); await flush(); assert.equal(env.service.queries.length, before); registration.dispose();
 });
 test("exact arbitrary-extension, missing and companion candidate watches treat glob characters literally", async () => {
   const candidates = [`${other}/part%5B1%5D%7Bcopy%7D.data`, `${other}/missing.noext`, `${other}/main_steadystate.m`];
   const env = setup({ status: facts([root("checked", { dependency_candidates: candidates })]) });
-  const registration = registerProjectStatus(env.service); await flush();
+  const registration = registerWorkspaceStatus(env.service); await flush();
   const watcher = liveWatchers(env, "*")[0]; assert.equal(liveWatchers(env, "*").length, 1);
   assert.equal(watcher.pattern.baseUri.fsPath, path.dirname(uri(candidates[0]).fsPath)); assert.equal(watcher.pattern.pattern, "*");
   const before = env.service.client.sent.length; watcher.changed.fire(uri(`${other}/part1copy.data`)); await flush();
@@ -346,7 +375,7 @@ test("exact arbitrary-extension, missing and companion candidate watches treat g
 });
 test("unchanged dependency directories reuse watchers while candidate sets update", async () => {
   const first = `${other}/a.inc`, second = `${other}/b.any`, env = setup({ status: facts([root("checked", { dependency_candidates: [first] })]) });
-  const registration = registerProjectStatus(env.service); await flush();
+  const registration = registerWorkspaceStatus(env.service); await flush();
   const watcher = liveWatchers(env, "*")[0];
   env.service.client.notify(facts([root("checked", { dependency_candidates: [second] })]));
   assert.equal(liveWatchers(env, "*")[0], watcher); assert.equal(watcher.disposed, false);
@@ -355,18 +384,18 @@ test("unchanged dependency directories reuse watchers while candidate sets updat
   registration.dispose();
 });
 test("root creation and deletion are watched per folder; removed folders and exclusions clear watchers", async () => {
-  const env = setup({ folders: [folder(), folder(other, "other")] }); const registration = registerProjectStatus(env.service); await flush();
+  const env = setup({ folders: [folder(), folder(other, "other")] }); const registration = registerWorkspaceStatus(env.service); await flush();
   assert.equal(liveWatchers(env, "**/*.{[mM][oO][dD],[dD][yY][nN],[iI][nN][cC]}").length, 2);
   const removed = liveWatchers(env, "**/*.{[mM][oO][dD],[dD][yY][nN],[iI][nN][cC]}")[1]; env.host.folders = [folder()];
   env.service.status = facts([], { pass_revision: 2 }); env.host.folderChanged.fire(); await flush();
   assert.equal(removed.disposed, true); assert.equal(rows(env).length, 1);
-  const watcher = liveWatchers(env, "**/*.{[mM][oO][dD],[dD][yY][nN],[iI][nN][cC]}")[0]; watcher.created.fire(uri(`${project}/new.mod`)); watcher.deleted.fire(uri(`${project}/old.mod`)); await flush();
+  const watcher = liveWatchers(env, "**/*.{[mM][oO][dD],[dD][yY][nN],[iI][nN][cC]}")[0]; watcher.created.fire(uri(`${workspace}/new.mod`)); watcher.deleted.fire(uri(`${workspace}/old.mod`)); await flush();
   assert.deepEqual(env.service.client.sent.filter(value => value.name === "workspace/didChangeWatchedFiles").map(value => value.params.changes[0].type), [1, 3]);
   registration.dispose();
 });
 test("newer notifications and passes reject obsolete query responses", async () => {
   const pending = deferred(), env = setup({ client: connection() }); env.service.execute = async () => pending.promise;
-  const registration = registerProjectStatus(env.service); await flush();
+  const registration = registerWorkspaceStatus(env.service); await flush();
   env.service.client.notify(facts([root("checked", { errors: 4 })], { pass_revision: 3 }));
   pending.resolve(facts([root("pending")], { pass_revision: 1 })); await flush();
   assert.match(env.host.items[0].text, /1\/1 checked/);
@@ -377,12 +406,12 @@ test("newer notifications and passes reject obsolete query responses", async () 
 });
 for (const action of ["edit", "Recheck", "settings"]) {
   test(`${action} retains a same-pass completed notification received before its delayed pending reply`, async () => {
-    const env = setup(), registration = registerProjectStatus(env.service); await flush();
+    const env = setup(), registration = registerWorkspaceStatus(env.service); await flush();
     const pending = deferred(); env.service.execute = async () => pending.promise;
     const trigger = async () => {
       if (action === "edit") { env.host.edited.fire({ document: document() }); await new Promise(resolve => setTimeout(resolve, 90)); }
-      else if (action === "Recheck") env.host.commands.get("dygnosis.recheckProject")();
-      else env.configure("projectExcludePaths", ["generated/**"]);
+      else if (action === "Recheck") env.host.commands.get("dygnosis.recheckWorkspace")();
+      else env.configure("workspaceExcludePaths", ["generated/**"]);
       await flush();
     };
     await trigger();
@@ -400,30 +429,30 @@ for (const action of ["edit", "Recheck", "settings"]) {
   });
 }
 test("refresh discards pre-action passes and superseded-epoch notification buffers", async () => {
-  const env = setup(), registration = registerProjectStatus(env.service); await flush();
+  const env = setup(), registration = registerWorkspaceStatus(env.service); await flush();
   const first = deferred(), second = deferred(); env.service.execute = async () => first.promise;
-  env.host.commands.get("dygnosis.recheckProject")(); await flush();
+  env.host.commands.get("dygnosis.recheckWorkspace")(); await flush();
   env.service.client.notify(facts([root("checked", { errors: 99 })], { pass_revision: 1 }));
   env.service.client.notify(facts([root("checked", { errors: 4 })], { pass_revision: 2 }));
-  env.service.execute = async () => second.promise; env.configure("projectExcludePaths", ["generated/**"]); await flush();
+  env.service.execute = async () => second.promise; env.configure("workspaceExcludePaths", ["generated/**"]); await flush();
   first.resolve(facts([root("pending")], { pass_revision: 2 }));
   second.resolve(facts([root("pending")], { pass_revision: 3 })); await flush();
   assert.match(env.host.items[0].text, /0\/1 finished/);
   assert.equal(rows(env)[0].children[0].description, "Pending"); registration.dispose();
 });
 test("an acknowledged later pass supersedes an earlier buffered completion", async () => {
-  const env = setup(), registration = registerProjectStatus(env.service); await flush();
+  const env = setup(), registration = registerWorkspaceStatus(env.service); await flush();
   const pending = deferred(); env.service.execute = async () => pending.promise;
-  env.host.commands.get("dygnosis.recheckProject")(); await flush();
+  env.host.commands.get("dygnosis.recheckWorkspace")(); await flush();
   env.service.client.notify(facts([root("checked", { errors: 99 })], { pass_revision: 2 }));
   pending.resolve(facts([root("pending")], { pass_revision: 3 })); await flush();
   assert.match(env.host.items[0].text, /0\/1 finished/);
   assert.equal(rows(env)[0].children[0].description, "Pending"); registration.dispose();
 });
 test("a buffered old-instance completion cannot replace a restarted instance's status", async () => {
-  const env = setup(), registration = registerProjectStatus(env.service); await flush();
+  const env = setup(), registration = registerWorkspaceStatus(env.service); await flush();
   const oldClient = env.service.client, pending = deferred(); env.service.execute = async () => pending.promise;
-  env.host.commands.get("dygnosis.recheckProject")(); await flush();
+  env.host.commands.get("dygnosis.recheckWorkspace")(); await flush();
   oldClient.notify(facts([root("checked", { errors: 99 })], { pass_revision: 2 }));
   env.service.client = connection(); ++env.service.currentInstance; env.service.execute = async () => facts([], { pass_revision: 0 }); env.changed.fire(); await flush();
   pending.resolve(facts([root("pending")], { pass_revision: 2 })); await flush();
@@ -432,9 +461,9 @@ test("a buffered old-instance completion cannot replace a restarted instance's s
 });
 test("cancel reply defeats a same-pass pre-cancel notification while retaining a newer cancelled report", async () => {
   for (const newerCancelled of [false, true]) {
-    const env = setup(), registration = registerProjectStatus(env.service); await flush();
+    const env = setup(), registration = registerWorkspaceStatus(env.service); await flush();
     const pending = deferred(); env.service.execute = async () => pending.promise;
-    env.host.commands.get("dygnosis.cancelProject")(); await flush();
+    env.host.commands.get("dygnosis.cancelWorkspace")(); await flush();
     env.service.client.notify(facts([root("checked", { errors: newerCancelled ? 4 : 99 })],
       newerCancelled ? { cancelled: true, complete: false, coverage_complete: false } : {}));
     if (newerCancelled) env.service.client.notify(facts([root("checked", { errors: 99 })]));
@@ -448,10 +477,10 @@ test("folder and settings changes reject replies captured under old inputs and c
   for (const change of ["folder", "settings"]) {
     const env = setup({ client: connection() }), first = deferred(), second = deferred();
     env.service.execute = async () => first.promise;
-    const registration = registerProjectStatus(env.service); await flush();
+    const registration = registerWorkspaceStatus(env.service); await flush();
     env.service.execute = async () => second.promise;
     if (change === "folder") { env.host.folders = [folder(other, "other")]; env.host.folderChanged.fire(); }
-    else { env.configure("projectExcludePaths", ["generated/**"]); }
+    else { env.configure("workspaceExcludePaths", ["generated/**"]); }
     assert.equal(rows(env).length, 0); await flush();
     first.resolve(facts([root("checked", { errors: 99 })])); await flush(); assert.equal(rows(env).length, 0);
     second.resolve(facts([root("checked", { root_uri: `${env.host.folders[0].uri.toString()}/main.mod`, errors: 2 })], { pass_revision: 2 })); await flush();
@@ -459,17 +488,17 @@ test("folder and settings changes reject replies captured under old inputs and c
     assert.equal(rows(env)[0].children[0].description, "Checked · 2 Errors, 0 Warnings"); registration.dispose();
   }
 });
-test("disabling queued work clears the project contribution and cannot be undone by a late enabled reply", async () => {
-  const env = setup(), pending = deferred(); const registration = registerProjectStatus(env.service); await flush();
-  env.service.execute = async () => pending.promise; env.host.commands.get("dygnosis.recheckProject")(); await flush();
-  env.configure("projectDiagnostics", false); assert.match(env.host.items[0].text, /off/); assert.equal(rows(env).length, 0);
+test("disabling queued work clears the workspace contribution and cannot be undone by a late enabled reply", async () => {
+  const env = setup(), pending = deferred(); const registration = registerWorkspaceStatus(env.service); await flush();
+  env.service.execute = async () => pending.promise; env.host.commands.get("dygnosis.recheckWorkspace")(); await flush();
+  env.configure("workspaceDiagnostics", false); assert.match(env.host.items[0].text, /off/); assert.equal(rows(env).length, 0);
   assert.equal(liveWatchers(env).length, 0);
   pending.resolve(facts([root("checked", { errors: 99 })], { pass_revision: 2 })); await flush();
   assert.match(env.host.items[0].text, /off/); assert.equal(rows(env).length, 0); registration.dispose();
 });
 test("server replacement drops old subscriptions, watchers and responses, then queries the new instance", async () => {
   const first = connection(), pending = deferred(), env = setup({ client: first }); env.service.execute = async () => pending.promise;
-  const registration = registerProjectStatus(env.service); await flush();
+  const registration = registerWorkspaceStatus(env.service); await flush();
   const second = connection(); env.service.client = second; ++env.service.currentInstance; env.service.execute = async () => facts([], { pass_revision: 0 }); env.changed.fire(); await flush();
   assert.equal(first.subscriptions.get(capability.status_notification).listeners.size, 0);
   assert.equal(liveWatchers(env, "**/*.{[mM][oO][dD],[dD][yY][nN],[iI][nN][cC]}").length, 1); assert.match(env.host.items[0].text, /no root models/);
@@ -481,20 +510,20 @@ test("server replacement drops old subscriptions, watchers and responses, then q
   registration.dispose();
 });
 test("Recheck and Cancel use advertised commands and preserve their different lifetimes", async () => {
-  const env = setup(); const registration = registerProjectStatus(env.service); await flush();
-  env.service.status = facts([root("pending")], { pass_revision: 2 }); env.host.commands.get("dygnosis.recheckProject")(); await flush();
+  const env = setup(); const registration = registerWorkspaceStatus(env.service); await flush();
+  env.service.status = facts([root("pending")], { pass_revision: 2 }); env.host.commands.get("dygnosis.recheckWorkspace")(); await flush();
   assert.equal(env.service.queries.at(-1).command, capability.recheck_command); assert.match(env.host.items[0].text, /0\/1 finished/);
-  env.service.status = facts([root("pending")], { pass_revision: 2, cancelled: true }); env.host.commands.get("dygnosis.cancelProject")(); await flush();
+  env.service.status = facts([root("pending")], { pass_revision: 2, cancelled: true }); env.host.commands.get("dygnosis.cancelWorkspace")(); await flush();
   assert.equal(env.service.queries.at(-1).command, capability.cancel_command); assert.match(env.host.items[0].text, /cancelled/);
-  assert.equal(env.host.settings.projectDiagnostics, undefined); assert.match(env.host.items[0].tooltip, /file edit\/change or Recheck/);
+  assert.equal(env.host.settings.workspaceDiagnostics, undefined); assert.match(tooltipText(env.host.items[0].tooltip), /file edit\/change or Recheck/);
   env.service.client.notify(facts([root()], { pass_revision: 3 })); assert.match(env.host.items[0].text, /1\/1 checked/);
   registration.dispose();
 });
 
-// Guards explicit project actions dropping their request promise and losing the refusal cause.
+// Guards explicit workspace actions dropping their request promise and losing the refusal cause.
 test("Recheck and Cancel wait for the request and show its cause once", async () => {
-  for (const command of ["dygnosis.recheckProject", "dygnosis.cancelProject"]) {
-    const env = setup(), registration = registerProjectStatus(env.service); await flush();
+  for (const command of ["dygnosis.recheckWorkspace", "dygnosis.cancelWorkspace"]) {
+    const env = setup(), registration = registerWorkspaceStatus(env.service); await flush();
     const pending = deferred(); env.service.execute = () => pending.promise;
     let finished = false; const action = env.host.commands.get(command)().then(() => { finished = true; }); await flush();
     assert.equal(finished, false); pending.reject(new Error("engine request failed")); await action;
@@ -502,15 +531,15 @@ test("Recheck and Cancel wait for the request and show its cause once", async ()
   }
 });
 
-// Guards an automatic project refresh leaking a startup rejection after an engine failure.
-test("a background project refresh logs a startup failure without notifying", async () => {
-  const env = setup(), registration = registerProjectStatus(env.service); await flush();
+// Guards an automatic workspace refresh leaking a startup rejection after an engine failure.
+test("a background workspace refresh logs a startup failure without notifying", async () => {
+  const env = setup(), registration = registerWorkspaceStatus(env.service); await flush();
   env.service.ensureStarted = async () => { throw new Error("startup failed"); };
   env.host.edited.fire({ document: document() }); await new Promise(resolve => setTimeout(resolve, 90)); await flush();
   assert.ok(env.service.logged.some(message => /startup failed/.test(message))); assert.deepEqual(env.host.notifications, []); registration.dispose();
 });
 test("rapid overlay edits coalesce a status query and close refreshes saved coverage", async () => {
-  const env = setup(), registration = registerProjectStatus(env.service); await flush();
+  const env = setup(), registration = registerWorkspaceStatus(env.service); await flush();
   const doc = document(), before = env.service.queries.length;
   env.service.status = facts([root("pending")], { pass_revision: 2 });
   for (let index = 0; index < 4; ++index) { ++doc.version; env.host.edited.fire({ document: doc }); }
@@ -523,13 +552,13 @@ test("rapid overlay edits coalesce a status query and close refreshes saved cove
   assert.equal(rows(env)[0].children[0].description, "Checked · 1 Error, 0 Warnings"); registration.dispose();
 });
 test("per-folder exclusion controls write only the chosen resource and reset its override", async () => {
-  const env = setup({ folders: [folder(), folder(other, "other")] }); env.host.resources.set(other, { projectExcludePaths: ["old/**"] });
-  const registration = registerProjectStatus(env.service); await flush();
-  env.host.choices.push("other", "add"); env.host.inputValues.push("generated/**"); await env.host.commands.get("dygnosis.configureProjectExclusions")();
+  const env = setup({ folders: [folder(), folder(other, "other")] }); env.host.resources.set(other, { workspaceExcludePaths: ["old/**"] });
+  const registration = registerWorkspaceStatus(env.service); await flush();
+  env.host.choices.push("other", "add"); env.host.inputValues.push("generated/**"); await env.host.commands.get("dygnosis.configureWorkspaceExclusions")();
   assert.deepEqual(env.host.updates[0].value, ["old/**", "generated/**"]); assert.equal(env.host.updates[0].target, vscode.ConfigurationTarget.WorkspaceFolder);
   assert.equal(env.host.updates[0].resource.toString(), other);
-  env.host.choices.push("reset"); await env.host.commands.get("dygnosis.configureProjectExclusions")(rows(env)[1]); assert.equal(env.host.updates[1].value, undefined);
-  env.host.choices.push("remove", "old/**"); await env.host.commands.get("dygnosis.configureProjectExclusions")(rows(env)[1]); assert.deepEqual(env.host.updates[2].value, []);
+  env.host.choices.push("reset"); await env.host.commands.get("dygnosis.configureWorkspaceExclusions")(rows(env)[1]); assert.equal(env.host.updates[1].value, undefined);
+  env.host.choices.push("remove", "old/**"); await env.host.commands.get("dygnosis.configureWorkspaceExclusions")(rows(env)[1]); assert.deepEqual(env.host.updates[2].value, []);
   registration.dispose();
 });
 
@@ -538,65 +567,65 @@ test("Ignore this folder adds a scoped subtree once and preserves include entrie
   const env = setup({ folders: [folder(), folder(other, "other")], status: facts([
     root(), root("checked", { root_uri: `${other}/models/main.dyn` }),
   ], { include_files: [include] }) });
-  env.host.resources.set(other, { projectExcludePaths: ["existing/**"] });
-  const registration = registerProjectStatus(env.service); await flush();
+  env.host.resources.set(other, { workspaceExcludePaths: ["existing/**"] });
+  const registration = registerWorkspaceStatus(env.service); await flush();
   const subtree = child(rows(env)[1], "models");
-  assert.equal(subtree.contextValue, "dygnosis.projectDirectory");
-  await env.host.commands.get("dygnosis.ignoreProjectFolder")(subtree);
+  assert.equal(subtree.contextValue, "dygnosis.workspaceDirectory");
+  await env.host.commands.get("dygnosis.ignoreWorkspaceFolder")(subtree);
   assert.deepEqual(env.host.updates[0].value, ["existing/**", "models/**"]);
   assert.equal(env.host.updates[0].resource.toString(), other);
   assert.equal(env.host.updates[0].target, vscode.ConfigurationTarget.WorkspaceFolder);
   assert.equal(env.host.picks.length, 0);
-  env.host.resources.set(other, { projectExcludePaths: env.host.updates[0].value });
-  await env.host.commands.get("dygnosis.ignoreProjectFolder")(subtree);
+  env.host.resources.set(other, { workspaceExcludePaths: env.host.updates[0].value });
+  await env.host.commands.get("dygnosis.ignoreWorkspaceFolder")(subtree);
   assert.equal(env.host.updates.length, 1);
-  await env.host.commands.get("dygnosis.ignoreProjectFolder")(rows(env)[1]);
+  await env.host.commands.get("dygnosis.ignoreWorkspaceFolder")(rows(env)[1]);
   assert.deepEqual(env.host.updates[1].value, ["existing/**", "models/**", "**"]);
   assert.ok(child(child(rows(env)[1], "models"), "part.inc"));
-  await env.host.commands.get("dygnosis.ignoreProjectFolder")(child(subtree, "part.inc"));
+  await env.host.commands.get("dygnosis.ignoreWorkspaceFolder")(child(subtree, "part.inc"));
   assert.match(env.host.notifications.at(-1), /Choose a folder/);
   assert.equal(env.host.updates.length, 2);
   env.host.folders = [folder()];
-  await env.host.commands.get("dygnosis.ignoreProjectFolder")(subtree);
+  await env.host.commands.get("dygnosis.ignoreWorkspaceFolder")(subtree);
   assert.match(env.host.notifications.at(-1), /workspace folder changed/);
   assert.equal(env.host.updates.length, 2);
   registration.dispose();
 });
 
 test("Ignore this folder refuses a literal name that the exclusion grammar cannot represent", async () => {
-  const env = setup({ status: facts([root("checked", { root_uri: `${project}/a%3Fb/main.mod` })]) });
-  const registration = registerProjectStatus(env.service); await flush();
-  await env.host.commands.get("dygnosis.ignoreProjectFolder")(child(rows(env)[0], "a?b"));
+  const env = setup({ status: facts([root("checked", { root_uri: `${workspace}/a%3Fb/main.mod` })]) });
+  const registration = registerWorkspaceStatus(env.service); await flush();
+  await env.host.commands.get("dygnosis.ignoreWorkspaceFolder")(child(rows(env)[0], "a?b"));
   assert.equal(env.host.updates.length, 0);
   assert.match(env.host.notifications[0], /No exclusion was added/);
   registration.dispose();
 });
 
 test("Ignore this folder accepts the plain item payload delivered by the native row action", async () => {
-  const env = setup({ status: facts([root("checked", { root_uri: `${project}/alpha/main.mod` })]) });
-  const registration = registerProjectStatus(env.service); await flush();
+  const env = setup({ status: facts([root("checked", { root_uri: `${workspace}/alpha/main.mod` })]) });
+  const registration = registerWorkspaceStatus(env.service); await flush();
   const item = child(rows(env)[0], "alpha");
   const nativePayload = Object.fromEntries(Object.entries(item));
-  await env.host.commands.get("dygnosis.ignoreProjectFolder")(nativePayload);
+  await env.host.commands.get("dygnosis.ignoreWorkspaceFolder")(nativePayload);
   assert.equal(env.host.updates.length, 1);
   assert.deepEqual(env.host.updates[0].value, ["alpha/**"]);
-  assert.equal(env.host.updates[0].resource.toString(), project);
+  assert.equal(env.host.updates[0].resource.toString(), workspace);
   registration.dispose();
 });
 
 test("Ignore this folder resolves its owner when workspace snapshots return new folder objects", async () => {
-  const env = setup({ status: facts([root("checked", { root_uri: `${project}/alpha/main.mod` })]) });
+  const env = setup({ status: facts([root("checked", { root_uri: `${workspace}/alpha/main.mod` })]) });
   env.host.freshFolders = true;
-  const registration = registerProjectStatus(env.service); await flush();
-  await env.host.commands.get("dygnosis.ignoreProjectFolder")(Object.fromEntries(Object.entries(child(rows(env)[0], "alpha"))));
+  const registration = registerWorkspaceStatus(env.service); await flush();
+  await env.host.commands.get("dygnosis.ignoreWorkspaceFolder")(Object.fromEntries(Object.entries(child(rows(env)[0], "alpha"))));
   assert.deepEqual(env.host.updates[0].value, ["alpha/**"]);
-  assert.equal(env.host.updates[0].resource.toString(), project);
+  assert.equal(env.host.updates[0].resource.toString(), workspace);
   registration.dispose();
 });
 test("malformed notification clears stale coverage, and disposal prevents late updates and releases every listener", async () => {
-  const env = setup(); const registration = registerProjectStatus(env.service); await flush();
+  const env = setup(); const registration = registerWorkspaceStatus(env.service); await flush();
   env.service.client.notify({ ...facts(), schema_version: 9 }); assert.match(env.host.items[0].text, /unavailable/); assert.equal(rows(env).length, 0);
-  const pending = deferred(); env.service.execute = async () => pending.promise; env.host.commands.get("dygnosis.recheckProject")(); await flush();
+  const pending = deferred(); env.service.execute = async () => pending.promise; env.host.commands.get("dygnosis.recheckWorkspace")(); await flush();
   registration.dispose(); pending.resolve(facts([root("checked", { errors: 99 })])); await flush();
   assert.equal(env.host.items[0].visible, false); assert.equal(env.host.items[0].disposed, true); assert.equal(env.host.views[0].disposed, true);
   assert.equal(liveWatchers(env).length, 0); assert.equal(env.host.commands.size, 0);

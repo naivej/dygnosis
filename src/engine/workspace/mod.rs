@@ -230,7 +230,7 @@ pub(crate) struct InputGuard {
     pub length: Option<u64>,
 }
 
-/// Compact provenance retained by project reports after parsed caches expire.
+/// Compact provenance retained by workspace reports after parsed caches expire.
 #[derive(Clone, Default)]
 pub(crate) struct InputStamps {
     files: BTreeMap<String, u64>,
@@ -3844,7 +3844,7 @@ mod compare_snapshot_tests {
 }
 
 #[cfg(test)]
-mod project_snapshot_tests {
+mod workspace_snapshot_tests {
     use super::*;
 
     #[test]
@@ -3864,7 +3864,7 @@ mod project_snapshot_tests {
     #[test]
     fn heavyweight_cache_eviction_keeps_owner_and_dependency_provenance() {
         let folder =
-            std::env::temp_dir().join(format!("dygnosis-project-cache-{}", std::process::id()));
+            std::env::temp_dir().join(format!("dygnosis-workspace-cache-{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
         let included = folder.join("body.data");
         std::fs::write(&included, "y=0;\n").unwrap();

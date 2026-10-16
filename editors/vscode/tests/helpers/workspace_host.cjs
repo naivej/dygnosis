@@ -1,4 +1,4 @@
-// Verify project folder grouping and saved include navigation in native VS Code.
+// Verify workspace folder grouping and saved include navigation in native VS Code.
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
@@ -8,14 +8,14 @@ const { nativeWorkbench } = require("./native_webview.cjs");
 async function nativeValue(expression) {
   return nativeWorkbench(async send => {
     const response = await send("Runtime.evaluate", { expression, returnByValue: true });
-    assert.equal(response.exceptionDetails, undefined, "native project tree inspection succeeds");
+    assert.equal(response.exceptionDetails, undefined, "native workspace tree inspection succeeds");
     return response.result?.value;
   });
 }
 
 const treeRowsExpression = `(() => {
   const panes = [...document.querySelectorAll('.pane')];
-  const pane = panes.find(value => value.textContent.includes('Dynare project checks'));
+  const pane = panes.find(value => value.textContent.includes('Dynare workspace checks'));
   if (!pane) return [];
   return [...pane.querySelectorAll('.monaco-list-row:not(.monaco-tree-sticky-row)')].filter(row => row.getClientRects().length).map(row => ({
     label: row.querySelector('.label-name')?.textContent.trim() || row.textContent.trim(),
@@ -32,36 +32,36 @@ async function findRows(label) {
 }
 async function rowSelector(label, occurrence = 0) {
   const rows = await findRows(label);
-  assert.ok(rows.length > occurrence, `native project tree contains ${label} row ${occurrence + 1}; saw ${JSON.stringify(await treeRows())}`);
-  return `(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare project checks')); const rows=[...pane.querySelectorAll('.monaco-list-row:not(.monaco-tree-sticky-row)')].filter(row=>row.getClientRects().length); return rows.filter(row=>(row.querySelector('.label-name')?.textContent.trim()||row.textContent.trim())===${JSON.stringify(label)})[${occurrence}]; })()`;
+  assert.ok(rows.length > occurrence, `native workspace tree contains ${label} row ${occurrence + 1}; saw ${JSON.stringify(await treeRows())}`);
+  return `(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); const rows=[...pane.querySelectorAll('.monaco-list-row:not(.monaco-tree-sticky-row)')].filter(row=>row.getClientRects().length); return rows.filter(row=>(row.querySelector('.label-name')?.textContent.trim()||row.textContent.trim())===${JSON.stringify(label)})[${occurrence}]; })()`;
 }
 async function clickRow(label, occurrence = 0, twistie = false) {
   const selector = await rowSelector(label, occurrence);
   const clicked = await nativeValue(`(() => { const row=${selector}; if(!row) return false; const target=${twistie ? "row.querySelector('.monaco-tl-twistie')" : "row"}; if(!target) return false; target.dispatchEvent(new MouseEvent('click',{bubbles:true,view:window})); return true; })()`);
-  assert.equal(clicked, true, `native project tree can click ${label}`);
+  assert.equal(clicked, true, `native workspace tree can click ${label}`);
 }
-async function scrollProjectTree(deltaY) {
-  const point = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare project checks')); const list=pane?.querySelector('.monaco-list'); if(!list) return undefined; const box=list.getBoundingClientRect(); return {x:box.x+box.width/2,y:box.y+box.height/2}; })()`);
-  assert.ok(point, "native project tree has a scrollable viewport");
+async function scrollWorkspaceTree(deltaY) {
+  const point = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); const list=pane?.querySelector('.monaco-list'); if(!list) return undefined; const box=list.getBoundingClientRect(); return {x:box.x+box.width/2,y:box.y+box.height/2}; })()`);
+  assert.ok(point, "native workspace tree has a scrollable viewport");
   await nativeWorkbench(send => send("Input.dispatchMouseEvent", { type: "mouseWheel", x: point.x, y: point.y, deltaX: 0, deltaY }));
   await new Promise(resolve => setTimeout(resolve, 120));
 }
-async function scrollProjectTreeByViewport(direction = 1) {
-  const height = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare project checks')); return pane?.querySelector('.monaco-list')?.getBoundingClientRect().height ?? 0; })()`);
+async function scrollWorkspaceTreeByViewport(direction = 1) {
+  const height = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); return pane?.querySelector('.monaco-list')?.getBoundingClientRect().height ?? 0; })()`);
   const step = Math.max(1, Math.min(120, Math.floor(height / 2)));
-  await scrollProjectTree(step * direction);
+  await scrollWorkspaceTree(step * direction);
 }
 async function revealRow(label, waitFor) {
-  await scrollProjectTreeToTop();
+  await scrollWorkspaceTreeToTop();
   await waitFor(async () => {
     if ((await findRows(label)).length) return true;
-    await scrollProjectTreeByViewport();
+    await scrollWorkspaceTreeByViewport();
     return (await findRows(label)).length > 0;
-  }, `native project tree scrolls ${label} into view`);
+  }, `native workspace tree scrolls ${label} into view`);
 }
-async function enlargeProjectTreePane() {
-  const layout = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare project checks')); if(!pane) return undefined; const box=pane.getBoundingClientRect(); const sashes=[...document.querySelectorAll('.monaco-sash')].map(sash=>{const rect=sash.getBoundingClientRect();return {rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},classes:sash.className};}); return {pane:{x:box.x,y:box.y,width:box.width,height:box.height},sashes}; })()`);
-  assert.ok(layout?.pane, "native project checks pane has a measurable layout");
+async function enlargeWorkspaceTreePane() {
+  const layout = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); if(!pane) return undefined; const box=pane.getBoundingClientRect(); const sashes=[...document.querySelectorAll('.monaco-sash')].map(sash=>{const rect=sash.getBoundingClientRect();return {rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},classes:sash.className};}); return {pane:{x:box.x,y:box.y,width:box.width,height:box.height},sashes}; })()`);
+  assert.ok(layout?.pane, "native workspace checks pane has a measurable layout");
   const sash = layout.sashes.map(value => ({ ...value, centerY: value.rect.y + value.rect.height / 2 }))
     .filter(value => Math.abs(value.centerY - layout.pane.y) < 24)
     .sort((left, right) => Math.abs(left.centerY - layout.pane.y) - Math.abs(right.centerY - layout.pane.y))[0];
@@ -78,34 +78,34 @@ async function enlargeProjectTreePane() {
 async function expandFolder(label, waitFor) {
   await revealRow(label, waitFor);
   if ((await findRows(label))[0]?.expanded === "false") await clickRow(label, 0, true);
-  await waitFor(async () => (await findRows(label))[0]?.expanded === "true", `native project folder ${label} expands`);
+  await waitFor(async () => (await findRows(label))[0]?.expanded === "true", `native workspace folder ${label} expands`);
 }
-async function scrollProjectTreeToTop() {
+async function scrollWorkspaceTreeToTop() {
   const rootLabel = path.basename(vscode.workspace.workspaceFolders[0].uri.fsPath);
   for (let index = 0; index < 40; ++index) {
     const rows = await treeRows();
     if (rows[0]?.label === rootLabel) return;
-    await scrollProjectTreeByViewport(-1);
+    await scrollWorkspaceTreeByViewport(-1);
   }
-  throw new Error(`Native project tree did not return to its workspace row: ${JSON.stringify(await treeRows())}`);
+  throw new Error(`Native workspace tree did not return to its workspace row: ${JSON.stringify(await treeRows())}`);
 }
 async function openExplorer(waitFor) {
   await vscode.commands.executeCommand("workbench.view.explorer");
-  await vscode.commands.executeCommand("dygnosis.project.focus");
-  await waitFor(async () => (await nativeValue("Boolean([...document.querySelectorAll('.pane')].some(value=>value.textContent.includes('Dynare project checks')))")), "project checks view is visible in Explorer");
-  const paneState = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare project checks')); const header=pane?.querySelector('.pane-header'); const box=header?.getBoundingClientRect(); return {expanded:pane?.classList.contains('expanded'),point:box?{x:box.x+box.width/2,y:box.y+box.height/2}:undefined}; })()`);
+  await vscode.commands.executeCommand("dygnosis.workspace.focus");
+  await waitFor(async () => (await nativeValue("Boolean([...document.querySelectorAll('.pane')].some(value=>value.textContent.includes('Dynare workspace checks')))")), "workspace checks view is visible in Explorer");
+  const paneState = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); const header=pane?.querySelector('.pane-header'); const box=header?.getBoundingClientRect(); return {expanded:pane?.classList.contains('expanded'),point:box?{x:box.x+box.width/2,y:box.y+box.height/2}:undefined}; })()`);
   if (!paneState.expanded) {
-    assert.ok(paneState.point, "collapsed project checks pane has a native header");
+    assert.ok(paneState.point, "collapsed workspace checks pane has a native header");
     await nativeWorkbench(async send => {
       await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: paneState.point.x, y: paneState.point.y });
       await send("Input.dispatchMouseEvent", { type: "mousePressed", x: paneState.point.x, y: paneState.point.y, button: "left", clickCount: 1 });
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: paneState.point.x, y: paneState.point.y, button: "left", clickCount: 1 });
     });
-    await waitFor(() => nativeValue(`(() => [...document.querySelectorAll('.pane')].some(value=>value.textContent.includes('Dynare project checks')&&value.classList.contains('expanded')))()`),
-      "project checks pane expands");
+    await waitFor(() => nativeValue(`(() => [...document.querySelectorAll('.pane')].some(value=>value.textContent.includes('Dynare workspace checks')&&value.classList.contains('expanded')))()`),
+      "workspace checks pane expands");
   }
 }
-async function status(service) { return service.execute("dynare/projectStatus"); }
+async function status(service) { return service.execute("dynare/workspaceStatus"); }
 async function waitInventory(service, waitFor, predicate, description) {
   let current;
   await waitFor(async () => {
@@ -121,7 +121,7 @@ async function ignoreFolderRow(label, workspaceRoot, waitFor, occurrence = 0) {
   await revealRow(label, waitFor);
   const selector = await rowSelector(label, occurrence);
   const rowPoint = await nativeValue(`(() => { const row=${selector}; if(!row) return undefined; const box=row.getBoundingClientRect(); return {x:box.x+box.width/2,y:box.y+box.height/2}; })()`);
-  assert.ok(rowPoint, `native project row ${label} has a visible hit target`);
+  assert.ok(rowPoint, `native workspace row ${label} has a visible hit target`);
   await nativeWorkbench(send => send("Input.dispatchMouseEvent", { type: "mouseMoved", x: rowPoint.x, y: rowPoint.y }));
   const actionSelector = `(() => { const row=${selector}; return [...(row?.querySelectorAll('.action-label')??[])].find(item=>item.title==='Ignore this folder'||item.getAttribute('aria-label')==='Ignore this folder'); })()`;
   await waitFor(() => nativeValue(`(() => { const item=${actionSelector}; const box=item?.getBoundingClientRect(); return !!item&&box.width>0&&box.height>0; })()`),
@@ -138,14 +138,14 @@ async function ignoreFolderRow(label, workspaceRoot, waitFor, occurrence = 0) {
   // This action writes its relative pattern directly; it must not open a picker.
   await waitFor(() => nativeValue("!document.querySelector('.quick-input-widget input')?.getClientRects().length"), "Ignore this folder finishes without a picker");
   const expected = label === path.basename(workspaceRoot) ? "**" : `${label}/**`;
-  await waitFor(() => vscode.workspace.getConfiguration("dynare", vscode.workspace.workspaceFolders[0].uri).get("projectExcludePaths", []).includes(expected),
+  await waitFor(() => vscode.workspace.getConfiguration("dynare", vscode.workspace.workspaceFolders[0].uri).get("workspaceExcludePaths", []).includes(expected),
     `${label} exclusion is saved at workspace-folder scope`);
   return expected;
 }
 
-async function checkProjectHost(service, workspaceRoot, evidence, { waitFor }) {
-  assert.ok(process.env.DYGNOSIS_HOST_CDP_PORT, "Project acceptance requires the isolated native host CDP port");
-  await waitFor(() => service.client && service.supportsModelInfo, "project status language client startup");
+async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor }) {
+  assert.ok(process.env.DYGNOSIS_HOST_CDP_PORT, "Workspace acceptance requires the isolated native host CDP port");
+  await waitFor(() => service.client && service.supportsModelInfo, "workspace status language client startup");
 
   const files = new Map([
     ["root.mod", "var root_y; model; root_y=1; end;\n"],
@@ -166,65 +166,65 @@ async function checkProjectHost(service, workspaceRoot, evidence, { waitFor }) {
   }
 
   const expectedIncludes = [...files.keys()].filter(name => name.endsWith(".inc") && !name.startsWith("+")).map(name => path.join(workspaceRoot, name).toLowerCase()).sort();
-  let projectStatus = await waitInventory(service, waitFor, values => expectedIncludes.length === values.length,
-    "project status reports every saved .inc path");
-  const includePaths = projectStatus.include_files.map(uriPath);
+  let workspaceStatus = await waitInventory(service, waitFor, values => expectedIncludes.length === values.length,
+    "workspace status reports every saved .inc path");
+  const includePaths = workspaceStatus.include_files.map(uriPath);
   assert.deepEqual([...includePaths].sort(), expectedIncludes, "saved and unreferenced includes have a unique URI inventory");
-  assert.ok(!projectStatus.include_files.some(value => uriPath(value) === path.join(workspaceRoot, "+generated/skip.inc").toLowerCase()),
+  assert.ok(!workspaceStatus.include_files.some(value => uriPath(value) === path.join(workspaceRoot, "+generated/skip.inc").toLowerCase()),
     "the saved include inventory skips generated + directories");
-  assert.equal(projectStatus.roots.length, 5, "root .mod and .dyn files are checked without opening them");
-  assert.equal(projectStatus.counts.checked, 5, "include files do not contribute to model coverage");
-  for (const root of projectStatus.roots) assert.ok(!vscode.workspace.textDocuments.some(document => document.uri.fsPath.toLowerCase() === uriPath(root.root_uri)), "project model discovery does not open the model");
-  evidence.project = { model_roots: projectStatus.roots.map(root => root.root_uri), include_files: projectStatus.include_files };
+  assert.equal(workspaceStatus.roots.length, 5, "root .mod and .dyn files are checked without opening them");
+  assert.equal(workspaceStatus.counts.checked, 5, "include files do not contribute to model coverage");
+  for (const root of workspaceStatus.roots) assert.ok(!vscode.workspace.textDocuments.some(document => document.uri.fsPath.toLowerCase() === uriPath(root.root_uri)), "workspace model discovery does not open the model");
+  evidence.workspace = { model_roots: workspaceStatus.roots.map(root => root.root_uri), include_files: workspaceStatus.include_files };
 
   await openExplorer(waitFor);
-  await enlargeProjectTreePane();
-  await scrollProjectTreeToTop();
+  await enlargeWorkspaceTreePane();
+  await scrollWorkspaceTreeToTop();
   await expandFolder(path.basename(workspaceRoot), waitFor);
   for (const folder of ["alpha", "beta", "includes", "models", "only-includes"])
     await expandFolder(folder, waitFor);
   await expandFolder("variants", waitFor);
   for (const name of ["root.mod", "root.dyn", "policy.dyn", "shared.inc", "calibration.inc", "standalone.inc"])
     await revealRow(name, waitFor);
-  await scrollProjectTreeToTop();
+  await scrollWorkspaceTreeToTop();
   await waitFor(async () => {
     const rows = await treeRows();
     return rows.filter(row => row.label === "same.mod").length === 2;
-  }, "native project tree renders both sibling model rows after expansion");
+  }, "native workspace tree renders both sibling model rows after expansion");
   let rows = await treeRows();
   for (const label of ["alpha", "beta", "same.mod"])
-    assert.ok(rowTextIncludes(rows, label), `native project tree shows ${label}`);
+    assert.ok(rowTextIncludes(rows, label), `native workspace tree shows ${label}`);
   assert.equal(rows.filter(row => row.label === "same.mod").length, 2,
     "same-name models remain separate rows under sibling directories");
   assert.ok(!rowTextIncludes(rows, "alpha/same.mod"), "model labels use basenames while folders carry paths");
   for (const name of ["root.mod", "root.dyn", "policy.dyn", "shared.inc", "calibration.inc", "standalone.inc"]) {
     await revealRow(name, waitFor);
     const fileRow = (await findRows(name))[0];
-    assert.ok(fileRow, `native project tree shows ${name}`);
+    assert.ok(fileRow, `native workspace tree shows ${name}`);
     assert.ok(!fileRow.label.includes("/"), `${name} uses a basename label`);
     if (name.endsWith(".inc")) assert.match(fileRow.text, /Include file/, `${name} has the Include file description`);
     if (name.endsWith(".inc")) assert.equal((await treeRows()).filter(row => row.label === name).length, 1, `${name} appears once at its actual path`);
   }
-  await scrollProjectTreeToTop();
+  await scrollWorkspaceTreeToTop();
 
   const alphaPattern = await ignoreFolderRow("alpha", workspaceRoot, waitFor);
   const alphaRootPath = path.join(workspaceRoot, "alpha", "same.mod").toLowerCase();
   await waitFor(async () => {
-    projectStatus = await status(service);
-    return projectStatus?.complete && projectStatus.roots.find(root => uriPath(root.root_uri) === alphaRootPath)?.state === "excluded";
+    workspaceStatus = await status(service);
+    return workspaceStatus?.complete && workspaceStatus.roots.find(root => uriPath(root.root_uri) === alphaRootPath)?.state === "excluded";
   }, "Ignore this folder excludes the nested alpha model").catch(error => {
-    error.message += `; latest projectStatus=${JSON.stringify(projectStatus)}`;
+    error.message += `; latest workspaceStatus=${JSON.stringify(workspaceStatus)}`;
     throw error;
   });
-  assert.equal(projectStatus.roots.length, 5, "ignoring one directory preserves every discovered model root");
-  assert.ok(projectStatus.include_files.some(value => uriPath(value) === path.join(workspaceRoot, "includes/shared.inc").toLowerCase()),
+  assert.equal(workspaceStatus.roots.length, 5, "ignoring one directory preserves every discovered model root");
+  assert.ok(workspaceStatus.include_files.some(value => uriPath(value) === path.join(workspaceRoot, "includes/shared.inc").toLowerCase()),
     "nested model exclusion does not hide a shared include entry");
   await revealRow("shared.inc", waitFor);
-  await vscode.workspace.getConfiguration("dynare", vscode.workspace.workspaceFolders[0].uri).update("projectExcludePaths", [], vscode.ConfigurationTarget.WorkspaceFolder);
+  await vscode.workspace.getConfiguration("dynare", vscode.workspace.workspaceFolders[0].uri).update("workspaceExcludePaths", [], vscode.ConfigurationTarget.WorkspaceFolder);
   await waitFor(async () => {
-    projectStatus = await status(service);
-    return projectStatus?.complete && projectStatus.roots.every(root => root.state === "checked");
-  }, "clear nested exclusion before continuing project tree checks");
+    workspaceStatus = await status(service);
+    return workspaceStatus?.complete && workspaceStatus.roots.every(root => root.state === "checked");
+  }, "clear nested exclusion before continuing workspace tree checks");
   evidence.checks.push(`Ignore this folder on alpha writes ${alphaPattern}, excludes its model, and retains its shared include`);
 
   await revealRow("alpha", waitFor);
@@ -249,11 +249,11 @@ async function checkProjectHost(service, workspaceRoot, evidence, { waitFor }) {
   await revealRow("models", waitFor);
   await clickRow("models", 0, true);
   await waitFor(async () => (await findRows("models"))[0]?.expanded === "false", "models folder collapses");
-  await vscode.commands.executeCommand("dygnosis.recheckProject");
-  await waitFor(async () => { projectStatus = await status(service); return projectStatus?.complete && projectStatus.pass_revision > 1; }, "native project Recheck completes a status update");
+  await vscode.commands.executeCommand("dygnosis.recheckWorkspace");
+  await waitFor(async () => { workspaceStatus = await status(service); return workspaceStatus?.complete && workspaceStatus.pass_revision > 1; }, "native workspace Recheck completes a status update");
   await revealRow("models", waitFor);
   await waitFor(async () => (await findRows("models"))[0]?.expanded === "false", "status update preserves the collapsed models folder");
-  evidence.checks.push("native project tree groups root and nested .mod/.dyn files, keeps independent folder state through status refresh, and displays saved includes once outside coverage counts");
+  evidence.checks.push("native workspace tree groups root and nested .mod/.dyn files, keeps independent folder state through status refresh, and displays saved includes once outside coverage counts");
 
   // Opening one of two equal basenames must use the selected row's URI.
   await revealRow("alpha", waitFor);
@@ -290,11 +290,11 @@ async function checkProjectHost(service, workspaceRoot, evidence, { waitFor }) {
 
   await ignoreFolderRow(path.basename(workspaceRoot), workspaceRoot, waitFor);
   await waitFor(async () => {
-    projectStatus = await status(service);
-    return projectStatus?.complete && projectStatus.roots.every(root => root.state === "excluded");
+    workspaceStatus = await status(service);
+    return workspaceStatus?.complete && workspaceStatus.roots.every(root => root.state === "excluded");
   }, "Ignore this folder excludes all workspace model roots");
-  assert.equal(projectStatus.counts.excluded, 5, "workspace ignore excludes all selected model roots");
-  assert.deepEqual(projectStatus.include_files.map(uriPath).sort(), expectedIncludes,
+  assert.equal(workspaceStatus.counts.excluded, 5, "workspace ignore excludes all selected model roots");
+  assert.deepEqual(workspaceStatus.include_files.map(uriPath).sort(), expectedIncludes,
     "workspace model exclusion keeps the saved include inventory unchanged");
   await expandFolder("only-includes", waitFor);
   await revealRow("standalone.inc", waitFor);
@@ -302,4 +302,4 @@ async function checkProjectHost(service, workspaceRoot, evidence, { waitFor }) {
   evidence.checks.push("Ignore this folder on the workspace row writes **, excludes every selected model root, and retains the complete include inventory");
 }
 
-module.exports = { checkProjectHost };
+module.exports = { checkWorkspaceHost };

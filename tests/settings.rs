@@ -883,7 +883,7 @@ impl Wire {
         );
         assert!(
             capabilities["experimental"]["dygnosis"]
-                .get("projectStatus")
+                .get("workspaceStatus")
                 .is_none()
         );
         self.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}))

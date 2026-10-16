@@ -5,7 +5,8 @@ Dygnosis adds Dynare language support to VS Code. Install it from the [VS Code M
 - Edit with live diagnostics, hover, completion, document or selection formatting, fixes, and commented shock templates.
 - Follow names with **Go to Definition**, **Find All References** and **Rename symbol** across known includes. Browse **Outline**, fold blocks and open linked model files.
 - Inspect model counts, equations, includes, and expanded source, with jumps back to the written equations.
-- Compare a model with Git history or another `.mod` file; check unopened saved models in a project.
+- Compare a model with Git history or another `.mod` file.
+- An overview of all dynare models in the current workspace.
 - Run **Dygnosis: Open Help** to learn more.
 
 It also provides [MCP tools](https://github.com/naivej/dygnosis/blob/main/help/agents.md) and a [use-dynare skill](https://github.com/naivej/dygnosis/blob/main/.agents/skills/use-dynare/SKILL.md) for agents.

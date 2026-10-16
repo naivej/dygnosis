@@ -23,7 +23,7 @@ function uri(value) {
   const parsed = new URL(value);
   return { scheme: parsed.protocol.slice(0, -1), path: parsed.pathname, toString: () => value };
 }
-function document(value = "file:///project/main.mod", extra = {}) {
+function document(value = "file:///workspace/main.mod", extra = {}) {
   const lines = Array(60).fill(" ".repeat(40));
   return { uri: uri(value), languageId: "dynare", version: 1, isClosed: false,
     lineCount: lines.length, lineAt: index => {
@@ -112,7 +112,7 @@ const tintCategoryDefaults = [
   ["pac_target_info", "subtle"], ["epilogue", "subtle"], ["verbatim", "subtle"], ["priors", "subtle"],
 ];
 const registry = tintCategoryDefaults.map(([category, fallback]) => ({ category, default: fallback }));
-function location(value = "file:///project/main.mod", start = 2, end = 5, character = 0, lastCharacter = 4) {
+function location(value = "file:///workspace/main.mod", start = 2, end = 5, character = 0, lastCharacter = 4) {
   return { uri: value, range: { start: { line: start, character }, end: { line: end, character: lastCharacter } } };
 }
 function block(overrides = {}) {
@@ -275,7 +275,7 @@ test("dimension overrides take priority only for registered heterogeneous model 
 });
 
 test("split includes stay separate, macro copies deduplicate, source envelopes and anchors are never used", () => {
-  const local = location(undefined, 2, 3), later = location(undefined, 10, 11), foreign = location("file:///project/part.inc", 1, 7);
+  const local = location(undefined, 2, 3), later = location(undefined, 10, 11), foreign = location("file:///workspace/part.inc", 1, 7);
   const statement = block({ location: location(undefined, 0, 40), anchor: location(undefined, 1, 1), segments: [local, foreign, later] });
   const ranges = pure(facts(undefined, { statements: [statement, { ...statement, id: "macro:copy" }, block({ segments: [], location: location(undefined, 30, 40) })] }));
   assert.deepEqual(ranges.model.map(range => [range.start.line, range.end.line]), [[2, 3], [10, 11]]);
@@ -292,7 +292,7 @@ test("macro copies with conflicting dimension styles leave the shared written si
 test("exclusive end at column zero does not tint the next line; malformed/out-of-file segments are refused", () => {
   const segments = [location(undefined, 2, 5, 3, 0), location(undefined, 9, 9, 0, 0), location(undefined, 10, 61),
     location(undefined, 11, 12, 41), location(undefined, 11, 12, 0, 41), location(undefined, 13, 12),
-    { uri: "file:///project/main.mod", range: { start: { line: -1, character: 0 }, end: { line: 2, character: 0 } } }];
+    { uri: "file:///workspace/main.mod", range: { start: { line: -1, character: 0 }, end: { line: 2, character: 0 } } }];
   const result = pure(facts(undefined, { statements: [block({ segments })] }));
   assert.equal(result.model.length, 1); assert.deepEqual(result.model[0], new Range(2, 3, 4, 40));
 });
@@ -334,13 +334,13 @@ test("style and dimension reset restore declared defaults live without restartin
 
 test("unsupported previews, other languages, closed documents, and ownerless includes stay clear", async () => {
   for (const doc of [document("dygnosis-effective:/main.mod"), document("vscode-vfs:/main.mod"),
-    document(undefined, { languageId: "plaintext" }), document(undefined, { isClosed: true }), document("file:///project/ownerless.inc")]) {
+    document(undefined, { languageId: "plaintext" }), document(undefined, { isClosed: true }), document("file:///workspace/ownerless.inc")]) {
     const env = setup(doc); await flush(); assert.equal(env.ranges("model").length, 0); assert.equal(env.service.requests.length, 0); env.registration.dispose();
   }
 });
 
 test("ordinary dyn and untitled models preserve their URI for model facts and decorations", async () => {
-  for (const value of ["file:///project/model.DYN", "untitled:/scratch.mod"]) {
+  for (const value of ["file:///workspace/model.DYN", "untitled:/scratch.mod"]) {
     const env = setup(document(value)); await flush();
     assert.deepEqual(env.service.requests[0], { root: value, document: value }); assert.equal(env.ranges("model").length, 1);
     env.registration.dispose();
@@ -350,8 +350,8 @@ test("ordinary dyn and untitled models preserve their URI for model facts and de
 test("stale root replies lose to current roots and old revisions cannot restore earlier decorations", async () => {
   const env = setup(); await flush(); const old = deferred(), next = deferred();
   env.service.modelInfo = () => old.promise; env.changed.fire(); await flush();
-  env.service.root = uri("file:///project/next.mod"); env.service.modelInfo = () => next.promise; env.changed.fire(); await flush();
-  next.resolve(facts(env.doc, { root_uri: "file:///project/next.mod", revision: "next", statements: [block({ category: "initval" })] })); await flush();
+  env.service.root = uri("file:///workspace/next.mod"); env.service.modelInfo = () => next.promise; env.changed.fire(); await flush();
+  next.resolve(facts(env.doc, { root_uri: "file:///workspace/next.mod", revision: "next", statements: [block({ category: "initval" })] })); await flush();
   old.resolve(facts(env.doc)); await flush(); assert.equal(env.ranges("model").length, 0); assert.equal(env.ranges("subtle").length, 1);
   env.registration.dispose();
 });
@@ -364,7 +364,7 @@ test("version, engine, document identity and visible-editor changes reject late 
     if (kind === "version") ++env.doc.version;
     if (kind === "instance") ++env.service.currentInstance;
     if (kind === "client") env.service.client = {};
-    if (kind === "document") original.document = document("file:///project/new.mod");
+    if (kind === "document") original.document = document("file:///workspace/new.mod");
     if (kind === "hidden") env.host.editors = [];
     if (kind === "closed") env.doc.isClosed = true;
     if (kind === "language") env.doc.languageId = "plaintext";
@@ -381,14 +381,14 @@ test("mismatched snapshot root, resource, version or instance is refused", async
 });
 
 test("owner changes while fetching or checking the root prevent old include tint", async () => {
-  const env = setup(document("file:///project/part.inc")); env.service.root = uri("file:///project/a.mod");
+  const env = setup(document("file:///workspace/part.inc")); env.service.root = uri("file:///workspace/a.mod");
   const late = deferred(); env.service.modelInfo = () => late.promise; env.changed.fire(); await flush();
-  env.service.root = uri("file:///project/b.mod"); late.resolve(facts(env.doc, { root_uri: "file:///project/a.mod" })); await flush();
+  env.service.root = uri("file:///workspace/b.mod"); late.resolve(facts(env.doc, { root_uri: "file:///workspace/a.mod" })); await flush();
   assert.equal(env.ranges("model").length, 0);
   const rootCheck = deferred(); let calls = 0;
-  env.service.rootForDocument = () => ++calls === 1 ? Promise.resolve(uri("file:///project/a.mod")) : rootCheck.promise;
-  env.service.modelInfo = async () => facts(env.doc, { root_uri: "file:///project/a.mod" }); env.changed.fire(); await flush();
-  env.configure("blockTint.enabled", false); rootCheck.resolve(uri("file:///project/a.mod")); await flush();
+  env.service.rootForDocument = () => ++calls === 1 ? Promise.resolve(uri("file:///workspace/a.mod")) : rootCheck.promise;
+  env.service.modelInfo = async () => facts(env.doc, { root_uri: "file:///workspace/a.mod" }); env.changed.fire(); await flush();
+  env.configure("blockTint.enabled", false); rootCheck.resolve(uri("file:///workspace/a.mod")); await flush();
   assert.equal(env.ranges("model").length, 0); env.registration.dispose();
 });
 
@@ -403,7 +403,7 @@ test("edits retain tint; detached editors clear and cannot receive old replies",
   const env = setup(); await flush(); const first = env.host.editors[0];
   const late = deferred(); env.service.modelInfo = () => late.promise; ++env.doc.version;
   env.host.edited.fire({ document: env.doc, contentChanges: [{ text: "x" }] }); assert.equal(env.ranges("model").length, 1); await flush();
-  const replacement = editor(document("file:///project/second.mod")); env.host.editors = [replacement]; env.host.visible.fire(env.host.editors);
+  const replacement = editor(document("file:///workspace/second.mod")); env.host.editors = [replacement]; env.host.visible.fire(env.host.editors);
   late.resolve(facts(env.doc)); await flush();
   assert.equal(first.decorations.get("dynare.blockTint.modelBackground").length, 0); assert.equal(env.ranges("model").length, 0);
   env.registration.dispose();
@@ -468,7 +468,7 @@ test("successive edits coalesce and reject a response that arrives during the ne
 });
 
 test("focus changes preserve visible tint and empty document changes make no requests", async () => {
-  const env = setup(undefined, [document("file:///project/other.mod")]); await flush();
+  const env = setup(undefined, [document("file:///workspace/other.mod")]); await flush();
   const editors = [...env.host.editors], offsets = editors.map(item => item.calls.length);
   const requests = env.service.requests.length;
   env.host.edited.fire({ document: env.doc, contentChanges: [] }); await flush();

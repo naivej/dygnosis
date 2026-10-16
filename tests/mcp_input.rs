@@ -361,11 +361,11 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
     }
     // Exercise relative sibling folders through the published JSON arguments,
     // not only through the repository adapter's internal entry point.
-    let project = directory.join("project");
+    let workspace = directory.join("workspace");
     let common = directory.join("common");
-    std::fs::create_dir(&project).unwrap();
+    std::fs::create_dir(&workspace).unwrap();
     std::fs::create_dir(&common).unwrap();
-    std::fs::write(project.join("main.mod"), root).unwrap();
+    std::fs::write(workspace.join("main.mod"), root).unwrap();
     std::fs::write(common.join("eq.inc"), "[name='eq'] y=4;\n").unwrap();
     for command_args in [
         vec!["init", "--quiet"],
@@ -376,7 +376,7 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
     ] {
         let output = Command::new("git")
             .arg("-C")
-            .arg(&project)
+            .arg(&workspace)
             .args(command_args)
             .output()
             .unwrap();
@@ -386,7 +386,7 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    let mut sibling_arguments = json!({"comparison":{"kind":"repository","repository_path":project.to_str().unwrap(),
+    let mut sibling_arguments = json!({"comparison":{"kind":"repository","repository_path":workspace.to_str().unwrap(),
         "before":{"kind":"working", "root_file":"main.mod"},
         "after":{"kind":"working", "root_file":"main.mod"}, "search_paths":["../common"]},"detail":"full"});
     let sibling_saved = decode(wire.call("dynare_compare_models", sibling_arguments.clone()));

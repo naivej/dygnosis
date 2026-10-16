@@ -18,7 +18,7 @@ function uri(value) {
   const parsed = new URL(value);
   return { scheme: parsed.protocol.slice(0, -1), path: parsed.pathname, fsPath: decodeURIComponent(parsed.pathname), toString: () => value };
 }
-function document(value = "file:///project/main.mod", extra = {}) {
+function document(value = "file:///workspace/main.mod", extra = {}) {
   return { uri: uri(value), languageId: "dynare", version: 1, isClosed: false, ...extra };
 }
 function deferred() {
@@ -51,7 +51,7 @@ const vscode = {
     },
   },
   workspace: {
-    asRelativePath: value => value.path.replace(/^\/project\//, ""),
+    asRelativePath: value => value.path.replace(/^\/workspace\//, ""),
     onDidChangeTextDocument: listener => host.edited.event(listener),
     onDidCloseTextDocument: listener => host.closed.event(listener),
     onDidChangeConfiguration: listener => host.configured.event(listener),
@@ -72,7 +72,7 @@ Module._load = function(id, ...args) {
 const { registerModelNavigation, sameWrittenLocation } = require(compiledModule("model_navigation"));
 Module._load = originalLoad;
 
-function location(value = "file:///project/main.mod", line = 5) {
+function location(value = "file:///workspace/main.mod", line = 5) {
   return { uri: value, range: { start: { line, character: 2 }, end: { line, character: 10 } } };
 }
 function equation(id = "aggregate:1", overrides = {}) {
@@ -145,12 +145,12 @@ test("one unnamed equation still opens the searchable list before its verified j
   env.registration.dispose();
 });
 test("same equation numbers across scopes remain distinct rows in the only picker", async () => {
-  const env = setup(); env.service.info = () => facts(env.doc, { equations: [equation(), equation("dimension:1", { name: "", scope: "dimension", dimension: "households", location: location("file:///project/hank.inc", 20) })] });
+  const env = setup(); env.service.info = () => facts(env.doc, { equations: [equation(), equation("dimension:1", { name: "", scope: "dimension", dimension: "households", location: location("file:///workspace/hank.inc", 20) })] });
   env.host.answers.push(items => items[1]); await env.run("jumpToEquation");
   assert.equal(env.host.picks.length, 1); assert.equal(env.host.inputs.length, 0);
   assert.deepEqual(env.host.picks[0].items.map(item => item.label), ["1 · Euler", "1 · Unnamed equation"]);
   assert.match(env.host.picks[0].items[1].description, /Dimension households.*hank.inc:21/);
-  assert.equal(env.service.jumps[0].target.uri, "file:///project/hank.inc"); env.registration.dispose();
+  assert.equal(env.service.jumps[0].target.uri, "file:///workspace/hank.inc"); env.registration.dispose();
 });
 test("equation list cancellation leaves the cursor and source untouched", async () => {
   const env = setup(); const editor = env.host.editor; editor.selection = { line: 8, character: 3 };
@@ -165,7 +165,7 @@ test("empty, incomplete, unowned and unavailable models explain why no equation 
   assert.equal(env.host.messages.at(-1), "This model has no counted equations.");
   env.service.info = () => facts(env.doc, { complete: false }); await env.run("jumpToEquation");
   assert.match(env.host.messages.at(-1), /expansion is incomplete/);
-  env.host.editor = { document: document("file:///project/part.inc") }; await env.run("jumpToEquation");
+  env.host.editor = { document: document("file:///workspace/part.inc") }; await env.run("jumpToEquation");
   assert.match(env.host.messages.at(-1), /known model owner/);
   env.host.editor = { document: env.doc }; env.service.modelInfo = async () => undefined; await env.run("jumpToEquation");
   assert.match(env.host.messages.at(-1), /information is unavailable/);
@@ -174,7 +174,7 @@ test("empty, incomplete, unowned and unavailable models explain why no equation 
   assert.equal(env.host.picks.length, 0); assert.equal(env.service.jumps.length, 0); env.registration.dispose();
 });
 test("unsupported and closed documents do not acquire navigation or owner facts", async () => {
-  for (const doc of [document("dygnosis-effective:/main.mod"), document("file:///project/data.txt", { languageId: "plaintext" }), document(undefined, { isClosed: true })]) {
+  for (const doc of [document("dygnosis-effective:/main.mod"), document("file:///workspace/data.txt", { languageId: "plaintext" }), document(undefined, { isClosed: true })]) {
     const env = setup(doc); await env.run("jumpToEquation"); await env.run("chooseModelOwner");
     assert.equal(env.service.requests.length, 0); assert.equal(env.host.picks.length, 0); env.registration.dispose();
   }
@@ -187,17 +187,17 @@ test("fresh equation replies with the wrong root, document, version or instance 
   }
 });
 test("shared includes choose a validated owner and equation navigation uses that root", async () => {
-  const env = setup(document("file:///project/part.inc")); env.service.owners = [uri("file:///project/a.mod"), uri("file:///project/b.mod")];
+  const env = setup(document("file:///workspace/part.inc")); env.service.owners = [uri("file:///workspace/a.mod"), uri("file:///workspace/b.mod")];
   env.service.info = (root, current) => facts(env.doc, { root_uri: root.toString(), document_uri: current.toString(), owner_roots: [root.toString()] });
   env.host.answers.push(items => items[1]); await env.run("chooseModelOwner");
-  assert.equal(env.service.selected.get(env.doc.uri.toString()).toString(), "file:///project/b.mod");
-  assert.equal(env.service.validations.at(-1).root, "file:///project/b.mod");
+  assert.equal(env.service.selected.get(env.doc.uri.toString()).toString(), "file:///workspace/b.mod");
+  assert.equal(env.service.validations.at(-1).root, "file:///workspace/b.mod");
   env.host.answers.push(items => items[0]); await env.run("jumpToEquation");
-  assert.equal(env.service.jumps[0].root, "file:///project/b.mod"); env.registration.dispose();
+  assert.equal(env.service.jumps[0].root, "file:///workspace/b.mod"); env.registration.dispose();
 });
 test("owner cancellation, changes, closure and disposal during selection preserve ownership", async () => {
   for (const change of ["cancel", "version", "focus", "instance", "closed", "dispose", "revision", "removedOwner", "wrongRoot", "wrongDocument", "wrongVersion", "wrongInstance"]) {
-    const env = setup(document("file:///project/part.inc")); const root = uri("file:///project/a.mod");
+    const env = setup(document("file:///workspace/part.inc")); const root = uri("file:///workspace/a.mod");
     env.service.owners = [root]; env.service.info = () => facts(env.doc, { root_uri: root.toString(), owner_roots: [root.toString()] });
     const pick = deferred(); env.host.answers.push(() => pick.promise); const pending = env.run("chooseModelOwner"); await flush();
     if (change === "version") ++env.doc.version;
@@ -214,7 +214,7 @@ test("owner cancellation, changes, closure and disposal during selection preserv
 });
 test("owner facts that arrive after disposal or edits never display a stale owner picker", async () => {
   for (const change of ["dispose", "edit", "restart"]) {
-    const env = setup(document("file:///project/part.inc")); const root = uri("file:///project/a.mod"), late = deferred();
+    const env = setup(document("file:///workspace/part.inc")); const root = uri("file:///workspace/a.mod"), late = deferred();
     env.service.owners = [root]; env.service.modelInfo = () => late.promise;
     const pending = env.run("chooseModelOwner"); await flush();
     if (change === "dispose") env.registration.dispose();
@@ -225,7 +225,7 @@ test("owner facts that arrive after disposal or edits never display a stale owne
   }
 });
 test("owner discovery can start the client before owner facts pin its instance", async () => {
-  const env = setup(document("file:///project/part.inc")), root = uri("file:///project/a.mod");
+  const env = setup(document("file:///workspace/part.inc")), root = uri("file:///workspace/a.mod");
   env.service.ownerChoices = async () => { env.service.currentInstance = 2; return [root]; };
   env.service.info = () => facts(env.doc, { root_uri: root.toString(), owner_roots: [root.toString()], client_instance: 2 });
   env.host.answers.push(items => items[0]); await env.run("chooseModelOwner");
@@ -233,7 +233,7 @@ test("owner discovery can start the client before owner facts pin its instance",
   assert.equal(env.service.validations[0].instance, 2); env.registration.dispose();
 });
 test("no known owner explains recovery without selecting an arbitrary root", async () => {
-  const env = setup(document("file:///project/part.inc")); await env.run("chooseModelOwner");
+  const env = setup(document("file:///workspace/part.inc")); await env.run("chooseModelOwner");
   assert.equal(env.host.messages.at(-1), "No known model owns this include. Open its model root first.");
   assert.equal(env.service.selected.size, 0); env.registration.dispose();
 });
@@ -248,7 +248,7 @@ test("disposal removes commands and prevents pending or retained callbacks from 
 test("equation search distinguishes scopes, files and macro occurrences at the same written site", async () => {
   const env = setup(); const repeated = [equation("copy:1", { origin_frames: [{ kind: "for", variable: "i", value: "1", segments: [location()] }] }),
     equation("copy:2", { number: 2, origin_frames: [{ kind: "for", variable: "i", value: "2", segments: [location()] }] }),
-    equation("dimension:1", { dimension: "firms", scope: "dimension", location: location("file:///project/firms.inc") })];
+    equation("dimension:1", { dimension: "firms", scope: "dimension", location: location("file:///workspace/firms.inc") })];
   env.service.info = () => facts(env.doc, { equations: repeated }); await flush();
   env.host.answers.push(items => items[1]); await env.run("jumpToEquation");
   const picker = env.host.picks[0]; assert.equal(picker.items.length, 3); assert.equal(picker.options.matchOnDescription, true); assert.equal(picker.options.matchOnDetail, true);
@@ -261,10 +261,10 @@ test("root/version/restart changes while a picker is open refuse the old equatio
   for (const kind of ["root", "version", "client", "document"]) {
     const env = setup(); await flush(); const pick = deferred(); env.host.answers.push(() => pick.promise);
     const pending = env.run("jumpToEquation"); await flush(); const chosen = env.host.picks.at(-1).items[0];
-    if (kind === "root") env.service.root = uri("file:///project/changed.mod");
+    if (kind === "root") env.service.root = uri("file:///workspace/changed.mod");
     else if (kind === "version") ++env.doc.version;
     else if (kind === "client") ++env.service.currentInstance;
-    else env.host.editor = { document: document("file:///project/other.mod") };
+    else env.host.editor = { document: document("file:///workspace/other.mod") };
     pick.resolve(chosen); await pending; assert.equal(env.service.jumps.length, 0); env.registration.dispose();
   }
 });
@@ -278,7 +278,7 @@ test("dependency/settings revision changes and missing current identities refuse
 test("owner changes during the fresh revision request refuse the old target", async () => {
   const env = setup(); await flush(); const fresh = deferred(); env.service.revalidate = () => fresh.promise;
   env.host.answers.push(items => items[0]); const pending = env.run("jumpToEquation"); await flush();
-  env.service.root = uri("file:///project/changed.mod"); fresh.resolve(facts(env.doc)); await pending;
+  env.service.root = uri("file:///workspace/changed.mod"); fresh.resolve(facts(env.doc)); await pending;
   assert.equal(env.service.jumps.length, 0); assert.match(env.host.messages.at(-1), /model changed/); env.registration.dispose();
 });
 test("source edits, focus, ownership, restart, and dependency revisions during source loading refuse the jump", async () => {
@@ -287,8 +287,8 @@ test("source edits, focus, ownership, restart, and dependency revisions during s
     env.host.answers.push(items => items[0]); const pending = env.run("jumpToEquation"); await flush();
     assert.equal(env.host.fileRequests.length, 1);
     if (change === "source") ++env.doc.version;
-    else if (change === "focus") env.host.editor = { document: document("file:///project/other.mod") };
-    else if (change === "owner") env.service.selected.set(env.doc.uri.toString(), uri("file:///project/other.mod"));
+    else if (change === "focus") env.host.editor = { document: document("file:///workspace/other.mod") };
+    else if (change === "owner") env.service.selected.set(env.doc.uri.toString(), uri("file:///workspace/other.mod"));
     else if (change === "restart") ++env.service.currentInstance;
     else env.service.revalidate = async () => undefined;
     loader.resolve(document()); await pending;
@@ -297,7 +297,7 @@ test("source edits, focus, ownership, restart, and dependency revisions during s
   }
 });
 test("a valid unopened include still jumps after its ordinary overlay is opened", async () => {
-  const env = setup(); const target = "file:///project/unopened.inc";
+  const env = setup(); const target = "file:///workspace/unopened.inc";
   env.service.info = () => facts(env.doc, { equations: [equation("include:1", { location: location(target, 11) })] });
   await flush(); const loader = deferred(); env.host.openDocument = () => loader.promise;
   env.host.answers.push(items => items[0]); const pending = env.run("jumpToEquation"); await flush();
@@ -307,12 +307,12 @@ test("a valid unopened include still jumps after its ordinary overlay is opened"
   assert.equal(env.service.validations.length, 2); env.registration.dispose();
 });
 test("file identity follows Windows case folding, with exact ranges and case-sensitive Unix and virtual URIs", () => {
-  const written = location("file:///C:/users/shifu/project/part.inc", 11);
-  const opened = location("file:///C:/Users/Shifu/project/part.inc", 11);
+  const written = location("file:///C:/users/shifu/workspace/part.inc", 11);
+  const opened = location("file:///C:/Users/Shifu/workspace/part.inc", 11);
   assert.equal(sameWrittenLocation(written, opened, "win32"), true);
   assert.equal(sameWrittenLocation(written, opened, "linux"), false);
   assert.equal(sameWrittenLocation(written, opened, "darwin"), false);
-  assert.equal(sameWrittenLocation(written, location("file:///C:/users/shifu/project/other.inc", 11), "win32"), false);
+  assert.equal(sameWrittenLocation(written, location("file:///C:/users/shifu/workspace/other.inc", 11), "win32"), false);
   assert.equal(sameWrittenLocation(written, location(written.uri, 12), "win32"), false);
   assert.equal(sameWrittenLocation(written, { ...written, range: { ...written.range, end: { line: 11, character: 11 } } }, "win32"), false);
   assert.equal(sameWrittenLocation(location("untitled:/Model.mod"), location("untitled:/model.mod"), "win32"), false);
@@ -320,11 +320,11 @@ test("file identity follows Windows case folding, with exact ranges and case-sen
 });
 test("post-loader mapping accepts Windows path spelling but refuses a different file or range", async () => {
   for (const change of ["case", "file", "range"]) {
-    const env = setup(); const written = location("file:///C:/users/shifu/project/part.inc", 11);
+    const env = setup(); const written = location("file:///C:/users/shifu/workspace/part.inc", 11);
     env.service.info = () => facts(env.doc, { equations: [equation("include:1", { location: written })] }); await flush();
     const loader = deferred(); env.host.openDocument = () => loader.promise;
     env.host.answers.push(items => items[0]); const pending = env.run("jumpToEquation"); await flush();
-    const opened = location(change === "file" ? "file:///C:/Users/Shifu/project/other.inc" : "file:///C:/Users/Shifu/project/part.inc", change === "range" ? 12 : 11);
+    const opened = location(change === "file" ? "file:///C:/Users/Shifu/workspace/other.inc" : "file:///C:/Users/Shifu/workspace/part.inc", change === "range" ? 12 : 11);
     env.service.fresh = facts(env.doc, { equations: [equation("include:1", { location: opened })] });
     loader.resolve(document(opened.uri)); await pending;
     assert.equal(env.service.jumps.length, change === "case" && process.platform === "win32" ? 1 : 0, change);
@@ -340,7 +340,7 @@ test("source target edits during the post-load revision request refuse display",
   assert.equal(env.service.jumps.length, 0); env.registration.dispose();
 });
 test("dyn and untitled roots preserve their original URI during navigation", async () => {
-  for (const value of ["file:///project/model.DYN", "untitled:/scratch.mod"]) {
+  for (const value of ["file:///workspace/model.DYN", "untitled:/scratch.mod"]) {
     const env = setup(document(value)); env.service.info = () => facts(env.doc, { equations: [equation("row", { location: location(value, 7) })] });
     await flush(); env.host.answers.push(items => items[0]); await env.run("jumpToEquation");
     assert.equal(env.service.jumps[0].root, value); assert.equal(env.service.jumps[0].target.uri, value); env.registration.dispose();

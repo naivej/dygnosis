@@ -7,7 +7,7 @@ import { resolveBinary, validateMcpBinary } from "../client/binary";
 import { record } from "../client/protocol";
 import { Log } from "../client/settings";
 
-const commandId = "dygnosis.setupProjectMcp";
+const commandId = "dygnosis.setupWorkspaceMcp";
 const reviewScheme = "dygnosis-mcp-review";
 const targets: Record<string, string> = {
   "win32-x64": "x86_64-pc-windows-msvc", "win32-arm64": "aarch64-pc-windows-msvc",
@@ -27,7 +27,7 @@ async function optionalBytes(file: string): Promise<Buffer | undefined> {
 function sameBytes(a: Buffer | undefined, b: Buffer | undefined): boolean { return a === undefined ? b === undefined : b !== undefined && a.equals(b); }
 
 /** Exclusive local-host lock. Stale removal is serialized to avoid deleting a new owner's lock. */
-export async function withProjectLock<T>(file: string, work: () => Promise<T>, attempts = 50, delayMs = 100): Promise<T> {
+export async function withWorkspaceLock<T>(file: string, work: () => Promise<T>, attempts = 50, delayMs = 100): Promise<T> {
   const token = `${process.pid}:${randomUUID()}`;
   for (let attempt = 0; attempt < attempts; ++attempt) {
     let handle;
@@ -161,7 +161,7 @@ export async function ensureManagedBinary(storage: string, bundle: VerifiedBundl
   const incoming = provenance(bundle.provenance);
   if (digest(bundle.bytes) !== incoming.binary_sha256) throw new Error("Verified Dygnosis package bytes changed before installation.");
   await fs.mkdir(files.directory, { recursive: true });
-  return withProjectLock(files.lock, async () => {
+  return withWorkspaceLock(files.lock, async () => {
     let active = await storedProvenance(files.active, incoming);
     let pending = await storedProvenance(files.pending, incoming);
     const working = await optionalBytes(files.binary);
@@ -234,17 +234,17 @@ function jsonTree(text: string): JsonNode {
   };
   return value();
 }
-export interface ProjectEntry { type: "stdio"; command: string; args: ["mcp"] }
-export interface ProjectMerge { text: string; identical: boolean; conflict: boolean }
-export function mergeProjectConfig(text: string, command: string): ProjectMerge {
-  if (!path.isAbsolute(command)) throw new Error("The project MCP command must be an absolute executable path.");
+export interface WorkspaceEntry { type: "stdio"; command: string; args: ["mcp"] }
+export interface WorkspaceMerge { text: string; identical: boolean; conflict: boolean }
+export function mergeWorkspaceConfig(text: string, command: string): WorkspaceMerge {
+  if (!path.isAbsolute(command)) throw new Error("The workspace MCP command must be an absolute executable path.");
   let parsed: unknown;
   try { parsed = JSON.parse(text); } catch (error) { throw new Error(".mcp.json is not strict JSON. Fix it before setup; the file was left intact.", { cause: error }); }
   if (!record(parsed) || Array.isArray(parsed)) throw new Error(".mcp.json must contain a JSON object. The file was left intact.");
   const root = jsonTree(text);
   const servers = root.properties?.get("mcpServers");
   if (servers && !servers.properties) throw new Error(".mcp.json mcpServers must be a JSON object. The file was left intact.");
-  const entry: ProjectEntry = { type: "stdio", command, args: ["mcp"] };
+  const entry: WorkspaceEntry = { type: "stdio", command, args: ["mcp"] };
   const current = servers?.properties?.get("dygnosis");
   if (current) {
     const old: unknown = JSON.parse(text.slice(current.start, current.end));
@@ -260,7 +260,7 @@ export function mergeProjectConfig(text: string, command: string): ProjectMerge 
   return { text: text.slice(0, offset) + insert + text.slice(offset), identical: false, conflict: false };
 }
 
-export function chooseProjectRoot(folder: vscode.Uri, repositories: readonly { rootUri: vscode.Uri }[]): vscode.Uri {
+export function chooseMcpRoot(folder: vscode.Uri, repositories: readonly { rootUri: vscode.Uri }[]): vscode.Uri {
   const matching = repositories.filter(repository => {
     if (repository.rootUri.scheme !== "file") return false;
     const relative = path.relative(repository.rootUri.fsPath, folder.fsPath);
@@ -270,16 +270,16 @@ export function chooseProjectRoot(folder: vscode.Uri, repositories: readonly { r
 }
 interface GitApi { repositories: readonly { rootUri: vscode.Uri }[] }
 interface GitExtension { getAPI(version: 1): GitApi }
-async function projectDestination(): Promise<vscode.Uri | undefined> {
+async function workspaceDestination(): Promise<vscode.Uri | undefined> {
   const folders = vscode.workspace.workspaceFolders;
-  if (!folders?.length) { await vscode.window.showInformationMessage("Open a project folder before setting up Dygnosis MCP."); return undefined; }
-  const chosen = folders.length === 1 ? folders[0] : (await vscode.window.showQuickPick(folders.map(folder => ({ label: folder.name, description: folder.uri.fsPath, folder })), { placeHolder: "Choose the project for .mcp.json", ignoreFocusOut: true }))?.folder;
+  if (!folders?.length) { await vscode.window.showInformationMessage("Open a workspace folder before setting up Dygnosis MCP."); return undefined; }
+  const chosen = folders.length === 1 ? folders[0] : (await vscode.window.showQuickPick(folders.map(folder => ({ label: folder.name, description: folder.uri.fsPath, folder })), { placeHolder: "Choose a workspace folder for .mcp.json", ignoreFocusOut: true }))?.folder;
   if (!chosen) return undefined;
-  if (chosen.uri.scheme !== "file") throw new Error("Dygnosis project MCP setup requires a file-backed folder on the extension host.");
+  if (chosen.uri.scheme !== "file") throw new Error("Dygnosis workspace MCP setup requires a file-backed folder on the extension host.");
   let root = chosen.uri;
   const git = vscode.extensions.getExtension<GitExtension>("vscode.git");
   if (git) {
-    try { const api = git.isActive ? git.exports : await git.activate(); root = chooseProjectRoot(chosen.uri, api.getAPI(1).repositories); }
+    try { const api = git.isActive ? git.exports : await git.activate(); root = chooseMcpRoot(chosen.uri, api.getAPI(1).repositories); }
     catch { /* Disabled/unavailable Git: selected folder remains the visible destination. */ }
   }
   return vscode.Uri.joinPath(root, ".mcp.json");
@@ -298,11 +298,11 @@ async function unchangedConfig(uri: vscode.Uri, snapshot: ConfigSnapshot): Promi
   if (!snapshot.document && vscode.workspace.textDocuments.some(document => document.uri.toString() === uri.toString())) throw new Error(".mcp.json was opened during setup. Run setup again to use its current buffer.");
 }
 /** Review and persistence are separate so cancellation and revision races are checked before mutation. */
-export async function writeProjectConfig(uri: vscode.Uri, command: string, review: (before: string, after: string) => Promise<boolean>): Promise<"saved" | "identical" | "cancelled"> {
-  const snapshot = await configSnapshot(uri), merged = mergeProjectConfig(snapshot.source, command);
+export async function writeWorkspaceConfig(uri: vscode.Uri, command: string, review: (before: string, after: string) => Promise<boolean>): Promise<"saved" | "identical" | "cancelled"> {
+  const snapshot = await configSnapshot(uri), merged = mergeWorkspaceConfig(snapshot.source, command);
   if (merged.identical) { if (snapshot.document) await vscode.window.showTextDocument(snapshot.document); return "identical"; }
   if ((merged.conflict || snapshot.dirty) && !await review(snapshot.source, merged.text)) return "cancelled";
-  return withProjectLock(`${uri.fsPath}.dygnosis.lock`, async () => {
+  return withWorkspaceLock(`${uri.fsPath}.dygnosis.lock`, async () => {
     await unchangedConfig(uri, snapshot);
     if (snapshot.document) {
       const document = snapshot.document;
@@ -328,8 +328,8 @@ export async function writeProjectConfig(uri: vscode.Uri, command: string, revie
   });
 }
 
-/** Registers independently of the language client; activation never edits project configuration. */
-export function registerProjectMcp(context: vscode.ExtensionContext, service?: { log: Log }): vscode.Disposable {
+/** Registers independently of the language client; activation never edits workspace configuration. */
+export function registerWorkspaceMcp(context: vscode.ExtensionContext, service?: { log: Log }): vscode.Disposable {
   const log = service?.log ?? (() => {});
   const reviews = new Map<string, string>();
   const provider = vscode.workspace.registerTextDocumentContentProvider(reviewScheme, { provideTextDocumentContent: uri => reviews.get(uri.toString()) ?? "" });
@@ -343,13 +343,13 @@ export function registerProjectMcp(context: vscode.ExtensionContext, service?: {
   };
   const reportManaged = (binary: ManagedBinary): void => {
     if (binary.pendingVersion) {
-      log(`Project MCP update pending: ${binary.version} -> ${binary.pendingVersion}. Stop the other client's Dygnosis MCP server so its locked executable can be replaced, then restart it.`);
+      log(`Workspace MCP update pending: ${binary.version} -> ${binary.pendingVersion}. Stop the other client's Dygnosis MCP server so its locked executable can be replaced, then restart it.`);
       if (!pendingShown && !disposed) {
         pendingShown = true;
         void vscode.window.showWarningMessage(`Dygnosis MCP ${binary.pendingVersion} is pending. Stop the other client's Dygnosis MCP server so the working ${binary.version} can be replaced, then restart it. Setup will retry while this window is active and on the next activation.`);
       }
       if (!disposed && retries < 5 && !retry) { ++retries; retry = setTimeout(() => { retry = undefined; void maintain(); }, 15000); }
-    } else if (binary.changed) log(`Project MCP executable updated to ${binary.version}: ${binary.path}. Restart other clients' MCP server to load it; .mcp.json does not change.`);
+    } else if (binary.changed) log(`Workspace MCP executable updated to ${binary.version}: ${binary.path}. Restart other clients' MCP server to load it; .mcp.json does not change.`);
   };
   const maintain = async (): Promise<void> => {
     try {
@@ -360,7 +360,7 @@ export function registerProjectMcp(context: vscode.ExtensionContext, service?: {
       const bundle = await verifyPackagedBundle(context);
       if (disposed) return;
       reportManaged(await ensureManagedBinary(directory, bundle));
-    } catch (error) { log(`Project MCP managed update: ${String(error)}`); }
+    } catch (error) { log(`Workspace MCP managed update: ${String(error)}`); }
   };
   const review = async (uri: vscode.Uri, before: string, after: string): Promise<boolean> => {
     const id = randomUUID(), old = vscode.Uri.parse(`${reviewScheme}:/${id}/before.json`), proposed = vscode.Uri.parse(`${reviewScheme}:/${id}/proposed.json`);
@@ -369,29 +369,29 @@ export function registerProjectMcp(context: vscode.ExtensionContext, service?: {
     return await vscode.window.showWarningMessage(`Review the proposed .mcp.json change in ${uri.fsPath}. Save this result?`, { modal: true }, "Save reviewed setup") === "Save reviewed setup" && !disposed;
   };
   const command = vscode.commands.registerCommand(commandId, async () => {
-    if (running) { await vscode.window.showInformationMessage("Dygnosis project MCP setup is already running in this window."); return; }
+    if (running) { await vscode.window.showInformationMessage("Dygnosis workspace MCP setup is already running in this window."); return; }
     running = true;
     try {
-      if (!vscode.workspace.isTrusted) throw new Error("Trust this workspace before setting up Dygnosis project MCP.");
-      const uri = await projectDestination();
+      if (!vscode.workspace.isTrusted) throw new Error("Trust this workspace before setting up Dygnosis workspace MCP.");
+      const uri = await workspaceDestination();
       if (!uri || disposed) return;
-      log(`Project MCP destination: ${uri.fsPath}`);
-      void vscode.window.showInformationMessage(`Dygnosis project MCP destination: ${uri.fsPath}`);
+      log(`Workspace MCP destination: ${uri.fsPath}`);
+      void vscode.window.showInformationMessage(`Dygnosis workspace MCP destination: ${uri.fsPath}`);
       const selected = await resolveBinary(context, log);
       let executable = selected.path;
       if (selected.override) {
         await validateMcpBinary(selected, log);
-        log(`Project MCP uses user-managed dynare.serverPath: ${selected.path}. Updates are your responsibility.`);
+        log(`Workspace MCP uses user-managed dynare.serverPath: ${selected.path}. Updates are your responsibility.`);
       } else {
         const directory = storage();
-        if (!directory) throw new Error("Dygnosis project MCP requires file-backed extension storage on this host.");
+        if (!directory) throw new Error("Dygnosis workspace MCP requires file-backed extension storage on this host.");
         const managed = await ensureManagedBinary(directory, await verifyPackagedBundle(context));
         executable = managed.path; reportManaged(managed);
       }
       if (disposed) return;
-      const result = await writeProjectConfig(uri, executable, (before, after) => review(uri, before, after));
-      if (result !== "cancelled") await vscode.window.showInformationMessage(`Dygnosis project MCP ${result === "identical" ? "is already configured" : "is configured"} in ${uri.fsPath}. Restart or reconnect the agent's MCP server. ${selected.override ? "The executable is user-managed." : "Its path uses this host's extension storage."}`);
-    } catch (error) { log(`Project MCP setup: ${String(error)}`); if (!disposed) await vscode.window.showErrorMessage(`Dygnosis project MCP setup: ${error instanceof Error ? error.message : String(error)}`); }
+      const result = await writeWorkspaceConfig(uri, executable, (before, after) => review(uri, before, after));
+      if (result !== "cancelled") await vscode.window.showInformationMessage(`Dygnosis workspace MCP ${result === "identical" ? "is already configured" : "is configured"} in ${uri.fsPath}. Restart or reconnect the agent's MCP server. ${selected.override ? "The executable is user-managed." : "Its path uses this host's extension storage."}`);
+    } catch (error) { log(`Workspace MCP setup: ${String(error)}`); if (!disposed) await vscode.window.showErrorMessage(`Dygnosis workspace MCP setup: ${error instanceof Error ? error.message : String(error)}`); }
     finally { running = false; }
   });
   const closed = vscode.workspace.onDidCloseTextDocument(document => { if (document.uri.scheme === reviewScheme) reviews.delete(document.uri.toString()); });

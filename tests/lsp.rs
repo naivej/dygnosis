@@ -1347,8 +1347,10 @@ async fn document_symbols_show_blocks_commands_and_uncounted_rows() {
     let nested = nested_symbols(resp);
     assert_eq!(
         top_level_names(&nested),
-        ["var", "varexo", "parameters", "rho", "model", "initval"]
+        ["var", "varexo", "parameters", "model", "initval"]
     );
+    // Parameter assignments have no Outline row; their declarations remain.
+    assert_eq!(child_names(&nested, "parameters"), ["rho"]);
     assert_eq!(child_names(&nested, "var"), ["y", "k", "w", "a", "u"]);
     let declarations = nested
         .iter()
@@ -2325,9 +2327,9 @@ fn initialize_capabilities_wave_c() {
     assert!(commands.contains(&"dynare/showEffectiveModel".into()));
     assert!(commands.contains(&"dynare/captureRename".into()));
     assert!(commands.contains(&"dynare/modelInfo".into()));
-    assert!(commands.contains(&"dynare/projectStatus".into()));
-    assert!(commands.contains(&"dynare/recheckProject".into()));
-    assert!(commands.contains(&"dynare/cancelProject".into()));
+    assert!(commands.contains(&"dynare/workspaceStatus".into()));
+    assert!(commands.contains(&"dynare/recheckWorkspace".into()));
+    assert!(commands.contains(&"dynare/cancelWorkspace".into()));
     assert!(!commands.contains(&"dynare/runPreprocessor".into()));
     assert!(!commands.iter().any(|c| c.contains("computeSteadyState")));
     assert!(!commands.iter().any(|c| c.contains("runDynare")));

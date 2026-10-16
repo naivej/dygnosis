@@ -1,7 +1,7 @@
 # Work with an agent
 
 The `use-dynare` skill gives AI coding agents domain instructions for building,
-checking and replicating Dynare models. To install it in your project, run
+checking and replicating Dynare models. To install it in your workspace, run
 `npx skills add naivej/dygnosis` in a terminal.
 
 Dygnosis also provides an MCP server so agents can inspect, check, compare and
@@ -41,9 +41,10 @@ For VS Code agents such as GitHub Copilot, run **MCP: List Servers** from the
 Command Palette and select **Dygnosis** to start, stop or inspect the server's
 output.
 
-For external agents, open a trusted project folder and run **Dygnosis: Set up
-MCP for this project** from the Command Palette. This creates or updates
-`.mcp.json` in your project root using a managed copy of the bundled executable
+For external agents, open a trusted workspace folder and run **Dygnosis: Set up
+MCP for this workspace** from the Command Palette. This creates or updates
+`.mcp.json` in the selected folder's Git repository root, or in the selected
+workspace folder when it has no Git repository, using a managed copy of the bundled executable
 (or the custom binary set in [Dynare: Server
 Path](settings:dynare.serverPath), available from [GitHub
 Releases](https://github.com/naivej/dygnosis/releases)):

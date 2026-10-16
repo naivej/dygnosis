@@ -65,6 +65,6 @@
   "dynare.diagnosticActions.ignore": "diagnostics",
   "dynare.diagnosticActions.explain": "diagnostics",
   "dynare.diff.defaultChangeKinds": "structural-diff",
-  "dynare.projectDiagnostics": "project-checks",
-  "dynare.projectExcludePaths": "project-checks"
+  "dynare.workspaceDiagnostics": "workspace-checks",
+  "dynare.workspaceExcludePaths": "workspace-checks"
 }

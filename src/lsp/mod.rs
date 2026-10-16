@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 mod document_context;
-mod project;
+mod workspace_checks;
 
 mod ordering;
 
@@ -151,7 +151,7 @@ struct Inner {
     completion_snippets: bool,
     publication_versions: HashMap<Url, Option<i32>>,
     reports: HashMap<Url, Arc<RootReport>>,
-    project: project::ProjectState,
+    workspace_checks: workspace_checks::WorkspaceCheckState,
 }
 
 impl Default for Inner {
@@ -173,7 +173,7 @@ impl Default for Inner {
             completion_snippets: false,
             publication_versions: HashMap::new(),
             reports: HashMap::new(),
-            project: project::ProjectState::default(),
+            workspace_checks: workspace_checks::WorkspaceCheckState::default(),
         }
     }
 }
@@ -288,14 +288,14 @@ impl Inner {
         let mut roots: Vec<_> = self
             .tracked_roots
             .keys()
-            .filter(|root| owners.contains(&self.project.observed_identity(root)))
+            .filter(|root| owners.contains(&self.workspace_checks.observed_identity(root)))
             .cloned()
             .collect();
         roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-        roots.extend(self.project.owners(uri));
+        roots.extend(self.workspace_checks.owners(uri));
         roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
         let mut seen = HashSet::new();
-        roots.retain(|root| seen.insert(self.project.observed_identity(root)));
+        roots.retain(|root| seen.insert(self.workspace_checks.observed_identity(root)));
         roots
     }
 
@@ -386,7 +386,7 @@ impl Inner {
             self.reports.insert(uri.clone(), Arc::new(report));
         }
         self.reports
-            .retain(|root, _| roots.contains(root) || self.project.is_selected(root));
+            .retain(|root, _| roots.contains(root) || self.workspace_checks.is_selected(root));
         self.merge_diagnostics(first)
     }
 
@@ -587,7 +587,7 @@ impl Inner {
 pub struct Backend {
     client: Client,
     inner: Arc<Mutex<Inner>>,
-    project_wake: Arc<tokio::sync::Notify>,
+    workspace_wake: Arc<tokio::sync::Notify>,
     output_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -602,7 +602,7 @@ impl Backend {
         Self {
             client,
             inner: Arc::new(Mutex::new(Inner::default())),
-            project_wake: Arc::new(tokio::sync::Notify::new()),
+            workspace_wake: Arc::new(tokio::sync::Notify::new()),
             output_gate: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
@@ -663,10 +663,10 @@ impl Backend {
                 || crate::engine::workspace::include_resolver::normalize_uri(candidate.as_str())
                     != key
         });
-        inner.align_project_root(&uri);
-        inner.project_changed(&uri, false);
+        inner.align_workspace_root(&uri);
+        inner.workspace_changed(&uri, false);
         if is_model_root(&uri) {
-            inner.project.active = Some(uri.clone());
+            inner.workspace_checks.active = Some(uri.clone());
         }
         inner.prepare_root(&uri);
         inner.workspace.update_document(uri.as_str(), &text);
@@ -709,7 +709,7 @@ impl Backend {
             return hover;
         }
         if is_model_root(&pos.text_document.uri) {
-            inner.project.active = Some(pos.text_document.uri.clone());
+            inner.workspace_checks.active = Some(pos.text_document.uri.clone());
         }
         let text = inner.document(&pos.text_document.uri)?.text.clone();
         let normalized = crate::engine::language::parser::normalize_newlines(&text);
@@ -1335,7 +1335,7 @@ impl Backend {
     fn apply_settings(&self, settings: &Value) -> Vec<String> {
         let mut inner = self.lock_inner();
         let explanations = inner.settings.apply(settings);
-        inner.project_reconfigure(true);
+        inner.workspace_reconfigure(true);
         explanations
     }
 
@@ -1703,8 +1703,8 @@ impl Backend {
             .and_then(|uri| Url::parse(uri).ok())
             .filter(is_model_root)
         {
-            self.lock_inner().project.active = Some(root);
-            self.project_wake.notify_one();
+            self.lock_inner().workspace_checks.active = Some(root);
+            self.workspace_wake.notify_one();
         }
         let result = match command {
             "dynare/explainDiagnostic" => explain_command(arguments),
@@ -2507,12 +2507,12 @@ impl LanguageServer for Backend {
                 .and_then(|value| value.get("schema_version"))
                 .and_then(Value::as_u64)
                 == Some(1);
-            inner.project.notifications = params
+            inner.workspace_checks.notifications = params
                 .capabilities
                 .experimental
                 .as_ref()
                 .and_then(|value| value.get("dygnosis"))
-                .and_then(|value| value.get("projectStatusChanged"))
+                .and_then(|value| value.get("workspaceStatusChanged"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
             let workspace = params.capabilities.workspace.as_ref();
@@ -2528,7 +2528,7 @@ impl LanguageServer for Backend {
         let explanations = if let Some(opts) = params.initialization_options {
             self.apply_settings(&opts)
         } else {
-            self.lock_inner().project_reconfigure(true);
+            self.lock_inner().workspace_reconfigure(true);
             Vec::new()
         };
         ordering::committed();
@@ -2548,22 +2548,22 @@ impl LanguageServer for Backend {
 
     async fn initialized(&self, _: InitializedParams) {
         ordering::ready().await;
-        self.lock_inner().project.initialized = true;
+        self.lock_inner().workspace_checks.initialized = true;
         ordering::committed();
         self.client
             .log_message(MessageType::INFO, "dygnosis initialized")
             .await;
-        self.kick_project();
+        self.kick_workspace();
     }
 
     async fn shutdown(&self) -> Result<()> {
         ordering::ready().await;
         let _output = self.output_gate.lock().await;
         let mut inner = self.lock_inner();
-        inner.project.shutdown = true;
-        inner.project.epoch += 1;
+        inner.workspace_checks.shutdown = true;
+        inner.workspace_checks.epoch += 1;
         ordering::committed();
-        self.project_wake.notify_one();
+        self.workspace_wake.notify_one();
         Ok(())
     }
 
@@ -2580,7 +2580,7 @@ impl LanguageServer for Backend {
         }
         drop(output);
         self.refresh_presentation(false).await;
-        self.kick_project();
+        self.kick_workspace();
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -2612,7 +2612,7 @@ impl LanguageServer for Backend {
         }
         drop(output);
         self.refresh_presentation(false).await;
-        self.kick_project();
+        self.kick_workspace();
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -2638,7 +2638,7 @@ impl LanguageServer for Backend {
         }
         drop(output);
         self.refresh_presentation(false).await;
-        self.kick_project();
+        self.kick_workspace();
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -2653,7 +2653,7 @@ impl LanguageServer for Backend {
             });
             inner.document_contexts.remove(&key);
             inner.workspace.remove_document(uri.as_str());
-            inner.project_changed(&uri, false);
+            inner.workspace_changed(&uri, false);
             inner.refresh_diagnostics(Some(&uri))
         };
         ordering::committed();
@@ -2664,7 +2664,7 @@ impl LanguageServer for Backend {
         }
         drop(output);
         self.refresh_presentation(false).await;
-        self.kick_project();
+        self.kick_workspace();
     }
 
     async fn diagnostic(
@@ -2732,7 +2732,7 @@ impl LanguageServer for Backend {
         let to_publish = {
             let mut inner = self.lock_inner();
             for event in &params.changes {
-                inner.project_changed(&event.uri, event.typ == FileChangeType::DELETED);
+                inner.workspace_changed(&event.uri, event.typ == FileChangeType::DELETED);
                 inner.workspace.remove_document(event.uri.as_str());
             }
             let snapshots: Vec<(Url, String, i32)> = inner
@@ -2757,7 +2757,7 @@ impl LanguageServer for Backend {
         }
         drop(output);
         self.refresh_presentation(false).await;
-        self.kick_project();
+        self.kick_workspace();
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -2952,9 +2952,9 @@ impl LanguageServer for Backend {
         }
         if matches!(
             params.command.as_str(),
-            "dynare/projectStatus" | "dynare/recheckProject" | "dynare/cancelProject"
+            "dynare/workspaceStatus" | "dynare/recheckWorkspace" | "dynare/cancelWorkspace"
         ) {
-            return Ok(Some(self.project_command(&params.command).await));
+            return Ok(Some(self.workspace_command(&params.command).await));
         }
         Ok(Some(self.execute(&params.command, &params.arguments)))
     }
@@ -2977,7 +2977,7 @@ impl LanguageServer for Backend {
         }
         drop(output);
         self.refresh_presentation(true).await;
-        self.kick_project();
+        self.kick_workspace();
     }
 
     async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
@@ -2989,7 +2989,7 @@ impl LanguageServer for Backend {
                 .settings
                 .change_folders(params.event.added, params.event.removed);
             inner.document_contexts.clear();
-            inner.project_reconfigure(true);
+            inner.workspace_reconfigure(true);
             inner.refresh_diagnostics(None)
         };
         ordering::committed();
@@ -3000,7 +3000,7 @@ impl LanguageServer for Backend {
         }
         drop(output);
         self.refresh_presentation(true).await;
-        self.kick_project();
+        self.kick_workspace();
     }
 
     async fn prepare_call_hierarchy(
@@ -3087,9 +3087,9 @@ pub fn initialize_result() -> InitializeResult {
                     "dynare/captureRename".into(),
                     "dynare/modelInfo".into(),
                     "dynare/setDocumentContext".into(),
-                    "dynare/projectStatus".into(),
-                    "dynare/recheckProject".into(),
-                    "dynare/cancelProject".into(),
+                    "dynare/workspaceStatus".into(),
+                    "dynare/recheckWorkspace".into(),
+                    "dynare/cancelWorkspace".into(),
                 ],
                 work_done_progress_options: WorkDoneProgressOptions::default(),
             }),
@@ -3111,7 +3111,7 @@ pub fn initialize_result() -> InitializeResult {
                 "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
                 "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::engine::preview::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::engine::preview::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true, "macro_messages":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
-                ,"projectDiagnostics": {"schema_version":project::SCHEMA_VERSION,"status_command":"dynare/projectStatus","recheck_command":"dynare/recheckProject","cancel_command":"dynare/cancelProject","active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/projectStatusChanged","typing_pause_ms":250}
+                ,"workspaceDiagnostics": {"schema_version":workspace_checks::SCHEMA_VERSION,"status_command":"dynare/workspaceStatus","recheck_command":"dynare/recheckWorkspace","cancel_command":"dynare/cancelWorkspace","active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/workspaceStatusChanged","typing_pause_ms":250}
             }})),
             ..ServerCapabilities::default()
         },

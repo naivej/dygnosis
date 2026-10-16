@@ -553,7 +553,7 @@ exports.run = async function run() {
     const extension = vscode.extensions.getExtension("CoconutWater.dygnosis");
     assert.ok(extension);
     const service = await extension.activate();
-    assert.ok(["all", "mcp", "semantic", "folding", "presentation", "rename", "project", "syntax"].includes(scope), "Unknown native host scope");
+    assert.ok(["all", "mcp", "semantic", "folding", "presentation", "rename", "workspace", "syntax"].includes(scope), "Unknown native host scope");
     if (scope === "syntax") {
       await require("./helpers/syntax_host.cjs").checkSyntax(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, currentSnapshot, writeObservedInput });
       await service.shutdown();
@@ -579,8 +579,8 @@ exports.run = async function run() {
       evidence.passed = true;
       return;
     }
-    if (scope === "project") {
-      await require("./helpers/project_host.cjs").checkProjectHost(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor });
+    if (scope === "workspace") {
+      await require("./helpers/workspace_host.cjs").checkWorkspaceHost(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor });
       await service.shutdown();
       evidence.artifacts_after = await historyArtifacts();
       assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "the engine and compiled extension must remain unchanged throughout the host gate");
@@ -613,38 +613,38 @@ exports.run = async function run() {
       evidence.passed = true;
       return;
     }
-    const projectFeature = extension.packageJSON.contributes.configuration.some(group => Object.hasOwn(group.properties, "dynare.projectDiagnostics"));
-    if (projectFeature) {
-      await waitFor(() => service.client && service.supportsModelInfo, "folder-only project LSP startup");
-      let projectStatus;
-      await waitFor(async () => { projectStatus = await service.execute("dynare/projectStatus"); return projectStatus?.complete; }, "folder-only discovery completes");
-      assert.equal(projectStatus.enabled, true); assert.equal(projectStatus.roots.length, 0);
-      evidence.checks.push("folder-only project activation and empty discovery without opening a model");
+    const workspaceFeature = extension.packageJSON.contributes.configuration.some(group => Object.hasOwn(group.properties, "dynare.workspaceDiagnostics"));
+    if (workspaceFeature) {
+      await waitFor(() => service.client && service.supportsModelInfo, "folder-only workspace LSP startup");
+      let workspaceStatus;
+      await waitFor(async () => { workspaceStatus = await service.execute("dynare/workspaceStatus"); return workspaceStatus?.complete; }, "folder-only discovery completes");
+      assert.equal(workspaceStatus.enabled, true); assert.equal(workspaceStatus.roots.length, 0);
+      evidence.checks.push("folder-only workspace activation and empty discovery without opening a model");
     } else {
       assert.equal(service.client, undefined, "startup registration must not eagerly launch LSP");
       evidence.checks.push("activate before model/LSP launch");
     }
     evidence.native_vscode_mcp = await probeNativeMcp(vscode, extension.id);
-    if (!projectFeature) assert.equal(service.client, undefined, "native MCP must work before any model/LSP opens");
+    if (!workspaceFeature) assert.equal(service.client, undefined, "native MCP must work before any model/LSP opens");
     evidence.checks.push("native MCP discovers every tool and invokes model info before a model opens");
-    if (projectFeature) {
-      const projectOnly = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, "project-only.mod");
-      await writeObservedInput(service, projectOnly, "var z; model; z=project_unknown; end;\n");
-      let projectStatus;
-      await waitFor(async () => { projectStatus = await service.execute("dynare/projectStatus"); return projectStatus?.complete && projectStatus.roots.some(root => root.root_uri.endsWith("project-only.mod") && root.state === "checked" && root.errors > 0); }, "unopened model receives project diagnostics");
-      const projectUri = vscode.Uri.file(projectOnly);
-      await waitFor(() => vscode.languages.getDiagnostics(projectUri).some(item => item.severity === vscode.DiagnosticSeverity.Error), "unopened project Error reaches Problems");
-      assert.ok(!vscode.workspace.textDocuments.some(item => item.uri.toString() === projectUri.toString()));
-      await vscode.commands.executeCommand("dygnosis.cancelProject");
-      await waitFor(async () => (await service.execute("dynare/projectStatus"))?.cancelled === true, "native Cancel stops this pass");
-      await vscode.commands.executeCommand("dygnosis.recheckProject");
-      await waitFor(async () => { const result = await service.execute("dynare/projectStatus"); return result?.complete && !result.cancelled; }, "native Recheck resumes discovery");
-      await vscode.workspace.getConfiguration("dynare").update("projectDiagnostics", false, vscode.ConfigurationTarget.Workspace);
-      await waitFor(async () => (await service.execute("dynare/projectStatus"))?.enabled === false, "project setting off reaches engine");
-      await waitFor(() => vscode.languages.getDiagnostics(projectUri).length === 0, "off clears unopened project contribution");
-      await vscode.workspace.getConfiguration("dynare").update("projectDiagnostics", true, vscode.ConfigurationTarget.Workspace);
-      await waitFor(async () => { const result = await service.execute("dynare/projectStatus"); return result?.enabled && result.complete; }, "project setting on resumes checking");
-      evidence.checks.push("unopened project Problems, native Cancel/Recheck, scoped off/on and contribution clearing");
+    if (workspaceFeature) {
+      const workspaceOnly = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, "workspace-only.mod");
+      await writeObservedInput(service, workspaceOnly, "var z; model; z=workspace_unknown; end;\n");
+      let workspaceStatus;
+      await waitFor(async () => { workspaceStatus = await service.execute("dynare/workspaceStatus"); return workspaceStatus?.complete && workspaceStatus.roots.some(root => root.root_uri.endsWith("workspace-only.mod") && root.state === "checked" && root.errors > 0); }, "unopened model receives workspace diagnostics");
+      const workspaceUri = vscode.Uri.file(workspaceOnly);
+      await waitFor(() => vscode.languages.getDiagnostics(workspaceUri).some(item => item.severity === vscode.DiagnosticSeverity.Error), "unopened workspace Error reaches Problems");
+      assert.ok(!vscode.workspace.textDocuments.some(item => item.uri.toString() === workspaceUri.toString()));
+      await vscode.commands.executeCommand("dygnosis.cancelWorkspace");
+      await waitFor(async () => (await service.execute("dynare/workspaceStatus"))?.cancelled === true, "native Cancel stops this pass");
+      await vscode.commands.executeCommand("dygnosis.recheckWorkspace");
+      await waitFor(async () => { const result = await service.execute("dynare/workspaceStatus"); return result?.complete && !result.cancelled; }, "native Recheck resumes discovery");
+      await vscode.workspace.getConfiguration("dynare").update("workspaceDiagnostics", false, vscode.ConfigurationTarget.Workspace);
+      await waitFor(async () => (await service.execute("dynare/workspaceStatus"))?.enabled === false, "workspace setting off reaches engine");
+      await waitFor(() => vscode.languages.getDiagnostics(workspaceUri).length === 0, "off clears unopened workspace contribution");
+      await vscode.workspace.getConfiguration("dynare").update("workspaceDiagnostics", true, vscode.ConfigurationTarget.Workspace);
+      await waitFor(async () => { const result = await service.execute("dynare/workspaceStatus"); return result?.enabled && result.complete; }, "workspace setting on resumes checking");
+      evidence.checks.push("unopened workspace Problems, native Cancel/Recheck, scoped off/on and contribution clearing");
     }
     const filename = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, "model.mod");
     await writeObservedInput(service, filename, "var y; parameters p; p=1/2; model; y=p; end;\n");

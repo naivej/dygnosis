@@ -12,7 +12,7 @@ Press `F1` to open the **Command Palette** and type `Dygnosis` to run extension
 commands such as **Dygnosis: Open Help**, **Dygnosis: Expand macros** or
 **Dygnosis: Open Settings**. Common actions also appear in the editor title
 bar, the editor right-click menu, **Outline**, **Problems**, and **Dynare
-project checks** in Explorer.
+workspace checks** in Explorer.
 
 In **Dygnosis Help**, use **Search** at the top to find a feature, command,
 setting or check code. Use **←** and **→** to move through your reading
@@ -45,9 +45,9 @@ related locations and quick fixes.
 ## Review changes and model variants
 
 [Review model changes](structural-diff.md) compares a model against Git history
-or another `.mod` file in **Dygnosis Changes**. [Check project
-models](project-checks.md) checks unopened saved models across your workspace in
-**Dynare project checks**.
+or another `.mod` file in **Dygnosis Changes**. [Check workspace
+models](workspace-checks.md) checks unopened saved models across your workspace in
+**Dynare workspace checks**.
 
 ## Numerical work and agents
 

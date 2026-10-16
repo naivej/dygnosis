@@ -1,8 +1,8 @@
-import { registerProjectStatus } from "./editor/project_status";
+import { registerWorkspaceStatus } from "./editor/workspace_status";
 import { registerChanges } from "./comparison/changes_editor";
-import { registerProjectMcp } from "./mcp/project_mcp";
+import { registerWorkspaceMcp } from "./mcp/workspace_mcp";
 // The installed-package harness verifies and stages the actual bundled engine.
-export { verifyPackagedBundle, ensureManagedBinary } from "./mcp/project_mcp";
+export { verifyPackagedBundle, ensureManagedBinary } from "./mcp/workspace_mcp";
 import { registerOriginJumps } from "./editor/origin_jumps";
 import { registerDiagnosticActions } from "./editor/quickfix";
 import { registerLenses } from "./editor/lenses";
@@ -25,9 +25,9 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
   context.subscriptions.push(registerHelp(context));
   const client = new DygnosisClient(context);
   service = client;
-  context.subscriptions.push(registerProjectMcp(context, client));
+  context.subscriptions.push(registerWorkspaceMcp(context, client));
   const previews = registerEffectivePreview(client);
-  context.subscriptions.push(client, registerDiagnosticActions(client), registerProjectStatus(client), registerLenses(client), registerStatus(client), registerModelNavigation(client), registerColors(client), registerMcp(context, client.log), previews, registerOriginJumps(client, previews), registerChanges(client, context.extensionUri),
+  context.subscriptions.push(client, registerDiagnosticActions(client), registerWorkspaceStatus(client), registerLenses(client), registerStatus(client), registerModelNavigation(client), registerColors(client), registerMcp(context, client.log), previews, registerOriginJumps(client, previews), registerChanges(client, context.extensionUri),
     vscode.commands.registerCommand("dygnosis.restartServer", () => runCommand(client, () => client.restart())),
     vscode.commands.registerCommand("dygnosis.showOutput", () => client.output.show()),
     vscode.commands.registerCommand("dygnosis.openSettings", () => vscode.commands.executeCommand("workbench.action.openSettings", "@ext:CoconutWater.dygnosis")),

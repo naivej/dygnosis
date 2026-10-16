@@ -76,7 +76,7 @@ async fn transport() -> (
     };
     wire.send(&[
         json!({"jsonrpc":"2.0", "id":1, "method":"initialize", "params": {
-            "capabilities":{}, "initializationOptions":{"projectDiagnostics":false}
+            "capabilities":{}, "initializationOptions":{"workspaceDiagnostics":false}
         }}),
     ])
     .await;
@@ -366,7 +366,7 @@ async fn cancelled_and_malformed_mutations_do_not_skip_prior_input_or_wedge_foll
     let uri = "untitled:cancel-input.mod";
     wire.send(&[
         open(uri, 1, "unsaved"),
-        json!({"jsonrpc":"2.0", "id":2, "method":"workspace/executeCommand", "params":{"command":"dynare/recheckProject"}}),
+        json!({"jsonrpc":"2.0", "id":2, "method":"workspace/executeCommand", "params":{"command":"dynare/recheckWorkspace"}}),
         json!({"jsonrpc":"2.0", "method":"$/cancelRequest", "params":{"id":2}}),
     ]).await;
     assert_eq!(
@@ -376,7 +376,7 @@ async fn cancelled_and_malformed_mutations_do_not_skip_prior_input_or_wedge_foll
         -32800
     );
     wire.send(&[
-        json!({"jsonrpc":"2.0", "id":3, "method":"workspace/executeCommand", "params":{"command":"dynare/cancelProject", "arguments":false}}),
+        json!({"jsonrpc":"2.0", "id":3, "method":"workspace/executeCommand", "params":{"command":"dynare/cancelWorkspace", "arguments":false}}),
         symbols(4, uri),
     ]).await;
     assert_eq!(

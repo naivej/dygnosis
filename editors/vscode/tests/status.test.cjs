@@ -1,5 +1,6 @@
 const { compiledModule, importedModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
+const { MarkdownString, tooltipText } = require("./helpers/markdown.cjs");
 const test = require("node:test");
 const Module = require("node:module");
 const { URL } = require("node:url");
@@ -17,7 +18,7 @@ function uri(value) {
   const parsed = new URL(value);
   return { scheme: parsed.protocol.slice(0, -1), path: parsed.pathname, toString: () => value };
 }
-function document(value = "file:///project/main.mod", extra = {}) {
+function document(value = "file:///workspace/main.mod", extra = {}) {
   return { uri: uri(value), languageId: "dynare", version: 1, isClosed: false, ...extra };
 }
 function deferred() {
@@ -29,7 +30,7 @@ function deferred() {
 const flush = () => new Promise(resolve => setImmediate(resolve));
 let host;
 const vscode = {
-  Disposable,
+  Disposable, MarkdownString,
   StatusBarAlignment: { Left: 1 },
   window: {
     get activeTextEditor() { return host.editor; },
@@ -101,20 +102,39 @@ function setup(doc = document()) {
   return { host, service, changed, configure, doc };
 }
 
-test("aggregate icons and separate count blocks retain every class and dimension in hover and speech", () => {
-  // Guards against adding dimensions to aggregate icons or losing their facts in speech.
-  const value = modelStatus(facts(), ["endogenous", "exogenous", "equations"], "main.mod");
-  assert.equal(value.text, "$(symbol-variable) 4  $(symbol-field) 2  $(list-ordered) 3");
+test("total icons and separate count blocks retain every class and dimension in hover and speech", () => {
+  // Guards omitting dimension counts from the status bar or losing the separate hover facts.
+  const value = modelStatus(facts(), ["endogenous", "exogenous", "equations"]);
+  assert.equal(value.text, "$(symbol-variable) 104  $(symbol-field) 12  $(list-ordered) 93");
   const report = [
-    "Aggregate model before transformation",
+    "Aggregate model",
     "4 endogenous (1 static, 1 predetermined, 1 forward-looking, 1 mixed)",
     "2 exogenous", "3 equations", "Heterogeneous model: households",
     "100 endogenous (1 static, 0 predetermined, 0 forward-looking, 0 mixed)",
     "10 exogenous", "90 equations",
   ];
-  assert.equal(value.tooltip, ["main.mod", ...report, "Click to focus Outline."].join("\n"));
-  assert.equal(value.accessibilityLabel, `main.mod. ${report.join(". ")}. Click to focus Outline.`);
-  assert.doesNotMatch(value.text, /104|warning|error/);
+  assert.equal(tooltipText(value.tooltip), report.join("\n"));
+  assert.match(value.tooltip.value, /^\*\*Aggregate model\*\*/);
+  assert.doesNotMatch(tooltipText(value.tooltip), /main\.mod|before transformation|Click/);
+  assert.equal(value.accessibilityLabel, `Dynare model counts. Total: 104 endogenous, 12 exogenous, 93 equations. ${report.join(". ")}. Focus Outline.`);
+  assert.doesNotMatch(value.text, /warning|error/);
+});
+
+test("total counts include every dimension and fall back to aggregate when none are present", () => {
+  // Guards summing only the first dimension or requiring a dimension for ordinary models.
+  const info = facts();
+  info.heterogeneity_dimensions.push({ ...info.heterogeneity_dimensions[0], dimension: "firms", n_endogenous: 3, n_exogenous: 1, n_equations: 2 });
+  assert.equal(modelStatus(info, ["endogenous", "exogenous", "equations"]).text,
+    "$(symbol-variable) 107  $(symbol-field) 13  $(list-ordered) 95");
+  info.heterogeneity_dimensions = [];
+  assert.equal(modelStatus(info, ["endogenous", "exogenous", "equations"]).text,
+    "$(symbol-variable) 4  $(symbol-field) 2  $(list-ordered) 3");
+});
+
+test("a total outside the safe integer range is unavailable", () => {
+  // Guards displaying a rounded total even when each scope has a valid count.
+  const info = facts(document(), { n_endogenous: Number.MAX_SAFE_INTEGER });
+  assert.equal(modelStatus(info, ["endogenous"]).text, "$(info) Dynare: unavailable");
 });
 test("selected count order applies to each dimension and hiding endogenous hides every class", () => {
   // Guards against dimensions ignoring count selection or exposing hidden classes.
@@ -122,10 +142,10 @@ test("selected count order applies to each dimension and hiding endogenous hides
     ...facts().heterogeneity_dimensions,
     { dimension: "firms", n_endogenous: 0, n_exogenous: 0, n_equations: 0 },
   ] });
-  const value = modelStatus(info, ["equations", "exogenous"], "main.mod");
-  assert.equal(value.text, "$(list-ordered) 3  $(symbol-field) 2");
-  assert.match(value.tooltip, /Aggregate model before transformation\n3 equations\n2 exogenous\nHeterogeneous model: households\n90 equations\n10 exogenous\nHeterogeneous model: firms\n0 equations\n0 exogenous/);
-  for (const text of [value.tooltip, value.accessibilityLabel]) {
+  const value = modelStatus(info, ["equations", "exogenous"]);
+  assert.equal(value.text, "$(list-ordered) 93  $(symbol-field) 12");
+  assert.match(tooltipText(value.tooltip), /Aggregate model\n3 equations\n2 exogenous\nHeterogeneous model: households\n90 equations\n10 exogenous\nHeterogeneous model: firms\n0 equations\n0 exogenous/);
+  for (const text of [tooltipText(value.tooltip), value.accessibilityLabel]) {
     assert.doesNotMatch(text, /endogenous|static|predetermined|forward-looking|mixed/);
     assert.ok(text.indexOf("households") < text.indexOf("firms"));
   }
@@ -134,20 +154,20 @@ test("missing class lists display all four zero classes for aggregate and dimens
   // Guards compatibility with count facts that omit class lists.
   const info = facts(document(), { static: undefined, predetermined: undefined, forward_looking: undefined, mixed: undefined,
     heterogeneity_dimensions: [{ dimension: "households", n_endogenous: 0, n_exogenous: 0, n_equations: 0 }] });
-  const value = modelStatus(info, ["endogenous"], "main.mod");
+  const value = modelStatus(info, ["endogenous"]);
   const classes = "(0 static, 0 predetermined, 0 forward-looking, 0 mixed)";
-  for (const text of [value.tooltip, value.accessibilityLabel]) {
+  for (const text of [tooltipText(value.tooltip), value.accessibilityLabel]) {
     assert.ok(text.includes(`4 endogenous ${classes}`));
     assert.ok(text.includes(`0 endogenous ${classes}`));
     assert.doesNotMatch(text, /exogenous|equations/);
   }
 });
 test("incomplete expansion withholds even supplied old numbers", () => {
-  const value = modelStatus(facts(document(), { complete: false, message: "Model expansion is incomplete" }), ["endogenous", "equations"], "main.mod");
+  const value = modelStatus(facts(document(), { complete: false, message: "Model expansion is incomplete" }), ["endogenous", "equations"]);
   assert.equal(value.text, "$(info) Dynare: incomplete");
-  assert.match(value.tooltip, /Counts are unavailable/);
-  assert.match(value.tooltip, /Model expansion is incomplete/);
-  assert.doesNotMatch(value.tooltip, /Endogenous:|households|Timing:/);
+  assert.match(tooltipText(value.tooltip), /Counts are unavailable/);
+  assert.match(tooltipText(value.tooltip), /Model expansion is incomplete/);
+  assert.doesNotMatch(tooltipText(value.tooltip), /Endogenous:|households|Timing:/);
 });
 test("incomplete reasons appear in the hover without reading diagnostics", () => {
   const value = modelStatus(facts(document(), {
@@ -157,25 +177,25 @@ test("incomplete reasons appear in the hover without reading diagnostics", () =>
       { code: "E063", message: "Unknown variable missing", location: null },
       { code: "I211", message: "Macro expression 'length([1])' could not be evaluated; some model checks were withheld.", location: null },
     ],
-  }), ["endogenous", "equations"], "main.mod");
+  }), ["endogenous", "equations"]);
   assert.equal(value.text, "$(info) Dynare: incomplete");
-  assert.match(value.tooltip, /Unknown variable missing/);
-  assert.match(value.tooltip, /Macro expression 'length\(\[1\]\)' could not be evaluated/);
-  assert.doesNotMatch(value.tooltip, /Model expansion is incomplete/);
-  assert.match(value.tooltip, /Counts are unavailable/);
+  assert.match(tooltipText(value.tooltip), /Unknown variable missing/);
+  assert.match(tooltipText(value.tooltip), /Macro expression 'length\(\[1\]\)' could not be evaluated/);
+  assert.doesNotMatch(tooltipText(value.tooltip), /Model expansion is incomplete/);
+  assert.match(tooltipText(value.tooltip), /Counts are unavailable/);
 });
 test("older engines without incomplete_reasons keep the generic hover", () => {
-  const value = modelStatus(facts(document(), { complete: false, message: "Model expansion is incomplete" }), ["endogenous"], "main.mod");
-  assert.match(value.tooltip, /Model expansion is incomplete/);
-  assert.doesNotMatch(value.tooltip, /Unknown variable/);
+  const value = modelStatus(facts(document(), { complete: false, message: "Model expansion is incomplete" }), ["endogenous"]);
+  assert.match(tooltipText(value.tooltip), /Model expansion is incomplete/);
+  assert.doesNotMatch(tooltipText(value.tooltip), /Unknown variable/);
 });
 test("ignored diagnostic codes do not remove incomplete hover reasons", () => {
   // Hover reads model-info reasons only; Ignore filters painted diagnostics elsewhere.
   const value = modelStatus(facts(document(), {
     complete: false,
     incomplete_reasons: [{ code: "I211", message: "Macro expression '1 in 1:3' could not be evaluated; some model checks were withheld." }],
-  }), ["equations"], "main.mod");
-  assert.match(value.tooltip, /Macro expression '1 in 1:3' could not be evaluated/);
+  }), ["equations"]);
+  assert.match(tooltipText(value.tooltip), /Macro expression '1 in 1:3' could not be evaluated/);
 });
 test("default status is native, accessible, and focuses Outline", async () => {
   const env = setup();
@@ -186,7 +206,7 @@ test("default status is native, accessible, and focuses Outline", async () => {
   assert.equal(item.command, "outline.focus");
   assert.equal(item.name, "Dynare model counts");
   assert.equal(item.visible, true);
-  assert.match(item.accessibilityInformation.label, /4 endogenous/);
+  assert.match(item.accessibilityInformation.label, /Total: 104 endogenous/);
   assert.equal(item.backgroundColor, undefined);
   assert.equal(item.color, undefined);
   registration.dispose();
@@ -197,7 +217,7 @@ test("resource settings choose count order, live disable, empty list, and reset"
   const registration = registerStatus(env.service);
   await flush();
   const item = env.host.items[0];
-  assert.equal(item.text, "$(list-ordered) 3  $(symbol-variable) 4");
+  assert.equal(item.text, "$(list-ordered) 93  $(symbol-variable) 104");
   assert.ok(env.host.scopes.every(value => value.section === "dynare" && value.scope.languageId === "dynare" && value.scope.uri === env.doc.uri));
   env.configure("statusBar.enabled", false);
   assert.equal(item.visible, false);
@@ -210,7 +230,7 @@ test("resource settings choose count order, live disable, empty list, and reset"
   env.host.resourceSettings.delete(env.doc.uri.toString());
   env.configure("statusBar.counts", undefined);
   await flush();
-  assert.equal(item.text, "$(symbol-variable) 4  $(symbol-field) 2  $(list-ordered) 3");
+  assert.equal(item.text, "$(symbol-variable) 104  $(symbol-field) 12  $(list-ordered) 93");
   registration.dispose();
 });
 test("invalid settings are safely filtered or fall back with an Output explanation", async () => {
@@ -219,16 +239,16 @@ test("invalid settings are safely filtered or fall back with an Output explanati
   env.configure("statusBar.counts", ["equations", "equations", "invented", 1]);
   const registration = registerStatus(env.service);
   await flush();
-  assert.equal(env.host.items[0].text, "$(list-ordered) 3");
+  assert.equal(env.host.items[0].text, "$(list-ordered) 93");
   assert.ok(env.service.logged.some(message => message.includes("Invalid dynare.statusBar.enabled")));
   assert.ok(env.service.logged.some(message => message.includes("Invalid or repeated entries")));
   registration.dispose();
 });
 test("includes, virtual previews, other languages and no editor do not request or show counts", async () => {
   const cases = [
-    document("file:///project/includes.inc"),
+    document("file:///workspace/includes.inc"),
     document("dygnosis-effective:/main.mod"),
-    document("file:///project/main.mod", { languageId: "plaintext" }),
+    document("file:///workspace/main.mod", { languageId: "plaintext" }),
     undefined,
   ];
   for (const doc of cases) {
@@ -242,7 +262,7 @@ test("includes, virtual previews, other languages and no editor do not request o
   }
 });
 test("dyn and untitled model roots are supported", async () => {
-  for (const value of ["file:///project/model.DYN", "untitled:/scratch.mod"]) {
+  for (const value of ["file:///workspace/model.DYN", "untitled:/scratch.mod"]) {
     const env = setup(document(value));
     const registration = registerStatus(env.service);
     await flush();
@@ -253,18 +273,19 @@ test("dyn and untitled model roots are supported", async () => {
 });
 test("a mod opened as an include uses its chosen root while preferences use the displayed file", async () => {
   const env = setup(document("file:///other-folder/part.mod"));
-  env.service.root = uri("file:///project/owner.mod");
+  env.service.root = uri("file:///workspace/owner.mod");
   env.configure("statusBar.counts", ["equations"], env.doc.uri.toString());
   const registration = registerStatus(env.service);
   await flush();
-  assert.equal(env.service.requests[0].root.toString(), "file:///project/owner.mod");
+  assert.equal(env.service.requests[0].root.toString(), "file:///workspace/owner.mod");
   assert.equal(env.service.requests[0].document.toString(), env.doc.uri.toString());
-  assert.equal(env.host.items[0].text, "$(list-ordered) 3");
-  assert.match(env.host.items[0].tooltip, /\/project\/owner.mod/);
+  assert.equal(env.host.items[0].text, "$(list-ordered) 93");
+  assert.match(tooltipText(env.host.items[0].tooltip), /^Aggregate model/);
+  assert.doesNotMatch(tooltipText(env.host.items[0].tooltip), /owner\.mod|part\.mod/);
   registration.dispose();
 });
 test("ambiguous background model counts explain the owner-selection action", async () => {
-  const env = setup(document("file:///project/helper.mod"));
+  const env = setup(document("file:///workspace/helper.mod"));
   env.service.rootForDocument = async () => undefined;
   const registration = registerStatus(env.service); await flush();
   assert.match(env.host.items[0].text, /choose model owner/);
@@ -290,8 +311,8 @@ test("edit invalidation removes numbers immediately and superseded versions cann
   await flush();
   first.resolve(facts(env.doc, { document_version: 2, n_equations: 99 }));
   await flush();
-  assert.match(env.host.items[0].text, /list-ordered\) 8$/);
-  assert.doesNotMatch(env.host.items[0].text, /99/);
+  assert.match(env.host.items[0].text, /list-ordered\) 98$/);
+  assert.doesNotMatch(env.host.items[0].text, /189/);
   registration.dispose();
 });
 test("root changes and active-editor changes reject old replies", async () => {
@@ -300,7 +321,7 @@ test("root changes and active-editor changes reject old replies", async () => {
   env.service.modelInfo = () => old.promise;
   const registration = registerStatus(env.service);
   await flush();
-  env.service.root = uri("file:///project/new-owner.mod");
+  env.service.root = uri("file:///workspace/new-owner.mod");
   env.service.modelInfo = () => next.promise;
   env.changed.fire();
   await flush();
@@ -308,12 +329,12 @@ test("root changes and active-editor changes reject old replies", async () => {
   await flush();
   old.resolve(facts(env.doc, { n_endogenous: 99 }));
   await flush();
-  assert.match(env.host.items[0].text, /symbol-variable\) 7/);
+  assert.match(env.host.items[0].text, /symbol-variable\) 107/);
   const late = deferred();
   env.service.modelInfo = () => late.promise;
   env.changed.fire();
   await flush();
-  env.host.editor = { document: document("file:///project/part.inc") };
+  env.host.editor = { document: document("file:///workspace/part.inc") };
   env.host.active.fire(env.host.editor);
   late.resolve(facts(env.doc));
   await flush();

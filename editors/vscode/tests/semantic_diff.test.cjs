@@ -560,11 +560,11 @@ test("missing-side block opener survives projection and labels the source link",
       }
     }
     const envelope = { state: "result", diff: snapshotResponse, navigation: { ...snapshotResponse.navigation, schema_version: 2 }, sources: registry };
-    const project = input => parseSnapshotDiff(input, ids, (side, key) => { assert.ok(Object.hasOwn(registry[side], key)); return key; }, inputs, true);
-    assert.deepEqual(project(envelope).rows[0].navigation.block_openers, snapshot.rows[0].navigation.block_openers);
+    const workspace = input => parseSnapshotDiff(input, ids, (side, key) => { assert.ok(Object.hasOwn(registry[side], key)); return key; }, inputs, true);
+    assert.deepEqual(workspace(envelope).rows[0].navigation.block_openers, snapshot.rows[0].navigation.block_openers);
     for (const change of [location => location.input_id = "wrong", location => location.commit = "wrong"]) {
       const badSnapshot = structuredClone(envelope); change(badSnapshot.navigation.rows[0].block_openers[missing].written_locations[0]);
-      assert.throws(() => project(badSnapshot), /unsupported/);
+      assert.throws(() => workspace(badSnapshot), /unsupported/);
     }
   }
 });

@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.11.29
+
+- Workspace checks use VS Code's workspace terminology in Explorer, the status
+  bar, commands, settings, MCP setup and Help. Saved configuration now uses
+  `dynare.workspaceDiagnostics` and `dynare.workspaceExcludePaths`. Update
+  existing saved settings to these names.
+- Model-count hovers keep timing beside the endogenous count under **Aggregate
+  model**, with separate heterogeneous model blocks. The filename,
+  before-transformation qualifier and click instructions are removed.
+- Status bar variable and equation totals sum counts from the aggregate model
+  and every heterogeneous dimension. The hover keeps their separate breakdowns.
+- The **Models in workspace** hover shows a compact count table. Incomplete and
+  failed checks share **Not fully checked**; that row and **Excluded** appear
+  only when nonzero. Column headers align with their labels and counts.
+  The status bar shows the checked ratio without an incomplete prefix.
+  Cancellation and unreadable folders retain short messages.
+
 ## v0.11.28
 
 - MCP uses the 12-tool contract 3. The `legacy-v2` launch profile is removed.

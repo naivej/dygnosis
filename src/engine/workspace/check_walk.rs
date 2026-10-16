@@ -35,17 +35,17 @@ pub fn is_include_path(path: &Path) -> bool {
 }
 
 #[derive(Default)]
-pub struct ProjectFiles {
+pub struct WorkspaceFiles {
     pub models: Vec<String>,
     pub includes: Vec<String>,
 }
 
 pub fn collect_model_files(dir: &Path) -> io::Result<Vec<String>> {
-    Ok(collect_project_files(dir)?.models)
+    Ok(collect_workspace_files(dir)?.models)
 }
 
-pub fn collect_project_files(dir: &Path) -> io::Result<ProjectFiles> {
-    let mut out = ProjectFiles::default();
+pub fn collect_workspace_files(dir: &Path) -> io::Result<WorkspaceFiles> {
+    let mut out = WorkspaceFiles::default();
     if starts_with_plus(dir) {
         return Ok(out);
     }
@@ -55,7 +55,7 @@ pub fn collect_project_files(dir: &Path) -> io::Result<ProjectFiles> {
     Ok(out)
 }
 
-fn collect_into(dir: &Path, out: &mut ProjectFiles) -> io::Result<()> {
+fn collect_into(dir: &Path, out: &mut WorkspaceFiles) -> io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();

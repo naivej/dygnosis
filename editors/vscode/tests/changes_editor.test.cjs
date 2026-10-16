@@ -13,7 +13,7 @@ function activateHost(env) {
   const registrations = { "changes_editor": { registerChanges: value => { assert.equal(value, service); host.registeredChanges++; return new Disposable(); } },
     "client": { DygnosisClient: class { constructor() { return service; } }, isAnalysisDocument: document => document.uri.scheme === "file" },
   };
-  for (const [module, name] of [["project_status", "registerProjectStatus"], ["project_mcp", "registerProjectMcp"], ["origin_jumps", "registerOriginJumps"], ["quickfix", "registerDiagnosticActions"], ["lenses", "registerLenses"], ["color", "registerColors"], ["model_navigation", "registerModelNavigation"], ["status", "registerStatus"], ["mcp", "registerMcp"], ["preview", "registerEffectivePreview"], ["help", "registerHelp"]]) registrations[module] = { [name]: () => new Disposable() };
+  for (const [module, name] of [["workspace_status", "registerWorkspaceStatus"], ["workspace_mcp", "registerWorkspaceMcp"], ["origin_jumps", "registerOriginJumps"], ["quickfix", "registerDiagnosticActions"], ["lenses", "registerLenses"], ["color", "registerColors"], ["model_navigation", "registerModelNavigation"], ["status", "registerStatus"], ["mcp", "registerMcp"], ["preview", "registerEffectivePreview"], ["help", "registerHelp"]]) registrations[module] = { [name]: () => new Disposable() };
   const { activate } = load("extension", vscode, registrations), context = { subscriptions: [] };
   assert.equal(activate(context), service); return context;
 }

@@ -5,7 +5,7 @@ export type Log = (message: string) => void;
 /** Macro tint changes no server input; simultaneous engine-setting changes still do. */
 export function macroTintOnlyChange(event: vscode.ConfigurationChangeEvent, resource?: vscode.Uri): boolean {
   return event.affectsConfiguration("dynare.effectiveModel.macroTint", resource) &&
-    !["serverPath", "searchPaths", "macroWorkLimit", "formatIndent", "projectDiagnostics", "projectExcludePaths", "nameDetails", "outline", "parameterValueHints"]
+    !["serverPath", "searchPaths", "macroWorkLimit", "formatIndent", "workspaceDiagnostics", "workspaceExcludePaths", "nameDetails", "outline", "parameterValueHints"]
       .some(key => event.affectsConfiguration(`dynare.${key}`, resource));
 }
 function valueSetting(key: string, resource: vscode.Uri | undefined, fallback: unknown): unknown {
@@ -27,10 +27,10 @@ export function listSetting(key: string, resource: vscode.Uri | undefined, allow
   if (result.length !== value.length) log(`Invalid or repeated entries in dynare.${key} were ignored.`);
   return result;
 }
-export function projectDiagnosticsSetting(log: Log): boolean {
-  const value: unknown = vscode.workspace.getConfiguration("dynare").get("projectDiagnostics", true);
+export function workspaceDiagnosticsSetting(log: Log): boolean {
+  const value: unknown = vscode.workspace.getConfiguration("dynare").get("workspaceDiagnostics", true);
   if (typeof value === "boolean") return value;
-  log("Invalid dynare.projectDiagnostics; using true.");
+  log("Invalid dynare.workspaceDiagnostics; using true.");
   return true;
 }
 function stringListSetting(key: string, resource: vscode.Uri | undefined, log: Log): string[] {
@@ -45,7 +45,7 @@ export function engineSettings(resource: vscode.Uri | undefined, log: Log) {
   const formatIndent = rawIndent === "tab" || (typeof rawIndent === "number" && Number.isInteger(rawIndent) && rawIndent >= 1 && rawIndent <= 8) ? rawIndent : "tab";
   if (formatIndent !== rawIndent) log("Invalid dynare.formatIndent; using a tab.");
   return {
-    searchPaths, macroWorkLimit: valueSetting("macroWorkLimit", resource, 2_000_000), formatIndent, projectExcludePaths: stringListSetting("projectExcludePaths", resource, log),
+    searchPaths, macroWorkLimit: valueSetting("macroWorkLimit", resource, 2_000_000), formatIndent, workspaceExcludePaths: stringListSetting("workspaceExcludePaths", resource, log),
     nameDetails: {
       longName: booleanSetting("nameDetails.longName", resource, true, log),
       tex: booleanSetting("nameDetails.tex", resource, true, log),
@@ -60,7 +60,7 @@ export function engineSettings(resource: vscode.Uri | undefined, log: Log) {
 export function configurationSnapshot(log: Log) {
   return { dynare: { configuration: {
     schemaVersion: 1,
-    loose: { ...engineSettings(undefined, log), projectDiagnostics: projectDiagnosticsSetting(log) },
+    loose: { ...engineSettings(undefined, log), workspaceDiagnostics: workspaceDiagnosticsSetting(log) },
     folders: (vscode.workspace.workspaceFolders ?? []).filter(folder => folder.uri.scheme === "file").map(folder => ({
       uri: folder.uri.toString(), settings: engineSettings(folder.uri, log),
     })),

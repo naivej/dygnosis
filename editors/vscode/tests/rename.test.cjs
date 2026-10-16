@@ -27,7 +27,7 @@ const original = Module._load;
 Module._load = function(name, ...args) { return name === "vscode" ? vscode : name === "vscode-languageclient/node" ? { TextDocumentEdit } : original.call(this, name, ...args); };
 const { withCheckedRenameEdit } = require(compiledModule("rename_guard"));
 Module._load = original;
-const root = "file:///project/root.mod", child = "file:///project/equations.txt";
+const root = "file:///workspace/root.mod", child = "file:///workspace/equations.txt";
 const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } };
 const token = { isCancellationRequested: false };
 function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
@@ -79,7 +79,7 @@ test("edits, dependency file invalidation, settings and replacement during loadi
       if (reason === "file") events.invalidate.fire({ reason: "file" });
       if (reason === "settings") events.configuration.fire({ affectsConfiguration: key => key === "dynare" });
       if (reason === "instance") ++service.currentInstance;
-      if (reason === "owner") host.capture = () => { const changed = envelope(); changed.owners.push({ root_uri: "file:///project/other.mod", revision: "other" }); return changed; };
+      if (reason === "owner") host.capture = () => { const changed = envelope(); changed.owners.push({ root_uri: "file:///workspace/other.mod", revision: "other" }); return changed; };
     };
     await assert.rejects(run(), /Rename|engine/, reason); assert.equal(host.converted.length, 0);
   }
@@ -126,7 +126,7 @@ test("guard listeners remain active through consumption and are disposed afterwa
 });
 
 test("unedited model inputs carry no-op application guards without becoming genuine rename targets", async () => {
-  const { run, envelope } = setup(); const dependency = "file:///project/settings.inc";
+  const { run, envelope } = setup(); const dependency = "file:///workspace/settings.inc";
   host.disk.set(dependency, "@#define variant=1");
   host.capture = () => { const value = envelope(); value.sources.push({ uri: dependency, text: host.disk.get(dependency), version: null }); return value; };
   const result = await run(); assert.ok(result);
@@ -136,7 +136,7 @@ test("unedited model inputs carry no-op application guards without becoming genu
 
 test("native Windows saved-to-open URI aliases preserve the complete recaptured edit", { skip: process.platform !== "win32" }, async () => {
   const { run, envelope } = setup();
-  const saved = "file:///C:/Project/equations.inc", opened = "file:///c%3A/Project/equations.inc";
+  const saved = "file:///C:/Workspace/equations.inc", opened = "file:///c%3A/Workspace/equations.inc";
   host.disk.set(saved, "p");
   host.load = target => { if (target.uri.toString() === saved) { host.documents.delete(saved); target.uri = vscode.Uri.parse(opened); host.documents.set(opened, target); } };
   host.capture = request => {
@@ -144,7 +144,7 @@ test("native Windows saved-to-open URI aliases preserve the complete recaptured 
     value.edit.documentChanges[1].textDocument = { uri, version: request === 1 ? null : 1 };
     value.sources[1] = { uri, text: "p", version: request === 1 ? null : 1 };
     // The same native identity can occur in the owner set too.
-    value.owners[0].root_uri = request === 1 ? "file:///C:/Project/root.mod" : "file:///c%3A/Project/root.mod";
+    value.owners[0].root_uri = request === 1 ? "file:///C:/Workspace/root.mod" : "file:///c%3A/Workspace/root.mod";
     return value;
   };
   assert.ok(await run());
@@ -157,7 +157,7 @@ test("URI aliases do not permit duplicate identities or genuinely changed target
     const { run, envelope } = setup();
     host.capture = () => {
       const value = envelope();
-      const first = "file:///C:/Project/root.mod", alias = "file:///c%3A/Project/root.mod";
+      const first = "file:///C:/Workspace/root.mod", alias = "file:///c%3A/Workspace/root.mod";
       if (reason === "sources") value.sources.push({ uri: first, text: "p", version: null }, { uri: alias, text: "p", version: null });
       if (reason === "edits") value.edit.documentChanges.push({ textDocument: { uri: first, version: null }, edits: [] }, { textDocument: { uri: alias, version: null }, edits: [] });
       if (reason === "owners") value.owners.push({ root_uri: first, revision: "one" }, { root_uri: alias, revision: "two" });

@@ -1,6 +1,7 @@
 // Check equation lists and Outline presentation in an isolated native VS Code host.
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
+const { Buffer } = require("node:buffer");
 const path = require("node:path");
 const vscode = require("vscode");
 const { compiledModule } = require("./extension_modules.cjs");
@@ -30,6 +31,57 @@ async function closePicker(waitFor) {
   }), "native picker closes after Escape");
 }
 
+async function checkStatusHovers(service, evidence, waitFor) {
+  const hover = async (id, title) => {
+    let point;
+    await waitFor(async () => {
+      point = await nativeWorkbench(async send => {
+        const result = await send("Runtime.evaluate", { returnByValue: true,
+          expression: `(() => { const item=[...document.querySelectorAll('.statusbar-item')].find(item=>item.id.endsWith(${JSON.stringify(id)})); const box=item?.getBoundingClientRect(); return box?.width && !/updating|starting/.test(item.textContent) ? {x:box.x+box.width/2,y:box.y+box.height/2} : null; })()` });
+        return result.result.value;
+      });
+      return point;
+    }, `${id} finishes updating in the native status bar`);
+    assert.ok(point, `${id} has a visible native status bar entry`);
+    await nativeWorkbench(async send => {
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 10, y: 10 });
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+    });
+    let content;
+    await waitFor(async () => {
+      content = await nativeWorkbench(async send => {
+        const result = await send("Runtime.evaluate", { returnByValue: true,
+          expression: `(() => { const clean=value=>value.replaceAll(String.fromCharCode(160),' '); const hover=[...document.querySelectorAll('.monaco-hover .rendered-markdown')].find(item=>item.getClientRects().length && clean(item.textContent).includes(${JSON.stringify(title)})); return hover ? {text:clean(hover.innerText),headings:[...hover.querySelectorAll('strong')].map(item=>clean(item.textContent)),tables:[...hover.querySelectorAll('table')].map(table=>[...table.rows].map(row=>[...row.cells].map(cell=>clean(cell.textContent).trim()))),tableAlignments:[...hover.querySelectorAll('table')].map(table=>[...table.rows].map(row=>[...row.cells].map(cell=>getComputedStyle(cell).textAlign.replace("-webkit-", ""))))} : null; })()` });
+        return result.result.value;
+      });
+      return content;
+    }, `${title} renders in the native hover`).catch(async error => {
+      const state = await nativeWorkbench(async send => {
+        const result = await send("Runtime.evaluate", { returnByValue: true,
+          expression: `({status:[...document.querySelectorAll('.statusbar-item')].filter(item=>item.id.endsWith(${JSON.stringify(id)})).map(item=>item.outerHTML),hovers:[...document.querySelectorAll('.monaco-hover .rendered-markdown')].map(item=>item.outerHTML),hit:document.elementFromPoint(${point.x},${point.y})?.outerHTML})` });
+        const capture = await send("Page.captureScreenshot", { format: "png" });
+        await fs.writeFile(path.join(path.dirname(process.env.DYGNOSIS_HOST_RESULT), "status-hover.png"), Buffer.from(capture.data, "base64"));
+        return result.result.value;
+      });
+      error.message += `; native hover state=${JSON.stringify(state)}`;
+      throw error;
+    });
+    await nativeWorkbench(send => send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 10, y: 10 }));
+    return content;
+  };
+  const model = await hover("dygnosis.modelCounts", "Aggregate model");
+  assert.ok(model.headings.includes("Aggregate model"));
+  assert.match(model.text, /1 endogenous \(0 static, 1 predetermined, 0 forward-looking, 0 mixed\)/);
+  assert.doesNotMatch(model.text, /presentation\.mod|before transformation|Click/);
+  await waitFor(async () => (await service.execute("dynare/workspaceStatus"))?.complete, "workspace counts finish before native hover");
+  const workspace = await hover("dygnosis.workspaceCoverage", "Models in workspace");
+  assert.ok(workspace.headings.includes("Models in workspace"));
+  assert.deepEqual(workspace.tables, [[["Models", "Count"], ["Checked", "1"]]]);
+  assert.deepEqual(workspace.tableAlignments, [[["left", "right"], ["left", "right"]]], "workspace headers align with their values");
+  assert.doesNotMatch(workspace.text, /Not fully checked|Excluded|Pending|Checking|Click|Warnings|Errors|unopened/);
+  evidence.checks.push("native status hovers render bold headings, inline endogenous timing and a workspace count table without filenames, scope, click instructions or zero-state rows");
+}
+
 async function checkPresentation(service, workspaceRoot, evidence, helpers) {
   const { waitFor, currentSnapshot, writeObservedInput } = helpers;
   assert.ok(process.env.DYGNOSIS_HOST_CDP_PORT, "Presentation acceptance requires the native equation picker");
@@ -43,6 +95,7 @@ async function checkPresentation(service, workspaceRoot, evidence, helpers) {
     return { document, editor, info };
   };
   const input = await open("presentation.mod", "var y;\nparameters rho;\nrho=.9;\nhelper=1;\nmodel;\ny=rho*y(-1);\nend;\n");
+  await checkStatusHovers(service, evidence, waitFor);
   const symbols = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", input.document.uri);
   assert.deepEqual(symbols.map(symbol => symbol.name), ["var", "parameters", "model"]);
   const parameter = symbols.find(symbol => symbol.name === "parameters").children.find(symbol => symbol.name === "rho");
@@ -93,6 +146,21 @@ async function checkPresentation(service, workspaceRoot, evidence, helpers) {
   await pick(input, lens.command.command, lens.command.arguments);
   evidence.checks.push("native command and CodeLens each show one unnamed-equation list, jump to written source, and cancel without moving selection");
 
+  const heterogeneous = await open("scope-counts.mod", await fs.readFile(path.resolve(__dirname, "../../../../tests/fixtures/compare/het_before.mod"), "utf8"));
+  assert.equal(heterogeneous.info.complete, true);
+  assert.equal(heterogeneous.info.n_endogenous, 1);
+  assert.equal(heterogeneous.info.n_exogenous, 1);
+  assert.equal(heterogeneous.info.n_equations, 1);
+  assert.equal(heterogeneous.info.heterogeneity_dimensions.length, 1);
+  assert.equal(heterogeneous.info.heterogeneity_dimensions[0].n_endogenous, 1);
+  assert.equal(heterogeneous.info.heterogeneity_dimensions[0].n_equations, 1);
+  await waitFor(async () => nativeWorkbench(async send => {
+    const result = await send("Runtime.evaluate", { returnByValue: true,
+      expression: `(() => { const item=[...document.querySelectorAll('.statusbar-item')].find(item=>item.id.endsWith('dygnosis.modelCounts')); return item?.textContent.replace(/\\s+/g,' ').trim(); })()` });
+    return result.result.value === "2 1 2";
+  }), "native status bar totals aggregate and heterogeneous counts before hover");
+  evidence.checks.push("real heterogeneous model shows summed endogenous/exogenous/equation totals on the status bar before hover");
+
   const repeated = await open("repeated-opener.mod", "var y;\n@#for copy in 1:2\nmodel;\ny=@{copy};\nend;\n@#endfor\n");
   assert.equal(repeated.info.equations.length, 2);
   const repeatedLenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", repeated.document.uri);
@@ -110,8 +178,8 @@ async function checkPresentation(service, workspaceRoot, evidence, helpers) {
       const outline = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", example.document.uri);
       if (heterogeneous) {
         for (const name of ["model(heterogeneity=households)", "var(heterogeneity=households)", "varexo(heterogeneity=households)"]) assert.ok(outline.some(row => row.name === name), name);
-        const status = modelStatus(example.info, ["endogenous", "exogenous", "equations"], path.basename(relative));
-        assert.match(status.tooltip, /Heterogeneous model: households/);
+        const status = modelStatus(example.info, ["endogenous", "exogenous", "equations"]);
+        assert.match(status.tooltip.value, /Heterogeneous model: households/);
         assert.match(status.accessibilityLabel, /Heterogeneous model: households/);
       } else assert.ok(example.info.equations.some(row => row.origin_frames?.length > 0), "real macro equations retain origin frames");
       evidence.checks.push(`pinned official ${relative}: complete counts and native presentation`);
@@ -135,7 +203,7 @@ async function checkOwnerContexts(service, workspaceRoot, evidence, { waitFor, c
   const diagnosticCode = note => typeof note.code === "object" ? note.code.value : note.code;
   const codes = () => vscode.languages.getDiagnostics(helper.uri).map(diagnosticCode);
   await waitFor(async () => (await service.rootForDocument(helper))?.toString() === root.uri.toString() && codes().includes("E285") && !codes().includes("E063"), "native .mod helper uses its unique parent and keeps the real macro type error");
-  assert.equal(service.chosenRootForDocument(helper), undefined, "automatic context is not explicit project priority");
+  assert.equal(service.chosenRootForDocument(helper), undefined, "automatic context is not explicit workspace priority");
   await vscode.commands.executeCommand("dygnosis.treatAsRoot");
   await waitFor(() => codes().includes("E063") && !codes().includes("E285"), "native standalone command changes diagnostic context");
   const pending = vscode.commands.executeCommand("dygnosis.chooseModelOwner");

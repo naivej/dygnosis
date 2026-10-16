@@ -7,7 +7,7 @@
   {"id":"effective-model","title":"Inspect macro expansion","keywords":["expand","macro","origins","written source","refresh"]},
   {"id":"diagnostics","title":"Check the model","keywords":["diagnostics","Problems","Error","Warning","Information","Explain","ignore","restore"]},
   {"id":"structural-diff","title":"Review model changes","keywords":["comparison","variants","Diff","semantic","Before","After","groups","rows","pairing","filter","priors","text diff","source","model-local","timing","references"]},
-  {"id":"project-checks","title":"Check project models","keywords":["project checks","coverage","background","saved","exclude","cancel","Recheck"]},
+  {"id":"workspace-checks","title":"Check workspace models","keywords":["workspace checks","coverage","background","saved","exclude","cancel","Recheck"]},
   {"id":"agents","title":"Work with an agent","keywords":["MCP","tools",".mcp.json","managed binary","approval","standalone","executable"]},
   {"id":"reference","title":"Reference","keywords":["commands","checks","options","keyboard","shortcut","index","reference"]},
   {"id":"troubleshoot","title":"Support and problem reports","keywords":["support","report","issue","version","restart","Output","settings"]},

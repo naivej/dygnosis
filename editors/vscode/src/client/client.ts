@@ -37,7 +37,7 @@ export function extendCapabilities(capabilities: ClientCapabilities): void {
   const experimental: Record<string, unknown> = record(capabilities.experimental) ? capabilities.experimental : {};
   experimental.dygnosis = { modelInfo: { schema_version: 1 }, modelInfoChanged: true, documentContext: { schema_version: 1 }, configuration: { schema_version: 1 },
     compareModels: { navigation_schema_version: 1 }, compareModelSnapshots: { schema_version: 1, navigation_schema_version: 2 }, effectivePreview: { navigation_schema_version: 1, dependency_candidates: true },
-    projectStatusChanged: true };
+    workspaceStatusChanged: true };
   capabilities.experimental = experimental;
 }
 class DygnosisCapabilities implements StaticFeature {

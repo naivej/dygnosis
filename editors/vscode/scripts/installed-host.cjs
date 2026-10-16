@@ -59,8 +59,8 @@ exports.run = async function run() {
     const launchLogs = [];
     const originalLog = service.log;
     service.log = message => { launchLogs.push(message); originalLog(message); };
-    const projectDiagnostics = extension.packageJSON.contributes.configuration.some(group => Object.hasOwn(group.properties, "dynare.projectDiagnostics"));
-    if (!projectDiagnostics) assert.equal(service.client, undefined, "Before project diagnostics ships, activation before a model must leave LSP idle");
+    const workspaceDiagnostics = extension.packageJSON.contributes.configuration.some(group => Object.hasOwn(group.properties, "dynare.workspaceDiagnostics"));
+    if (!workspaceDiagnostics) assert.equal(service.client, undefined, "Before workspace diagnostics ships, activation before a model must leave LSP idle");
     else await service.restart(); // Later releases may already analyze the unopened workspace.
     evidence.checks.push("installed extension activation before opening a Dynare document");
     await checkpoint("installed bundled MCP initialize, discovery and model-info call");
@@ -68,7 +68,7 @@ exports.run = async function run() {
     evidence.checks.push("installed bundled MCP initialize/tools/list/tool call before opening a model");
     await checkpoint("native VS Code MCP discovery and model-info invocation");
     evidence.native_vscode_mcp = await probeNativeMcp(vscode, extension.id);
-    if (!projectDiagnostics) assert.equal(service.client, undefined, "Native MCP must work before the first LSP launch");
+    if (!workspaceDiagnostics) assert.equal(service.client, undefined, "Native MCP must work before the first LSP launch");
     evidence.checks.push("native VS Code MCP discovery and actual invocation of all fifteen tools before opening a model");
     await checkpoint("bundled LSP counts, symbols and Problems diagnostics");
     const file = path.join(workspace, "installed model.mod");

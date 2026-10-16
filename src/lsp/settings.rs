@@ -61,7 +61,7 @@ pub struct ResourceSettings {
     pub search_paths: Vec<PathBuf>,
     pub format_indent_unit: String,
     pub presentation: PresentationSettings,
-    pub project_exclude_paths: Vec<String>,
+    pub workspace_exclude_paths: Vec<String>,
 }
 
 impl Default for ResourceSettings {
@@ -71,7 +71,7 @@ impl Default for ResourceSettings {
             search_paths: Vec::new(),
             format_indent_unit: "\t".to_owned(),
             presentation: PresentationSettings::default(),
-            project_exclude_paths: Vec::new(),
+            workspace_exclude_paths: Vec::new(),
         }
     }
 }
@@ -82,7 +82,7 @@ pub(crate) struct SettingsStore {
     loose: ResourceSettings,
     folder_settings: HashMap<String, ResourceSettings>,
     legacy_root_paths: HashMap<String, Vec<PathBuf>>,
-    pub project_diagnostics: bool,
+    pub workspace_diagnostics: bool,
 }
 
 impl Default for SettingsStore {
@@ -92,7 +92,7 @@ impl Default for SettingsStore {
             loose: ResourceSettings::default(),
             folder_settings: HashMap::new(),
             legacy_root_paths: HashMap::new(),
-            project_diagnostics: true,
+            workspace_diagnostics: true,
         }
     }
 }
@@ -164,14 +164,14 @@ impl SettingsStore {
                 );
             }
             self.loose = loose;
-            self.project_diagnostics = snapshot
+            self.workspace_diagnostics = snapshot
                 .get("loose")
                 .and_then(|v| v.get("dynare").or(Some(v)))
-                .and_then(|v| v.get("projectDiagnostics"))
+                .and_then(|v| v.get("workspaceDiagnostics"))
                 .map(|v| {
                     v.as_bool().unwrap_or_else(|| {
                         explanations
-                            .push("Invalid dynare.projectDiagnostics; use true.".to_owned());
+                            .push("Invalid dynare.workspaceDiagnostics; use true.".to_owned());
                         true
                     })
                 })
@@ -179,15 +179,15 @@ impl SettingsStore {
             self.folder_settings = settings;
             self.legacy_root_paths.clear();
         } else {
-            if let Some(value) = object.get("projectDiagnostics") {
-                self.project_diagnostics = value.as_bool().unwrap_or_else(|| {
-                    explanations.push("Invalid dynare.projectDiagnostics; use true.".to_owned());
+            if let Some(value) = object.get("workspaceDiagnostics") {
+                self.workspace_diagnostics = value.as_bool().unwrap_or_else(|| {
+                    explanations.push("Invalid dynare.workspaceDiagnostics; use true.".to_owned());
                     true
                 });
             }
             read_settings(value, &mut self.loose, &mut explanations);
             // The new window switch alone does not replace resource scopes.
-            if object.len() != 1 || !object.contains_key("projectDiagnostics") {
+            if object.len() != 1 || !object.contains_key("workspaceDiagnostics") {
                 self.folder_settings.clear();
             }
             if let Some(raw) = object.get("searchPathsByRoot") {
@@ -264,22 +264,27 @@ fn read_settings(value: &Value, settings: &mut ResourceSettings, explanations: &
     let Some(object) = value.as_object() else {
         return;
     };
-    if let Some(raw) = object.get("projectExcludePaths") {
-        settings.project_exclude_paths.clear();
+    if let Some(raw) = object.get("workspaceExcludePaths") {
+        settings.workspace_exclude_paths.clear();
         if let Some(items) = raw.as_array() {
             for item in items {
                 if let Some(pattern) = item.as_str().filter(|s| !s.trim().is_empty()) {
-                    if !settings.project_exclude_paths.iter().any(|s| s == pattern) {
-                        settings.project_exclude_paths.push(pattern.to_owned());
+                    if !settings
+                        .workspace_exclude_paths
+                        .iter()
+                        .any(|s| s == pattern)
+                    {
+                        settings.workspace_exclude_paths.push(pattern.to_owned());
                     }
                 } else {
                     explanations.push(
-                        "Invalid dynare.projectExcludePaths entry; ignore this entry.".to_owned(),
+                        "Invalid dynare.workspaceExcludePaths entry; ignore this entry.".to_owned(),
                     );
                 }
             }
         } else {
-            explanations.push("Invalid dynare.projectExcludePaths; use no exclusions.".to_owned());
+            explanations
+                .push("Invalid dynare.workspaceExcludePaths; use no exclusions.".to_owned());
         }
     }
     if let Some(raw) = object.get("searchPaths") {

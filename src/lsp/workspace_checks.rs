@@ -16,7 +16,7 @@ use super::{
 use crate::Workspace;
 use crate::engine::diagnostics::check_in_workspace_with_origins;
 use crate::engine::workspace::InputStamps;
-use crate::engine::workspace::check_walk::{collect_project_files, is_include_path};
+use crate::engine::workspace::check_walk::{collect_workspace_files, is_include_path};
 use crate::engine::workspace::include_resolver::{normalize_uri, path_key};
 use crate::lsp::settings::SettingsStore;
 
@@ -25,7 +25,7 @@ const TYPING_PAUSE: Duration = Duration::from_millis(250);
 const RETAINED_REQUEST_ROOTS: usize = 8;
 
 #[derive(Default)]
-pub(super) struct ProjectState {
+pub(super) struct WorkspaceCheckState {
     roots: BTreeMap<Url, RootEntry>,
     include_files: BTreeSet<Url>,
     pub notifications: bool,
@@ -104,7 +104,7 @@ impl RootEntry {
     }
 }
 
-impl ProjectState {
+impl WorkspaceCheckState {
     fn update_include_files(
         &mut self,
         found: BTreeSet<Url>,
@@ -193,7 +193,7 @@ impl ProjectState {
 }
 
 impl Inner {
-    pub(super) fn align_project_root(&mut self, uri: &Url) {
+    pub(super) fn align_workspace_root(&mut self, uri: &Url) {
         if !is_model_root(uri) {
             return;
         }
@@ -201,19 +201,19 @@ impl Inner {
         // stored at discovery, check, or their own edit.
         let key = normalize_uri(uri.as_str());
         let alias = self
-            .project
+            .workspace_checks
             .roots
             .iter()
             .find(|(root, entry)| *root != uri && entry.identity == key)
             .map(|(root, _)| root.clone());
         if let Some(alias) = alias {
-            let mut entry = self.project.roots.remove(&alias).unwrap();
+            let mut entry = self.workspace_checks.roots.remove(&alias).unwrap();
             if entry.selected {
                 entry.queue(TYPING_PAUSE);
             }
             entry.identity = key.clone();
-            self.project.roots.insert(uri.clone(), entry);
-        } else if let Some(entry) = self.project.roots.get_mut(uri) {
+            self.workspace_checks.roots.insert(uri.clone(), entry);
+        } else if let Some(entry) = self.workspace_checks.roots.get_mut(uri) {
             entry.identity = key.clone();
         }
         let report_roots: Vec<Url> = self.reports.keys().cloned().collect();
@@ -222,7 +222,7 @@ impl Inner {
                 continue;
             }
             let same = self
-                .project
+                .workspace_checks
                 .roots
                 .get(&root)
                 .map(|entry| entry.identity == key)
@@ -233,19 +233,20 @@ impl Inner {
         }
     }
 
-    pub(super) fn project_reconfigure(&mut self, force: bool) {
-        self.project.epoch += 1;
-        self.project.begin_pass();
-        self.project.discovery_requested = self.settings.project_diagnostics;
-        self.project.discovery = if self.settings.project_diagnostics {
+    pub(super) fn workspace_reconfigure(&mut self, force: bool) {
+        self.workspace_checks.epoch += 1;
+        self.workspace_checks.begin_pass();
+        self.workspace_checks.discovery_requested = self.settings.workspace_diagnostics;
+        self.workspace_checks.discovery = if self.settings.workspace_diagnostics {
             "pending"
         } else {
             "disabled"
         };
-        self.project.discovery_failures.clear();
+        self.workspace_checks.discovery_failures.clear();
         let settings = &self.settings;
-        for (root, entry) in &mut self.project.roots {
-            let selected = settings.project_diagnostics && selection(settings, root) == Some(true);
+        for (root, entry) in &mut self.workspace_checks.roots {
+            let selected =
+                settings.workspace_diagnostics && selection(settings, root) == Some(true);
             entry.selected = selected;
             if selected {
                 if force || entry.state == "checking" || entry.state == "pending" {
@@ -261,39 +262,40 @@ impl Inner {
                 entry.cached_report = None;
             }
         }
-        if !settings.project_diagnostics {
-            self.project.roots.clear();
-            self.project.include_files.clear();
+        if !settings.workspace_diagnostics {
+            self.workspace_checks.roots.clear();
+            self.workspace_checks.include_files.clear();
         }
-        self.reports
-            .retain(|root, _| self.docs.contains_key(root) || self.project.is_selected(root));
+        self.reports.retain(|root, _| {
+            self.docs.contains_key(root) || self.workspace_checks.is_selected(root)
+        });
         self.bound_workspace_cache();
     }
 
-    pub(super) fn project_changed(&mut self, changed: &Url, deleted: bool) {
-        if !self.settings.project_diagnostics || self.project.shutdown {
+    pub(super) fn workspace_changed(&mut self, changed: &Url, deleted: bool) {
+        if !self.settings.workspace_diagnostics || self.workspace_checks.shutdown {
             return;
         }
-        let resuming = self.project.cancelled;
-        if resuming || self.project.finished() {
-            self.project.begin_pass();
+        let resuming = self.workspace_checks.cancelled;
+        if resuming || self.workspace_checks.finished() {
+            self.workspace_checks.begin_pass();
         }
-        if resuming && self.project.discovery == "cancelled" {
-            self.project.discovery_requested = true;
-            self.project.discovery = "pending";
+        if resuming && self.workspace_checks.discovery == "cancelled" {
+            self.workspace_checks.discovery_requested = true;
+            self.workspace_checks.discovery = "pending";
         }
         let key = normalize_uri(changed.as_str());
-        if !deleted && let Some(entry) = self.project.roots.get_mut(changed) {
+        if !deleted && let Some(entry) = self.workspace_checks.roots.get_mut(changed) {
             entry.identity = key.clone();
         }
-        let roots: Vec<Url> = self.project.roots.keys().cloned().collect();
+        let roots: Vec<Url> = self.workspace_checks.roots.keys().cloned().collect();
         for root in roots {
             // Drop the root borrow before touching reports. A delete
             // canonicalizes only after the stored identity misses. Typing
             // compares the stored string and does not stat every root.
             let open = self.docs.contains_key(&root);
             let remove_report = {
-                let Some(entry) = self.project.roots.get_mut(&root) else {
+                let Some(entry) = self.workspace_checks.roots.get_mut(&root) else {
                     continue;
                 };
                 if !entry.selected {
@@ -328,23 +330,23 @@ impl Inner {
         if is_model_root(changed)
             && (deleted
                 || !self
-                    .project
+                    .workspace_checks
                     .roots
                     .values()
                     .any(|entry| entry.identity == key))
             || is_include_path(Path::new(changed.path()))
-                && (deleted || !self.project.include_files.contains(changed))
+                && (deleted || !self.workspace_checks.include_files.contains(changed))
         {
-            self.project.discovery_requested = true;
-            self.project.discovery = "pending";
+            self.workspace_checks.discovery_requested = true;
+            self.workspace_checks.discovery = "pending";
         }
         // A cancellation is lifted by an edit, even when dependency provenance
         // proves that none of the already checked roots needs another check.
-        self.project.cancelled = false;
+        self.workspace_checks.cancelled = false;
     }
 
     pub(super) fn bound_workspace_cache(&mut self) {
-        self.project
+        self.workspace_checks
             .request_roots
             .retain(|root| self.tracked_roots.contains_key(root));
         let mut roots: HashSet<_> = self
@@ -353,7 +355,7 @@ impl Inner {
             .map(|uri| normalize_uri(uri.as_str()))
             .collect();
         let retained: Vec<Url> = self
-            .project
+            .workspace_checks
             .request_roots
             .iter()
             .rev()
@@ -361,7 +363,7 @@ impl Inner {
             .cloned()
             .collect();
         for root in retained {
-            roots.insert(self.project.observed_identity(&root));
+            roots.insert(self.workspace_checks.observed_identity(&root));
         }
         roots.extend(
             self.document_contexts
@@ -369,23 +371,27 @@ impl Inner {
                 .map(|root| normalize_uri(root.as_str())),
         );
         self.workspace.retain_analysis_roots(&roots);
-        // Project dependency provenance lives in ProjectState, independently
+        // Workspace dependency provenance lives in WorkspaceCheckState, independently
         // of this bounded cache and model-info subscription bookkeeping.
     }
 
     pub(super) fn remember_request_root(&mut self, root: &Url) {
-        self.project.request_roots.retain(|uri| uri != root);
-        self.project.request_roots.push(root.clone());
-        if self.project.request_roots.len() > RETAINED_REQUEST_ROOTS {
-            self.project.request_roots.remove(0);
+        self.workspace_checks
+            .request_roots
+            .retain(|uri| uri != root);
+        self.workspace_checks.request_roots.push(root.clone());
+        if self.workspace_checks.request_roots.len() > RETAINED_REQUEST_ROOTS {
+            self.workspace_checks.request_roots.remove(0);
         }
     }
 }
 
 impl Backend {
-    pub fn project_status(&self) -> Value {
+    pub fn workspace_status(&self) -> Value {
         let inner = self.lock_inner();
-        inner.project.status(inner.settings.project_diagnostics)
+        inner
+            .workspace_checks
+            .status(inner.settings.workspace_diagnostics)
     }
 
     pub async fn active_model_changed(&self, params: Value) {
@@ -402,59 +408,60 @@ impl Backend {
             }
             _ => return,
         };
-        self.lock_inner().project.explicit_active = uri;
+        self.lock_inner().workspace_checks.explicit_active = uri;
         super::ordering::committed();
-        self.kick_project();
+        self.kick_workspace();
     }
 
-    pub(super) fn kick_project(&self) {
-        self.project_wake.notify_one();
+    pub(super) fn kick_workspace(&self) {
+        self.workspace_wake.notify_one();
         let mut inner = self.lock_inner();
-        if !inner.project.initialized
-            || inner.project.worker_running
-            || inner.project.shutdown
-            || !inner.settings.project_diagnostics
-            || inner.project.cancelled
+        if !inner.workspace_checks.initialized
+            || inner.workspace_checks.worker_running
+            || inner.workspace_checks.shutdown
+            || !inner.settings.workspace_diagnostics
+            || inner.workspace_checks.cancelled
         {
             return;
         }
-        if !inner.project.discovery_requested
+        if !inner.workspace_checks.discovery_requested
             && !inner
-                .project
+                .workspace_checks
                 .roots
                 .values()
                 .any(|entry| entry.selected && entry.due.is_some())
         {
             return;
         }
-        inner.project.worker_running = true;
+        inner.workspace_checks.worker_running = true;
         let client = self.client.clone();
         let state = Arc::clone(&self.inner);
-        let wake = Arc::clone(&self.project_wake);
+        let wake = Arc::clone(&self.workspace_wake);
         let output_gate = Arc::clone(&self.output_gate);
         tokio::spawn(async move {
             run_worker(client, state, wake, output_gate).await;
         });
     }
 
-    pub(super) async fn project_command(&self, command: &str) -> Value {
-        if command == "dynare/projectStatus" {
-            return self.project_status();
+    pub(super) async fn workspace_command(&self, command: &str) -> Value {
+        if command == "dynare/workspaceStatus" {
+            return self.workspace_status();
         }
         let _output = self.output_gate.lock().await;
         let publications = {
             let mut inner = self.lock_inner();
-            if command == "dynare/recheckProject" {
-                inner.project_reconfigure(true);
-            } else if command == "dynare/cancelProject" {
-                inner.project.epoch += 1;
-                inner.project.cancelled = true;
-                inner.project.discovery_requested = false;
-                if inner.project.discovery == "pending" || inner.project.discovery == "discovering"
+            if command == "dynare/recheckWorkspace" {
+                inner.workspace_reconfigure(true);
+            } else if command == "dynare/cancelWorkspace" {
+                inner.workspace_checks.epoch += 1;
+                inner.workspace_checks.cancelled = true;
+                inner.workspace_checks.discovery_requested = false;
+                if inner.workspace_checks.discovery == "pending"
+                    || inner.workspace_checks.discovery == "discovering"
                 {
-                    inner.project.discovery = "cancelled";
+                    inner.workspace_checks.discovery = "cancelled";
                 }
-                for entry in inner.project.roots.values_mut() {
+                for entry in inner.workspace_checks.roots.values_mut() {
                     entry.generation += 1;
                     entry.due = None;
                     if entry.state == "checking" {
@@ -466,9 +473,9 @@ impl Backend {
         };
         super::ordering::committed();
         publish(&self.client, publications).await;
-        self.kick_project();
+        self.kick_workspace();
         send_status(&self.client, &self.inner).await;
-        self.project_status()
+        self.workspace_status()
     }
 }
 
@@ -498,30 +505,30 @@ async fn run_worker(
     loop {
         let work = {
             let mut inner = state.lock().unwrap_or_else(|e| e.into_inner());
-            if !inner.settings.project_diagnostics
-                || inner.project.cancelled
-                || inner.project.shutdown
+            if !inner.settings.workspace_diagnostics
+                || inner.workspace_checks.cancelled
+                || inner.workspace_checks.shutdown
             {
                 Work::Stop
-            } else if inner.project.discovery_requested {
-                inner.project.discovery_requested = false;
-                inner.project.discovery = "discovering";
+            } else if inner.workspace_checks.discovery_requested {
+                inner.workspace_checks.discovery_requested = false;
+                inner.workspace_checks.discovery = "discovering";
                 Work::Discover {
-                    epoch: inner.project.epoch,
+                    epoch: inner.workspace_checks.epoch,
                     settings: inner.settings.clone(),
                 }
             } else {
                 let now = Instant::now();
                 let active_uri = inner
-                    .project
+                    .workspace_checks
                     .explicit_active
                     .clone()
-                    .or_else(|| inner.project.active.clone());
+                    .or_else(|| inner.workspace_checks.active.clone());
                 let active = active_uri
                     .as_ref()
-                    .map(|root| inner.project.observed_identity(root));
+                    .map(|root| inner.workspace_checks.observed_identity(root));
                 let next = inner
-                    .project
+                    .workspace_checks
                     .roots
                     .iter()
                     .filter(|(_, entry)| entry.selected && entry.due.is_some_and(|due| due <= now))
@@ -534,9 +541,9 @@ async fn run_worker(
                     .map(|(root, _)| root.clone());
                 if let Some(root) = next {
                     let settings = inner.settings.resolve(&root);
-                    let epoch = inner.project.epoch;
+                    let epoch = inner.workspace_checks.epoch;
                     let prior = inner
-                        .project
+                        .workspace_checks
                         .roots
                         .get(&root)
                         .filter(|entry| !entry.force)
@@ -547,7 +554,7 @@ async fn run_worker(
                                 owner_files: entry.owner_files.clone(),
                             })
                         });
-                    let entry = inner.project.roots.get_mut(&root).unwrap();
+                    let entry = inner.workspace_checks.roots.get_mut(&root).unwrap();
                     entry.due = None;
                     entry.state = "checking";
                     let generation = entry.generation;
@@ -570,7 +577,7 @@ async fn run_worker(
                         prior,
                     }
                 } else if let Some(due) = inner
-                    .project
+                    .workspace_checks
                     .roots
                     .values()
                     .filter(|entry| entry.selected)
@@ -588,17 +595,17 @@ async fn run_worker(
             // an event cannot queue work between the decision and this release.
             let runnable = {
                 let mut inner = state.lock().unwrap_or_else(|e| e.into_inner());
-                let runnable = inner.settings.project_diagnostics
-                    && !inner.project.cancelled
-                    && !inner.project.shutdown
-                    && (inner.project.discovery_requested
+                let runnable = inner.settings.workspace_diagnostics
+                    && !inner.workspace_checks.cancelled
+                    && !inner.workspace_checks.shutdown
+                    && (inner.workspace_checks.discovery_requested
                         || inner
-                            .project
+                            .workspace_checks
                             .roots
                             .values()
                             .any(|entry| entry.selected && entry.due.is_some()));
                 if !runnable {
-                    inner.project.worker_running = false;
+                    inner.workspace_checks.worker_running = false;
                 }
                 runnable
             };
@@ -621,15 +628,15 @@ async fn run_worker(
                 let _output = output_gate.lock().await;
                 let publications = {
                     let mut inner = state.lock().unwrap_or_else(|e| e.into_inner());
-                    if inner.project.epoch != epoch
-                        || !inner.settings.project_diagnostics
-                        || inner.project.cancelled
-                        || inner.project.shutdown
+                    if inner.workspace_checks.epoch != epoch
+                        || !inner.settings.workspace_diagnostics
+                        || inner.workspace_checks.cancelled
+                        || inner.workspace_checks.shutdown
                     {
                         continue;
                     }
-                    inner.project.discovery_ms = started.elapsed().as_secs_f64() * 1000.0;
-                    inner.project.discovery = "complete";
+                    inner.workspace_checks.discovery_ms = started.elapsed().as_secs_f64() * 1000.0;
+                    inner.workspace_checks.discovery = "complete";
                     match result {
                         Ok(discovered) => {
                             // Resolve each open document once. A stored root
@@ -643,15 +650,15 @@ async fn run_worker(
                                     .or_insert_with(|| uri.clone());
                             }
                             let roots = bind_discovered_roots(
-                                &inner.project.roots,
+                                &inner.workspace_checks.roots,
                                 &open_identities,
                                 discovered.roots,
                             );
-                            inner.project.discovery_failures = discovered.failures;
+                            inner.workspace_checks.discovery_failures = discovered.failures;
                             // A failed folder walk cannot prove prior roots gone.
                             // Keep them pending/incomplete rather than clear coverage.
                             let failed_folders: Vec<_> = inner
-                                .project
+                                .workspace_checks
                                 .discovery_failures
                                 .iter()
                                 .filter_map(|item| {
@@ -664,18 +671,18 @@ async fn run_worker(
                                 .iter()
                                 .map(|folder| folder.uri.clone())
                                 .collect();
-                            inner.project.update_include_files(
+                            inner.workspace_checks.update_include_files(
                                 discovered.includes,
                                 &current_folders,
                                 &failed_folders,
                             );
-                            inner.project.roots.retain(|root, _| {
+                            inner.workspace_checks.roots.retain(|root, _| {
                                 roots.contains_key(root)
                                     || failed_owner(root, &current_folders, &failed_folders)
                             });
                             for (root, (key, selected)) in roots {
                                 let entry = inner
-                                    .project
+                                    .workspace_checks
                                     .roots
                                     .entry(root)
                                     .or_insert_with(RootEntry::pending);
@@ -695,14 +702,14 @@ async fn run_worker(
                             }
                         }
                         Err(error) => {
-                            inner.project.discovery_failures = folder_uris.into_iter().map(|uri|
-                                json!({"folder_uri": uri, "failure": format!("Cannot list project models and include files: discovery worker failed: {error}")})
+                            inner.workspace_checks.discovery_failures = folder_uris.into_iter().map(|uri|
+                                json!({"folder_uri": uri, "failure": format!("Cannot list workspace models and include files: discovery worker failed: {error}")})
                             ).collect();
                         }
                     }
                     let docs: HashSet<_> = inner.docs.keys().cloned().collect();
                     let selected: HashSet<_> = inner
-                        .project
+                        .workspace_checks
                         .roots
                         .iter()
                         .filter(|(_, entry)| entry.selected)
@@ -730,12 +737,12 @@ async fn run_worker(
                 let _output = output_gate.lock().await;
                 let publications = {
                     let mut inner = state.lock().unwrap_or_else(|e| e.into_inner());
-                    if inner.project.epoch != epoch
-                        || inner.project.cancelled
-                        || inner.project.shutdown
-                        || !inner.settings.project_diagnostics
+                    if inner.workspace_checks.epoch != epoch
+                        || inner.workspace_checks.cancelled
+                        || inner.workspace_checks.shutdown
+                        || !inner.settings.workspace_diagnostics
                         || !inner
-                            .project
+                            .workspace_checks
                             .roots
                             .get(&root)
                             .is_some_and(|entry| entry.selected && entry.generation == generation)
@@ -755,17 +762,17 @@ async fn run_worker(
                             });
                             if !checked.current || !current {
                                 inner
-                                    .project
+                                    .workspace_checks
                                     .roots
                                     .get_mut(&root)
                                     .unwrap()
                                     .queue(TYPING_PAUSE);
                                 continue;
                             }
-                            inner.project.analysis_ms += checked.elapsed_ms;
-                            inner.project.completed_jobs += 1;
-                            inner.project.reused_jobs += u64::from(checked.reused);
-                            let entry = inner.project.roots.get_mut(&root).unwrap();
+                            inner.workspace_checks.analysis_ms += checked.elapsed_ms;
+                            inner.workspace_checks.completed_jobs += 1;
+                            inner.workspace_checks.reused_jobs += u64::from(checked.reused);
+                            let entry = inner.workspace_checks.roots.get_mut(&root).unwrap();
                             entry.identity = normalize_uri(root.as_str());
                             entry.state = if checked.complete {
                                 "checked"
@@ -804,7 +811,7 @@ async fn run_worker(
                                 Err(error) => format!("Check worker failed: {error}"),
                                 _ => unreachable!(),
                             };
-                            let entry = inner.project.roots.get_mut(&root).unwrap();
+                            let entry = inner.workspace_checks.roots.get_mut(&root).unwrap();
                             entry.state = "failed";
                             entry.failure = Some(message);
                             entry.proven = false;
@@ -967,7 +974,7 @@ fn discover(settings: &SettingsStore) -> Discovery {
         let Ok(path) = folder.uri.to_file_path() else {
             continue;
         };
-        match collect_project_files(&path) {
+        match collect_workspace_files(&path) {
             Ok(paths) => {
                 for path in paths.models {
                     if let Ok(uri) = Url::from_file_path(path) {
@@ -986,7 +993,7 @@ fn discover(settings: &SettingsStore) -> Discovery {
                 }
             }
             Err(error) => found.failures.push(
-                json!({"folder_uri": folder.uri, "failure": format!("Cannot list project models and include files: {error}")}),
+                json!({"folder_uri": folder.uri, "failure": format!("Cannot list workspace models and include files: {error}")}),
             ),
         }
     }
@@ -1026,7 +1033,7 @@ fn selection(settings: &SettingsStore, root: &Url) -> Option<bool> {
     Some(
         !settings
             .resolve(root)
-            .project_exclude_paths
+            .workspace_exclude_paths
             .iter()
             .any(|pattern| {
                 if cfg!(windows) {
@@ -1093,23 +1100,24 @@ async fn publish(client: &Client, publications: Vec<(Url, Option<i32>, Vec<Diagn
     }
 }
 
-enum ProjectStatusChanged {}
-impl notification::Notification for ProjectStatusChanged {
+enum WorkspaceStatusChanged {}
+impl notification::Notification for WorkspaceStatusChanged {
     type Params = Value;
-    const METHOD: &'static str = "dynare/projectStatusChanged";
+    const METHOD: &'static str = "dynare/workspaceStatusChanged";
 }
 
 async fn send_status(client: &Client, state: &Mutex<Inner>) {
     let status = {
         let inner = state.lock().unwrap_or_else(|e| e.into_inner());
-        inner
-            .project
-            .notifications
-            .then(|| inner.project.status(inner.settings.project_diagnostics))
+        inner.workspace_checks.notifications.then(|| {
+            inner
+                .workspace_checks
+                .status(inner.settings.workspace_diagnostics)
+        })
     };
     if let Some(status) = status {
         client
-            .send_notification::<ProjectStatusChanged>(status)
+            .send_notification::<WorkspaceStatusChanged>(status)
             .await;
     }
 }
@@ -1119,18 +1127,18 @@ mod tests {
     use super::*;
     #[test]
     fn successful_nested_discovery_removes_deleted_includes_despite_parent_failure() {
-        let folder = Url::from_file_path(std::env::temp_dir().join("project-parent")).unwrap();
+        let folder = Url::from_file_path(std::env::temp_dir().join("workspace-parent")).unwrap();
         let nested =
-            Url::from_file_path(std::env::temp_dir().join("project-parent/models")).unwrap();
-        let old = Url::from_file_path(std::env::temp_dir().join("project-parent/models/old.inc"))
+            Url::from_file_path(std::env::temp_dir().join("workspace-parent/models")).unwrap();
+        let old = Url::from_file_path(std::env::temp_dir().join("workspace-parent/models/old.inc"))
             .unwrap();
         let retained =
-            Url::from_file_path(std::env::temp_dir().join("project-parent/sibling/kept.inc"))
+            Url::from_file_path(std::env::temp_dir().join("workspace-parent/sibling/kept.inc"))
                 .unwrap();
         let current =
-            Url::from_file_path(std::env::temp_dir().join("project-parent/models/current.inc"))
+            Url::from_file_path(std::env::temp_dir().join("workspace-parent/models/current.inc"))
                 .unwrap();
-        let mut state = ProjectState::default();
+        let mut state = WorkspaceCheckState::default();
         state.include_files.extend([old.clone(), retained.clone()]);
         state.update_include_files(
             BTreeSet::from([current.clone()]),
@@ -1156,7 +1164,7 @@ mod tests {
     #[test]
     fn proven_dependency_selection_and_unknown_fallback_survive_cache_clear() {
         let mut inner = Inner::default();
-        inner.project.discovery = "complete";
+        inner.workspace_checks.discovery = "complete";
         let changed = Url::from_file_path(std::env::temp_dir().join("dependency.any")).unwrap();
         let dependent = Url::from_file_path(std::env::temp_dir().join("dependent.mod")).unwrap();
         let unrelated = Url::from_file_path(std::env::temp_dir().join("unrelated.mod")).unwrap();
@@ -1166,22 +1174,22 @@ mod tests {
             entry.due = None;
             entry.state = "checked";
             entry.proven = *root != unknown;
-            inner.project.roots.insert(root.clone(), entry);
+            inner.workspace_checks.roots.insert(root.clone(), entry);
         }
         inner
-            .project
+            .workspace_checks
             .roots
             .get_mut(&dependent)
             .unwrap()
             .dependencies
             .insert(normalize_uri(changed.as_str()));
         inner.bound_workspace_cache();
-        inner.project_changed(&changed, false);
-        assert!(inner.project.roots[&dependent].due.is_some());
-        assert!(inner.project.roots[&unknown].due.is_some());
-        assert!(inner.project.roots[&unrelated].due.is_none());
+        inner.workspace_changed(&changed, false);
+        assert!(inner.workspace_checks.roots[&dependent].due.is_some());
+        assert!(inner.workspace_checks.roots[&unknown].due.is_some());
+        assert!(inner.workspace_checks.roots[&unrelated].due.is_none());
         assert!(
-            inner.project.owners(&changed).is_empty(),
+            inner.workspace_checks.owners(&changed).is_empty(),
             "search candidates do not imply include ownership"
         );
     }
@@ -1189,7 +1197,7 @@ mod tests {
     #[test]
     fn an_edit_matches_the_stored_root_identity() {
         let mut inner = Inner::default();
-        inner.project.discovery = "complete";
+        inner.workspace_checks.discovery = "complete";
         let edited = Url::from_file_path(std::env::temp_dir().join("edited-root.mod")).unwrap();
         let other = Url::from_file_path(std::env::temp_dir().join("quiet-root.mod")).unwrap();
         for root in [&edited, &other] {
@@ -1198,13 +1206,13 @@ mod tests {
             entry.state = "checked";
             entry.proven = true;
             entry.identity = normalize_uri(root.as_str());
-            inner.project.roots.insert(root.clone(), entry);
+            inner.workspace_checks.roots.insert(root.clone(), entry);
         }
-        inner.project_changed(&edited, false);
-        assert!(inner.project.roots[&edited].due.is_some());
-        assert!(inner.project.roots[&other].due.is_none());
+        inner.workspace_changed(&edited, false);
+        assert!(inner.workspace_checks.roots[&edited].due.is_some());
+        assert!(inner.workspace_checks.roots[&other].due.is_none());
         assert_eq!(
-            inner.project.roots[&edited].identity,
+            inner.workspace_checks.roots[&edited].identity,
             normalize_uri(edited.as_str())
         );
     }
@@ -1229,9 +1237,15 @@ mod tests {
         self_entry
             .owner_files
             .insert(normalize_uri(include.as_str()));
-        inner.project.roots.insert(owner.clone(), owner_entry);
-        inner.project.roots.insert(include.clone(), self_entry);
-        assert_eq!(inner.project.owners(&include), vec![owner]);
+        inner
+            .workspace_checks
+            .roots
+            .insert(owner.clone(), owner_entry);
+        inner
+            .workspace_checks
+            .roots
+            .insert(include.clone(), self_entry);
+        assert_eq!(inner.workspace_checks.owners(&include), vec![owner]);
     }
 
     #[test]
@@ -1294,7 +1308,7 @@ mod tests {
         entry.state = "checked";
         entry.proven = true;
         entry.identity = key.clone();
-        inner.project.roots.insert(root.clone(), entry);
+        inner.workspace_checks.roots.insert(root.clone(), entry);
         inner.reports.insert(
             root.clone(),
             Arc::new(RootReport {
@@ -1305,18 +1319,18 @@ mod tests {
                 warnings: 0,
             }),
         );
-        inner.align_project_root(&alias);
-        assert_eq!(inner.project.roots.len(), 1);
-        assert!(inner.project.roots.contains_key(&alias));
+        inner.align_workspace_root(&alias);
+        assert_eq!(inner.workspace_checks.roots.len(), 1);
+        assert!(inner.workspace_checks.roots.contains_key(&alias));
         assert!(!inner.reports.contains_key(&root));
-        assert!(inner.project.is_selected(&alias));
-        assert!(inner.project.is_selected(&root));
-        assert!(inner.project.roots[&alias].due.is_some());
-        inner.project.roots.get_mut(&alias).unwrap().due = None;
-        inner.project.roots.get_mut(&alias).unwrap().proven = true;
-        inner.project.roots.get_mut(&alias).unwrap().state = "checked";
-        inner.project_changed(&alias, false);
-        assert!(inner.project.roots[&alias].due.is_some());
+        assert!(inner.workspace_checks.is_selected(&alias));
+        assert!(inner.workspace_checks.is_selected(&root));
+        assert!(inner.workspace_checks.roots[&alias].due.is_some());
+        inner.workspace_checks.roots.get_mut(&alias).unwrap().due = None;
+        inner.workspace_checks.roots.get_mut(&alias).unwrap().proven = true;
+        inner.workspace_checks.roots.get_mut(&alias).unwrap().state = "checked";
+        inner.workspace_changed(&alias, false);
+        assert!(inner.workspace_checks.roots[&alias].due.is_some());
     }
 
     #[test]

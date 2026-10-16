@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.28",
+  "version": "0.11.29",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -25,7 +25,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "Read-only analysis is available. A workspace cannot choose the executable; project MCP setup requires trust.",
+      "description": "Read-only analysis is available. A workspace cannot choose the executable; workspace MCP setup requires trust.",
       "restrictedConfigurations": [
         "dynare.serverPath"
       ]
@@ -185,36 +185,36 @@
       },
       {
         "category": "Dygnosis",
-        "command": "dygnosis.setupProjectMcp",
-        "title": "Set up MCP for this project",
+        "command": "dygnosis.setupWorkspaceMcp",
+        "title": "Set up MCP for this workspace",
         "enablement": "isWorkspaceTrusted"
       },
       {
-        "command": "dygnosis.projectStatus",
-        "title": "Show project checks",
+        "command": "dygnosis.workspaceStatus",
+        "title": "Show workspace checks",
         "category": "Dygnosis",
         "icon": "$(list-tree)"
       },
       {
-        "command": "dygnosis.recheckProject",
-        "title": "Recheck project",
+        "command": "dygnosis.recheckWorkspace",
+        "title": "Recheck workspace",
         "category": "Dygnosis",
         "icon": "$(refresh)"
       },
       {
-        "command": "dygnosis.cancelProject",
-        "title": "Cancel project checks",
+        "command": "dygnosis.cancelWorkspace",
+        "title": "Cancel workspace checks",
         "category": "Dygnosis",
         "icon": "$(debug-stop)"
       },
       {
-        "command": "dygnosis.configureProjectExclusions",
-        "title": "Configure project exclusions",
+        "command": "dygnosis.configureWorkspaceExclusions",
+        "title": "Configure workspace exclusions",
         "category": "Dygnosis",
         "icon": "$(settings-gear)"
       },
       {
-        "command": "dygnosis.ignoreProjectFolder",
+        "command": "dygnosis.ignoreWorkspaceFolder",
         "title": "Ignore this folder",
         "category": "Dygnosis",
         "icon": "$(exclude)"
@@ -288,7 +288,7 @@
       ],
       "commandPalette": [
         {
-          "command": "dygnosis.ignoreProjectFolder",
+          "command": "dygnosis.ignoreWorkspaceFolder",
           "when": "false"
         },
         {
@@ -326,30 +326,30 @@
       ],
       "view/title": [
         {
-          "command": "dygnosis.recheckProject",
-          "when": "view == dygnosis.project",
+          "command": "dygnosis.recheckWorkspace",
+          "when": "view == dygnosis.workspace",
           "group": "navigation@1"
         },
         {
-          "command": "dygnosis.cancelProject",
-          "when": "view == dygnosis.project",
+          "command": "dygnosis.cancelWorkspace",
+          "when": "view == dygnosis.workspace",
           "group": "navigation@2"
         },
         {
-          "command": "dygnosis.configureProjectExclusions",
-          "when": "view == dygnosis.project",
+          "command": "dygnosis.configureWorkspaceExclusions",
+          "when": "view == dygnosis.workspace",
           "group": "navigation@3"
         },
         {
           "command": "dygnosis.openHelp",
-          "when": "view == dygnosis.project",
+          "when": "view == dygnosis.workspace",
           "group": "navigation@99"
         }
       ],
       "view/item/context": [
         {
-          "command": "dygnosis.ignoreProjectFolder",
-          "when": "view == dygnosis.project && (viewItem == dygnosis.projectFolder || viewItem == dygnosis.projectDirectory)",
+          "command": "dygnosis.ignoreWorkspaceFolder",
+          "when": "view == dygnosis.workspace && (viewItem == dygnosis.workspaceFolder || viewItem == dygnosis.workspaceDirectory)",
           "group": "inline"
         }
       ],
@@ -1336,15 +1336,15 @@
         }
       },
       {
-        "title": "Dygnosis: Project checks",
+        "title": "Dygnosis: Workspace checks",
         "properties": {
-          "dynare.projectDiagnostics": {
+          "dynare.workspaceDiagnostics": {
             "type": "boolean",
             "default": true,
             "scope": "window",
-            "description": "Check unopened saved .mod and .dyn models in workspace folders. Turning this off cancels background work and clears its project reports."
+            "description": "Check unopened saved .mod and .dyn models in workspace folders. Turning this off cancels background work and clears its workspace reports."
           },
-          "dynare.projectExcludePaths": {
+          "dynare.workspaceExcludePaths": {
             "type": "array",
             "items": {
               "type": "string"
@@ -1452,8 +1452,8 @@
     "views": {
       "explorer": [
         {
-          "id": "dygnosis.project",
-          "name": "Dynare project checks",
+          "id": "dygnosis.workspace",
+          "name": "Dynare workspace checks",
           "icon": "media/logo_s.png"
         }
       ]
@@ -1479,7 +1479,7 @@
     ],
     "viewsWelcome": [
       {
-        "view": "dygnosis.project",
+        "view": "dygnosis.workspace",
         "contents": "Open a folder to check saved .mod and .dyn models and browse saved .inc files.\n[Open Dygnosis Help](command:dygnosis.openHelp)"
       }
     ],

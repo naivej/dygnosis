@@ -54,49 +54,49 @@ test("macro work settings reach each root scope and simultaneous tint changes re
     assert.equal(configurationSnapshot(() => {}).dynare.configuration.loose.macroWorkLimit, "invalid", "the server validates and explains the fallback");
   } finally { delete globals.macroWorkLimit; delete workspace.macroWorkLimit; }
 });
-test("project switch uses window precedence while exclusions resolve independently for each folder", () => {
+test("workspace switch uses window precedence while exclusions resolve independently for each folder", () => {
   const originalFolders = vscode.workspace.workspaceFolders;
   vscode.workspace.workspaceFolders = ["file:///a", "file:///b", "remote:/virtual"].map(value => ({ uri: { scheme: value.startsWith("file:") ? "file" : "remote", toString: () => value } }));
-  globals.projectDiagnostics = false; workspace.projectDiagnostics = true;
-  globals.projectExcludePaths = ["user/**"]; workspace.projectExcludePaths = ["workspace/**"];
-  folderOverrides.set("file:///a", { projectDiagnostics: false, projectExcludePaths: ["a/**"] });
-  folderOverrides.set("file:///b", { projectDiagnostics: false, projectExcludePaths: ["b/**"] });
+  globals.workspaceDiagnostics = false; workspace.workspaceDiagnostics = true;
+  globals.workspaceExcludePaths = ["user/**"]; workspace.workspaceExcludePaths = ["workspace/**"];
+  folderOverrides.set("file:///a", { workspaceDiagnostics: false, workspaceExcludePaths: ["a/**"] });
+  folderOverrides.set("file:///b", { workspaceDiagnostics: false, workspaceExcludePaths: ["b/**"] });
   try {
     let settings = configurationSnapshot(() => {}).dynare.configuration;
-    assert.equal(settings.loose.projectDiagnostics, true, "workspace window value overrides the user switch");
-    assert.deepEqual(settings.loose.projectExcludePaths, ["user/**"], "loose defaults retain resource-setting user precedence");
+    assert.equal(settings.loose.workspaceDiagnostics, true, "workspace window value overrides the user switch");
+    assert.deepEqual(settings.loose.workspaceExcludePaths, ["user/**"], "loose defaults retain resource-setting user precedence");
     assert.equal(settings.folders.length, 2);
-    assert.deepEqual(settings.folders.map(entry => entry.settings.projectExcludePaths), [["a/**"], ["b/**"]]);
-    assert.ok(settings.folders.every(entry => !Object.hasOwn(entry.settings, "projectDiagnostics")), "folder values cannot override the window switch");
-    workspace.projectDiagnostics = false;
-    assert.equal(configurationSnapshot(() => {}).dynare.configuration.loose.projectDiagnostics, false);
-    delete workspace.projectDiagnostics;
-    assert.equal(configurationSnapshot(() => {}).dynare.configuration.loose.projectDiagnostics, false, "reset to the user switch");
-    delete globals.projectDiagnostics;
-    assert.equal(configurationSnapshot(() => {}).dynare.configuration.loose.projectDiagnostics, true, "reset to default on");
+    assert.deepEqual(settings.folders.map(entry => entry.settings.workspaceExcludePaths), [["a/**"], ["b/**"]]);
+    assert.ok(settings.folders.every(entry => !Object.hasOwn(entry.settings, "workspaceDiagnostics")), "folder values cannot override the window switch");
+    workspace.workspaceDiagnostics = false;
+    assert.equal(configurationSnapshot(() => {}).dynare.configuration.loose.workspaceDiagnostics, false);
+    delete workspace.workspaceDiagnostics;
+    assert.equal(configurationSnapshot(() => {}).dynare.configuration.loose.workspaceDiagnostics, false, "reset to the user switch");
+    delete globals.workspaceDiagnostics;
+    assert.equal(configurationSnapshot(() => {}).dynare.configuration.loose.workspaceDiagnostics, true, "reset to default on");
     folderOverrides.delete("file:///a");
     settings = configurationSnapshot(() => {}).dynare.configuration;
-    assert.deepEqual(settings.folders[0].settings.projectExcludePaths, ["workspace/**"], "folder reset restores inherited exclusions");
-    delete workspace.projectExcludePaths;
-    assert.deepEqual(configurationSnapshot(() => {}).dynare.configuration.folders[0].settings.projectExcludePaths, ["user/**"]);
-    delete globals.projectExcludePaths;
-    assert.deepEqual(configurationSnapshot(() => {}).dynare.configuration.folders[0].settings.projectExcludePaths, []);
+    assert.deepEqual(settings.folders[0].settings.workspaceExcludePaths, ["workspace/**"], "folder reset restores inherited exclusions");
+    delete workspace.workspaceExcludePaths;
+    assert.deepEqual(configurationSnapshot(() => {}).dynare.configuration.folders[0].settings.workspaceExcludePaths, ["user/**"]);
+    delete globals.workspaceExcludePaths;
+    assert.deepEqual(configurationSnapshot(() => {}).dynare.configuration.folders[0].settings.workspaceExcludePaths, []);
   } finally {
     vscode.workspace.workspaceFolders = originalFolders; folderOverrides.clear();
-    delete globals.projectDiagnostics; delete workspace.projectDiagnostics; delete globals.projectExcludePaths; delete workspace.projectExcludePaths;
+    delete globals.workspaceDiagnostics; delete workspace.workspaceDiagnostics; delete globals.workspaceExcludePaths; delete workspace.workspaceExcludePaths;
   }
 });
-test("invalid project values fall back or filter entries and explain the exact setting", () => {
-  globals.projectDiagnostics = "on"; globals.projectExcludePaths = ["valid/**", 7, null];
-  workspace.projectExcludePaths = "invalid";
+test("invalid workspace values fall back or filter entries and explain the exact setting", () => {
+  globals.workspaceDiagnostics = "on"; globals.workspaceExcludePaths = ["valid/**", 7, null];
+  workspace.workspaceExcludePaths = "invalid";
   try {
     const logged = [], settings = configurationSnapshot(message => logged.push(message)).dynare.configuration;
-    assert.equal(settings.loose.projectDiagnostics, true);
-    assert.deepEqual(settings.loose.projectExcludePaths, ["valid/**"]);
-    assert.deepEqual(settings.folders[0].settings.projectExcludePaths, []);
-    assert.ok(logged.includes("Invalid dynare.projectDiagnostics; using true."));
-    assert.ok(logged.includes("Invalid dynare.projectExcludePaths entries were ignored."));
-  } finally { delete globals.projectDiagnostics; delete globals.projectExcludePaths; delete workspace.projectExcludePaths; }
+    assert.equal(settings.loose.workspaceDiagnostics, true);
+    assert.deepEqual(settings.loose.workspaceExcludePaths, ["valid/**"]);
+    assert.deepEqual(settings.folders[0].settings.workspaceExcludePaths, []);
+    assert.ok(logged.includes("Invalid dynare.workspaceDiagnostics; using true."));
+    assert.ok(logged.includes("Invalid dynare.workspaceExcludePaths entries were ignored."));
+  } finally { delete globals.workspaceDiagnostics; delete globals.workspaceExcludePaths; delete workspace.workspaceExcludePaths; }
 });
 test("one absolute executable resolver supports spaces and never selects PATH", () => {
   const extension = path.resolve("directory with spaces");

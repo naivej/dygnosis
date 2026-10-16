@@ -111,11 +111,11 @@ function reset() {
   };
   return service;
 }
-function document(name = "a.mod") { const doc = { uri: Uri.parse(`file:///project/${name}`), version: 1, languageId: "dynare" }; host.documents.push(doc); return doc; }
-function wire(code = "W010", root = "file:///project/a.mod", severity = 2) {
+function document(name = "a.mod") { const doc = { uri: Uri.parse(`file:///workspace/${name}`), version: 1, languageId: "dynare" }; host.documents.push(doc); return doc; }
+function wire(code = "W010", root = "file:///workspace/a.mod", severity = 2) {
   return { range: { start: { line: 0, character: 2 }, end: { line: 0, character: 3 } }, message: `Check ${code}`, source: "dygnosis", code,
     severity, data: { root, input_revision: "checked-1", related_context: [{ origin_frames: [{ kind: "macro", value: "1" }] }] },
-    tags: [1], relatedInformation: [{ location: { uri: "file:///project/first.inc", range: { start: { line: 3, character: 1 }, end: { line: 3, character: 2 } } }, message: "First occurrence" }] };
+    tags: [1], relatedInformation: [{ location: { uri: "file:///workspace/first.inc", range: { start: { line: 3, character: 1 }, end: { line: 3, character: 2 } } }, message: "First occurrence" }] };
 }
 const note = (...args) => p2c.asDiagnostic(wire(...args));
 function push(service, doc, items) { const displayed = []; service.middleware.handleDiagnostics(doc.uri, items, (_uri, values) => displayed.push(values)); return displayed; }
@@ -152,7 +152,7 @@ test("push hide applies across files/classes and restoration replays the latest 
   assert.equal(otherFile.at(-1).length, 1);
   assert.equal(host.status[0].shown, false);
   assert.equal(c2p.asDiagnostic(original).data, original.data);
-  assert.equal(c2p.asDiagnostic(original).relatedInformation[0].location.uri, "file:///project/first.inc");
+  assert.equal(c2p.asDiagnostic(original).relatedInformation[0].location.uri, "file:///workspace/first.inc");
   // Replaying the second push restores exactly that newer diagnostic.
   assert.equal(latestDisplay.at(-1)[0], next);
   registration.dispose();
@@ -206,10 +206,10 @@ test("a server revision notification preserves its new push and invalidates only
 
 test("shared includes retain a current owner's rows when another owner becomes stale", async () => {
   const service = reset(), registration = registerDiagnosticActions(service), doc = document("shared.inc");
-  const left = note("W010", "file:///project/left.mod"), right = note("W010", "file:///project/right.mod");
+  const left = note("W010", "file:///workspace/left.mod"), right = note("W010", "file:///workspace/right.mod");
   const displayed = push(service, doc, [left, right]);
   await hide(service, doc, left);
-  host.invalidated.fire({ reason: "input", root: "file:///project/left.mod", inputRevision: "changed" }); host.changed.fire();
+  host.invalidated.fire({ reason: "input", root: "file:///workspace/left.mod", inputRevision: "changed" }); host.changed.fire();
   await command("dygnosis.showAllDiagnostics");
   assert.deepEqual(displayed.at(-1), [right]);
   registration.dispose();
@@ -233,7 +233,7 @@ test("legacy metadata-less pushes survive their notification but expire on local
 
 test("actions retain engine fixes and raw root/data context, hiding only diagnostic-bound actions", async () => {
   const service = reset(), registration = registerDiagnosticActions(service), doc = document("shared.inc");
-  const left = note("I208", "file:///project/left.mod", 3), right = note("I208", "file:///project/right.mod", 3), warning = note();
+  const left = note("I208", "file:///workspace/left.mod", 3), right = note("I208", "file:///workspace/right.mod", 3), warning = note();
   push(service, doc, [left, right, warning]);
   // Another VS Code caller can supply a new diagnostic instance with the same engine context.
   const supplied = p2c.asDiagnostic(c2p.asDiagnostic(right));
@@ -244,7 +244,7 @@ test("actions retain engine fixes and raw root/data context, hiding only diagnos
   assert.equal(host.actionContext.diagnostics.length, 1);
   assert.equal(host.actionContext.diagnostics[0], right);
   assert.ok(actions.includes(leftFix));
-  assert.equal((await c2p.asCodeActionContext(host.actionContext)).diagnostics[0].data.root, "file:///project/right.mod");
+  assert.equal((await c2p.asCodeActionContext(host.actionContext)).diagnostics[0].data.root, "file:///workspace/right.mod");
   await hide(service, doc, left);
   const filtered = await offers(service, doc, [warning], [leftFix, refactor, independent]);
   assert.ok(!filtered.includes(leftFix));
@@ -318,7 +318,7 @@ test("workspace pull empties partial and final rows, keeps result IDs, and frees
   const diagnostic = note(); push(service, doc, [diagnostic]); await hide(service, doc, diagnostic);
   host.workspaceRequest = params => {
     host.progress.get(params.partialResultToken)({ items: [{ uri: doc.uri.toString(), version: 1, kind: "full", resultId: "partial", items: [wire()] }] });
-    return Promise.resolve({ items: [{ uri: "file:///project/unopened.mod", version: null, kind: "full", resultId: "final", items: [wire()] }] });
+    return Promise.resolve({ items: [{ uri: "file:///workspace/unopened.mod", version: null, kind: "full", resultId: "final", items: [wire()] }] });
   };
   const chunks = [];
   const collection = new Map(), resultIds = new Map();
@@ -338,17 +338,17 @@ test("workspace pull empties partial and final rows, keeps result IDs, and frees
   assert.deepEqual(host.request.previousResultIds, [{ uri: doc.uri.toString(), value: "prior" }]);
   assert.equal(chunks.length, 2, "one partial and one final delivery");
   assert.deepEqual(collection.get(doc.uri.toString()), []);
-  assert.deepEqual(collection.get("file:///project/unopened.mod"), []);
+  assert.deepEqual(collection.get("file:///workspace/unopened.mod"), []);
   assert.equal(resultIds.get(doc.uri.toString()), "partial");
-  assert.equal(resultIds.get("file:///project/unopened.mod"), "final");
+  assert.equal(resultIds.get("file:///workspace/unopened.mod"), "final");
   assert.equal(host.progress.size, 0);
   command("dygnosis.showAllDiagnostics");
-  host.workspaceRequest = () => Promise.resolve({ items: [{ uri: "file:///project/unopened.mod", version: null, kind: "unchanged", resultId: "final" }] });
+  host.workspaceRequest = () => Promise.resolve({ items: [{ uri: "file:///workspace/unopened.mod", version: null, kind: "unchanged", resultId: "final" }] });
   await consume([]);
   assert.equal(chunks.length, 3, "unchanged final is delivered once");
   assert.equal(chunks.at(-1).items[0].kind, "full");
-  assert.deepEqual(collection.get("file:///project/unopened.mod"), []);
-  assert.equal(resultIds.get("file:///project/unopened.mod"), "final");
+  assert.deepEqual(collection.get("file:///workspace/unopened.mod"), []);
+  assert.equal(resultIds.get("file:///workspace/unopened.mod"), "final");
   registration.dispose();
 });
 
@@ -362,7 +362,7 @@ test("push then pull and pull then push keep one painted list and push-owned act
   assert.deepEqual(afterPush.items, []);
   const actions = await offers(service, doc, [first]);
   assert.equal(host.actionContext.diagnostics[0], first);
-  assert.equal((await c2p.asCodeActionContext(host.actionContext)).diagnostics[0].data.root, "file:///project/a.mod");
+  assert.equal((await c2p.asCodeActionContext(host.actionContext)).diagnostics[0].data.root, "file:///workspace/a.mod");
   assert.ok(actions.some(action => action.command?.command === "dygnosis.ignoreDiagnostic"));
   assert.ok(actions.some(action => action.command?.command === "dygnosis.explainDiagnostic"));
   // Pull first at the same version creates no painted list; the later push owns display and actions.
@@ -553,8 +553,8 @@ test("dependency, ownership, close, reopen, and instance changes cannot revive a
   await refuse(service => { ++service.currentInstance; }, "server instance");
   await refuse(() => { host.folder.fire(); }, "folder");
   await refuse((_service, doc) => { host.close.fire(doc); const index = host.documents.indexOf(doc); if (index >= 0) host.documents.splice(index, 1); document(); }, "close and reopen");
-  await refuse(() => { host.invalidated.fire({ reason: "file", uri: "file:///project/dep.inc" }); }, "dependency file");
-  await refuse(() => { host.invalidated.fire({ reason: "input", root: "file:///project/a.mod", inputRevision: "changed-2" }); host.changed.fire(); }, "stale revision");
+  await refuse(() => { host.invalidated.fire({ reason: "file", uri: "file:///workspace/dep.inc" }); }, "dependency file");
+  await refuse(() => { host.invalidated.fire({ reason: "input", root: "file:///workspace/a.mod", inputRevision: "changed-2" }); host.changed.fire(); }, "stale revision");
   await refuse((service, doc) => { push(service, doc, []); }, "withdrawn push");
   const service = reset(), registration = registerDiagnosticActions(service), doc = document(), child = document("child.inc");
   const diagnostic = note("E001", undefined, 1);
@@ -564,7 +564,7 @@ test("dependency, ownership, close, reopen, and instance changes cannot revive a
   assert.equal(await command(fix.command.command, ...fix.command.arguments), false);
   assert.equal(host.applied.length, 0);
   assert.equal(doc.version, 1);
-  const closedUri = Uri.parse("file:///project/closed.inc");
+  const closedUri = Uri.parse("file:///workspace/closed.inc");
   const closed = await sealedFix(service, doc, diagnostic, "Closed target", Kind.QuickFix, engineEdit(closedUri));
   document("closed.inc");
   assert.equal(await command(closed.command.command, ...closed.command.arguments), false);
@@ -598,7 +598,7 @@ test("a refactor template and an older engine edit stay guarded without a public
   assert.equal(template.diagnostics, undefined);
   assert.equal(template.edit, undefined);
   assert.equal(template.command.command, "dygnosis.applyDiagnosticEdit");
-  host.invalidated.fire({ reason: "file", uri: "file:///project/other.inc" });
+  host.invalidated.fire({ reason: "file", uri: "file:///workspace/other.inc" });
   assert.equal(await command(template.command.command, ...template.command.arguments), false);
   assert.equal(host.applied.length, 0);
   assert.equal(doc.version, 1);
@@ -669,7 +669,7 @@ test("revision, withdrawal, ignore, and owner changes retire unproved captured e
   await command("dygnosis.showDiagnostic");
   assert.equal(await command(captured.command.command, ...captured.command.arguments), false);
 
-  const rooted = note("E001", "file:///project/root-a.mod", 1);
+  const rooted = note("E001", "file:///workspace/root-a.mod", 1);
   push(service, doc, [rooted]);
   const ownerEdit = await sealedFix(service, doc, rooted, "Owner semicolon");
   assert.equal(host.documents.includes(doc), true);

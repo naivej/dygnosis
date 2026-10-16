@@ -77,11 +77,11 @@ const { DygnosisClient, extendCapabilities } = require(compiledModule("client"))
 const { runCommand } = require(compiledModule("refusal"));
 Module._load = originalLoad;
 function reset() {
-  host = { documents: [], folders: [{ uri: Uri.parse("file:///project"), name: "project" }], settings: {}, commands: new Map(), opened: [], reveals: [], managed: [], watchers: [], notifications: [], picks: [], symbols: 0,
+  host = { documents: [], folders: [{ uri: Uri.parse("file:///workspace"), name: "workspace" }], settings: {}, commands: new Map(), opened: [], reveals: [], managed: [], watchers: [], notifications: [], picks: [], symbols: 0,
     visibleEditors: undefined, tabGroups: [] };
   for (const name of ["created", "disk", "deleted", "open", "edit", "close", "folder", "config", "tabsChanged"]) host[name] = new Emitter();
 }
-function model(root = "file:///project/root.mod", related = []) {
+function model(root = "file:///workspace/root.mod", related = []) {
   return { schema_version: 1, root_uri: root, document_uri: root, document_version: 1, revision: "one", complete: false,
     owner_roots: [], statements: [], declarations: [], equations: [], related_files: related, block_categories: [], first_model_anchor: null };
 }
@@ -152,22 +152,22 @@ test("macro tint alone sends no server settings or input invalidation", async ()
 test("server invalidation keeps the diagnostic input token separate from the model revision", async () => {
   reset(); const client = service(); await client.ensureStarted();
   const events = [], listener = client.onDidInvalidate(event => events.push(event));
-  host.managed[0].client.notify({ schema_version: 1, root_uri: "file:///project/root.mod", revision: "model-token", input_revision: "diagnostic-token" });
+  host.managed[0].client.notify({ schema_version: 1, root_uri: "file:///workspace/root.mod", revision: "model-token", input_revision: "diagnostic-token" });
   assert.equal(events[0].inputRevision, "diagnostic-token");
   assert.equal(events[0].modelRevision, "model-token");
-  assert.equal(events[0].root, "file:///project/root.mod");
+  assert.equal(events[0].root, "file:///workspace/root.mod");
   listener.dispose(); await client.shutdown();
 });
 test("edits and disk/server invalidations coalesce a native Outline refresh", async () => {
   reset(); const client = service(); await client.ensureStarted(); const before = host.symbols;
-  const included = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 2 };
+  const included = { uri: Uri.parse("file:///workspace/shared.inc"), languageId: "dynare", version: 2 };
   host.edit.fire({ document: included, contentChanges: [{ text: "changed" }] }); host.disk.fire(included.uri);
-  host.managed[0].client.notify({ schema_version: 1, root_uri: "file:///project/root.mod" });
+  host.managed[0].client.notify({ schema_version: 1, root_uri: "file:///workspace/root.mod" });
   await new Promise(resolve => setTimeout(resolve, 110));
   assert.equal(host.symbols, before + 1); await client.shutdown();
 });
 test("unavailable owner responses preserve a selected owner until current facts disprove it", async () => {
-  reset(); const client = service(); const root = Uri.parse("file:///project/root.mod"), child = { uri: Uri.parse("file:///project/fragment.mod"), languageId: "dynare", version: 1 };
+  reset(); const client = service(); const root = Uri.parse("file:///workspace/root.mod"), child = { uri: Uri.parse("file:///workspace/fragment.mod"), languageId: "dynare", version: 1 };
   client.selectOwner(child.uri, root);
   client.modelInfo = () => Promise.resolve(undefined);
   assert.equal(await client.rootForDocument(child), undefined);
@@ -183,15 +183,15 @@ test("unavailable owner responses preserve a selected owner until current facts 
 // an arbitrary choice when another verified parent is discovered.
 test("mod helpers discover owners before standalone and automatic choices yield to ambiguity", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const a = Uri.parse("file:///project/a.mod"), b = Uri.parse("file:///project/b.mod");
-  const helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 1 };
+  const a = Uri.parse("file:///workspace/a.mod"), b = Uri.parse("file:///workspace/b.mod");
+  const helper = { uri: Uri.parse("file:///workspace/helper.mod"), languageId: "dynare", version: 1 };
   host.documents.push({ uri: a, languageId: "dynare", version: 1 }, helper);
   const related = [{ kind: "include", filename: "helper.mod", resolved: true, path: helper.uri.fsPath }];
   host.managed[0].client.sendRequest = (_method, params) => Promise.resolve(model(params.arguments[0].root_uri, related));
   try {
     await client.modelInfo(helper.uri); assert.deepEqual(client.knownOwners(helper.uri), [], "a model is not its own parent");
     assert.equal((await client.rootForDocument(helper)).toString(), a.toString());
-    assert.equal(client.chosenRootForDocument(helper), undefined, "automatic ownership is not explicit project priority");
+    assert.equal(client.chosenRootForDocument(helper), undefined, "automatic ownership is not explicit workspace priority");
     host.documents.push({ uri: b, languageId: "dynare", version: 1 }); await client.modelInfo(b);
     assert.equal(await client.rootForDocument(helper), undefined, "old automatic owner must not hide a second parent");
     assert.equal(host.picks.length, 0);
@@ -207,7 +207,7 @@ test("mod helpers discover owners before standalone and automatic choices yield 
 // the server accepts the exact document version and model revision.
 test("guarded owner and standalone choices reach the server before changing the native view", async () => {
   reset(); const client = service({ documentContext: true }); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"), helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 7 };
+  const root = Uri.parse("file:///workspace/root.mod"), helper = { uri: Uri.parse("file:///workspace/helper.mod"), languageId: "dynare", version: 7 };
   host.documents.push({ uri: root, languageId: "dynare", version: 1 }, helper);
   const related = [{ kind: "include", filename: "helper.mod", resolved: true, path: helper.uri.fsPath }];
   const calls = [], accepted = deferred();
@@ -231,7 +231,7 @@ test("guarded owner and standalone choices reach the server before changing the 
 test("refused and stale owner choices retain the current native context", async () => {
   for (const outcome of ["refused", "edited", "restarted"]) {
     reset(); const client = service({ documentContext: true }); await client.ensureStarted();
-    const root = Uri.parse("file:///project/root.mod"), helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 1 };
+    const root = Uri.parse("file:///workspace/root.mod"), helper = { uri: Uri.parse("file:///workspace/helper.mod"), languageId: "dynare", version: 1 };
     host.documents.push(helper); client.treatAsRoot(helper.uri);
     const proof = deferred(), calls = [];
     host.managed[0].client.sendRequest = (_method, params) => {
@@ -250,7 +250,7 @@ test("refused and stale owner choices retain the current native context", async 
 });
 test("older engines keep the useful model choice and explain the unsynchronized diagnostics at the command", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 1 };
+  const helper = { uri: Uri.parse("file:///workspace/helper.mod"), languageId: "dynare", version: 1 };
   host.documents.push(helper);
   try {
     const before = host.notifications.length;
@@ -265,7 +265,7 @@ test("older engines keep the useful model choice and explain the unsynchronized 
 });
 test("closing the last text tab resets a retained document's native and server context", async () => {
   reset(); const client = service({ documentContext: true }); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"), helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 1 };
+  const root = Uri.parse("file:///workspace/root.mod"), helper = { uri: Uri.parse("file:///workspace/helper.mod"), languageId: "dynare", version: 1 };
   host.documents.push(helper); const mutations = [];
   host.managed[0].client.sendRequest = (_method, params) => {
     const arg = params.arguments[0];
@@ -283,7 +283,7 @@ test("closing the last text tab resets a retained document's native and server c
 });
 test("another text or diff view retains context until the last matching tab closes", async () => {
   reset(); const client = service({ documentContext: true }); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"), helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 1 };
+  const root = Uri.parse("file:///workspace/root.mod"), helper = { uri: Uri.parse("file:///workspace/helper.mod"), languageId: "dynare", version: 1 };
   host.documents.push(helper); const mutations = [];
   host.managed[0].client.sendRequest = (_method, params) => {
     const arg = params.arguments[0];
@@ -292,7 +292,7 @@ test("another text or diff view retains context until the last matching tab clos
   };
   try {
     await client.applyOwner(helper, root);
-    const textTab = { input: new TabInputText(helper.uri) }, diffTab = { input: new TabInputTextDiff(Uri.parse("file:///project/before.mod"), helper.uri) };
+    const textTab = { input: new TabInputText(helper.uri) }, diffTab = { input: new TabInputTextDiff(Uri.parse("file:///workspace/before.mod"), helper.uri) };
     host.tabGroups = [{ tabs: [diffTab] }]; host.tabsChanged.fire({ closed: [textTab], opened: [], changed: [] }); await flush();
     assert.equal(client.chosenRootForDocument(helper).toString(), root.toString()); assert.deepEqual(mutations, [root.toString()]);
     host.tabGroups = []; host.tabsChanged.fire({ closed: [diffTab], opened: [], changed: [] }); await flush();
@@ -301,7 +301,7 @@ test("another text or diff view retains context until the last matching tab clos
 });
 test("last-tab closure clears an accepted owner and prevents its delayed acknowledgment from restoring it", async () => {
   reset(); const client = service({ documentContext: true }); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"), helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 1 };
+  const root = Uri.parse("file:///workspace/root.mod"), helper = { uri: Uri.parse("file:///workspace/helper.mod"), languageId: "dynare", version: 1 };
   host.documents.push(helper); const acknowledgment = deferred(); let serverOwner;
   host.managed[0].client.sendRequest = (_method, params) => {
     const arg = params.arguments[0];
@@ -317,7 +317,7 @@ test("last-tab closure clears an accepted owner and prevents its delayed acknowl
 });
 test("a background tab-reset refusal logs the cleared choice and actual cause without a popup", async () => {
   reset(); const client = service({ documentContext: true }); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"), helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 1 };
+  const root = Uri.parse("file:///workspace/root.mod"), helper = { uri: Uri.parse("file:///workspace/helper.mod"), languageId: "dynare", version: 1 };
   host.documents.push(helper); const logs = []; client.log = message => logs.push(message);
   host.managed[0].client.sendRequest = (_method, params) => {
     const arg = params.arguments[0];
@@ -335,7 +335,7 @@ test("a background tab-reset refusal logs the cleared choice and actual cause wi
 });
 test("a delayed accepted context keeps client and server aligned when the source-jump guard expires", async () => {
   reset(); const client = service({ documentContext: true }); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"), helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 1 };
+  const root = Uri.parse("file:///workspace/root.mod"), helper = { uri: Uri.parse("file:///workspace/helper.mod"), languageId: "dynare", version: 1 };
   host.documents.push({ uri: root, languageId: "dynare", version: 1 }, helper);
   host.editor = { document: host.documents[0] }; client.treatAsRoot(helper.uri);
   const acknowledgment = deferred(); let serverOwner = helper.uri.toString(), valid = true;
@@ -356,7 +356,7 @@ test("a delayed accepted context keeps client and server aligned when the source
 });
 test("an older delayed context acknowledgment cannot overwrite a newer accepted owner", async () => {
   reset(); const client = service({ documentContext: true }); await client.ensureStarted();
-  const a = Uri.parse("file:///project/a.mod"), b = Uri.parse("file:///project/b.mod"), helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 1 };
+  const a = Uri.parse("file:///workspace/a.mod"), b = Uri.parse("file:///workspace/b.mod"), helper = { uri: Uri.parse("file:///workspace/helper.mod"), languageId: "dynare", version: 1 };
   host.documents.push(helper); const firstAck = deferred(); let serverOwner;
   host.managed[0].client.sendRequest = (_method, params) => {
     const arg = params.arguments[0];
@@ -372,7 +372,7 @@ test("an older delayed context acknowledgment cannot overwrite a newer accepted 
 });
 test("an accepted owner acknowledgment survives a newer owner attempt whose proof fails", async () => {
   reset(); const client = service({ documentContext: true }); await client.ensureStarted();
-  const a = Uri.parse("file:///project/a.mod"), b = Uri.parse("file:///project/b.mod"), helper = { uri: Uri.parse("file:///project/helper.mod"), languageId: "dynare", version: 1 };
+  const a = Uri.parse("file:///workspace/a.mod"), b = Uri.parse("file:///workspace/b.mod"), helper = { uri: Uri.parse("file:///workspace/helper.mod"), languageId: "dynare", version: 1 };
   host.documents.push(helper); client.treatAsRoot(helper.uri);
   const firstAck = deferred(), secondProof = deferred(), mutations = []; let serverOwner = helper.uri.toString();
   host.managed[0].client.sendRequest = (_method, params) => {
@@ -396,7 +396,7 @@ test("an accepted owner acknowledgment survives a newer owner attempt whose proo
 });
 test("an older-engine interactive owner choice explains the partial outcome once while automatic context stays quiet", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const a = Uri.parse("file:///project/a.mod"), b = Uri.parse("file:///project/b.mod"), helper = { uri: Uri.parse("file:///project/helper.inc"), languageId: "dynare", version: 1 };
+  const a = Uri.parse("file:///workspace/a.mod"), b = Uri.parse("file:///workspace/b.mod"), helper = { uri: Uri.parse("file:///workspace/helper.inc"), languageId: "dynare", version: 1 };
   host.documents.push({ uri: a, languageId: "dynare", version: 1 }, { uri: b, languageId: "dynare", version: 1 }, helper);
   host.managed[0].client.sendRequest = (_method, params) => Promise.resolve(model(params.arguments[0].root_uri, [{ kind: "include", filename: "helper.inc", resolved: true, path: helper.uri.fsPath }]));
   try {
@@ -414,8 +414,8 @@ test("an older-engine interactive owner choice explains the partial outcome once
 test("a newer selected owner survives both an old owner reply and an old ownership disproof", async () => {
   for (const stillOwned of [false, true]) {
     reset(); const client = service(), pending = deferred();
-    const a = Uri.parse("file:///project/a.mod"), b = Uri.parse("file:///project/b.mod");
-    const child = { uri: Uri.parse("file:///project/fragment.mod"), languageId: "dynare", version: 1 };
+    const a = Uri.parse("file:///workspace/a.mod"), b = Uri.parse("file:///workspace/b.mod");
+    const child = { uri: Uri.parse("file:///workspace/fragment.mod"), languageId: "dynare", version: 1 };
     const related = [{ kind: "include", filename: "fragment.mod", resolved: true, path: child.uri.fsPath }];
     client.modelInfo = root => root.toString() === a.toString() ? pending.promise : Promise.resolve(model(b.toString(), related));
     client.selectOwner(child.uri, a); const obsolete = client.rootForDocument(child);
@@ -427,7 +427,7 @@ test("a newer selected owner survives both an old owner reply and an old ownersh
 });
 test("model snapshots canceled by a delivered engine invalidation can be retried with current facts", async () => {
   reset(); const client = service(); await client.ensureStarted(); const pending = deferred();
-  const root = Uri.parse("file:///project/root.mod");
+  const root = Uri.parse("file:///workspace/root.mod");
   host.documents.push({ uri: root, languageId: "dynare", version: 1 });
   host.managed[0].client.sendRequest = () => pending.promise;
   const obsolete = client.modelInfo(root); await flush();
@@ -472,7 +472,7 @@ test("an unsupported model-info capability reaches the command notification", as
   reset(); const client = service({ pending: true }), starting = client.ensureStarted(); await flush();
   host.managed[0].client.initializeResult.capabilities.experimental.dygnosis.modelInfo.schema_version = 99;
   host.managed[0].initialized.resolve(); await starting;
-  await runCommand(client, () => client.modelInfo(Uri.parse("file:///project/root.mod")));
+  await runCommand(client, () => client.modelInfo(Uri.parse("file:///workspace/root.mod")));
   const notices = host.notifications.filter(value => typeof value === "string");
   assert.equal(notices.length, 1); assert.match(notices[0], /selected engine does not support model information.*bundled binary/);
   await client.shutdown();
@@ -513,7 +513,7 @@ test("engine stop and explicit shutdown invalidate their instance immediately", 
 });
 test("native include links route through the retained owner before opening a mod fragment", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"), target = Uri.parse("file:///project/fragment.mod");
+  const root = Uri.parse("file:///workspace/root.mod"), target = Uri.parse("file:///workspace/fragment.mod");
   const source = { uri: root, languageId: "dynare", version: 1 }; host.documents.push(source);
   const info = { ...model(root.toString(), [{ kind: "include", filename: "fragment.mod", resolved: true, path: target.fsPath }]), client_instance: client.currentInstance };
   client.modelInfo = () => Promise.resolve(info);
@@ -526,7 +526,7 @@ test("native include links route through the retained owner before opening a mod
 });
 test("an editor-cached native link remains usable after another same-version provider request", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"), target = Uri.parse("file:///project/fragment.mod");
+  const root = Uri.parse("file:///workspace/root.mod"), target = Uri.parse("file:///workspace/fragment.mod");
   const source = { uri: root, languageId: "dynare", version: 1 }; host.documents.push(source); host.editor = { document: source };
   const info = { ...model(root.toString(), [{ kind: "include", filename: "fragment.mod", resolved: true, path: target.fsPath }]), client_instance: client.currentInstance };
   client.modelInfo = () => Promise.resolve(info);
@@ -542,14 +542,14 @@ test("an editor-cached native link remains usable after another same-version pro
 test("native link commands are retired after source-version changes, close, replacement and restart", async () => {
   for (const changed of ["version", "close", "target", "restart"]) {
     reset(); const client = service(); await client.ensureStarted();
-    const root = Uri.parse("file:///project/root.mod"), target = Uri.parse("file:///project/fragment.mod");
+    const root = Uri.parse("file:///workspace/root.mod"), target = Uri.parse("file:///workspace/fragment.mod");
     const source = { uri: root, languageId: "dynare", version: 1 }; host.documents.push(source); host.editor = { document: source };
     client.modelInfo = () => Promise.resolve({ ...model(root.toString(), [{ kind: "include", filename: "fragment.mod", resolved: true, path: target.fsPath }]), client_instance: client.currentInstance });
     const first = await client.middleware.provideDocumentLinks(source, { isCancellationRequested: false }, () => [new vscode.DocumentLink({}, target)]);
     const [key] = JSON.parse(decodeURIComponent(first[0].target.query));
     if (changed === "version") { source.version = 2; host.edit.fire({ document: source, contentChanges: [{ text: "changed" }] }); }
     else if (changed === "close") host.close.fire(source);
-    else if (changed === "target") await client.middleware.provideDocumentLinks(source, { isCancellationRequested: false }, () => [new vscode.DocumentLink({}, Uri.parse("file:///project/replacement.mod"))]);
+    else if (changed === "target") await client.middleware.provideDocumentLinks(source, { isCancellationRequested: false }, () => [new vscode.DocumentLink({}, Uri.parse("file:///workspace/replacement.mod"))]);
     else await client.restart();
     await host.commands.get("dygnosis.openIncludeLink")(key);
     assert.deepEqual(host.opened, [], `${changed} must invalidate the saved command`);
@@ -559,7 +559,7 @@ test("native link commands are retired after source-version changes, close, repl
 test("native include validation refuses a newer owner or editor selected while its facts are pending", async () => {
   for (const changed of ["owner", "editor"]) {
     reset(); const client = service(); await client.ensureStarted(); const pending = deferred();
-    const a = Uri.parse("file:///project/a.mod"), b = Uri.parse("file:///project/b.mod"), target = Uri.parse("file:///project/fragment.mod");
+    const a = Uri.parse("file:///workspace/a.mod"), b = Uri.parse("file:///workspace/b.mod"), target = Uri.parse("file:///workspace/fragment.mod");
     const source = { uri: a, languageId: "dynare", version: 1 }; host.documents.push(source); host.editor = { document: source };
     const related = [{ kind: "include", filename: "fragment.mod", resolved: true, path: target.fsPath }];
     const info = { ...model(a.toString(), related), client_instance: client.currentInstance };
@@ -578,8 +578,8 @@ test("native include validation refuses a newer owner or editor selected while i
 });
 test("native include opening accepts an intentional owner pick before guarding validation", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"), target = Uri.parse("file:///project/fragment.mod");
-  const source = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 1 };
+  const root = Uri.parse("file:///workspace/root.mod"), target = Uri.parse("file:///workspace/fragment.mod");
+  const source = { uri: Uri.parse("file:///workspace/shared.inc"), languageId: "dynare", version: 1 };
   host.documents.push(source); host.editor = { document: source };
   const info = { ...model(root.toString(), [{ kind: "include", filename: "fragment.mod", resolved: true, path: target.fsPath }]), client_instance: client.currentInstance };
   client.rootForDocument = document => { if (document === source) client.selectOwner(source.uri, root); return Promise.resolve(root); };
@@ -591,7 +591,7 @@ test("native include opening accepts an intentional owner pick before guarding v
 });
 test("navigation checks a caller guard after loading and before ownership or editor changes", async () => {
   reset(); const client = service(), pending = deferred();
-  const root = Uri.parse("file:///project/root.mod"), target = Uri.parse("file:///project/fragment.mod");
+  const root = Uri.parse("file:///workspace/root.mod"), target = Uri.parse("file:///workspace/fragment.mod");
   const loaded = { uri: target, languageId: "dynare", version: 1 };
   const originalOpen = vscode.workspace.openTextDocument;
   vscode.workspace.openTextDocument = () => pending.promise;
@@ -616,12 +616,12 @@ test("navigation capabilities advertise the agreed comparison and effective-prev
   assert.deepEqual(capabilities.experimental.dygnosis.compareModels, { navigation_schema_version: 1 });
   assert.deepEqual(capabilities.experimental.dygnosis.effectivePreview, { navigation_schema_version: 1, dependency_candidates: true });
   assert.equal(capabilities.experimental.dygnosis.modelInfo.schema_version, 1);
-  assert.equal(capabilities.experimental.dygnosis.projectStatusChanged, true);
+  assert.equal(capabilities.experimental.dygnosis.workspaceStatusChanged, true);
 });
 test("chosen context reads only a proven selected owner and restores it on a separate model-info event", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const a = Uri.parse("file:///project/a.mod"), b = Uri.parse("file:///project/b.mod");
-  const child = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 1 };
+  const a = Uri.parse("file:///workspace/a.mod"), b = Uri.parse("file:///workspace/b.mod");
+  const child = { uri: Uri.parse("file:///workspace/shared.inc"), languageId: "dynare", version: 1 };
   host.documents.push({ uri: a, languageId: "dynare", version: 1 }, { uri: b, languageId: "dynare", version: 1 }, child);
   let requests = 0;
   const related = [{ kind: "include", filename: "shared.inc", resolved: true, path: child.uri.fsPath }];
@@ -648,9 +648,9 @@ test("chosen context reads only a proven selected owner and restores it on a sep
   await client.modelInfo(b); assert.equal(updates.length, 3, "cached reads do not emit proof-restoration updates");
   restored.dispose(); broad.dispose(); input.dispose(); await client.shutdown();
 });
-test("ambient sole-owner include presentation does not gain explicit project priority", async () => {
+test("ambient sole-owner include presentation does not gain explicit workspace priority", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"), child = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 1 };
+  const root = Uri.parse("file:///workspace/root.mod"), child = { uri: Uri.parse("file:///workspace/shared.inc"), languageId: "dynare", version: 1 };
   host.documents.push({ uri: root, languageId: "dynare", version: 1 }, child);
   const related = [{ kind: "include", filename: "shared.inc", resolved: true, path: child.uri.fsPath }];
   host.managed[0].client.sendRequest = (_method, params) => Promise.resolve({ ...model(root.toString(), related), document_uri: params.arguments[0].document_uri });
@@ -666,9 +666,9 @@ test("ambient sole-owner include presentation does not gain explicit project pri
     assert.equal(client.chosenRootForDocument(child).toString(), root.toString(), "fresh proof restores an explicit choice");
   } finally { await client.shutdown(); }
 });
-test("multi-owner presentation waits for a user pick before project priority is explicit", async () => {
+test("multi-owner presentation waits for a user pick before workspace priority is explicit", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const a = Uri.parse("file:///project/a.mod"), b = Uri.parse("file:///project/b.mod"), child = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 1 };
+  const a = Uri.parse("file:///workspace/a.mod"), b = Uri.parse("file:///workspace/b.mod"), child = { uri: Uri.parse("file:///workspace/shared.inc"), languageId: "dynare", version: 1 };
   host.documents.push({ uri: a, languageId: "dynare", version: 1 }, { uri: b, languageId: "dynare", version: 1 }, child);
   const related = [{ kind: "include", filename: "shared.inc", resolved: true, path: child.uri.fsPath }];
   host.managed[0].client.sendRequest = (_method, params) => Promise.resolve(model(params.arguments[0].root_uri, related));
@@ -685,8 +685,8 @@ test("multi-owner presentation waits for a user pick before project priority is 
 // Guards a real owner-picker cancellation being converted to a refusal toast.
 test("cancelling an owner picker stays silent at the command boundary", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const a = Uri.parse("file:///project/a.mod"), b = Uri.parse("file:///project/b.mod");
-  const child = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 1 };
+  const a = Uri.parse("file:///workspace/a.mod"), b = Uri.parse("file:///workspace/b.mod");
+  const child = { uri: Uri.parse("file:///workspace/shared.inc"), languageId: "dynare", version: 1 };
   host.documents.push({ uri: a, languageId: "dynare", version: 1 }, { uri: b, languageId: "dynare", version: 1 }, child);
   const related = [{ kind: "include", filename: "shared.inc", resolved: true, path: child.uri.fsPath }];
   host.managed[0].client.sendRequest = (_method, params) => Promise.resolve(model(params.arguments[0].root_uri, related));
@@ -700,7 +700,7 @@ test("cancelling an owner picker stays silent at the command boundary", async ()
 });
 test("native navigation upgrades automatic provenance and close, restart and folders clear explicit context", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"), child = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 1 };
+  const root = Uri.parse("file:///workspace/root.mod"), child = { uri: Uri.parse("file:///workspace/shared.inc"), languageId: "dynare", version: 1 };
   host.documents.push({ uri: root, languageId: "dynare", version: 1 }, child);
   const related = [{ kind: "include", filename: "shared.inc", resolved: true, path: child.uri.fsPath }];
   const reply = (_method, params) => Promise.resolve({ ...model(root.toString(), related), document_uri: params.arguments[0].document_uri });
@@ -728,13 +728,13 @@ test("native navigation upgrades automatic provenance and close, restart and fol
 test("ordinary and untitled roots need no owner proof while includes and retained mod fragments cannot guess one", async () => {
   reset(); const client = service();
   client.modelInfo = () => { throw new Error("no model lookup"); }; client.ownerChoices = () => { throw new Error("no owner discovery"); };
-  for (const value of ["file:///project/root.mod", "file:///outside/loose.DYN", "untitled:/scratch.mod"]) {
+  for (const value of ["file:///workspace/root.mod", "file:///outside/loose.DYN", "untitled:/scratch.mod"]) {
     const doc = { uri: Uri.parse(value), languageId: "dynare", version: 1 };
     assert.equal(client.chosenRootForDocument(doc).toString(), value);
     assert.equal(client.chosenRootForDocument({ ...doc, isClosed: true }), undefined);
   }
-  const owner = Uri.parse("file:///project/owner.mod"), fragment = { uri: Uri.parse("file:///project/fragment.mod"), languageId: "dynare", version: 1 };
-  assert.equal(client.chosenRootForDocument({ uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare" }), undefined);
+  const owner = Uri.parse("file:///workspace/owner.mod"), fragment = { uri: Uri.parse("file:///workspace/fragment.mod"), languageId: "dynare", version: 1 };
+  assert.equal(client.chosenRootForDocument({ uri: Uri.parse("file:///workspace/shared.inc"), languageId: "dynare" }), undefined);
   assert.equal(client.chosenRootForDocument({ uri: Uri.parse("dygnosis-effective:/root.mod"), languageId: "dynare" }), undefined);
   assert.equal(client.chosenRootForDocument({ uri: fragment.uri, languageId: "plaintext" }), undefined);
   client.selectOwner(fragment.uri, owner); assert.equal(client.chosenRootForDocument(fragment), undefined);
@@ -743,7 +743,7 @@ test("ordinary and untitled roots need no owner proof while includes and retaine
 });
 test("late model-info proofs cannot announce a wrong owner or restore invalidated inputs", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const a = Uri.parse("file:///project/a.mod"), b = Uri.parse("file:///project/b.mod"), child = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 1 };
+  const a = Uri.parse("file:///workspace/a.mod"), b = Uri.parse("file:///workspace/b.mod"), child = { uri: Uri.parse("file:///workspace/shared.inc"), languageId: "dynare", version: 1 };
   host.documents.push({ uri: a, languageId: "dynare", version: 1 }, { uri: b, languageId: "dynare", version: 1 }, child);
   const related = [{ kind: "include", filename: "shared.inc", resolved: true, path: child.uri.fsPath }];
   const old = deferred(), choices = []; let updates = 0;
@@ -765,7 +765,7 @@ test("input invalidation has its own root event and excludes owner presentation 
   const events = [], presentation = [];
   const input = client.onDidInvalidate(event => events.push(event));
   const changed = client.onDidChange(() => presentation.push("changed"));
-  const root = Uri.parse("file:///project/root.mod"), include = Uri.parse("file:///project/part.inc");
+  const root = Uri.parse("file:///workspace/root.mod"), include = Uri.parse("file:///workspace/part.inc");
   client.selectOwner(include, root); client.treatAsRoot(include);
   assert.deepEqual(events, []); assert.equal(presentation.length, 2);
   client.invalidate(root.toString()); client.invalidate();
@@ -775,7 +775,7 @@ test("input invalidation has its own root event and excludes owner presentation 
 
 test("overlapping fresh model reads serialize and ordinary presentation still reuses the cache", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"); host.documents.push({ uri: root, languageId: "dynare", version: 1 });
+  const root = Uri.parse("file:///workspace/root.mod"); host.documents.push({ uri: root, languageId: "dynare", version: 1 });
   const firstReply = deferred(), secondReply = deferred(), replies = [firstReply, secondReply], tokens = [];
   host.managed[0].client.sendRequest = (_method, _params, token) => { tokens.push(token); return replies.shift().promise; };
   const first = client.modelInfo(root, root, true), second = client.modelInfo(root, root, true);
@@ -792,7 +792,7 @@ test("overlapping fresh model reads serialize and ordinary presentation still re
 
 test("two concurrent source revalidations both obtain the current same-root snapshot", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"); host.documents.push({ uri: root, languageId: "dynare", version: 1 });
+  const root = Uri.parse("file:///workspace/root.mod"); host.documents.push({ uri: root, languageId: "dynare", version: 1 });
   const firstReply = deferred(), secondReply = deferred(), replies = [firstReply, secondReply]; let requests = 0;
   host.managed[0].client.sendRequest = () => { ++requests; return replies.shift().promise; };
   const first = client.revalidate(root, "one", client.currentInstance), second = client.revalidate(root, "one", client.currentInstance);
@@ -804,7 +804,7 @@ test("two concurrent source revalidations both obtain the current same-root snap
 
 test("fresh queues for different documents do not block each other", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"), include = Uri.parse("file:///project/part.inc");
+  const root = Uri.parse("file:///workspace/root.mod"), include = Uri.parse("file:///workspace/part.inc");
   host.documents.push({ uri: root, languageId: "dynare", version: 1 }, { uri: include, languageId: "dynare", version: 1 });
   const requests = [];
   host.managed[0].client.sendRequest = (_method, params) => { const reply = deferred(); requests.push({ params, reply }); return reply.promise; };
@@ -817,7 +817,7 @@ test("fresh queues for different documents do not block each other", async () =>
 
 test("invalidation releases active and queued fresh reads without waiting for an obsolete reply", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"), document = { uri: root, languageId: "dynare", version: 1 }; host.documents.push(document);
+  const root = Uri.parse("file:///workspace/root.mod"), document = { uri: root, languageId: "dynare", version: 1 }; host.documents.push(document);
   const oldReply = deferred(); let requests = 0, oldToken;
   host.managed[0].client.sendRequest = (_method, _params, token) => { ++requests; oldToken = token; return oldReply.promise; };
   const first = client.modelInfo(root, root, true), queued = client.revalidate(root, "one", client.currentInstance); await flush();
@@ -832,7 +832,7 @@ test("invalidation releases active and queued fresh reads without waiting for an
 
 test("restart releases queued fresh reads and only the replacement instance can revalidate", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"); host.documents.push({ uri: root, languageId: "dynare", version: 1 });
+  const root = Uri.parse("file:///workspace/root.mod"); host.documents.push({ uri: root, languageId: "dynare", version: 1 });
   const oldReply = deferred(); let requests = 0;
   host.managed[0].client.sendRequest = () => { ++requests; return oldReply.promise; };
   const oldInstance = client.currentInstance;
@@ -846,7 +846,7 @@ test("restart releases queued fresh reads and only the replacement instance can 
 
 test("a queued fresh read captures its document version before waiting for its predecessor", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"), document = { uri: root, languageId: "dynare", version: 1 }; host.documents.push(document);
+  const root = Uri.parse("file:///workspace/root.mod"), document = { uri: root, languageId: "dynare", version: 1 }; host.documents.push(document);
   const reply = deferred(); let requests = 0;
   host.managed[0].client.sendRequest = () => { ++requests; return reply.promise; };
   const first = client.modelInfo(root, root, true), queued = client.modelInfo(root, root, true); await flush();
@@ -858,7 +858,7 @@ test("a queued fresh read captures its document version before waiting for its p
 
 test("shutdown releases a fresh queue even if the active server request ignores cancellation", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"); host.documents.push({ uri: root, languageId: "dynare", version: 1 });
+  const root = Uri.parse("file:///workspace/root.mod"); host.documents.push({ uri: root, languageId: "dynare", version: 1 });
   const ignored = deferred(); host.managed[0].client.sendRequest = () => ignored.promise;
   const first = client.modelInfo(root, root, true), queued = client.modelInfo(root, root, true); await flush();
   await client.shutdown(); assert.deepEqual(await Promise.all([first, queued]), [undefined, undefined]);
@@ -868,7 +868,7 @@ test("shutdown releases a fresh queue even if the active server request ignores 
 
 test("native Beside placement is forwarded only after a source loader guard accepts", async () => {
   reset(); const client = service(), pending = deferred();
-  const root = Uri.parse("file:///project/root.mod"), target = Uri.parse("file:///project/part.inc");
+  const root = Uri.parse("file:///workspace/root.mod"), target = Uri.parse("file:///workspace/part.inc");
   const loaded = { uri: target, languageId: "dynare", version: 1 }, originalOpen = vscode.workspace.openTextDocument;
   const location = { uri: target.toString(), range: { start: { line: 2, character: 3 }, end: { line: 2, character: 5 } } };
   vscode.workspace.openTextDocument = () => pending.promise;
@@ -882,7 +882,7 @@ test("native Beside placement is forwarded only after a source loader guard acce
 
 test("reuseOpen prefers a visible editor after validation and otherwise reuses a hidden tab", async () => {
   reset(); const client = service();
-  const root = Uri.parse("file:///project/root.mod"), target = Uri.parse("file:///project/part.inc");
+  const root = Uri.parse("file:///workspace/root.mod"), target = Uri.parse("file:///workspace/part.inc");
   const loaded = { uri: target, languageId: "dynare", version: 1 };
   const location = { uri: target.toString(), range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } };
   host.documents.push(loaded);
@@ -904,14 +904,14 @@ test("reuseOpen prefers a visible editor after validation and otherwise reuses a
 test("dependency patterns match literal bracket/brace names and ignore unrelated directory events", async () => {
   for (const filename of ["[part].macro", "{part,other}.macro"]) for (const event of ["created", "disk", "deleted"]) {
     reset(); const client = service(); await client.ensureStarted();
-    const root = Uri.parse("file:///project/root.mod"), candidate = Uri.parse(`file:///project/${filename}`);
+    const root = Uri.parse("file:///workspace/root.mod"), candidate = Uri.parse(`file:///workspace/${filename}`);
     host.documents.push({ uri: root, languageId: "dynare", version: 1 });
     host.managed[0].client.sendRequest = () => Promise.resolve({ ...model(), dependency_candidates: [root.toString(), candidate.toString()] });
     await client.modelInfo(root);
     const dependencyPatterns = host.watchers.filter(watcher => typeof watcher.pattern !== "string").map(watcher => watcher.pattern);
     assert.ok(dependencyPatterns.every(pattern => pattern.pattern === "*" && matches(pattern, candidate)));
     let invalidations = 0; const listener = client.onDidInvalidate(() => { ++invalidations; });
-    host[event].fire(Uri.parse("file:///project/unrelated.macro")); assert.equal(invalidations, 0);
+    host[event].fire(Uri.parse("file:///workspace/unrelated.macro")); assert.equal(invalidations, 0);
     host[event].fire(candidate); assert.equal(invalidations, 1, `${filename} ${event}`);
     assert.ok(host.notifications.some(notification => notification.method === "workspace/didChangeWatchedFiles" && notification.params.changes[0].uri === candidate.toString()));
     listener.dispose(); await client.shutdown();
@@ -920,7 +920,7 @@ test("dependency patterns match literal bracket/brace names and ignore unrelated
 
 test("caller cancellation releases an active proof while two independent callers remain live", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"); host.documents.push({ uri: root, languageId: "dynare", version: 1 });
+  const root = Uri.parse("file:///workspace/root.mod"); host.documents.push({ uri: root, languageId: "dynare", version: 1 });
   const calls = [];
   host.managed[0].client.sendRequest = (_method, _params, token) => { const reply = deferred(); calls.push({ token, reply }); return reply.promise; };
   const obsolete = new CancellationTokenSource(), second = new CancellationTokenSource(), third = new CancellationTokenSource();
@@ -939,7 +939,7 @@ test("caller cancellation releases an active proof while two independent callers
 
 test("cancelling a queued proof returns immediately without letting a later caller cancel its live predecessor", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const root = Uri.parse("file:///project/root.mod"); host.documents.push({ uri: root, languageId: "dynare", version: 1 });
+  const root = Uri.parse("file:///workspace/root.mod"); host.documents.push({ uri: root, languageId: "dynare", version: 1 });
   const calls = [];
   host.managed[0].client.sendRequest = (_method, _params, token) => { const reply = deferred(); calls.push({ token, reply }); return reply.promise; };
   const first = new CancellationTokenSource(), queued = new CancellationTokenSource(), last = new CancellationTokenSource();
@@ -956,7 +956,7 @@ test("cancelling a queued proof returns immediately without letting a later call
 
 test("Windows canonical loaded URI retains the chosen owner among several include roots", { skip: process.platform !== "win32" }, async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const first = Uri.parse("file:///project/first.mod"), chosen = Uri.parse("file:///project/chosen.mod"), target = Uri.parse("file:///C:/Models/shared.inc");
+  const first = Uri.parse("file:///workspace/first.mod"), chosen = Uri.parse("file:///workspace/chosen.mod"), target = Uri.parse("file:///C:/Models/shared.inc");
   const loaded = { uri: Uri.parse("file:///c%3A/Models/shared.inc"), languageId: "dynare", version: 1 };
   host.documents.push({ uri: first, languageId: "dynare", version: 1 }, { uri: chosen, languageId: "dynare", version: 1 });
   host.managed[0].client.sendRequest = (_method, params) => Promise.resolve(model(params.arguments[0].root_uri,
@@ -976,7 +976,7 @@ test("Windows canonical loaded URI retains the chosen owner among several includ
 
 test("empty-content document metadata changes do not invalidate model inputs", async () => {
   reset(); const client = service(); await client.ensureStarted();
-  const source = { uri: Uri.parse("file:///project/root.mod"), languageId: "dynare", version: 1 };
+  const source = { uri: Uri.parse("file:///workspace/root.mod"), languageId: "dynare", version: 1 };
   const events = []; const listener = client.onDidInvalidate(event => events.push(event));
   host.edit.fire({ document: source, contentChanges: [] }); assert.equal(events.length, 0);
   host.edit.fire({ document: source, contentChanges: [{ text: "var y;" }] });
@@ -987,7 +987,7 @@ test("empty-content document metadata changes do not invalidate model inputs", a
 
 test("a guard decision is checked after its await before source owner or editor changes", async () => {
   reset(); const client = service();
-  const first = Uri.parse("file:///project/first.mod"), chosen = Uri.parse("file:///project/chosen.mod"), target = Uri.parse("file:///project/shared.inc");
+  const first = Uri.parse("file:///workspace/first.mod"), chosen = Uri.parse("file:///workspace/chosen.mod"), target = Uri.parse("file:///workspace/shared.inc");
   const loaded = { uri: target, languageId: "dynare", version: 1 }, originalOpen = vscode.workspace.openTextDocument;
   client.modelInfo = root => Promise.resolve(model(root.toString(), [{ kind: "include", filename: "shared.inc", resolved: true, path: target.fsPath }]));
   client.selectOwner(target, first); vscode.workspace.openTextDocument = () => Promise.resolve(loaded);

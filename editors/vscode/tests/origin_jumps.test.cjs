@@ -136,7 +136,7 @@ const originJumpContributions = { commands: contributed.commands.filter(item => 
 const { DygnosisClient } = require(compiledModule("client"));
 Module._load = originalLoad;
 
-const main = "file:///project/main.mod";
+const main = "file:///workspace/main.mod";
 function target(value = main, range = new Range(1, 0, 1, 3), version = 1) { return { uri: value, range, document_version: version }; }
 function row(extra = {}) {
   return { id: "e1", statement_id: "s1", effective_range: new Range(1, 0, 1, 5), written_locations: [target()], macro_frames: [],
@@ -250,7 +250,7 @@ test("cursor and selections respect half-open ranges and reject ambiguous rows",
 
 test("source pick labels retain scope, occurrence and preview line", () => {
   const value = row({ scope: "heterogeneous", dimension: "households", macro_frames: [
-    { kind: "for", variable: "country", value: '"US"', directive_locations: [target(main, new Range(0, 0, 0, 9))], body_locations: [target("file:///project/body.inc", new Range(2, 0, 2, 3), null)] },
+    { kind: "for", variable: "country", value: '"US"', directive_locations: [target(main, new Range(0, 0, 0, 9))], body_locations: [target("file:///workspace/body.inc", new Range(2, 0, 2, 3), null)] },
   ] });
   assert.match(writtenSourcePicks(value)[0].description, /Dimension households.*Preview line 2/);
 });
@@ -280,12 +280,12 @@ test("one verified source reuses an open editor with its stored root", async () 
 
 test("included and split rows offer every verified written portion", async () => {
   const env = setup();
-  env.service.value = payload({ navigation: [row({ written_locations: [target(), target("file:///project/body.inc", new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, "file:///project/body.inc"] });
+  env.service.value = payload({ navigation: [row({ written_locations: [target(), target("file:///workspace/body.inc", new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, "file:///workspace/body.inc"] });
   const session = await env.show();
   env.host.pick = items => items[1];
   await env.run("goToWrittenSource");
   assert.equal(env.host.picks[0].items.length, 2);
-  assert.equal(env.service.jumps[0].location.uri, "file:///project/body.inc");
+  assert.equal(env.service.jumps[0].location.uri, "file:///workspace/body.inc");
   assert.equal(env.service.jumps[0].root, session.root.toString());
   env.registration.dispose(); env.previews.dispose();
 });
@@ -316,9 +316,9 @@ test("root edits disable jumps until refresh atomically replaces text and naviga
 
 test("dependency candidates watch missing arbitrary-extension files and invalidate on create/change/delete", async () => {
   for (const event of ["create", "change", "remove"]) {
-    const env = setup(); env.service.value.dependency_candidates.push("file:///project/missing.macro"); await env.show();
+    const env = setup(); env.service.value.dependency_candidates.push("file:///workspace/missing.macro"); await env.show();
     assert.ok(env.host.watchers.every(watcher => watcher.pattern.pattern === "*"));
-    for (const watcher of env.host.watchers) watcher[event].fire(uri("file:///project/missing.macro"));
+    for (const watcher of env.host.watchers) watcher[event].fire(uri("file:///workspace/missing.macro"));
     assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
     await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 0);
     env.registration.dispose(); env.previews.dispose(); assert.ok(env.host.watchers.every(watcher => watcher.disposed));
@@ -343,7 +343,7 @@ test("settings and server invalidation withhold origins and obey action placemen
 
 test("several previews retain independent roots and refresh an unopened root", async () => {
   const env = setup(), first = await env.show();
-  const other = "file:///project/other.dyn", otherDocument = doc(other);
+  const other = "file:///workspace/other.dyn", otherDocument = doc(other);
   env.host.documents.set(other, otherDocument); env.host.editor = { document: otherDocument, selection: new Range(1, 0), setDecorations() {} };
   env.service.value = payload({ root_uri: other, navigation: [row({ written_locations: [target(other)] })], dependency_candidates: [other] });
   const second = await env.show(); assert.equal(env.previews.sessions().length, 2);
@@ -549,7 +549,7 @@ test("commands outside a registered virtual preview do no model work", async () 
 test("owner presentation updates do not stale previews and root invalidations stay scoped", async () => {
   const env = setup(), first = await env.show();
   env.service.presentation.fire(); assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
-  const other = "file:///project/second.mod", otherDocument = doc(other);
+  const other = "file:///workspace/second.mod", otherDocument = doc(other);
   env.host.documents.set(other, otherDocument); env.host.editor = { document: otherDocument, selection: new Range(1, 0), setDecorations() {} };
   env.service.value = payload({ root_uri: other, navigation: [row({ written_locations: [target(other)] })], dependency_candidates: [other] });
   const second = await env.show(); env.service.changed.fire({ root: other, reason: "input" });
@@ -645,10 +645,10 @@ test("a superseded post-loader validation cannot disable newly committed navigat
 
 test("preview watcher patterns actually match literal bracket/brace candidates and filter unrelated names", async () => {
   for (const filename of ["[part].macro", "{part,other}.macro"]) for (const event of ["create", "change", "remove"]) {
-    const env = setup(), candidate = uri(`file:///project/${filename}`);
+    const env = setup(), candidate = uri(`file:///workspace/${filename}`);
     env.service.value.dependency_candidates.push(candidate.toString()); await env.show();
     assert.ok(env.host.watchers.every(watcher => matches(watcher.pattern, candidate)));
-    for (const watcher of env.host.watchers) watcher[event].fire(uri("file:///project/unrelated.macro"));
+    for (const watcher of env.host.watchers) watcher[event].fire(uri("file:///workspace/unrelated.macro"));
     assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
     for (const watcher of env.host.watchers) watcher[event].fire(candidate);
     assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false, `${filename} ${event}`);
@@ -699,7 +699,7 @@ test("a delayed root file observation after the initial proof requires Refresh b
 
 test("unrelated root notifications during source loading obtain a bounded new proof for the unchanged preview", async context => {
   for (const interruptions of [1, 3, 4]) await context.test(`${interruptions} interruptions`, async () => {
-    const env = await realClientSetup(), include = "file:///project/unopened.inc";
+    const env = await realClientSetup(), include = "file:///workspace/unopened.inc";
     let interrupted = 0;
     try {
       env.engine.value = payload({ effective_text: "model;\ny = 3;\nend;", navigation: [row({ written_locations: [target(include, new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, include] });
@@ -712,7 +712,7 @@ test("unrelated root notifications during source loading obtain a bounded new pr
       env.engine.infoHook = call => {
         if (!env.host.documents.has(include) || interrupted >= interruptions) return false;
         ++interrupted;
-        void Promise.resolve().then(() => { env.service.invalidate("file:///project/other.mod"); call.reply.resolve(env.engine.snapshot()); });
+        void Promise.resolve().then(() => { env.service.invalidate("file:///workspace/other.mod"); call.reply.resolve(env.engine.snapshot()); });
         return true;
       };
       await env.run("goToWrittenSource");
@@ -731,7 +731,7 @@ test("unrelated root notifications during source loading obtain a bounded new pr
 
 test("loader proof retries reject changed bytes and relevant hard input after an unrelated interruption", async context => {
   for (const change of ["revision", "source-version", "root-notification", "global-notification"]) await context.test(change, async () => {
-    const env = await realClientSetup(), include = "file:///project/unopened.inc";
+    const env = await realClientSetup(), include = "file:///workspace/unopened.inc";
     let interrupted = false;
     try {
       env.engine.value = payload({ effective_text: "model;\ny = 3;\nend;", navigation: [row({ written_locations: [target(include, new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, include] });
@@ -745,7 +745,7 @@ test("loader proof retries reject changed bytes and relevant hard input after an
         if (!loaded || interrupted) return false;
         interrupted = true;
         void Promise.resolve().then(() => {
-          env.service.invalidate("file:///project/other.mod");
+          env.service.invalidate("file:///workspace/other.mod");
           if (change === "revision") { env.engine.value.revision = "changed"; env.engine.value.effective_text = "model;\ny = 4;\nend;"; }
           if (change === "source-version") { ++loaded.version; loaded.text = "y=4;\n"; env.host.edited.fire({ document: loaded, contentChanges: [{ text: loaded.text }] }); }
           if (change === "root-notification") env.service.invalidate(main);
@@ -797,7 +797,7 @@ test("real client supersede and close cancel only obsolete proofs while two othe
 
 test("real client opens an unchanged unopened include despite load-time input observations", async context => {
   for (const observation of ["metadata", "file"]) await context.test(observation, async () => {
-    const env = await realClientSetup(), include = "file:///project/unopened.inc";
+    const env = await realClientSetup(), include = "file:///workspace/unopened.inc";
     try {
       env.engine.value = payload({ effective_text: "model;\ny = 3;\nend;", navigation: [row({ written_locations: [target(include, new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, include] });
       await env.show();
@@ -818,7 +818,7 @@ test("real client opens an unchanged unopened include despite load-time input ob
 
 test("changed disk or unsaved include bytes cannot use the old source mapping", async () => {
   for (const change of ["disk", "unsaved"]) {
-    const env = await realClientSetup(), include = "file:///project/unopened.inc";
+    const env = await realClientSetup(), include = "file:///workspace/unopened.inc";
     try {
       env.engine.value = payload({ effective_text: "model;\ny = 3;\nend;", navigation: [row({ written_locations: [target(include, new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, include] });
       const session = await env.show(); let loaded;
@@ -843,7 +843,7 @@ test("changed disk or unsaved include bytes cannot use the old source mapping", 
 
 test("interleaved filesystem observations retry fresh proofs within a fixed bound", async () => {
   for (const observations of [3, 4]) {
-    const env = await realClientSetup(), include = "file:///project/unopened.inc";
+    const env = await realClientSetup(), include = "file:///workspace/unopened.inc";
     try {
       env.engine.value = payload({ effective_text: "model;\ny = 3;\nend;", navigation: [row({ written_locations: [target(include, new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, include] });
       const session = await env.show(), baseline = env.engine.infos.length; let remaining = observations;
@@ -869,7 +869,7 @@ test("interleaved filesystem observations retry fresh proofs within a fixed boun
 });
 
 test("new-epoch independent callers remain current while the source loader retries an obsolete filesystem proof", async () => {
-  const env = await realClientSetup(), include = "file:///project/unopened.inc";
+  const env = await realClientSetup(), include = "file:///workspace/unopened.inc";
   try {
     env.engine.value = payload({ effective_text: "model;\ny = 3;\nend;", navigation: [row({ written_locations: [target(include, new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, include] });
     await env.show(); let held;
@@ -889,7 +889,7 @@ test("new-epoch independent callers remain current while the source loader retri
 });
 
 test("Refresh still supersedes a source load made unavailable by filesystem observations", async () => {
-  const env = await realClientSetup(), include = "file:///project/unopened.inc", held = deferred();
+  const env = await realClientSetup(), include = "file:///workspace/unopened.inc", held = deferred();
   try {
     env.engine.value = payload({ effective_text: "model;\ny = 3;\nend;", navigation: [row({ written_locations: [target(include, new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, include] });
     const session = await env.show(); let loaded;
@@ -909,7 +909,7 @@ test("Refresh still supersedes a source load made unavailable by filesystem obse
 
 test("hard input changes still cancel a source load awaiting filesystem revalidation", async () => {
   for (const input of ["text", "settings", "restart", "close"]) {
-    const env = await realClientSetup(), include = "file:///project/unopened.inc", held = deferred();
+    const env = await realClientSetup(), include = "file:///workspace/unopened.inc", held = deferred();
     try {
       env.engine.value = payload({ effective_text: "model;\ny = 3;\nend;", navigation: [row({ written_locations: [target(include, new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, include] });
       const session = await env.show(); let loaded;
@@ -933,7 +933,7 @@ test("hard input changes still cancel a source load awaiting filesystem revalida
 });
 
 test("a filesystem change after proof completion cannot reveal the source from the old input revision", async () => {
-  const env = await realClientSetup(), include = "file:///project/unopened.inc", dependency = "file:///project/other.macro";
+  const env = await realClientSetup(), include = "file:///workspace/unopened.inc", dependency = "file:///workspace/other.macro";
   try {
     env.engine.value = payload({ effective_text: "model;\ny = 3;\nend;", navigation: [row({ written_locations: [target(include, new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, include, dependency] });
     const session = await env.show(); let injected = false;
@@ -965,7 +965,7 @@ test("a filesystem change after proof completion cannot reveal the source from t
 });
 
 test("a filesystem change after the loader guard completes is rechecked before source reveal", async () => {
-  const env = await realClientSetup(), include = "file:///project/unopened.inc", dependency = "file:///project/other.macro";
+  const env = await realClientSetup(), include = "file:///workspace/unopened.inc", dependency = "file:///workspace/other.macro";
   try {
     env.engine.value = payload({ effective_text: "model;\ny = 3;\nend;", navigation: [row({ written_locations: [target(include, new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, include, dependency] });
     const session = await env.show(); let injected = false;
@@ -994,7 +994,7 @@ test("a filesystem change after the loader guard completes is rechecked before s
 
 test("the final guard decision rejects late loaded-version, closed and dirty changes", async () => {
   for (const change of ["version", "closed", "dirty"]) {
-    const env = await realClientSetup(), include = "file:///project/unopened.inc";
+    const env = await realClientSetup(), include = "file:///workspace/unopened.inc";
     try {
       env.engine.value = payload({ effective_text: "model;\ny = 3;\nend;", navigation: [row({ written_locations: [target(include, new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, include] });
       const session = await env.show(); let loaded, injected = false;

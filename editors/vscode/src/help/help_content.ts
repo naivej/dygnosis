@@ -77,7 +77,7 @@ export function helpPages(bundle: HelpBundle): HelpTopic[] {
   // A bracket in a check title must stay inside the link. Raw "]" ends it early.
   const codeIndexLink = (code: HelpCode): string => `- [${code.code} — ${code.title.replaceAll(/[[\]]/g, bracket => `\\${bracket}`)}](check:${code.code}) (${code.kind})`;
   const commandLink = (command: { command: string; title: string; category: string }): string => {
-    const scope = command.command === "dygnosis.ignoreProjectFolder" ? " (folder row action in Dynare project checks)" : "";
+    const scope = command.command === "dygnosis.ignoreWorkspaceFolder" ? " (folder row action in Dynare workspace checks)" : "";
     return `- [${command.category}: ${command.title}](help:${bundle.commandsTopics[command.command]})${scope}`;
   };
   if (reference) reference.markdown += `\n## Commands\n\n${bundle.commands.map(commandLink).join("\n")}\n\n## Dygnosis shortcuts\n\n${bundle.keybindings.map(key => `- ${bundle.commands.find(command => command.command === key.command)?.title ?? key.command}: ${key.key}; macOS ${key.mac ?? key.key}`).join("\n")}\n\n## Diagnostic codes\n\n| Label | Meaning |\n|---|---|\n| Shared | Dynare reports this on the file you edit, and Dygnosis reports it too. |\n| Added | Extra guidance from Dygnosis. Dynare never reports it. |\n| Skipped | Documented only. Dynare's message depends on rewritten equations or on the MATLAB file it generates, so Dygnosis does not show the check. |\n\n${bundle.reference.codes.map(codeIndexLink).join("\n")}\n\n## Command options\n\n${bundle.reference.options.map(entry => `- [${entry.command}](option:${entry.command})`).join("\n")}\n`;

@@ -1,8 +1,8 @@
 # Check the model
 
 Dygnosis underlines issues in open `.mod`, `.dyn` and `.inc` files and lists
-them in VS Code's **Problems** panel (**View > Problems**). [Project
-checks](project-checks.md) add issues from unopened saved models in your
+them in VS Code's **Problems** panel (**View > Problems**). [Workspace
+checks](workspace-checks.md) add issues from unopened saved models in your
 workspace.
 
 ## Find a problem

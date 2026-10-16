@@ -26,7 +26,7 @@ function uri(value) {
   const parsed = new URL(value);
   return { scheme: parsed.protocol.slice(0, -1), path: parsed.pathname, fsPath: decodeURIComponent(parsed.pathname), toString: () => value };
 }
-function document(value = "file:///project/main.mod", extra = {}) {
+function document(value = "file:///workspace/main.mod", extra = {}) {
   return { uri: uri(value), languageId: "dynare", version: 1, isClosed: false,
     lineCount: 100, lineAt: () => ({ text: " ".repeat(60) }), ...extra };
 }
@@ -109,7 +109,7 @@ const { registerEffectivePreview } = require(compiledModule("preview"));
 Module._load = originalLoad;
 const lensContributions = { configuration: require("../package.json").contributes.configuration.find(group => group.title === "Dygnosis: Actions") };
 
-function location(value = "file:///project/main.mod", line = 3, start = 0, end = 5) {
+function location(value = "file:///workspace/main.mod", line = 3, start = 0, end = 5) {
   return { uri: value, range: { start: { line, character: start }, end: { line, character: end } } };
 }
 function statement(id = "s1", extra = {}) {
@@ -209,13 +209,13 @@ test("default actionable model lens reuses the cache facts and creates no refere
 test("aggregate, heterogeneous and multiple model blocks keep their separate surviving rows", async () => {
   const env = setup(); const blocks = [statement(), statement("s2", { lens_anchor: location(undefined, 20), dimension: "households", equation_count: 2 }),
     statement("s3", { lens_anchor: location(undefined, 40), equation_count: 0 })];
-  const rows = [equation(), equation("e2", { block_id: "s2", scope: "dimension", dimension: "households", location: location("file:///project/hank.inc", 2) }),
+  const rows = [equation(), equation("e2", { block_id: "s2", scope: "dimension", dimension: "households", location: location("file:///workspace/hank.inc", 2) }),
     equation("e3", { block_id: "s2", scope: "dimension", dimension: "households", number: 2 })];
   env.service.info = () => facts(env.doc, { statements: blocks, equations: rows });
   const lenses = await env.provide(); assert.deepEqual(lenses.map(row => row.command.title), ["Jump to equation...", "Jump to equation...", "Jump to equation..."]);
   env.host.answers.push(items => items[0]); await env.run(lenses[1]);
   assert.equal(env.host.picks[0].items.length, 2); assert.ok(env.host.picks[0].items.every(row => /households/.test(row.description)));
-  assert.equal(env.service.jumps[0].target.uri, "file:///project/hank.inc");
+  assert.equal(env.service.jumps[0].target.uri, "file:///workspace/hank.inc");
   // The empty surviving block offers an action and explains its empty state.
   env.host.activeEditor = env.host.editors[0]; await env.run(lenses[2]);
   assert.match(env.host.messages.at(-1), /no surviving counted equations/); env.registration.dispose();
@@ -262,12 +262,12 @@ test("incomplete, partial, ambiguous mapping and unsafe anchors expose no author
 });
 test("file-local anchors never use include segments or guessed first-model locations", async () => {
   const env = setup(); env.configure("dynare.codeLens.effectiveModel", true);
-  env.service.info = () => facts(env.doc, { statements: [statement("foreign", { lens_anchor: location("file:///project/part.inc"),
-    segments: [location()] })], first_model_anchor: location("file:///project/part.inc") });
+  env.service.info = () => facts(env.doc, { statements: [statement("foreign", { lens_anchor: location("file:///workspace/part.inc"),
+    segments: [location()] })], first_model_anchor: location("file:///workspace/part.inc") });
   assert.equal((await env.provide()).length, 0); env.registration.dispose();
 });
 test("includes require a selected known owner and keep its root even for included mod files", async () => {
-  for (const value of ["file:///project/shared.inc", "file:///project/part.mod"]) {
+  for (const value of ["file:///workspace/shared.inc", "file:///workspace/part.mod"]) {
     const env = setup(document(value));
     if (value.endsWith(".inc")) { assert.equal((await env.provide()).length, 0); assert.equal(env.service.requests.length, 0); }
     env.service.root = uri("file:///owners/b.mod"); env.service.info = () => facts(env.doc, { root_uri: env.service.root.toString(),
@@ -379,7 +379,7 @@ test("repeated-opener list cancellation and change prevent navigation", async ()
   }
 });
 test("a verified unopened include still opens when loading refreshes presentation without changing revision", async () => {
-  const env = setup(); const target = "file:///project/unopened.inc";
+  const env = setup(); const target = "file:///workspace/unopened.inc";
   env.service.info = () => facts(env.doc, { equations: [equation("e1", { location: location(target, 7) })] });
   const lens = (await env.provide())[0]; const loader = deferred(); env.host.load = () => loader.promise;
   env.host.answers.push(items => items[0]); const pending = env.run(lens); await flush();
@@ -429,7 +429,7 @@ test("ordinary effective-preview menu URI arguments retain the native root picke
   preview.dispose(); env.registration.dispose();
 });
 test("dyn and untitled roots retain exact URI and mapped anchors", async () => {
-  for (const value of ["file:///project/main.DYN", "untitled:/scratch.mod"]) {
+  for (const value of ["file:///workspace/main.DYN", "untitled:/scratch.mod"]) {
     const env = setup(document(value)); env.service.info = () => facts(env.doc, { statements: [statement("s1", { lens_anchor: location(value) })], equations: [equation("e1", { location: location(value, 5) })] });
     const lens = (await env.provide())[0]; env.host.answers.push(items => items[0]); await env.run(lens);
     assert.equal(env.service.jumps[0].root, value); assert.equal(env.service.jumps[0].target.uri, value); env.registration.dispose();

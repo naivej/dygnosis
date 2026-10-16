@@ -14,12 +14,12 @@
   "dygnosis.goToWrittenSource": "effective-model",
   "dygnosis.refreshEffectiveModel": "effective-model",
   "dygnosis.diffWith": "structural-diff",
-  "dygnosis.setupProjectMcp": "agents",
-  "dygnosis.projectStatus": "project-checks",
-  "dygnosis.recheckProject": "project-checks",
-  "dygnosis.cancelProject": "project-checks",
-  "dygnosis.configureProjectExclusions": "project-checks",
-  "dygnosis.ignoreProjectFolder": "project-checks",
+  "dygnosis.setupWorkspaceMcp": "agents",
+  "dygnosis.workspaceStatus": "workspace-checks",
+  "dygnosis.recheckWorkspace": "workspace-checks",
+  "dygnosis.cancelWorkspace": "workspace-checks",
+  "dygnosis.configureWorkspaceExclusions": "workspace-checks",
+  "dygnosis.ignoreWorkspaceFolder": "workspace-checks",
   "dygnosis.openChanges": "structural-diff",
   "dygnosis.renameSymbol": "navigate-code"
 }

@@ -5,7 +5,7 @@ import { booleanSetting, listSetting } from "../client/settings";
 
 export const statusCounts = ["endogenous", "exogenous", "equations"];
 export type StatusCount = "endogenous" | "exogenous" | "equations";
-interface StatusContent { text: string; tooltip: string; accessibilityLabel: string }
+interface StatusContent { text: string; tooltip: string | vscode.MarkdownString; accessibilityLabel: string }
 const countDetails: Record<StatusCount, { field: "n_endogenous" | "n_exogenous" | "n_equations"; icon: string; label: string }> = {
   endogenous: { field: "n_endogenous", icon: "symbol-variable", label: "endogenous" },
   exogenous: { field: "n_exogenous", icon: "symbol-field", label: "exogenous" },
@@ -34,38 +34,45 @@ function incompleteDetail(info: ModelInfo): string {
   return info.message ?? "Model expansion is incomplete.";
 }
 
-/** Format only engine facts. Aggregate and dimension counts stay separate. */
-export function modelStatus(info: ModelInfo, counts: StatusCount[], modelLabel: string): StatusContent {
+/** Sum scope counts for the status bar; retain each scope's facts in the hover. */
+export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusContent {
   if (!info.complete) {
     const detail = incompleteDetail(info);
     return {
       text: "$(info) Dynare: incomplete",
-      tooltip: `${modelLabel}\n${detail}\nCounts are unavailable.\nClick to focus Outline.`,
+      tooltip: `${detail}\nCounts are unavailable.`,
       accessibilityLabel: "Dynare model expansion is incomplete. Counts are unavailable. Focus Outline.",
     };
   }
-  const shown = counts.map(count => ({ ...countDetails[count], value: info[countDetails[count].field] }));
-  if (shown.some(count => typeof count.value !== "number" || !Number.isSafeInteger(count.value) || count.value < 0)) return {
+  const groups = [
+    { title: "Aggregate model", facts: info },
+    ...(info.heterogeneity_dimensions ?? []).map(dimension => ({ title: `Heterogeneous model: ${dimension.dimension}`, facts: dimension })),
+  ];
+  const validCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  const shown = counts.map(count => {
+    const values = groups.map(group => group.facts[countDetails[count].field]);
+    return { ...countDetails[count], value: values.every(validCount) ? values.reduce((total, value) => total + value, 0) : undefined };
+  });
+  if (shown.some(count => !validCount(count.value))) return {
     text: "$(info) Dynare: unavailable",
-    tooltip: `${modelLabel}\nModel counts are unavailable.\nClick to focus Outline.`,
+    tooltip: "Model counts are unavailable.",
     accessibilityLabel: "Dynare model counts are unavailable. Focus Outline.",
   };
-  const report = [
-    "Aggregate model before transformation",
-    ...countLines(info, counts),
-    ...(info.heterogeneity_dimensions ?? []).flatMap(dimension => [
-      `Heterogeneous model: ${dimension.dimension}`,
-      ...countLines(dimension, counts),
-    ]),
-  ];
+  const tooltip = new vscode.MarkdownString(), report: string[] = [];
+  for (const group of groups) {
+    if (report.length) tooltip.appendMarkdown("\n\n");
+    tooltip.appendMarkdown("**").appendText(group.title).appendMarkdown("**\n\n");
+    const lines = countLines(group.facts, counts);
+    lines.forEach((line, index) => {
+      if (index) tooltip.appendMarkdown("  \n");
+      tooltip.appendText(line);
+    });
+    report.push(group.title, ...lines);
+  }
   return {
     text: shown.map(count => `$(${count.icon}) ${String(count.value)}`).join("  "),
-    tooltip: [
-      modelLabel,
-      ...report,
-      "Click to focus Outline.",
-    ].join("\n"),
-    accessibilityLabel: `${modelLabel}. ${report.join(". ")}. Click to focus Outline.`,
+    tooltip,
+    accessibilityLabel: `Dynare model counts. Total: ${shown.map(count => `${String(count.value)} ${count.label}`).join(", ")}. ${report.join(". ")}. Focus Outline.`,
   };
 }
 
@@ -106,14 +113,14 @@ export function registerStatus(service: DygnosisClient): vscode.Disposable {
     };
     content({
       text: "$(sync~spin) Dynare: updating",
-      tooltip: "Refreshing model counts.\nClick to focus Outline.",
+      tooltip: "Refreshing model counts…",
       accessibilityLabel: "Dynare model counts are updating. Focus Outline.",
     });
     const unavailable = (): void => content({
       text: "$(info) Dynare: unavailable",
       tooltip: service.supportsModelInfo
-        ? "Model counts are unavailable. Choose a model root, or open Dygnosis Output for details.\nClick to focus Outline."
-        : "Model counts are unavailable. Restart the Dygnosis language server, or use the bundled binary in Settings.\nClick to focus Outline.",
+        ? "Model counts are unavailable. Choose a model root, or open Dygnosis Output for details."
+        : "Model counts are unavailable. Restart the Dygnosis language server, or use the bundled binary in Settings.",
       accessibilityLabel: "Dynare model counts are unavailable. Focus Outline.",
     });
     const update = async (): Promise<void> => {
@@ -134,7 +141,7 @@ export function registerStatus(service: DygnosisClient): vscode.Disposable {
       if (info.root_uri !== root.toString() || info.document_uri !== uri || info.document_version !== version) {
         unavailable(); return;
       }
-      content(modelStatus(info, settings.counts, vscode.workspace.asRelativePath(root)));
+      content(modelStatus(info, settings.counts));
     };
     void update().catch((error: unknown) => {
       if (current()) { service.log(String(error)); unavailable(); }

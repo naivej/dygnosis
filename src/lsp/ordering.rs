@@ -157,7 +157,9 @@ fn changes_input(request: &Request) -> bool {
             .is_some_and(|command| {
                 matches!(
                     command,
-                    "dynare/recheckProject" | "dynare/cancelProject" | "dynare/setDocumentContext"
+                    "dynare/recheckWorkspace"
+                        | "dynare/cancelWorkspace"
+                        | "dynare/setDocumentContext"
                 )
             }))
 }

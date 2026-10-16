@@ -33,8 +33,9 @@ loose file).
 ## Model structure and counts
 
 For the active `.mod` or `.dyn` file, the status bar shows endogenous,
-exogenous and equation counts beside their icons on the left. Hover over the
-counts to read the breakdown under **Aggregate model before transformation** and
+exogenous and equation totals beside their icons on the left. Totals combine
+the counts from the aggregate model and all heterogeneous dimensions. Hover over
+the counts for separate breakdowns under **Aggregate model** and
 each **Heterogeneous model: `<dimension>`**, including static, predetermined,
 forward-looking and mixed endogenous counts. Click the status bar item to focus
 **Outline**.
