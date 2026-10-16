@@ -1345,10 +1345,13 @@ async fn document_symbols_show_blocks_commands_and_uncounted_rows() {
         .expect("symbols rpc")
         .expect("symbols");
     let nested = nested_symbols(resp);
+    // Top-level parameter assignments stay out of Outline. The declared name
+    // remains under its declaration.
     assert_eq!(
         top_level_names(&nested),
-        ["var", "varexo", "parameters", "rho", "model", "initval"]
+        ["var", "varexo", "parameters", "model", "initval"]
     );
+    assert_eq!(child_names(&nested, "parameters"), ["rho"]);
     assert_eq!(child_names(&nested, "var"), ["y", "k", "w", "a", "u"]);
     let declarations = nested
         .iter()
