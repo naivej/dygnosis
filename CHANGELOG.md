@@ -2,6 +2,9 @@
 
 ## v0.11.29
 
+- VS Code's Outline supports macro expansion previews, including included
+  declarations and separate loop copies. Entries select the expanded text;
+  **Go to written source** opens the original model or include file.
 - Workspace checks use VS Code's workspace terminology in Explorer, the status
   bar, commands, settings, MCP setup and Help. Saved configuration now uses
   `dynare.workspaceDiagnostics` and `dynare.workspaceExcludePaths`. Update

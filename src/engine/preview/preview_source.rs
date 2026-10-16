@@ -14,6 +14,7 @@ use crate::engine::language::span::Span;
 pub(crate) struct SourcePreview {
     pub text: String,
     pub ranges: Vec<Span>,
+    pub token_spans: Vec<Option<Span>>,
     /// False when active tokens disagree with the stored expansion.
     pub proven: bool,
     /// Contiguous display pieces with written spans in include-spliced source.
@@ -75,16 +76,18 @@ pub(crate) fn source_with_evaluations(
     let (proof_model, _) =
         parse_expanded_controlled(&layout.text, tokenize(&layout.text), None, macro_work_limit);
     let proof = &proof_model.expanded_tokens;
-    let proven = token_stream_agrees(&layout.text, &model.source, tokens, proof);
-    let ranges = if proven {
-        map_navigation(report, &model.source, tokens, proof).unwrap_or_default()
+    let proven = token_stream_agrees(&layout.text, &model.source, tokens, proof)
+        && token_stream_agrees(&layout.text, &model.source, &model.expanded_tokens, proof);
+    let (ranges, token_spans) = if proven {
+        map_navigation(report, &model.source, &model.expanded_tokens, proof).unwrap_or_default()
     } else {
-        Vec::new()
+        (Vec::new(), Vec::new())
     };
     let navigation_ok = ranges.len() == report.navigation.len();
     Ok(Some(SourcePreview {
         text: layout.text,
         ranges,
+        token_spans,
         proven: proven && navigation_ok,
         fragments: layout.fragments,
     }))
@@ -108,7 +111,7 @@ fn map_navigation(
     src: &str,
     expanded: &[Token],
     proof: &[Token],
-) -> Option<Vec<Span>> {
+) -> Option<(Vec<Span>, Vec<Option<Span>>)> {
     let proof: Vec<_> = proof
         .iter()
         .filter(|token| token.kind != TokenKind::Eof)
@@ -141,11 +144,12 @@ fn map_navigation(
             end: display_of[end]?.end,
         })
     };
-    report
+    let ranges = report
         .navigation
         .iter()
         .map(|row| map(row.effective_span))
-        .collect()
+        .collect::<Option<Vec<_>>>()?;
+    Some((ranges, display_of))
 }
 
 #[cfg(test)]

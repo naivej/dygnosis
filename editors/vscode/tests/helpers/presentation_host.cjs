@@ -168,6 +168,7 @@ async function checkPresentation(service, workspaceRoot, evidence, helpers) {
   assert.equal(repeatedLens.command.title, "Jump to equation...");
   await pick(repeated, repeatedLens.command.command, repeatedLens.command.arguments);
   evidence.checks.push("repeated macro opener lists both counted copies directly and keeps the written target");
+  await checkPreviewOutline(service, workspaceRoot, evidence, helpers);
   await checkOwnerContexts(service, workspaceRoot, evidence, helpers);
 
   // External examples are optional for the general harness; release evidence records their pin.
@@ -185,6 +186,40 @@ async function checkPresentation(service, workspaceRoot, evidence, helpers) {
       evidence.checks.push(`pinned official ${relative}: complete counts and native presentation`);
     }
   }
+}
+
+// Verify the real Outline selects an expanded include copy and its source action opens that include.
+async function checkPreviewOutline(service, workspaceRoot, evidence, { waitFor, currentSnapshot, writeObservedInput }) {
+  const rootPath = path.join(workspaceRoot, "outline-preview.mod"), includePath = path.join(workspaceRoot, "outline-preview.inc");
+  await writeObservedInput(service, includePath, "[name='included_@{j}'] y@{j}=0;\n");
+  await writeObservedInput(service, rootPath, 'var y1 y2;\nmodel;\n@#for j in 1:2\n@#include "outline-preview.inc"\n@#endfor\nend;\n');
+  const root = await vscode.workspace.openTextDocument(rootPath);
+  await vscode.window.showTextDocument(root);
+  await currentSnapshot(service, root, () => service.modelInfo(root.uri), "preview Outline root snapshot");
+  await vscode.commands.executeCommand("dygnosis.showEffectiveModel");
+  const preview = vscode.window.activeTextEditor;
+  assert.equal(preview.document.uri.scheme, "dygnosis-effective");
+  let equations;
+  await waitFor(async () => {
+    const symbols = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", preview.document.uri);
+    equations = symbols?.find(row => row.name === "model")?.children;
+    return equations?.length === 2;
+  }, "preview Outline contains both expanded include copies");
+  assert.deepEqual(equations.map(row => row.name), ["1 · included_1", "2 · included_2"]);
+  assert.match(preview.document.getText(equations[1].range), /y2=0/);
+  assert.equal(preview.document.getText(equations[1].selectionRange), "[");
+  await vscode.commands.executeCommand("outline.focus");
+  await waitFor(async () => nativeWorkbench(async send => {
+    const response = await send("Runtime.evaluate", { returnByValue: true,
+      expression: `(() => { const row=[...document.querySelectorAll('.outline-pane .monaco-list-row')].find(row=>row.textContent.includes('2 · included_2')); if(!row) return false; row.click(); return true; })()` });
+    return response.result.value;
+  }), "native Outline entry for the second expanded include copy");
+  await waitFor(() => vscode.window.activeTextEditor?.document === preview.document &&
+    vscode.window.activeTextEditor.selection.start.isEqual(equations[1].selectionRange.start), "native Outline selects the expanded token");
+  await vscode.commands.executeCommand("dygnosis.goToWrittenSource");
+  await waitFor(() => vscode.window.activeTextEditor?.document.uri.fsPath.toLowerCase() === includePath.toLowerCase(), "source jump opens the included file");
+  assert.equal(vscode.window.activeTextEditor.selection.start.line, 0);
+  evidence.checks.push("native Outline lists repeated expanded include equations, selects their preview token, and Go to written source opens the original include");
 }
 
 // Verify the Help owner walkthrough through native commands and diagnostics.

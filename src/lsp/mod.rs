@@ -2146,6 +2146,8 @@ impl Backend {
             .then(|| inner.workspace.source_evaluations(uri.as_str()))
             .unwrap_or_default();
         let work_limit = inner.workspace.root_macro_work_limit(uri.as_str());
+        let preferences = inner.presentation_for(&uri);
+        let includes_complete = inner.workspace.includes_complete(uri.as_str());
         let model = matches!(requested, Some("readable") | Some("source"))
             .then(|| inner.workspace.get_effective_model(uri.as_str()))
             .flatten();
@@ -2183,9 +2185,33 @@ impl Backend {
             None => report.effective_text.as_str(),
         };
         let complete = report.navigation_complete
-            && inner.workspace.includes_complete(uri.as_str())
+            && includes_complete
             && !source_unproven
             && !(requested == Some("source") && layout.is_none());
+        let document_symbols = model
+            .map(|model| {
+                let token_spans = match &layout {
+                    Some(DisplayLayout::Readable(preview)) => Some(preview.token_spans.as_slice()),
+                    Some(DisplayLayout::Source(preview)) if preview.proven => {
+                        Some(preview.token_spans.as_slice())
+                    }
+                    _ => None,
+                };
+                token_spans
+                    .map(|spans| {
+                        model_map::preview_symbols(
+                            &uri,
+                            effective_text,
+                            model,
+                            &report.model_map,
+                            spans,
+                            &preferences,
+                            complete && report.complete && report.model_map.complete,
+                        )
+                    })
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
         let has_heterogeneous = !report.heterogeneous_origins.is_empty();
         let origins: Vec<Value> = report
             .origins
@@ -2205,6 +2231,9 @@ impl Backend {
             "origins": origins,
             "macro_messages": lsp_macro_messages(&inner.workspace, uri.as_str(), &report),
         });
+        if matches!(requested, Some("source") | Some("readable")) {
+            result["document_symbols"] = json!(document_symbols);
+        }
         result["navigation"] = if complete {
             let index = LineIndex::new(effective_text);
             let mut rows = 0;
@@ -3109,7 +3138,7 @@ pub fn initialize_result() -> InitializeResult {
                 "rename": {"command":"dynare/captureRename", "schema_version":1, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES},
                 "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
                 "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
-                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::engine::preview::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::engine::preview::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true, "macro_messages":true},
+                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::engine::preview::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::engine::preview::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true, "macro_messages":true, "document_symbols":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
                 ,"workspaceDiagnostics": {"schema_version":workspace_checks::SCHEMA_VERSION,"status_command":"dynare/workspaceStatus","recheck_command":"dynare/recheckWorkspace","cancel_command":"dynare/cancelWorkspace","active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/workspaceStatusChanged","typing_pause_ms":250}
             }})),

@@ -3523,6 +3523,116 @@ async fn show_effective_model_include_eq() {
     assert!(slice.contains("z = 0"), "include origin slice {slice:?}");
 }
 
+// Guards preview Outline ranges pointing into the root instead of expanded includes or loop copies.
+#[tokio::test]
+async fn effective_preview_outline_uses_display_ranges() {
+    for fixture in ["include_eq.mod", "nested_for.mod"] {
+        let (uri, text) = expand_open(fixture);
+        let (service, _socket) = new_service();
+        service
+            .inner()
+            .did_open(open_params(uri.clone(), text, 1))
+            .await;
+        for layout in ["source", "readable"] {
+            let payload = service
+                .inner()
+                .execute_command(ExecuteCommandParams {
+                    command: "dynare/showEffectiveModel".into(),
+                    arguments: vec![serde_json::json!({"root_uri": uri, "layout": layout})],
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            let symbols: Vec<DocumentSymbol> =
+                serde_json::from_value(payload["document_symbols"].clone())
+                    .expect("preview symbols");
+            let models: Vec<_> = symbols.iter().filter(|row| row.name == "model").collect();
+            let equations: Vec<_> = models
+                .iter()
+                .flat_map(|row| row.children.iter().flatten())
+                .collect();
+            let navigation = payload["navigation"].as_array().unwrap();
+            assert_eq!(equations.len(), navigation.len(), "{fixture}, {layout}");
+            assert!(equations.len() > 1);
+            for (symbol, row) in equations.iter().zip(navigation) {
+                let range: Range = serde_json::from_value(row["effective_range"].clone()).unwrap();
+                assert_eq!(symbol.range, range, "{fixture}, {layout}");
+                assert_eq!(symbol.selection_range.start, range.start);
+                assert!(symbol.selection_range.end <= range.end);
+                assert!(
+                    !slice_range(payload["effective_text"].as_str().unwrap(), range)
+                        .trim()
+                        .is_empty()
+                );
+            }
+            assert!(
+                equations
+                    .windows(2)
+                    .all(|rows| rows[0].range.end < rows[1].range.start)
+            );
+        }
+    }
+}
+
+// Guards expanded Outline bypassing the root's settings or inventing authoritative numbers after recovery.
+#[tokio::test]
+async fn effective_preview_outline_respects_settings_and_incomplete_input() {
+    let (uri, text) = expand_open("include_eq.mod");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text, 1))
+        .await;
+    service.inner().did_change_configuration(DidChangeConfigurationParams {
+        settings: serde_json::json!({"dynare":{"outline":{"sections":["equations"],"equationNumbers":false}}}),
+    }).await;
+    let request = || ExecuteCommandParams {
+        command: "dynare/showEffectiveModel".into(),
+        arguments: vec![serde_json::json!({"root_uri": uri, "layout": "source"})],
+        work_done_progress_params: WorkDoneProgressParams::default(),
+    };
+    let payload = service
+        .inner()
+        .execute_command(request())
+        .await
+        .unwrap()
+        .unwrap();
+    let symbols: Vec<DocumentSymbol> =
+        serde_json::from_value(payload["document_symbols"].clone()).unwrap();
+    assert_eq!(
+        symbols
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
+        ["y", "z"]
+    );
+    service
+        .inner()
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: "var y;\nmodel;\ny=0;\n".into(),
+            }],
+        })
+        .await;
+    let partial = service
+        .inner()
+        .execute_command(request())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(partial["complete"], false);
+    let symbols: Vec<DocumentSymbol> =
+        serde_json::from_value(partial["document_symbols"].clone()).unwrap();
+    assert!(symbols.iter().all(|row| !row.name.contains('·')));
+}
+
 #[tokio::test]
 async fn show_effective_model_nested_for() {
     let (uri, text) = expand_open("nested_for.mod");

@@ -43,6 +43,7 @@ const vscode = {
   Uri: { parse: uri, file: value => uri(`file://${value.startsWith("/") ? "" : "/"}${value}`),
     from: value => uri(`${value.scheme}:${value.path}`) },
   languages: {
+    registerDocumentSymbolProvider: () => new Disposable(),
     registerCodeLensProvider: (selector, provider) => {
       const registration = { selector, provider, disposed: false }; host.providers.push(registration);
       return new Disposable(() => { registration.disposed = true; });

@@ -93,6 +93,85 @@ fn range_key(range: Range) -> (u32, u32, u32, u32) {
     )
 }
 
+/// Reuse written Outline labels over verified token positions in one display document.
+pub(crate) fn preview_symbols(
+    uri: &Url,
+    text: &str,
+    model: &Model,
+    map: &WrittenModelMap,
+    token_spans: &[Option<Span>],
+    preferences: &PresentationSettings,
+    authoritative: bool,
+) -> Vec<DocumentSymbol> {
+    if token_spans.len() != model.expanded_tokens.len() {
+        return Vec::new();
+    }
+    let segment = |range: &std::ops::Range<usize>| -> Option<WrittenSegment> {
+        if range.is_empty() {
+            return None;
+        }
+        let first = token_spans.get(range.start)?.as_ref()?;
+        let last = token_spans.get(range.end - 1)?.as_ref()?;
+        Some(WrittenSegment {
+            file: None,
+            span: Span {
+                start: first.start,
+                end: last.end,
+            },
+        })
+    };
+    let source =
+        |range: &std::ops::Range<usize>, anchor: &std::ops::Range<usize>| SourceOccurrence {
+            segments: segment(range).into_iter().collect(),
+            anchor: segment(anchor),
+            origin_frames: Vec::new(),
+        };
+    let mut display = map.clone();
+    display.statements = model
+        .statements
+        .iter()
+        .map(|statement| source(&statement.token_range, &statement.opener_range))
+        .collect();
+    display.declarations = model
+        .written_declarations
+        .iter()
+        .map(|declaration| source(&declaration.token_range, &declaration.token_range))
+        .collect();
+    for (row, written) in display.equations.iter_mut().zip(&model.written_equations) {
+        row.source = source(
+            &written.token_range,
+            &(written.token_range.start..written.token_range.start + 1),
+        );
+    }
+    let mut symbols = WrittenView::new(uri, text, model, &display, None, authoritative, true)
+        .symbols(preferences);
+    let index = LineIndex::new(text);
+    let anchors: BTreeMap<_, _> = token_spans
+        .iter()
+        .flatten()
+        .map(|span| {
+            let range = super::span_range(&index, text, *span);
+            (range.start, range)
+        })
+        .collect();
+    fn select_token(rows: &mut [DocumentSymbol], anchors: &BTreeMap<Position, Range>) {
+        for row in rows {
+            if let Some(range) = anchors
+                .get(&row.selection_range.start)
+                .filter(|range| contains(row.range, **range))
+            {
+                row.selection_range = *range;
+            }
+            if let Some(children) = &mut row.children {
+                select_token(children, anchors);
+            }
+        }
+    }
+    // Whole equations can cross source regions. A single token keeps Go to written source usable.
+    select_token(&mut symbols, &anchors);
+    symbols
+}
+
 impl<'a> WrittenView<'a> {
     pub fn new(
         uri: &'a Url,

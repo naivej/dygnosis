@@ -11,6 +11,7 @@ use crate::engine::language::span::Span;
 pub(crate) struct PreviewLayout {
     pub text: String,
     pub ranges: Vec<Span>,
+    pub token_spans: Vec<Option<Span>>,
 }
 
 pub(crate) fn readable(report: &ExpandReport, model: &Model) -> Option<PreviewLayout> {
@@ -84,6 +85,7 @@ pub(crate) fn readable(report: &ExpandReport, model: &Model) -> Option<PreviewLa
     }
     let mut text = String::with_capacity(original.len());
     let mut mapped = Vec::with_capacity(tokens.len());
+    let mut token_spans = vec![None; tokens.len()];
     let mut previous_end = 0;
     for (index, span) in emitted.iter().enumerate() {
         let Some(span) = span else { continue };
@@ -100,7 +102,9 @@ pub(crate) fn readable(report: &ExpandReport, model: &Model) -> Option<PreviewLa
         }
         let emitted_start = text.len();
         text.push_str(&original[start..end]);
-        mapped.push((*span, Span::new(emitted_start, text.len())));
+        let display = Span::new(emitted_start, text.len());
+        mapped.push((*span, display));
+        token_spans[index] = Some(display);
         previous_end = end;
     }
     text.push_str(&original[previous_end..]);
@@ -120,5 +124,9 @@ pub(crate) fn readable(report: &ExpandReport, model: &Model) -> Option<PreviewLa
         .iter()
         .map(|row| map(row.effective_span))
         .collect::<Option<Vec<_>>>()?;
-    Some(PreviewLayout { text, ranges })
+    Some(PreviewLayout {
+        text,
+        ranges,
+        token_spans,
+    })
 }

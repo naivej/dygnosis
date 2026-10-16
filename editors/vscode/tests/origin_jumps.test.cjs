@@ -28,6 +28,11 @@ class Range {
     this.start = { line, character }; this.end = { line: endLine, character: endCharacter };
   }
 }
+class DocumentSymbol {
+  constructor(name, detail, kind, range, selectionRange) {
+    Object.assign(this, { name, detail, kind, range, selectionRange, children: [] });
+  }
+}
 function uri(value) {
   const parsed = new URL(value);
   return { scheme: parsed.protocol.slice(0, -1), path: parsed.pathname, fsPath: decodeURIComponent(parsed.pathname),
@@ -47,7 +52,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 let host;
 class TabInputText { constructor(uri) { this.uri = uri; } }
 const vscode = {
-  Disposable, EventEmitter: Emitter, CancellationTokenSource, Range, TreeItem: class {}, TabInputText, ViewColumn: { Beside: 2, One: 1 },
+  Disposable, EventEmitter: Emitter, CancellationTokenSource, Range, DocumentSymbol, TreeItem: class {}, TabInputText, ViewColumn: { Beside: 2, One: 1 },
   DecorationRangeBehavior: { ClosedClosed: 1 },
   ThemeColor: class ThemeColor { constructor(id) { this.id = id; } },
   RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } },
@@ -60,7 +65,12 @@ const vscode = {
       return host.commands.get(id)?.(...args);
     },
   },
-  languages: { setTextDocumentLanguage: async (document, language) => { document.languageId = language; return document; } },
+  languages: {
+    setTextDocumentLanguage: async (document, language) => { document.languageId = language; return document; },
+    registerDocumentSymbolProvider: (selector, provider) => {
+      host.outline = { selector, provider }; return new Disposable(() => { host.outline = undefined; });
+    },
+  },
   window: {
     get activeTextEditor() { return host.editor; },
     get visibleTextEditors() { return host.visibleEditors ?? (host.editor ? [host.editor] : []); },
@@ -223,6 +233,54 @@ async function realClientSetup() {
   return { ...base, engine, service, previews, registration, show,
     dispose: async () => { registration.dispose(); previews.dispose(); await service.shutdown(); } };
 }
+
+// Guards preview Outline using source-file positions, stale ranges after Refresh, or unowned virtual documents.
+test("preview Outline uses its captured display ranges and follows Refresh and close", async () => {
+  const env = setup();
+  const model = { name: "model", kind: 2, range: new Range(0, 0, 2, 4), selectionRange: new Range(0, 0, 0, 5),
+    children: [{ name: "1 · y", kind: 12, range: new Range(1, 0, 1, 5), selectionRange: new Range(1, 0, 1, 5) }] };
+  env.service.value.document_symbols = [model];
+  const session = await env.show();
+  assert.deepEqual(env.host.outline.selector, { language: "dynare", scheme: "dygnosis-effective" });
+  const provide = document => env.host.outline.provider.provideDocumentSymbols(document);
+  const before = env.service.requests.length;
+  const rows = provide(session.document);
+  assert.equal(rows[0].kind, 1, "LSP symbol kinds convert to VS Code's zero-based enum");
+  assert.deepEqual(rows[0].children[0].selectionRange, new Range(1, 0, 1, 5));
+  assert.deepEqual(provide(env.rootDocument), []);
+  assert.deepEqual(provide(doc("dygnosis-effective:/unknown.mod")), []);
+  assert.equal(env.service.requests.length, before, "Outline reads the displayed snapshot without re-expanding");
+  const refreshed = payload({ effective_text: "// heading\nmodel;\ny = 1;\nend;", document_symbols: [{ ...model,
+    range: new Range(1, 0, 3, 4), selectionRange: new Range(1, 0, 1, 5),
+    children: [{ ...model.children[0], range: new Range(2, 0, 2, 5), selectionRange: new Range(2, 0, 2, 5) }] }] });
+  assert.equal(env.previews.replace(session, refreshed), true);
+  assert.deepEqual(provide(session.document)[0].children[0].selectionRange, new Range(2, 0, 2, 5));
+  session.document.text += "changed"; assert.deepEqual(provide(session.document), []);
+  env.close(session); assert.deepEqual(provide(session.document), []);
+  env.registration.dispose(); env.previews.dispose(); assert.equal(env.host.outline, undefined);
+});
+
+// Guards malformed engine ranges and partial-preview banners selecting unrelated display text.
+test("preview Outline validates hierarchy and offsets partial previews without parsing their text", async () => {
+  const env = setup();
+  const leaf = { name: "y", kind: 12, range: new Range(1, 0, 1, 5), selectionRange: new Range(1, 0, 1, 1) };
+  const session = await env.show(), provide = () => env.host.outline.provider.provideDocumentSymbols(session.document);
+  for (const row of [
+    { ...leaf, kind: 99 }, { ...leaf, range: new Range(1, 0, 4, 0) },
+    { ...leaf, selectionRange: new Range(1, 0, 1, 6) },
+    { ...leaf, children: [{ ...leaf, range: new Range(0, 0, 0, 3) }] },
+  ]) {
+    env.previews.replace(session, payload({ document_symbols: [row] })); assert.deepEqual(provide(), []);
+  }
+  env.previews.replace(session, payload()); assert.deepEqual(provide(), [], "older engines omit preview symbols");
+  env.previews.replace(session, payload({ complete: false, status: "incomplete", message: "Missing include.", document_symbols: [leaf] }));
+  assert.deepEqual(provide()[0].selectionRange, new Range(3, 0, 3, 1));
+  env.previews.replace(session, payload({ effective_text: "// 😀\nmodel;\ny=1;\nend;", document_symbols: [
+    { ...leaf, range: new Range(0, 0, 0, 5), selectionRange: new Range(0, 3, 0, 4) },
+  ] }));
+  assert.deepEqual(provide(), [], "a range cannot split a UTF-16 surrogate pair");
+  env.registration.dispose(); env.previews.dispose();
+});
 
 test("navigation schema checks exact UTF-16 and CRLF bounds without recovering rows from text", () => {
   const value = payload({ effective_text: "model;\r\ny = '😀';\r\nend;", navigation: [row({ effective_range: new Range(1, 0, 1, 8) })] });

@@ -12,6 +12,8 @@ Dygnosis opens a read-only editor tab beside your file with `@#include` files,
 `@#for` loops, `@#if` branches and `@{...}` substitutions expanded before
 Dynare's internal equation transformations.
 
+For model structure, open VS Code's **Outline** while the preview is active.
+
 | Action | Shortcut | Result |
 |---|---|---|
 | **Dygnosis: Go to written source** | `Ctrl+Alt+G` (`Cmd+Alt+G` on macOS) | Jumps from the cursor or selection in the preview to the line in your model or include file that produced it (for example, `beta_1` jumps to `beta_@{j}`). |

@@ -741,6 +741,10 @@ fn same_preview_facts(compact: &Value, layout: &Value) {
         .as_object_mut()
         .unwrap()
         .remove("macro_ranges");
+    without_layout
+        .as_object_mut()
+        .unwrap()
+        .remove("document_symbols");
     for (display, old) in without_layout["navigation"]
         .as_array_mut()
         .unwrap()

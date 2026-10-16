@@ -2,7 +2,7 @@ import { refuse, explainFailure } from "../client/refusal";
 import * as vscode from "vscode";
 import { DygnosisClient } from "../client/client";
 import { NavigationContext, validateNavigationContext } from "./model_navigation";
-import { record } from "../client/protocol";
+import { location, Position, Range, record } from "../client/protocol";
 
 export interface EffectivePreviewSession {
   readonly uri: vscode.Uri;
@@ -39,6 +39,45 @@ function previewText(result: unknown): string | undefined {
   return record(result) && typeof result.effective_text === "string"
     ? (result.status === "incomplete" ? `// INCOMPLETE EXPANSION — this preview is partial.\n// ${explanation.replace(/\r?\n/g, "\n// ")}\n` : "") + result.effective_text : undefined;
 }
+
+/** Symbols select the exact display snapshot; source jumps retain their separate revision proof. */
+function previewSymbols(result: unknown, text: string): vscode.DocumentSymbol[] {
+  if (!record(result) || !Array.isArray(result.document_symbols) || typeof result.effective_text !== "string" || previewText(result) !== text) return [];
+  const lines = result.effective_text.split(/\r\n|\r|\n/);
+  const lineOffset = text.slice(0, text.length - result.effective_text.length).split("\n").length - 1;
+  const before = (left: Position, right: Position): boolean => left.line < right.line || left.line === right.line && left.character <= right.character;
+  const contains = (outer: Range, inner: Range): boolean => before(outer.start, inner.start) && before(inner.end, outer.end);
+  const range = (value: unknown): Range | undefined => {
+    const candidate = { uri: "", range: value };
+    if (!location(candidate)) return undefined;
+    for (const position of [candidate.range.start, candidate.range.end]) {
+      const line = lines[position.line];
+      if (line === undefined || position.character > line.length) return undefined;
+      const previous = line.charCodeAt(position.character - 1), next = line.charCodeAt(position.character);
+      if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) return undefined;
+    }
+    return candidate.range;
+  };
+  const convertRange = (range: Range): vscode.Range => new vscode.Range(range.start.line + lineOffset, range.start.character,
+    range.end.line + lineOffset, range.end.character);
+  const convert = (rows: unknown[], parent?: Range, depth = 0): vscode.DocumentSymbol[] | undefined => {
+    if (depth > 128) return undefined;
+    const symbols: vscode.DocumentSymbol[] = [];
+    for (const row of rows) {
+      if (!record(row) || typeof row.name !== "string" || typeof row.kind !== "number" || !Number.isInteger(row.kind) || row.kind < 1 || row.kind > 26 ||
+          row.detail !== undefined && typeof row.detail !== "string") return undefined;
+      const full = range(row.range), selected = range(row.selectionRange);
+      if (!full || !selected || !contains(full, selected) || parent && !contains(parent, full)) return undefined;
+      if (row.children !== undefined && !Array.isArray(row.children)) return undefined;
+      const children = convert(row.children ?? [], full, depth + 1);
+      if (!children) return undefined;
+      const symbol = new vscode.DocumentSymbol(row.name, row.detail ?? "", row.kind - 1, convertRange(full), convertRange(selected));
+      symbol.children = children; symbols.push(symbol);
+    }
+    return symbols;
+  };
+  return convert(result.document_symbols) ?? [];
+}
 /** Open, Refresh, and jump proofs must use the same advertised display layout. */
 export function effectivePreviewArguments(service: Pick<DygnosisClient, "client">, root: vscode.Uri, legacyUriString = false): unknown[] {
   const experimental: unknown = service.client?.initializeResult?.capabilities.experimental;
@@ -64,6 +103,13 @@ export function registerEffectivePreview(service: DygnosisClient): EffectivePrev
   const provider = vscode.workspace.registerTextDocumentContentProvider("dygnosis-effective", {
     onDidChange: contentChanged.event,
     provideTextDocumentContent(uri) { return text.get(uri.toString()) ?? "// This effective preview is no longer available."; },
+  });
+  const outline = vscode.languages.registerDocumentSymbolProvider({ language: "dynare", scheme: "dygnosis-effective" }, {
+    provideDocumentSymbols(document) {
+      const session = sessions.get(document.uri.toString());
+      return !disposed && session?.document === document && !document.isClosed && document.getText() === session.text
+        ? previewSymbols(session.result, session.text) : [];
+    },
   });
   const command = vscode.commands.registerCommand("dygnosis.showEffectiveModel", async (argument?: unknown) => {
     const document = vscode.window.activeTextEditor?.document;
@@ -113,7 +159,7 @@ export function registerEffectivePreview(service: DygnosisClient): EffectivePrev
     if (session) { ++session.generation; sessions.delete(key); closed.fire(session); }
     text.delete(key);
   });
-  const disposable = vscode.Disposable.from(provider, command, close, new vscode.Disposable(() => {
+  const disposable = vscode.Disposable.from(provider, outline, command, close, new vscode.Disposable(() => {
     disposed = true;
     for (const session of sessions.values()) { ++session.generation; closed.fire(session); }
     sessions.clear(); text.clear();
