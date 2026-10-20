@@ -127,6 +127,8 @@ pub(crate) fn preview_symbols(
             origin_frames: Vec::new(),
         };
     let mut display = map.clone();
+    (display.statement_objects, display.pac_children) =
+        crate::engine::workspace::model_map::outline_occurrences(model, source);
     display.statements = model
         .statements
         .iter()
@@ -449,6 +451,7 @@ impl<'a> WrittenView<'a> {
         }
         let icon = match kind {
             "parameters" => SymbolKind::NUMBER,
+            "varexo" | "varexo_det" => SymbolKind::FIELD,
             "external_function" => SymbolKind::FUNCTION,
             "heterogeneity_dimension" => SymbolKind::NAMESPACE,
             _ => SymbolKind::VARIABLE,
@@ -512,6 +515,59 @@ impl<'a> WrittenView<'a> {
         let mut output = Vec::new();
         for ((kind, name, _), StatementGroup { ids, range, anchor }) in groups {
             let mut children = Vec::new();
+            let objects: Vec<_> = self
+                .map
+                .statement_objects
+                .iter()
+                .filter(|object| ids.contains(&object.statement_id))
+                .collect();
+            let object_names: BTreeSet<_> =
+                objects.iter().map(|object| object.name.as_str()).collect();
+            let object_target = objects.iter().find_map(|object| {
+                object
+                    .source
+                    .anchor
+                    .as_ref()
+                    .and_then(|segment| self.location(segment))
+                    .filter(|location| location.uri == *self.uri && contains(range, location.range))
+                    .map(|location| location.range)
+            });
+            if enabled("blocks") {
+                for member in self
+                    .map
+                    .pac_children
+                    .iter()
+                    .filter(|member| ids.contains(&member.statement_id))
+                {
+                    for location in self
+                        .local_locations(&member.source)
+                        .into_iter()
+                        .filter(|location| contains(range, location.range))
+                    {
+                        let selection = member
+                            .source
+                            .anchor
+                            .as_ref()
+                            .and_then(|segment| self.location(segment))
+                            .filter(|target| {
+                                target.uri == *self.uri && contains(location.range, target.range)
+                            })
+                            .map(|target| target.range)
+                            .unwrap_or(Range::new(location.range.start, location.range.start));
+                        let child = symbol(
+                            member.name.clone(),
+                            None,
+                            SymbolKind::OBJECT,
+                            location.range,
+                            selection,
+                            Vec::new(),
+                        );
+                        if !children.contains(&child) {
+                            children.push(child);
+                        }
+                    }
+                }
+            }
             if (kind == "declaration" && enabled("declarations"))
                 || (kind == "dimension" && enabled("dimensions"))
             {
@@ -631,7 +687,7 @@ impl<'a> WrittenView<'a> {
                     children.push(symbol(
                         format!("{number_label}{label}"),
                         detail,
-                        SymbolKind::FUNCTION,
+                        SymbolKind::OPERATOR,
                         row_range,
                         row_range,
                         Vec::new(),
@@ -665,10 +721,12 @@ impl<'a> WrittenView<'a> {
                     && dimensions.len() == 1
                 {
                     format!("{name}(heterogeneity={})", dimensions.first().unwrap())
-                } else if dimensions.len() > 1 {
+                } else if dimensions.len() > 1 || object_names.len() > 1 {
                     format!("{name} (multiple expansions)")
                 } else if anchor.is_none() && kind == "block" {
                     format!("{name} (fragment)")
+                } else if let Some(object) = object_names.first() {
+                    format!("{name}({object})")
                 } else {
                     name
                 };
@@ -693,7 +751,9 @@ impl<'a> WrittenView<'a> {
                     detail,
                     icon,
                     range,
-                    anchor
+                    object_target
+                        .filter(|_| object_names.len() == 1)
+                        .or(anchor)
                         .or_else(|| children.first().map(|child| child.selection_range))
                         .unwrap_or(Range::new(range.start, range.start)),
                     children,
@@ -825,9 +885,6 @@ pub(crate) fn add_binding_symbols(
         let (section, icon) = match binding.kind.as_str() {
             "heterogeneity_dimension" => ("dimensions", SymbolKind::NAMESPACE),
             "database" => ("declarations", SymbolKind::NAMESPACE),
-            "var_model" | "trend_component_model" | "var_expectation_model" | "pac_model" => {
-                ("commands", SymbolKind::OBJECT)
-            }
             "named_subsample" => ("commands", SymbolKind::CONSTANT),
             "trend_var" | "log_trend_var" => ("declarations", SymbolKind::VARIABLE),
             "external_function" => ("declarations", SymbolKind::FUNCTION),

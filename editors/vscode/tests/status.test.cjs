@@ -105,7 +105,7 @@ function setup(doc = document()) {
 test("total icons and separate count blocks retain every class and dimension in hover and speech", () => {
   // Guards omitting dimension counts from the status bar or losing the separate hover facts.
   const value = modelStatus(facts(), ["endogenous", "exogenous", "equations"]);
-  assert.equal(value.text, "$(symbol-variable) 104  $(symbol-field) 12  $(list-ordered) 93");
+  assert.equal(value.text, "$(symbol-variable) 104  $(symbol-field) 12  $(symbol-operator) 93");
   const report = [
     "Aggregate model",
     "4 endogenous (1 static, 1 predetermined, 1 forward-looking, 1 mixed)",
@@ -125,10 +125,10 @@ test("total counts include every dimension and fall back to aggregate when none 
   const info = facts();
   info.heterogeneity_dimensions.push({ ...info.heterogeneity_dimensions[0], dimension: "firms", n_endogenous: 3, n_exogenous: 1, n_equations: 2 });
   assert.equal(modelStatus(info, ["endogenous", "exogenous", "equations"]).text,
-    "$(symbol-variable) 107  $(symbol-field) 13  $(list-ordered) 95");
+    "$(symbol-variable) 107  $(symbol-field) 13  $(symbol-operator) 95");
   info.heterogeneity_dimensions = [];
   assert.equal(modelStatus(info, ["endogenous", "exogenous", "equations"]).text,
-    "$(symbol-variable) 4  $(symbol-field) 2  $(list-ordered) 3");
+    "$(symbol-variable) 4  $(symbol-field) 2  $(symbol-operator) 3");
 });
 
 test("a total outside the safe integer range is unavailable", () => {
@@ -143,7 +143,7 @@ test("selected count order applies to each dimension and hiding endogenous hides
     { dimension: "firms", n_endogenous: 0, n_exogenous: 0, n_equations: 0 },
   ] });
   const value = modelStatus(info, ["equations", "exogenous"]);
-  assert.equal(value.text, "$(list-ordered) 93  $(symbol-field) 12");
+  assert.equal(value.text, "$(symbol-operator) 93  $(symbol-field) 12");
   assert.match(tooltipText(value.tooltip), /Aggregate model\n3 equations\n2 exogenous\nHeterogeneous model: households\n90 equations\n10 exogenous\nHeterogeneous model: firms\n0 equations\n0 exogenous/);
   for (const text of [tooltipText(value.tooltip), value.accessibilityLabel]) {
     assert.doesNotMatch(text, /endogenous|static|predetermined|forward-looking|mixed/);
@@ -217,7 +217,7 @@ test("resource settings choose count order, live disable, empty list, and reset"
   const registration = registerStatus(env.service);
   await flush();
   const item = env.host.items[0];
-  assert.equal(item.text, "$(list-ordered) 93  $(symbol-variable) 104");
+  assert.equal(item.text, "$(symbol-operator) 93  $(symbol-variable) 104");
   assert.ok(env.host.scopes.every(value => value.section === "dynare" && value.scope.languageId === "dynare" && value.scope.uri === env.doc.uri));
   env.configure("statusBar.enabled", false);
   assert.equal(item.visible, false);
@@ -230,7 +230,7 @@ test("resource settings choose count order, live disable, empty list, and reset"
   env.host.resourceSettings.delete(env.doc.uri.toString());
   env.configure("statusBar.counts", undefined);
   await flush();
-  assert.equal(item.text, "$(symbol-variable) 104  $(symbol-field) 12  $(list-ordered) 93");
+  assert.equal(item.text, "$(symbol-variable) 104  $(symbol-field) 12  $(symbol-operator) 93");
   registration.dispose();
 });
 test("invalid settings are safely filtered or fall back with an Output explanation", async () => {
@@ -239,7 +239,7 @@ test("invalid settings are safely filtered or fall back with an Output explanati
   env.configure("statusBar.counts", ["equations", "equations", "invented", 1]);
   const registration = registerStatus(env.service);
   await flush();
-  assert.equal(env.host.items[0].text, "$(list-ordered) 93");
+  assert.equal(env.host.items[0].text, "$(symbol-operator) 93");
   assert.ok(env.service.logged.some(message => message.includes("Invalid dynare.statusBar.enabled")));
   assert.ok(env.service.logged.some(message => message.includes("Invalid or repeated entries")));
   registration.dispose();
@@ -267,7 +267,7 @@ test("dyn and untitled model roots are supported", async () => {
     const registration = registerStatus(env.service);
     await flush();
     assert.equal(env.host.items[0].visible, true);
-    assert.match(env.host.items[0].text, /list-ordered/);
+    assert.match(env.host.items[0].text, /symbol-operator/);
     registration.dispose();
   }
 });
@@ -279,7 +279,7 @@ test("a mod opened as an include uses its chosen root while preferences use the 
   await flush();
   assert.equal(env.service.requests[0].root.toString(), "file:///workspace/owner.mod");
   assert.equal(env.service.requests[0].document.toString(), env.doc.uri.toString());
-  assert.equal(env.host.items[0].text, "$(list-ordered) 93");
+  assert.equal(env.host.items[0].text, "$(symbol-operator) 93");
   assert.match(tooltipText(env.host.items[0].tooltip), /^Aggregate model/);
   assert.doesNotMatch(tooltipText(env.host.items[0].tooltip), /owner\.mod|part\.mod/);
   registration.dispose();
@@ -311,7 +311,7 @@ test("edit invalidation removes numbers immediately and superseded versions cann
   await flush();
   first.resolve(facts(env.doc, { document_version: 2, n_equations: 99 }));
   await flush();
-  assert.match(env.host.items[0].text, /list-ordered\) 98$/);
+  assert.match(env.host.items[0].text, /symbol-operator\) 98$/);
   assert.doesNotMatch(env.host.items[0].text, /189/);
   registration.dispose();
 });
@@ -376,7 +376,7 @@ test("client replacement and mismatched root, document or version cannot publish
     if (mismatch === "client") env.service.client = {};
     pending.resolve(facts(env.doc, override));
     await flush();
-    assert.doesNotMatch(env.host.items[0].text, /symbol-variable|list-ordered/);
+    assert.doesNotMatch(env.host.items[0].text, /symbol-variable|symbol-operator/);
     registration.dispose();
   }
 });

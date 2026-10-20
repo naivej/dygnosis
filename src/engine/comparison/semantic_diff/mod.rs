@@ -4,6 +4,7 @@
 //! occurrences. Legacy rows retain their original JSON pointers.
 
 mod budget;
+mod comments;
 pub mod equations;
 mod expression_values;
 mod families;

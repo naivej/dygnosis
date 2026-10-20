@@ -60,21 +60,79 @@
     if (!reason) button.title = [...locations.map(location => location.uri), ...files].join("\n");
     return button;
   }
+  function* codeRanges(text) {
+    const lineEnd = start => { const end = text.indexOf("\n", start); return end < 0 ? text.length : end; };
+    let position = 0, start = 0;
+    while (position < text.length) {
+      let commentStart = position, end;
+      if (text.startsWith("/*", position)) {
+        const closer = text.indexOf("*/", position + 2); end = closer < 0 ? text.length : closer + 2;
+      } else if (text.startsWith("//", position) || text[position] === "%") end = lineEnd(position);
+      else if (text.startsWith("...", position)) { commentStart += 3; end = lineEnd(position); }
+      if (end !== undefined) {
+        if (start < commentStart) yield [start, commentStart];
+        position = start = end;
+      } else if (text[position] === '"' || text[position] === "$" || text[position] === "'" && !/[\w\u0080-\uffff)\]}'".]/.test(text[position - 1] ?? "")) {
+        if (start < position) yield [start, position];
+        const literalStart = position;
+        const quote = text[position++];
+        while (position < text.length) {
+          if (text[position++] !== quote) continue;
+          if (quote !== "$" && text[position] === quote) ++position;
+          else break;
+        }
+        yield [literalStart, position, true];
+        start = position;
+      } else ++position;
+    }
+    if (start < text.length) yield [start, text.length];
+  }
+  function displayedCode(runs) {
+    const text = runs.map(run => run.text).join(""), ranges = codeRanges(text), output = [];
+    let range = ranges.next().value, position = 0, lastEnd = 0, kept = 0;
+    for (const run of runs) {
+      const end = position + run.text.length;
+      while (range && range[0] < end) {
+        const from = Math.max(position, range[0]), to = Math.min(end, range[1]);
+        if (from < to) {
+          const part = text.slice(from, to), previous = output.at(-1)?.text.at(-1);
+          if (lastEnd < from && previous && !/\s/.test(previous) && !/\s/.test(part[0])) output.push({ text: " ", role: "unchanged" });
+          output.push({ text: part, role: run.role, literal: !!range[2] }); kept += to - from; lastEnd = to;
+        }
+        if (range[1] > end) break;
+        range = ranges.next().value;
+      }
+      position = end;
+    }
+    return { runs: output, compact: kept < text.length };
+  }
   function codeLines(parent, expression, side) {
     if (!expression) return;
-    const lines = [[]];
+    const display = displayedCode(expression.runs);
+    let lines = [[]];
     // The host validates runs. Text insertion never creates HTML or actions.
-    for (const run of expression.runs) run.text.split("\n").forEach((part, index, parts) => {
-      const text = part + (index < parts.length - 1 ? "\n" : "");
-      const span = node("span", text, "token " + run.role);
-      if (run.role !== "unchanged") span.setAttribute("aria-label", titleCase(side) + ": " + run.role + " " + text);
-      lines.at(-1).push(span); if (index < parts.length - 1) lines.push([]);
+    for (const run of display.runs) run.text.split("\n").forEach((text, index) => {
+      if (index) lines.push([]);
+      lines.at(-1).push({ text, role: run.role, literal: run.literal });
     });
-    const block = node("div", undefined, "expression");
-    for (const spans of lines) {
-      const line = node("div", undefined, "code-line"), code = node("code");
-      code.append(...spans); line.append(code); block.append(line);
+    if (display.compact) {
+      lines = lines.filter(parts => parts.some(part => part.literal || part.text.trim()));
+      for (const parts of lines) for (let index = parts.length - 1; index >= 0; --index) {
+        if (parts[index].literal) break;
+        parts[index].text = parts[index].text.trimEnd(); if (parts[index].text) break;
+      }
     }
+    const block = node("div", undefined, "expression");
+    lines.forEach((parts, index) => {
+      const line = node("div", undefined, "code-line"), code = node("code");
+      parts.forEach((part, partIndex) => {
+        const text = part.text + (index < lines.length - 1 && partIndex === parts.length - 1 ? "\n" : "");
+        const span = node("span", text, "token " + part.role);
+        if (part.role !== "unchanged") span.setAttribute("aria-label", titleCase(side) + ": " + part.role + " " + text);
+        code.append(span);
+      });
+      line.append(code); block.append(line);
+    });
     parent.append(block);
   }
   const textField = (detail, name, side) => {

@@ -14,6 +14,75 @@ use tower_lsp::lsp_types::*;
 
 const BASE: &str = "var y c x v; varexo e u; parameters a b; a=.5; b=.9; model; y=a*y(-1)+e; c=y; x=c+u; v=x; end;\n";
 
+#[test]
+fn comments_do_not_create_cards_but_remain_available_for_text_diff() {
+    // Guards comment-only edits producing model cards or losing the captured text action.
+    let before = "// ignored before\nvar y; parameters p; p=1;\n\
+@#define scale = 1 // ignored before\n\
+@#if scale // ignored before\n\
+model; [name='law'] y=@{scale} /* ignored before */ *p; end;\n\
+@#else // ignored before\nmodel; [name='law'] y=0; end;\n@#endif // ignored before\n\
+steady_state_model; y=p; % ignored before\nend;\n\
+verbatim;\nhelper=1; % ignored before\n%{\nignored before\n%}\nend;\n";
+    for after in [
+        before.replace("ignored before", "ignored after"),
+        before.replace(" // ignored before", ""),
+    ] {
+        let result = dynare_compare_models(before, &after, None, None, None, None, None);
+        let rows = result["semantic"]["rows"].as_array().unwrap();
+        assert!(rows.is_empty(), "{rows:?}");
+        assert!(
+            !result["source_changes"]["files"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+
+#[tokio::test]
+async fn changed_statement_cards_keep_comments_plain_and_source_targets_intact() {
+    // Guards captured instruction comments receiving change colors, or shifting source navigation.
+    let before = "var y; model; y=1; end;\ninitval;\ny = 1 /* ignored before */ + 2;\nend;";
+    let after = before.replace("1 /* ignored before */ + 2", "3 /* ignored after */ - 4");
+    let (service, _) = new_service();
+    let result = current(service.inner(), before, &after).await;
+    let row = result["semantic"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["name"] == "y" && row["before"]["context"]["name"] == "initval")
+        .unwrap();
+    let text = row["expressions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|expression| expression["field"] == "statement_text")
+        .unwrap();
+    for (side, role) in [("before", "removed"), ("after", "added")] {
+        assert!(text[side]["text"].as_str().unwrap().contains("ignored"));
+        let colored: String = text[side]["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|run| run["role"] == role)
+            .map(|run| run["text"].as_str().unwrap())
+            .collect();
+        assert!(!colored.contains("ignored"), "{text}");
+        assert!(!colored.is_empty());
+        let navigation = result["navigation"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|navigation| navigation["id"] == row["pointer"])
+            .unwrap();
+        assert_eq!(
+            navigation[side]["written_locations"][0]["range"]["start"]["line"],
+            2
+        );
+    }
+}
+
 // Guards paired assignments opening their own line rather than the block opener.
 #[tokio::test]
 async fn paired_state_sources_select_the_changed_instruction() {

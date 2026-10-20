@@ -562,6 +562,7 @@ impl Parser<'_> {
         let saved = self.i;
         self.i = body_i;
         let mut rows = Vec::new();
+        let mut target_tokens = Vec::new();
         if body_i == body_end_i {
             self.pac_syntax("COMPONENT or TARGET or AUXNAME_TARGET_NONSTATIONARY");
         }
@@ -571,6 +572,7 @@ impl Parser<'_> {
                 self.bump();
                 if let Some(expr) = self.read_pac_expression() {
                     rows.push(PacTargetInfoRow::Target(expr));
+                    target_tokens.push(before..self.i);
                 }
                 self.pac_finish_row(body_end_i);
             } else if self.at_ident_ci("auxname_target_nonstationary") {
@@ -580,8 +582,10 @@ impl Parser<'_> {
                 }
                 self.pac_finish_row(body_end_i);
             } else if self.at_ident_ci("component") {
+                let component_start = self.i;
                 let keyword_span = self.bump().span;
                 let component = self.read_pac_expression();
+                let expression_tokens = component_start + 1..self.i;
                 self.pac_finish_row(body_end_i);
                 let mut component_rows = Vec::new();
                 while self.i < body_end_i {
@@ -611,6 +615,8 @@ impl Parser<'_> {
                 if let Some(component) = component {
                     let component_end = self.tokens[self.i.saturating_sub(1)].span.end;
                     rows.push(PacTargetInfoRow::Component(PacTargetComponent {
+                        active_tokens: component_start..self.i,
+                        expression_tokens,
                         keyword_span,
                         component,
                         rows: component_rows,
@@ -633,6 +639,7 @@ impl Parser<'_> {
             self.model.pac_target_info.push(PacTargetInfoBlock {
                 parse_order: start_i,
                 active_tokens: start_i..self.i,
+                target_tokens,
                 name,
                 name_span,
                 span: Span { start, end },

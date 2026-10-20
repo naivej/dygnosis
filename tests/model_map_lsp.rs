@@ -102,6 +102,235 @@ fn all<'a>(rows: &'a [DocumentSymbol], result: &mut Vec<&'a DocumentSymbol>) {
     }
 }
 
+#[tokio::test]
+async fn outline_icons_distinguish_exogenous_names_and_equations() {
+    // Guards Outline and preview rows using icons that differ from the status bar.
+    fn check(rows: &[DocumentSymbol]) {
+        let mut flat = Vec::new();
+        all(rows, &mut flat);
+        for (name, kind) in [
+            ("y", SymbolKind::VARIABLE),
+            ("e", SymbolKind::FIELD),
+            ("d", SymbolKind::FIELD),
+            ("p", SymbolKind::NUMBER),
+            ("1 · law", SymbolKind::OPERATOR),
+        ] {
+            assert_eq!(
+                flat.iter().find(|row| row.name == name).unwrap().kind,
+                kind,
+                "{name}"
+            );
+        }
+    }
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    let document = url("icons.mod");
+    open(
+        server,
+        &document,
+        "var y; varexo e; varexo_det d; parameters p;\nmodel; [name='law'] y=p*y(-1)+e+d; end;\n",
+    )
+    .await;
+    check(&symbols(server, &document).await);
+    for layout in ["source", "readable"] {
+        let payload = server
+            .execute_command(ExecuteCommandParams {
+                command: "dynare/showEffectiveModel".into(),
+                arguments: vec![json!({"uri":document,"layout":layout})],
+                work_done_progress_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        check(
+            &serde_json::from_value::<Vec<DocumentSymbol>>(payload["document_symbols"].clone())
+                .unwrap(),
+        );
+    }
+}
+
+#[tokio::test]
+async fn outline_compacts_named_commands_and_lists_pac_target_and_components() {
+    // Guards redundant name children, missing PAC targets/components, and wrong source targets.
+    let source = "var x y z; parameters b; b=.9;\n\
+var_model(model_name=vm,eqtags=['x']);\n\
+trend_component_model(model_name=tcm,eqtags=['x'],targets=['x']);\n\
+var_expectation_model(model_name=ve,auxiliary_model_name=vm,horizon=1,variable=x);\n\
+pac_model(model_name=pm,discount=b,auxiliary_model_name=tcm);\n\
+pac_target_info(pm);\n\
+target z; auxname_target_nonstationary zns;\n\
+component x; kind ll; auxname ax;\n\
+component y; kind dd; auxname ay; growth 1;\n\
+end;\n\
+model; [name='x'] x=x(-1); [name='y'] y=y(-1); [name='z'] z=x+y; end;\n";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    let document = url("named-commands.mod");
+    open(server, &document, source).await;
+    let rows = symbols(server, &document).await;
+    assert_local_tree(&rows, source, None);
+    for (command, name) in [
+        ("var_model", "vm"),
+        ("trend_component_model", "tcm"),
+        ("var_expectation_model", "ve"),
+        ("pac_model", "pm"),
+    ] {
+        let label = format!("{command}({name})");
+        let row = rows.iter().find(|row| row.name == label).unwrap();
+        assert!(row.children.is_none(), "{row:?}");
+        assert_eq!(original_token(source, &json!(row.selection_range)), name);
+        assert!(
+            source
+                .lines()
+                .nth(row.range.start.line as usize)
+                .unwrap()
+                .starts_with(command)
+        );
+    }
+    let pac = rows
+        .iter()
+        .find(|row| row.name == "pac_target_info(pm)")
+        .unwrap();
+    let children = pac.children.as_ref().unwrap();
+    assert_eq!(
+        children
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
+        ["target z", "component x", "component y"]
+    );
+    for (child, name) in children.iter().zip(["z", "x", "y"]) {
+        assert_eq!(child.kind, SymbolKind::OBJECT);
+        assert_eq!(original_token(source, &json!(child.selection_range)), name);
+        assert_eq!(child.range.start.line, child.range.end.line);
+        assert!(child.range.start.line < pac.range.end.line);
+    }
+    assert!(
+        !rows
+            .iter()
+            .find(|row| row.name == "model")
+            .unwrap()
+            .children
+            .as_ref()
+            .unwrap()
+            .is_empty()
+    );
+
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: json!({"outline":{"sections":["commands"]}}),
+        })
+        .await;
+    let filtered = symbols(server, &document).await;
+    assert!(filtered.iter().any(|row| row.name == "pac_model(pm)"));
+    assert!(
+        filtered
+            .iter()
+            .all(|row| !row.name.starts_with("pac_target_info")
+                && !row.name.starts_with("component ")
+                && !row.name.starts_with("target "))
+    );
+}
+
+#[tokio::test]
+async fn outline_projects_named_objects_and_component_macro_copies_in_includes() {
+    // Guards using the first macro name for all copies or selecting root-file bytes for include rows.
+    let root = url("named-macros.mod");
+    let include = url("named-macros.inc");
+    let root_text = "var x y z; parameters b; b=.9;\n@#define target_name = \"z\"\n@#include \"named-macros.inc\"\n";
+    let include_text = "@#for name in [\"a\",\"c\"]\n\
+var_model(model_name=@{name},eqtags=['x']);\n\
+@#endfor\n\
+pac_model(model_name=pm,discount=b);\n\
+pac_target_info(pm);\n\
+target @{target_name}; auxname_target_nonstationary zns;\n\
+@#for name in [\"x\",\"y\"]\n\
+component @{name}; kind dd; auxname aux_@{name};\n\
+@#endfor\n\
+end;\n";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open(server, &include, include_text).await;
+    open(server, &root, root_text).await;
+    let rows = symbols(server, &include).await;
+    assert_local_tree(&rows, include_text, None);
+    let command = rows
+        .iter()
+        .find(|row| row.name == "var_model (multiple expansions)")
+        .unwrap();
+    assert!(command.children.is_none());
+    let pac = rows
+        .iter()
+        .find(|row| row.name == "pac_target_info(pm)")
+        .unwrap();
+    let children = pac.children.as_ref().unwrap();
+    assert_eq!(
+        children
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
+        ["target z", "component x", "component y"]
+    );
+    assert_eq!(
+        original_token(include_text, &json!(children[0].selection_range)),
+        "@{target_name}"
+    );
+    assert!(children[1..].iter().all(|row| row.range.start.line == 7));
+    assert!(
+        !symbols(server, &root)
+            .await
+            .iter()
+            .any(|row| row.name.starts_with("pac_"))
+    );
+
+    for layout in ["source", "readable"] {
+        let payload = server
+            .execute_command(ExecuteCommandParams {
+                command: "dynare/showEffectiveModel".into(),
+                arguments: vec![json!({"uri":root,"layout":layout})],
+                work_done_progress_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let preview = payload["effective_text"].as_str().unwrap();
+        let rows: Vec<DocumentSymbol> =
+            serde_json::from_value(payload["document_symbols"].clone()).unwrap();
+        assert_local_tree(&rows, preview, None);
+        for name in ["a", "c"] {
+            let command = rows
+                .iter()
+                .find(|row| row.name == format!("var_model({name})"))
+                .unwrap();
+            assert!(command.children.is_none());
+            assert_eq!(
+                original_token(preview, &json!(command.selection_range)),
+                name
+            );
+        }
+        let pac = rows
+            .iter()
+            .find(|row| row.name == "pac_target_info(pm)")
+            .unwrap();
+        let children = pac.children.as_ref().unwrap();
+        assert_eq!(
+            children
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            ["target z", "component x", "component y"]
+        );
+        assert!(
+            children
+                .windows(2)
+                .all(|pair| pair[0].range.end <= pair[1].range.start)
+        );
+        for (child, name) in children.iter().zip(["z", "x", "y"]) {
+            assert_eq!(original_token(preview, &json!(child.selection_range)), name);
+        }
+    }
+}
+
 fn original_token(text: &str, range: &Value) -> String {
     let target = range["start"]["line"].as_u64().unwrap() as usize;
     assert_eq!(range["end"]["line"].as_u64().unwrap() as usize, target);
@@ -314,7 +543,7 @@ async fn numbers_keep_macro_static_local_removed_and_dimension_scopes() {
     assert!(
         equations
             .iter()
-            .all(|row| row.kind == SymbolKind::FUNCTION && !row.name.contains('·'))
+            .all(|row| row.kind == SymbolKind::OPERATOR && !row.name.contains('·'))
     );
 }
 

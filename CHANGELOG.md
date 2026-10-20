@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.11.30
+
+- Restart Language Server closes the old connection before stopping its process.
+  Pending requests from the old client no longer show restart-related errors.
+- Model Diff omits Dynare and MATLAB comments from change cards.
+  Comment markers inside strings remain part of the compared text.
+- Outline and the status bar use matching icons for exogenous variables and
+  equations.
+- Outline shows named VAR, trend-component, VAR-expectation and PAC model
+  commands on one row, such as `var_model(rvar)`. `pac_target_info` lists its
+  target and components. Macro expansion previews use the same labels and children.
+
 ## v0.11.29
 
 - VS Code's Outline supports macro expansion previews, including included

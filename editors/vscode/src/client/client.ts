@@ -3,7 +3,7 @@ import { spawn, ChildProcess } from "node:child_process";
 import * as vscode from "vscode";
 import {
   ClientCapabilities, DocumentSymbolRequest, ExecuteCommandRequest, FeatureState, InitializeParams,
-  LanguageClient, Middleware, RenameRequest, StaticFeature, State,
+  LanguageClient, MessageSignature, Middleware, RenameRequest, StaticFeature, State,
 } from "vscode-languageclient/node";
 import { Binary, resolveBinary } from "./binary";
 import { ClientLifecycle, ManagedClient } from "./lifecycle";
@@ -55,7 +55,15 @@ class ProcessClient implements ManagedClient {
   private disposed = false;
   private disposing: Promise<void> | undefined;
   constructor(binary: Binary, output: vscode.OutputChannel, middleware: Middleware, initializationOptions: unknown, capture: (params: InitializeParams) => void) {
-    this.client = new LanguageClient("dygnosis", "Dygnosis", () => {
+    const isDisposed = () => this.disposed;
+    class ProcessLanguageClient extends LanguageClient {
+      override handleFailedRequest<T>(type: MessageSignature, token: vscode.CancellationToken | undefined, error: unknown, defaultValue: T, showNotification = true): T {
+        // A retired provider has no current result; active failures keep the SDK policy.
+        if (isDisposed()) return defaultValue;
+        return super.handleFailedRequest(type, token, error, defaultValue, showNotification);
+      }
+    }
+    this.client = new ProcessLanguageClient("dygnosis", "Dygnosis", () => {
       if (this.disposed) throw new Error("Dygnosis startup was superseded.");
       const child = spawn(binary.path, [], { windowsHide: true, shell: false, stdio: "pipe" });
       this.process = child;
@@ -72,9 +80,14 @@ class ProcessClient implements ManagedClient {
   dispose(): Promise<void> {
     if (this.disposing) return this.disposing;
     this.disposed = true;
-    // Killing our child also rejects initialize if the server never answered.
-    this.process?.kill();
-    this.disposing = this.client.dispose(1500).catch(() => undefined);
+    const running = this.client.state === State.Running;
+    // Stop providers and send shutdown while the protocol stream is still open.
+    this.disposing = this.client.dispose(1500).catch(() => undefined).finally(() => {
+      const child = this.process;
+      if (child && child.exitCode === null && child.signalCode === null && !child.killed) child.kill();
+    });
+    // Initialize cannot be stopped through the protocol. Reject its pending start.
+    if (!running) this.process?.kill();
     return this.disposing;
   }
 }
@@ -283,8 +296,11 @@ export class DygnosisClient implements vscode.Disposable {
     if (this.closed) return;
     if (this.starting) return this.starting;
     if (this.client) return;
-    this.starting = this.start().finally(() => { this.starting = undefined; });
-    return this.starting;
+    const starting = this.start().finally(() => {
+      if (this.starting === starting) this.starting = undefined;
+    });
+    this.starting = starting;
+    return starting;
   }
   private async start(): Promise<void> {
     const generation = ++this.startGeneration;

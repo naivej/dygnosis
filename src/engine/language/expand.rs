@@ -647,8 +647,12 @@ fn build_model_map(
             }
         }
     }
+    let (statement_objects, pac_children) =
+        crate::engine::workspace::model_map::outline_occurrences(model, source);
     WrittenModelMap {
         complete,
+        statement_objects,
+        pac_children,
         statements: model
             .statements
             .iter()

@@ -383,6 +383,7 @@ pub struct NamedModelOperator {
 pub struct PacTargetInfoBlock {
     pub(crate) parse_order: usize,
     pub(crate) active_tokens: Range<usize>,
+    pub(crate) target_tokens: Vec<Range<usize>>,
     pub name: Name,
     pub name_span: Span,
     pub span: Span,
@@ -398,6 +399,8 @@ pub enum PacTargetInfoRow {
 
 #[derive(Clone, Debug)]
 pub struct PacTargetComponent {
+    pub(crate) active_tokens: Range<usize>,
+    pub(crate) expression_tokens: Range<usize>,
     /// Retained `component` token; the full span remains the analysis range.
     pub keyword_span: Span,
     pub component: WrittenExpression,

@@ -67,7 +67,7 @@ async function checkEquationSurgerySource(service, workspaceRoot, evidence, wait
   }, "written replacement card");
   await nativeChanges(async ({ evaluate, send }) => {
     assert.deepEqual(await evaluate('[...document.querySelectorAll(".group-button > span:first-child")].map(node=>node.textContent)'), ["Operations"]);
-    assert.equal(await evaluate('document.querySelector(".side.after .expression").textContent'), instruction);
+    assert.equal(await evaluate('document.querySelector(".side.after .expression").textContent'), instruction.replace("  // retain original spacing and comments\n", ""));
     assert.equal(await evaluate('document.querySelectorAll("article [data-field]").length'), 0, "operation records do not become displayed model syntax");
     const screenshot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
     const filename = path.join(path.dirname(process.env.DYGNOSIS_HOST_RESULT), `semantic-equation-surgery-${vscode.version}.png`);

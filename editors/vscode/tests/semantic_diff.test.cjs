@@ -906,6 +906,53 @@ test("an added prior in an existing block retains plain engine boundary runs", (
   assert.equal(descendants(env.elements.results).filter(element => element.className === "token added").map(element => element.textContent).join(""), body);
 });
 
+test("change cards omit comments across runs and retain code highlights and source actions", () => {
+  // Guards the PAC screenshot regression: plain comments must also disappear from displayed code.
+  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+  const prefix = "pac_target_info(pm);\n\n  target zstar; // hidden target note\n  auxname_target_nonstationary ";
+  const suffix = "; /* hidden auxiliary note */\n\n  // hidden component description\n  component y; // hidden inline note\n  kind ll;\nend;";
+  row.semantic.family = "semi_structural"; row.semantic.fields = []; row.semantic.references = [];
+  row.semantic.expressions = [{ field: "statement_text", before: { text: prefix + "vns" + suffix, runs: [{ text: prefix.slice(0, prefix.indexOf("//") + 1), role: "unchanged" }, { text: prefix.slice(prefix.indexOf("//") + 1), role: "unchanged" }, { text: "vns", role: "removed" }, { text: suffix, role: "unchanged" }] }, after: { text: prefix + "zstar_trend" + suffix, runs: [{ text: prefix, role: "unchanged" }, { text: "zstar_trend", role: "added" }, { text: suffix, role: "unchanged" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }];
+  const original = structuredClone(row.semantic.expressions);
+  env.render({ ...snapshot, rows: [row] });
+  const code = descendants(env.elements.results).filter(element => element.className === "expression");
+  assert.equal(code.length, 2);
+  for (const block of code) {
+    assert.doesNotMatch(block.textContent, /hidden|\/\/|\/\*/);
+    assert.match(block.textContent, /target zstar;/);
+    assert.match(block.textContent, /component y;/);
+    assert.ok(descendants(block).filter(element => element.className === "code-line").every(line => line.textContent.trim()));
+  }
+  assert.equal(descendants(code[0]).filter(element => element.className === "token removed").map(element => element.textContent).join(""), "vns");
+  assert.equal(descendants(code[1]).filter(element => element.className === "token added").map(element => element.textContent).join(""), "zstar_trend");
+  const button = descendants(env.elements.results).find(element => element.attributes["aria-label"] === "Open After source");
+  button.fire("click"); assert.equal(env.posted.at(-1).rowId, row.id); assert.equal(env.posted.at(-1).side, "after");
+  assert.ok(button.textContent.endsWith(":" + (row.navigation.after.written_locations[0].range.start.line + 1)));
+  assert.deepEqual(row.semantic.expressions, original);
+});
+
+test("displayed code removes MATLAB comments but keeps strings, transpose and separated names", () => {
+  // Guards deleting quoted comment markers or joining identifiers while removing a comment.
+  for (const [text, expected] of [
+    ["helper='https://literal/%value'; % hidden\nnext=1;", "helper='https://literal/%value';\nnext=1;"],
+    ["helper=\"/*literal*/ // literal\"; /* hidden */\nnext=1;", "helper=\"/*literal*/ // literal\";\nnext=1;"],
+    ["value=old'; % hidden\nnext=2;", "value=old';\nnext=2;"],
+    ["%{\n% hidden\n%{\n% hidden nested\n%}\n%}\nnext=2;", "next=2;"],
+    ["next=1 ... hidden\n+2;", "next=1 ...\n+2;"],
+    ["var left/* hidden */right;", "var left right;"],
+    ["var y(long_name='a\n%literal // literal'); // hidden", "var y(long_name='a\n%literal // literal');"],
+    ["@#define s=\"a\r\n//literal\" // hidden", "@#define s=\"a\r\n//literal\""],
+    ["var y(long_name='a  \n\n%literal'); /* hidden */", "var y(long_name='a  \n\n%literal');"],
+    ["model_replace('law');\n%{\ny=2;\n%}\nend;", "model_replace('law');\ny=2;\nend;"],
+  ]) {
+    const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+    row.semantic.family = "commands"; row.semantic.fields = []; row.semantic.references = [];
+    row.semantic.expressions = [{ field: "statement_text", before: null, after: { text, runs: [{ text, role: "added" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }];
+    env.render({ ...snapshot, rows: [row] });
+    assert.equal(descendants(env.elements.results).find(element => element.className === "expression").textContent, expected);
+  }
+});
+
 test("operation cards prefer captured instructions and retain fallback values", () => {
   const r = response(), row = r.semantic.rows[0], source = "model_replace( 'Consumption' );\n  [name='Consumption'] c = 0.8*y;\nend;";
   Object.assign(row, { family: "operations", change: "added", name: "model_replace", before: null, after: side("model_replace"), references: [], limits: [] });

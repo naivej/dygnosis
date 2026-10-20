@@ -9,7 +9,7 @@ interface StatusContent { text: string; tooltip: string | vscode.MarkdownString;
 const countDetails: Record<StatusCount, { field: "n_endogenous" | "n_exogenous" | "n_equations"; icon: string; label: string }> = {
   endogenous: { field: "n_endogenous", icon: "symbol-variable", label: "endogenous" },
   exogenous: { field: "n_exogenous", icon: "symbol-field", label: "exogenous" },
-  equations: { field: "n_equations", icon: "list-ordered", label: "equations" },
+  equations: { field: "n_equations", icon: "symbol-operator", label: "equations" },
 };
 
 type CountFacts = Pick<ModelInfo, "n_endogenous" | "n_exogenous" | "n_equations" | "static" | "predetermined" | "forward_looking" | "mixed">;

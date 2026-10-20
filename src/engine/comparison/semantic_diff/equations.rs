@@ -397,14 +397,35 @@ struct LexToken {
 }
 
 fn tokens(text: &str) -> Vec<LexToken> {
-    tokenize(text)
-        .into_iter()
-        .filter(|token| token.kind != TokenKind::Eof)
-        .map(|token| LexToken {
-            start: token.span.start as usize,
-            end: token.span.end as usize,
-            key: token.text(text).into(),
-            kind: token.kind,
+    super::comments::code_ranges(text)
+        .flat_map(|code| {
+            use super::comments::CodeRange;
+            let (range, literal) = match code {
+                CodeRange::Tokens(range) => (range, false),
+                CodeRange::Literal(range) => (range, true),
+            };
+            let part = &text[range.clone()];
+            let quoted = literal.then(|| LexToken {
+                start: range.start,
+                end: range.end,
+                key: part.into(),
+                kind: if part.starts_with('$') {
+                    TokenKind::Latex
+                } else {
+                    TokenKind::String
+                },
+            });
+            let code = if literal { Vec::new() } else { tokenize(part) };
+            quoted.into_iter().chain(
+                code.into_iter()
+                    .filter(|token| token.kind != TokenKind::Eof && !token.comment_context)
+                    .map(move |token| LexToken {
+                        start: range.start + token.span.start as usize,
+                        end: range.start + token.span.end as usize,
+                        key: token.text(part).into(),
+                        kind: token.kind,
+                    }),
+            )
         })
         .collect()
 }
@@ -427,7 +448,10 @@ fn runs(text: &str, tokens: &[LexToken], roles: &[TokenRole]) -> ExpressionSide 
     let mut runs = Vec::new();
     let mut position = 0;
     for (index, token) in tokens.iter().enumerate() {
-        let gap_role = if index > 0 && roles[index - 1] == roles[index] {
+        let gap_role = if index > 0
+            && roles[index - 1] == roles[index]
+            && text[position..token.start].trim().is_empty()
+        {
             roles[index]
         } else {
             TokenRole::Unchanged
@@ -461,7 +485,7 @@ fn plain(
 }
 
 /// Shared written-token comparison for downstream retained expression fields.
-/// Lexing reuses the existing lexer; this does not read a second syntax tree.
+/// Code uses the existing lexer; complete literals retain their own token boundaries.
 /// Matrix allocation starts only after the comparison-wide work charge passes.
 pub fn expression_detail(
     semantic: &mut SemanticDiff,

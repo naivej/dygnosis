@@ -70,7 +70,7 @@ const vscode = {
     asRelativePath: uri => uri.path,
   },
 };
-const languageClient = { DocumentSymbolRequest: { method: "textDocument/documentSymbol" }, RenameRequest: { method: "textDocument/rename" }, ExecuteCommandRequest: { type: "workspace/executeCommand" }, State: { Stopped: 1 } };
+const languageClient = { DocumentSymbolRequest: { method: "textDocument/documentSymbol" }, RenameRequest: { method: "textDocument/rename" }, ExecuteCommandRequest: { type: "workspace/executeCommand" }, State: { Stopped: 1, Running: 2, Starting: 3 } };
 const originalLoad = Module._load;
 Module._load = function(id, ...args) { return id === "vscode" ? vscode : id === "vscode-languageclient/node" ? languageClient : originalLoad.call(this, id, ...args); };
 const { DygnosisClient, extendCapabilities } = require(compiledModule("client"));
@@ -109,6 +109,70 @@ function service(options = {}) {
     },
   });
 }
+
+test("restart closes the protocol before destroying the server input stream", async () => {
+  // Guards Restart Language Server producing ERR_STREAM_DESTROYED or EPIPE on shutdown writes.
+  reset();
+  const childProcess = require("node:child_process"), { PassThrough } = require("node:stream");
+  const previousSpawn = childProcess.spawn, previousClient = languageClient.LanguageClient;
+  const errors = [], children = [];
+  childProcess.spawn = () => {
+    const child = { stdin: new PassThrough(), stderr: new PassThrough(), stdout: new PassThrough(), exitCode: null, signalCode: null, killed: false,
+      kill() { this.killed = true; this.stdin.destroy(); return true; } };
+    child.stdin.on("error", () => {}); children.push(child); return child;
+  };
+  languageClient.LanguageClient = class {
+    initializeResult = { capabilities: {}, serverInfo: { name: "dygnosis", version: "test" } };
+    state = 3;
+    constructor(_id, _name, server) { this.server = server; }
+    registerFeature() {}
+    async start() { this.child = await this.server(); this.state = 2; }
+    getFeature() { return { clear() {} }; }
+    sendNotification() { return Promise.resolve(); }
+    onNotification() { return new Disposable(); }
+    onDidChangeState() { return new Disposable(); }
+    handleFailedRequest(_type, _token, error) { throw error; }
+    dispose() {
+      return new Promise(resolve => this.child.stdin.write("shutdown", error => {
+        if (error) errors.push(error.code);
+        else { this.child.exitCode = 0; this.child.stdin.end(); }
+        resolve();
+      }));
+    }
+  };
+  const client = new DygnosisClient({}, { resolve: () => Promise.resolve({ path: "engine", override: true, version: "test" }) });
+  try {
+    await client.ensureStarted(); const previous = client.client; await client.restart();
+    const failure = new Error("Starting server failed");
+    assert.equal(previous.handleFailedRequest({ method: "textDocument/documentLink" }, undefined, failure, null), null);
+    assert.throws(() => client.client.handleFailedRequest({ method: "textDocument/documentLink" }, undefined, failure, null), error => error === failure);
+    await client.shutdown();
+    assert.deepEqual(errors, []);
+    assert.equal(children.length, 2);
+    assert.ok(children.every(child => child.exitCode === 0));
+  } finally {
+    await client.shutdown(); childProcess.spawn = previousSpawn; languageClient.LanguageClient = previousClient;
+    for (const child of children) { child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy(); }
+  }
+});
+
+test("an obsolete startup cannot clear the replacement startup promise", async () => {
+  // Guards a late resolver allowing background requests to start a third replacement.
+  reset();
+  const old = deferred(), replacement = deferred(); let resolutions = 0;
+  const client = service({ resolve: () => ++resolutions === 1 ? old.promise : replacement.promise });
+  const first = client.ensureStarted(); await flush();
+  const restarted = client.restart(); await flush();
+  let joined;
+  try {
+    old.resolve({ path: "old", override: true, version: "old" }); await first;
+    joined = client.ensureStarted(); await flush();
+    assert.equal(resolutions, 2, "the request must join the pending replacement");
+  } finally {
+    replacement.resolve({ path: "new", override: true, version: "new" });
+    await Promise.all([first, restarted, joined]); await client.shutdown();
+  }
+});
 
 test("native Rename application has one command owner and no static or dynamic provider bypass", async () => {
   reset(); const client = service(); await client.ensureStarted();

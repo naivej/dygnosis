@@ -519,7 +519,7 @@ async fn model_expression_completion_keeps_trends_and_external_functions() {
 
 #[tokio::test]
 async fn outline_selects_declared_identities_without_adding_each_operator_call() {
-    // Guards missing identity children or selecting a later use instead of the written declaration.
+    // Guards missing identities or selecting a later use instead of the written declaration.
     fn leaves<'a>(rows: &'a [DocumentSymbol], out: &mut Vec<&'a DocumentSymbol>) {
         for row in rows {
             out.push(row);
@@ -548,17 +548,17 @@ async fn outline_selects_declared_identities_without_adding_each_operator_call()
     };
     let mut all = Vec::new();
     leaves(&rows, &mut all);
-    for (name, needle, offset) in [
-        ("h", "dimension h", 10),
-        ("db", "database db", 9),
-        ("vm", "model_name=vm", 11),
-        ("ve", "model_name=ve", 11),
-        ("pm", "model_name=pm", 11),
-        ("early", "subsamples(early", 11),
-        ("ext", "name=ext", 5),
+    for (label, name, needle, offset) in [
+        ("h", "h", "dimension h", 10),
+        ("db", "db", "database db", 9),
+        ("var_model(vm)", "vm", "model_name=vm", 11),
+        ("var_expectation_model(ve)", "ve", "model_name=ve", 11),
+        ("pac_model(pm)", "pm", "model_name=pm", 11),
+        ("early", "early", "subsamples(early", 11),
+        ("ext", "ext", "name=ext", 5),
     ] {
         let expected = position(&document, SOURCE, needle, offset).position;
-        let matching: Vec<_> = all.iter().filter(|row| row.name == name).collect();
+        let matching: Vec<_> = all.iter().filter(|row| row.name == label).collect();
         assert_eq!(matching.len(), 1, "{name}: {matching:?}");
         assert_eq!(
             matching[0].selection_range,

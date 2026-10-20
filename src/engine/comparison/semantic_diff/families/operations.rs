@@ -487,7 +487,9 @@ fn macros(model: &Model, facts: &mut Vec<CapturedFact>) {
             model
                 .includepaths
                 .iter()
-                .map(|row| FieldValue::Text(row.argument.clone()))
+                .map(|row| {
+                    FieldValue::Text(super::super::comments::macro_argument(&row.argument).into())
+                })
                 .collect(),
         )),
         ChangeFacet::Options,
@@ -500,14 +502,19 @@ fn macros(model: &Model, facts: &mut Vec<CapturedFact>) {
                 .macro_directives
                 .iter()
                 .map(|row| {
+                    let argument = row
+                        .argument
+                        .as_deref()
+                        .map(super::super::comments::macro_argument)
+                        .filter(|argument| !argument.is_empty());
                     let mut entries = BTreeMap::new();
                     entries.insert("kind".into(), FieldValue::Text(row.kind.clone()));
                     entries.insert(
                         "has_argument".into(),
-                        FieldValue::Boolean(row.argument.is_some()),
+                        FieldValue::Boolean(argument.is_some()),
                     );
-                    if let Some(argument) = &row.argument {
-                        entries.insert("argument".into(), FieldValue::Text(argument.clone()));
+                    if let Some(argument) = argument {
+                        entries.insert("argument".into(), FieldValue::Text(argument.into()));
                     }
                     FieldValue::Record(entries)
                 })

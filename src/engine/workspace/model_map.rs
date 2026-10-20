@@ -69,6 +69,92 @@ pub struct WrittenModelMap {
     /// Captured declaration type-event indices with proven token occurrences.
     pub type_events: Vec<(usize, SourceOccurrence)>,
     pub writes: Vec<SourceOccurrence>,
+    pub statement_objects: Vec<OutlineOccurrence>,
+    pub pac_children: Vec<OutlineOccurrence>,
+}
+
+/// A parsed object name, PAC target or component under its owning statement.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutlineOccurrence {
+    pub statement_id: usize,
+    pub name: String,
+    pub source: SourceOccurrence,
+}
+
+/// Use parser token positions for both written files and expansion previews.
+pub(crate) fn outline_occurrences(
+    model: &crate::engine::language::model::Model,
+    source: impl Fn(&std::ops::Range<usize>, &std::ops::Range<usize>) -> SourceOccurrence,
+) -> (Vec<OutlineOccurrence>, Vec<OutlineOccurrence>) {
+    use crate::engine::language::model::{NamedSlotOwner, PacTargetInfoRow};
+    let statements: std::collections::HashMap<_, _> = model
+        .statements
+        .iter()
+        .map(|statement| (statement.token_range.start, statement.id))
+        .collect();
+    let mut objects = Vec::new();
+    let mut children = Vec::new();
+    for slot in model.named_slots.iter().filter(|slot| slot.declaration) {
+        let NamedSlotOwner::ModelCommand(index) = slot.owner else {
+            continue;
+        };
+        let command = &model.semi_structural_commands[index];
+        let Some(&statement_id) = statements.get(&command.parse_order) else {
+            continue;
+        };
+        if command.callback_completed {
+            let target = slot.order..slot.order + 1;
+            objects.push(OutlineOccurrence {
+                statement_id,
+                name: model.name(slot.name).to_string(),
+                source: source(&target, &target),
+            });
+        }
+    }
+    for block in &model.pac_target_info {
+        let Some(&statement_id) = statements.get(&block.parse_order) else {
+            continue;
+        };
+        if let Some(index) = block
+            .active_tokens
+            .clone()
+            .find(|&index| model.expanded_tokens[index].span == block.name_span)
+        {
+            let target = index..index + 1;
+            objects.push(OutlineOccurrence {
+                statement_id,
+                name: model.name(block.name).to_string(),
+                source: source(&target, &target),
+            });
+        }
+        for target in &block.target_tokens {
+            let index = target.start + 1;
+            let expression = &model.expanded_tokens[index..target.end];
+            children.push(OutlineOccurrence {
+                statement_id,
+                name: format!(
+                    "target {}",
+                    crate::engine::language::parser::join_lexemes(&model.source, expression)
+                ),
+                source: source(target, &(index..index + 1)),
+            });
+        }
+        for row in &block.rows {
+            if let PacTargetInfoRow::Component(component) = row {
+                let index = component.expression_tokens.start;
+                let expression = &model.expanded_tokens[component.expression_tokens.clone()];
+                children.push(OutlineOccurrence {
+                    statement_id,
+                    name: format!(
+                        "component {}",
+                        crate::engine::language::parser::join_lexemes(&model.source, expression)
+                    ),
+                    source: source(&component.active_tokens, &(index..index + 1)),
+                });
+            }
+        }
+    }
+    (objects, children)
 }
 
 /// Complete inventory of block branches the parser already recognizes.

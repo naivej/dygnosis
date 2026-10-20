@@ -32,6 +32,133 @@ fn highlight(side: &ExpressionSide, role: TokenRole) -> String {
 }
 
 #[test]
+fn comment_only_edits_do_not_create_model_changes() {
+    // Guards comments in written equations and calibration expressions becoming model edits.
+    for (old, new) in [
+        ("/* old */", "/* new */"),
+        ("// old\n", "// new\n"),
+        ("% old\n", "% new\n"),
+        ("/* old */", ""),
+        ("// old\n", "\n"),
+        ("% old\n", "\n"),
+    ] {
+        for template in [
+            "var y; model; [name='law'] y=1 COMMENT +y(-1); end;",
+            "parameters p; p=1 COMMENT +2;",
+        ] {
+            let before = parse(&template.replace("COMMENT", old));
+            let after = parse(&template.replace("COMMENT", new));
+            let diff = compare_models(&before, &after);
+            assert!(
+                diff.semantic.rows.is_empty(),
+                "{template}: {}",
+                diff.to_json()
+            );
+            assert!(diff.changed_equations.is_empty());
+            assert!(diff.changed_parameter_values.is_empty());
+        }
+    }
+}
+
+#[test]
+fn changed_tokens_do_not_color_the_comments_between_them() {
+    // Guards comment gaps inheriting the color of their changed neighboring tokens.
+    for (before, after) in [
+        (
+            "old /* ignored before */ + 1",
+            "new /* ignored after */ - 2",
+        ),
+        ("old // ignored before\n+ 1", "new // ignored after\n- 2"),
+        ("old % ignored before\n+ 1", "new % ignored after\n- 2"),
+        (
+            "old;\n%{\n% ignored before\n%{\n% ignored nested\n%}\n%}\nvalue=1;",
+            "new;\n%{\n% ignored after\n%}\nvalue=2;",
+        ),
+        ("old' % ignored before\n+ 1", "new' % ignored after\n- 2"),
+        ("old ... ignored before\n+ 1", "new ... ignored after\n- 2"),
+        (
+            "old /* 🚀 ignored before */ + 1",
+            "new /* ignored after */ - 2",
+        ),
+    ] {
+        let mut diff = compare_models(&parse(""), &parse(""));
+        let detail = expression_detail(&mut diff.semantic, "expression", Some(before), Some(after));
+        for (side, role) in [
+            (detail.before.as_ref().unwrap(), TokenRole::Removed),
+            (detail.after.as_ref().unwrap(), TokenRole::Added),
+        ] {
+            reconstruction(side);
+            assert!(!highlight(side, role).contains("ignored"), "{side:?}");
+            assert!(!highlight(side, role).is_empty());
+        }
+    }
+}
+
+#[test]
+fn quoted_comment_markers_remain_comparable_text() {
+    // Guards hiding real string edits that contain percent signs or comment delimiters.
+    for (before, after) in [
+        (
+            "'https://old/%value/*literal*/'",
+            "'https://new/%value/*literal*/'",
+        ),
+        ("\"old %value // literal\"", "\"new %value // literal\""),
+        ("'old''%literal'", "'new''%literal'"),
+        ("$old%literal$", "$new%literal$"),
+        ("'same\n%old // literal'", "'same\n%new // literal'"),
+        ("\"same\r\n//old % literal\"", "\"same\r\n//new % literal\""),
+    ] {
+        let mut diff = compare_models(&parse(""), &parse(""));
+        let detail = expression_detail(&mut diff.semantic, "expression", Some(before), Some(after));
+        assert!(highlight(detail.before.as_ref().unwrap(), TokenRole::Removed).contains("old"));
+        assert!(highlight(detail.after.as_ref().unwrap(), TokenRole::Added).contains("new"));
+        reconstruction(detail.before.as_ref().unwrap());
+        reconstruction(detail.after.as_ref().unwrap());
+    }
+    for (before, after) in [
+        (
+            "@#define path = \"https://old/%literal\" // ignored before\n",
+            "@#define path = \"https://new/%literal\" // ignored after\n",
+        ),
+        (
+            "@#define path = \"same\n//old\" // ignored before\n",
+            "@#define path = \"same\n//new\" // ignored after\n",
+        ),
+    ] {
+        let diff = compare_models(&parse(before), &parse(after));
+        assert!(
+            diff.semantic
+                .rows
+                .iter()
+                .any(|row| row.family == SemanticFamily::MacroContext
+                    && row.change == ChangeKind::Changed),
+            "{before:?} -> {after:?}"
+        );
+    }
+}
+
+#[test]
+fn percent_braces_do_not_hide_dynare_block_code() {
+    // Guards treating Dynare percent-comment lines as a MATLAB block that hides an equation edit.
+    let before = "model_replace('law');\n%{\ny=1;\n%}\nend;";
+    let after = "model_replace('law');\n%{\ny=2;\n%}\nend;";
+    let mut diff = compare_models(&parse(""), &parse(""));
+    let detail = expression_detail(
+        &mut diff.semantic,
+        "statement_text",
+        Some(before),
+        Some(after),
+    );
+    for (side, role, changed) in [
+        (detail.before.as_ref().unwrap(), TokenRole::Removed, "1"),
+        (detail.after.as_ref().unwrap(), TokenRole::Added, "2"),
+    ] {
+        reconstruction(side);
+        assert_eq!(highlight(side, role), changed);
+    }
+}
+
+#[test]
 fn constants_operators_and_timing_suffix_tokens_have_exact_runs() {
     let diff = compare_models(
         &parse("var y; model; [name='Output'] y=0.5*y(-1); end;"),
