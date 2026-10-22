@@ -3,6 +3,105 @@
 use super::*;
 use crate::engine::language::parser::PARSE_EXPANDED_BUILDS;
 
+#[test]
+fn source_limit_explains_partial_results_once_and_clears_after_recovery() {
+    // Guards silent empty source results, repeated notices from adjacent
+    // providers, and reporting code that starts an unnecessary source parse.
+    let uri = Url::parse("file:///C:/dygnosis-source-intelligence/limited.mod").unwrap();
+    let mut inner = Inner::default();
+    inner
+        .workspace
+        .set_root_macro_work_limit(uri.as_str(), crate::MacroWorkLimit::new(1).unwrap());
+    inner
+        .workspace
+        .update_document(uri.as_str(), "var y;\nmodel;\ny=0;\nend;\n");
+    assert!(inner.source_inspection_notice(&uri).is_none());
+    assert!(
+        inner
+            .workspace
+            .cached_source_inventory(uri.as_str())
+            .is_none()
+    );
+    inner.workspace.source_inventory(uri.as_str()).unwrap();
+    let message = inner.source_inspection_notice(&uri).unwrap();
+    assert!(message.contains("limited.mod"));
+    assert!(message.contains("work allowance"));
+    assert!(message.contains("Available Outline entries and folds are retained"));
+    assert!(inner.source_inspection_notice(&uri).is_none());
+    inner
+        .workspace
+        .set_root_macro_work_limit(uri.as_str(), Default::default());
+    inner.workspace.source_inventory(uri.as_str()).unwrap();
+    assert!(inner.source_inspection_notice(&uri).is_none());
+    assert!(!inner.source_inspection_notices.contains_key(&uri));
+    inner
+        .workspace
+        .set_root_macro_work_limit(uri.as_str(), crate::MacroWorkLimit::new(1).unwrap());
+    inner.workspace.source_inventory(uri.as_str()).unwrap();
+    assert!(inner.source_inspection_notice(&uri).is_some());
+}
+
+#[tokio::test]
+async fn written_intelligence_shares_inventory_without_accepting_dormant_model_facts() {
+    // Guards a parse per source feature and dormant declarations/equations
+    // acquiring semantic labels or changing the effective equation count.
+    let uri = Url::parse("file:///C:/dygnosis-source-intelligence/model.mod").unwrap();
+    let source = "@#define FLAG=0\r\nvar live;\r\n@#if FLAG\r\nvar dormant;\r\nmodel;\r\n[name='sleeping'] dormant=1;\r\nend;\r\n@#else\r\nmodel; live=1; end;\r\n@#endif\r\n";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    server.upsert(uri.clone(), source.into(), 1);
+    let before = server.model_info_command(&[json!({"root_uri":uri})]);
+    assert_eq!(before["n_equations"], 1);
+    let inventory = server
+        .lock_inner()
+        .workspace
+        .source_inventory(uri.as_str())
+        .unwrap();
+    PARSE_EXPANDED_BUILDS.with(|builds| builds.set(0));
+    assert!(server.folding_ranges(&uri).is_some());
+    let rows = server.doc_symbols(&uri).unwrap();
+    fn find<'a>(rows: &'a [DocumentSymbol], name: &str) -> Option<&'a DocumentSymbol> {
+        rows.iter().find_map(|row| {
+            if row.name == name {
+                Some(row)
+            } else {
+                row.children
+                    .as_deref()
+                    .and_then(|children| find(children, name))
+            }
+        })
+    }
+    let candidate = find(&rows, "dormant").unwrap();
+    assert!(
+        candidate
+            .detail
+            .as_deref()
+            .unwrap()
+            .contains("source candidate")
+    );
+    assert!(!candidate.detail.as_deref().unwrap().contains("static"));
+    let equation = find(&rows, "sleeping").unwrap();
+    assert_eq!(equation.detail.as_deref(), Some("unknown"));
+    assert_eq!(find(&rows, "FLAG").unwrap().detail, None);
+    let byte = source.find("dormant=1").unwrap() as u32 + 8;
+    let context = server
+        .lock_inner()
+        .syntax_context(&uri, source, byte, false)
+        .unwrap();
+    assert_eq!(context.language, "model_expression");
+    assert_eq!(PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get), 0);
+    assert!(Arc::ptr_eq(
+        &inventory,
+        &server
+            .lock_inner()
+            .workspace
+            .source_inventory(uri.as_str())
+            .unwrap()
+    ));
+    let after = server.model_info_command(&[json!({"root_uri":uri})]);
+    assert_eq!(after["n_equations"], 1);
+}
+
 #[tokio::test]
 async fn model_info_after_edits_reuses_the_checked_parse_and_keeps_current_origins() {
     // Guards a second core parse while preparing the first model-information

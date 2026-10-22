@@ -1,7 +1,8 @@
 //! Source-context projections of the shared pinned syntax reference.
 
+use crate::engine::analysis::source_inventory::SourceInventory;
 use crate::engine::catalog::syntax::{self, SyntaxRecord};
-use crate::engine::language::lexer::{TokenKind, tokenize};
+use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::model::{ExecutionStep, Model, StatementKind};
 use crate::engine::language::span::Span;
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, Documentation};
@@ -46,58 +47,52 @@ pub(crate) fn signature_context(model: &Model, text: &str, byte: u32) -> Option<
     context_impl(model, text, byte, true)
 }
 
+/// Written context is shared with folding and Outline, including dormant code.
+/// It does not borrow semantic facts from a different macro branch.
+pub(crate) fn source_context(
+    inventory: &SourceInventory,
+    text: &str,
+    byte: u32,
+    allow_literals: bool,
+) -> Option<Context> {
+    if macro_at(&inventory.macro_tokens, byte) {
+        return Some(Context {
+            language: "macro_expression",
+            parent: None,
+        });
+    }
+    if !lexical_context(&inventory.lexical_tokens, text, byte, allow_literals) {
+        return None;
+    }
+    inventory.context(byte).map(|context| Context {
+        language: context.language,
+        parent: context.parent,
+    })
+}
+
+fn macro_at(tokens: &[Token], byte: u32) -> bool {
+    let index = tokens.partition_point(|token| token.span.end < byte);
+    tokens.get(index).is_some_and(|token| {
+        matches!(token.kind, TokenKind::MacroDir | TokenKind::MacroInterp)
+            && token.span.start <= byte
+            && byte <= token.span.end
+    })
+}
+
 fn context_impl(model: &Model, text: &str, byte: u32, allow_literals: bool) -> Option<Context> {
-    if crate::engine::language::macro_expand::scan_macro_tokens(text)
-        .iter()
-        .any(|token| {
-            matches!(token.kind, TokenKind::MacroDir | TokenKind::MacroInterp)
-                && token.span.start <= byte
-                && byte <= token.span.end
-        })
-    {
+    if macro_at(
+        &crate::engine::language::macro_expand::scan_macro_tokens(text),
+        byte,
+    ) {
         return Some(Context {
             language: "macro_expression",
             parent: None,
         });
     }
     let tokens = tokenize(text);
-    if !allow_literals
-        && tokens.iter().any(|token| {
-            token.kind == TokenKind::String && token.span.start <= byte && byte < token.span.end
-        })
-    {
+    if !lexical_context(&tokens, text, byte, allow_literals) {
         return None;
     }
-    let previous = tokens
-        .iter()
-        .filter(|token| token.kind != TokenKind::Eof && token.span.end <= byte)
-        .map(|token| token.span.end)
-        .max()
-        .unwrap_or(0);
-    let gap = text
-        .get(previous as usize..byte as usize)
-        .unwrap_or_default();
-    let line = gap.rsplit(['\r', '\n']).next().unwrap_or_default();
-    let in_block_comment = gap
-        .rfind("/*")
-        .is_some_and(|open| gap.rfind("*/").is_none_or(|close| open > close));
-    if !allow_literals && (line.contains("//") || line.contains('%') || in_block_comment) {
-        return None;
-    }
-    let fallback;
-    let model = if model.macro_incomplete() {
-        let inert = crate::engine::analysis::folding::inert_source(text);
-        fallback = crate::engine::language::parser::parse_expanded_controlled(
-            &inert,
-            tokenize(&inert),
-            None,
-            model.macro_work_limit,
-        )
-        .0;
-        &fallback
-    } else {
-        model
-    };
     let statement = model
         .statements
         .iter()
@@ -170,6 +165,31 @@ fn context_impl(model: &Model, text: &str, byte: u32, allow_literals: bool) -> O
         language: "top_level",
         parent: None,
     })
+}
+
+fn lexical_context(tokens: &[Token], text: &str, byte: u32, allow_literals: bool) -> bool {
+    if allow_literals {
+        return true;
+    }
+    let next = tokens.partition_point(|token| token.span.end <= byte);
+    if tokens.get(next).is_some_and(|token| {
+        token.kind == TokenKind::String && token.span.start <= byte && byte < token.span.end
+    }) {
+        return false;
+    }
+    let previous = tokens[..next]
+        .iter()
+        .rev()
+        .find(|token| token.kind != TokenKind::Eof)
+        .map_or(0, |token| token.span.end);
+    let gap = text
+        .get(previous as usize..byte as usize)
+        .unwrap_or_default();
+    let line = gap.rsplit(['\r', '\n']).next().unwrap_or_default();
+    let in_block_comment = gap
+        .rfind("/*")
+        .is_some_and(|open| gap.rfind("*/").is_none_or(|close| open > close));
+    !line.contains("//") && !line.contains('%') && !in_block_comment
 }
 
 fn head_recovery(text: &str, byte: u32) -> Option<Context> {

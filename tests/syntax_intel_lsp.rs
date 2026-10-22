@@ -10,6 +10,14 @@ fn position(text: &str, byte: usize) -> Position {
 }
 
 async fn completions(marked: &str) -> Vec<String> {
+    completion_items(marked)
+        .await
+        .into_iter()
+        .map(|item| item.label)
+        .collect()
+}
+
+async fn completion_items(marked: &str) -> Vec<CompletionItem> {
     let byte = marked.find('|').unwrap();
     let text = marked.replacen('|', "", 1);
     let uri = Url::parse("file:///C:/syntax-intel/model.mod").unwrap();
@@ -39,13 +47,76 @@ async fn completions(marked: &str) -> Vec<String> {
         .await
         .unwrap()
     {
-        Some(CompletionResponse::Array(items)) => {
-            items.into_iter().map(|item| item.label).collect()
-        }
-        Some(CompletionResponse::List(list)) => {
-            list.items.into_iter().map(|item| item.label).collect()
-        }
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
         None => Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn failed_macro_target_keeps_written_syntax_help_without_accepted_names() {
+    // Guards target-discovery failure erasing an already proven written model
+    // context, or restoring configured binding roles while using that fallback.
+    let items = completion_items("@#define FLAG =\nvar x;\nmodel; x=lo|g(x); end;\n").await;
+    assert!(items.iter().any(|item| item.label == "log"));
+    let x = items.iter().find(|item| item.label == "x").unwrap();
+    assert_eq!(x.kind, Some(CompletionItemKind::TEXT));
+    assert_eq!(x.detail.as_deref(), Some("source candidate · unverified"));
+    assert!(x.documentation.is_none());
+    let help = function_signature("@#define FLAG =\nvar x;\nmodel; x=log(|x); end;\n").await;
+    assert!(
+        help.signatures
+            .iter()
+            .any(|signature| signature.label.to_ascii_lowercase().starts_with("log("))
+    );
+}
+
+#[tokio::test]
+async fn dormant_completion_does_not_inherit_a_sibling_binding_or_ancestor_span() {
+    // Guards a live endogenous binding suppressing its dormant same-name
+    // parameter candidate, and a broad accepted model span proving a branch
+    // that emitted no equation.
+    for source in [
+        "@#define FLAG=1\n@#if FLAG\nvar x;\nmodel; x=0; end;\n@#else\nparameters x;\nmodel; x=|0; end;\n@#endif\n",
+        "var x;\nmodel;\n@#if 1\nx=0;\n@#else\nx=|0;\n@#endif\nend;\n",
+        "var x;\nmodel;\n@#for k in 1:2\n@#if k==1\nx=|0;\n@#endif\n@#endfor\nend;\n",
+    ] {
+        let items = completion_items(source).await;
+        let matching: Vec<_> = items.iter().filter(|item| item.label == "x").collect();
+        assert_eq!(matching.len(), 1, "{source}: {matching:?}");
+        let candidate = matching[0];
+        assert_eq!(candidate.kind, Some(CompletionItemKind::TEXT));
+        assert_eq!(
+            candidate.detail.as_deref(),
+            Some("source candidate · unverified")
+        );
+        assert!(candidate.label_details.is_none());
+        assert!(candidate.documentation.is_none());
+        assert!(items.iter().any(|item| item.label == "log"));
+    }
+    // A completed active source path and ordinary root source retain their
+    // accepted role rather than losing all semantic completion to the guard.
+    for source in [
+        "@#define FLAG=1\n@#if FLAG\nvar x;\nmodel; x=|0; end;\n@#else\nparameters x;\nmodel; x=0; end;\n@#endif\n",
+        "var x;\nmodel; x=|0; end;\n",
+    ] {
+        let items = completion_items(source).await;
+        let accepted = items.iter().find(|item| item.label == "x").unwrap();
+        assert_eq!(accepted.kind, Some(CompletionItemKind::VARIABLE));
+        assert!(
+            accepted
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("endogenous variable")
+        );
+        assert!(
+            !accepted
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("source candidate")
+        );
     }
 }
 

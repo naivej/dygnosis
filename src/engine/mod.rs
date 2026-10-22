@@ -1,6 +1,7 @@
 //! Shared analysis of written Dynare source for LSP and MCP.
 
 pub(crate) mod analysis;
+pub mod analysis_configuration;
 pub mod catalog;
 pub mod comparison;
 pub(crate) mod control;

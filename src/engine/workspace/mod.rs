@@ -15,13 +15,14 @@ use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 static INPUT_GENERATION: AtomicU64 = AtomicU64::new(1);
 /// Input provenance keeps this fixed byte bound when macro work is increased.
 const INPUT_FILE_BYTE_CAP: usize = 1_000_000;
 
 use self::companion::{CompanionKind, CompanionRecord};
+use crate::engine::analysis::source_inventory::SourceInventory;
 use crate::engine::language::expand::{
     ExpandReport, NavigationSource, SpliceSegment, expand_report_from_spliced_model_controlled,
 };
@@ -74,12 +75,45 @@ pub struct IncludeRecords {
 struct Doc {
     source: Arc<String>,
     model: OnceLock<Arc<Model>>,
+    source_inventory: Mutex<Option<Arc<SourceInventory>>>,
     work_limit: MacroWorkLimit,
     overlay: bool,
     input_generation: u64,
 }
 
 impl Doc {
+    /// Folding and source intelligence share one bounded written-source pass.
+    /// Snapshot readers also share this lock, so concurrent requests do not
+    /// build the same inventory twice. A cancelled build is never published.
+    fn source_inventory(
+        &self,
+        cancellation: Option<Arc<AtomicBool>>,
+    ) -> Option<Arc<SourceInventory>> {
+        if crate::engine::control::flag_cancelled(cancellation.as_deref()) {
+            return None;
+        }
+        let mut cached = self
+            .source_inventory
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if crate::engine::control::flag_cancelled(cancellation.as_deref()) {
+            return None;
+        }
+        if let Some(inventory) = cached.as_ref() {
+            return Some(Arc::clone(inventory));
+        }
+        let inventory = Arc::new(SourceInventory::build(
+            &self.source,
+            self.work_limit,
+            cancellation.clone(),
+        )?);
+        if crate::engine::control::flag_cancelled(cancellation.as_deref()) {
+            return None;
+        }
+        *cached = Some(Arc::clone(&inventory));
+        Some(inventory)
+    }
+
     /// An acquired include needs only its source for execution in its parent.
     /// Parse it independently only when a standalone document query needs it.
     fn model(&self, cancellation: Option<Arc<AtomicBool>>) -> Option<&Arc<Model>> {
@@ -105,6 +139,7 @@ impl Doc {
         Self {
             source: Arc::clone(&self.source),
             model: OnceLock::new(),
+            source_inventory: Mutex::new(None),
             work_limit,
             overlay: self.overlay,
             input_generation: self.input_generation,
@@ -141,9 +176,12 @@ pub(crate) struct EffectiveOrigins(Arc<SplicedSource>);
 impl EffectiveOrigins {
     pub(crate) fn map(&self, span: Span) -> Option<(String, Span)> {
         let segments = &self.0.segments;
+        // Splicing appends ordered, non-overlapping ranges. Empty evaluation
+        // markers share their insertion point but never own a source byte.
+        let index = segments.partition_point(|s| s.spliced.end <= span.start);
         let segment = segments
-            .iter()
-            .find(|s| span.start >= s.spliced.start && span.start < s.spliced.end)
+            .get(index)
+            .filter(|s| span.start >= s.spliced.start && span.start < s.spliced.end)
             .or_else(|| {
                 segments
                     .last()
@@ -594,6 +632,7 @@ impl Workspace {
             Arc::new(Doc {
                 source: Arc::new(source),
                 model: OnceLock::from(Arc::new(model)),
+                source_inventory: Mutex::new(None),
                 work_limit: self.root_macro_work_limit(key),
                 overlay: true,
                 input_generation,
@@ -631,6 +670,7 @@ impl Workspace {
             Arc::new(Doc {
                 source: Arc::new(source),
                 model: OnceLock::from(Arc::new(model)),
+                source_inventory: Mutex::new(None),
                 work_limit: self.root_macro_work_limit(&key),
                 overlay: true,
                 input_generation,
@@ -716,6 +756,7 @@ impl Workspace {
             Arc::new(Doc {
                 source: Arc::new(source),
                 model: OnceLock::from(Arc::new(model)),
+                source_inventory: Mutex::new(None),
                 work_limit: self.root_macro_work_limit(&key),
                 overlay: false,
                 input_generation: 0,
@@ -1252,6 +1293,34 @@ impl Workspace {
         self.docs.get(&key).map(|d| d.source.as_str())
     }
 
+    /// Inspect an acquired file without changing its execution ownership or
+    /// reading dormant includes. The inventory is independent of root choices.
+    pub(crate) fn source_inventory(&self, uri: &str) -> Option<Arc<SourceInventory>> {
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
+        self.docs
+            .get(&key)?
+            .source_inventory(self.cancellation.clone())
+    }
+
+    /// Presentation of a previous inspection must not start new source work.
+    pub(crate) fn cached_source_inventory(&self, uri: &str) -> Option<Arc<SourceInventory>> {
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
+        self.docs
+            .get(&key)?
+            .source_inventory
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+
     /// Source-map keys are already normalized; no repeat path lookup is needed.
     pub(crate) fn source_for_normalized_key(&self, key: &str) -> Option<&str> {
         self.docs.get(key).map(|document| document.source.as_str())
@@ -1678,6 +1747,7 @@ impl Workspace {
             Arc::new(Doc {
                 source,
                 model: OnceLock::new(),
+                source_inventory: Mutex::new(None),
                 work_limit: self.root_macro_work_limit(key),
                 overlay: false,
                 input_generation: 0,
@@ -3950,6 +4020,57 @@ mod compare_snapshot_tests {
 #[cfg(test)]
 mod workspace_snapshot_tests {
     use super::*;
+
+    #[test]
+    fn written_inventory_reuses_snapshot_work_and_invalidates_changed_inputs() {
+        // Guards repeated source parsing on snapshot requests and stale source
+        // ranges after edits or a changed work allowance.
+        let uri = "map/model.mod";
+        let mut workspace = Workspace::overlay_documents(&BTreeMap::from([(
+            uri.into(),
+            "@#if 0\nvar dormant;\n@#endif\nvar live;".into(),
+        )]));
+        let first = workspace.source_inventory(uri).unwrap();
+        let snapshot = workspace.snapshot_for_root(uri, Vec::new());
+        let parallel = std::thread::scope(|scope| {
+            let left = scope.spawn(|| workspace.source_inventory(uri).unwrap());
+            let right = scope.spawn(|| snapshot.source_inventory(uri).unwrap());
+            (left.join().unwrap(), right.join().unwrap())
+        });
+        assert!(Arc::ptr_eq(&first, &parallel.0));
+        assert!(Arc::ptr_eq(&first, &parallel.1));
+
+        workspace.update_document(uri, "var replacement;");
+        let edited = workspace.source_inventory(uri).unwrap();
+        assert!(!Arc::ptr_eq(&first, &edited));
+        assert_ne!(first.source_revision, edited.source_revision);
+        assert!(Arc::ptr_eq(
+            &first,
+            &snapshot.source_inventory(uri).unwrap()
+        ));
+
+        workspace.set_root_macro_work_limit(uri, MacroWorkLimit::new(1).unwrap());
+        let limited = workspace.source_inventory(uri).unwrap();
+        assert!(!Arc::ptr_eq(&edited, &limited));
+        assert!(limited.coverage_cause.is_some());
+    }
+
+    #[test]
+    fn cancelled_written_inventory_is_not_shared_with_later_requests() {
+        // Guards publishing cancellation as an empty but reusable inventory.
+        let uri = "map/cancel.mod";
+        let mut workspace = Workspace::overlay_documents(&BTreeMap::from([(
+            uri.into(),
+            "@#if 0\nvar dormant;\n@#endif".into(),
+        )]));
+        let flag = Arc::new(AtomicBool::new(true));
+        workspace.cancellation = Some(Arc::clone(&flag));
+        assert!(workspace.source_inventory(uri).is_none());
+        flag.store(false, Ordering::Relaxed);
+        let inventory = workspace.source_inventory(uri).unwrap();
+        assert!(inventory.coverage_cause.is_none());
+        assert!(!inventory.items.is_empty());
+    }
 
     #[test]
     fn snapshots_share_immutable_overlay_documents() {

@@ -14,6 +14,7 @@ pub use engine::analysis::equations;
 pub use engine::analysis::model_info;
 pub use engine::analysis::model_locals;
 pub use engine::analysis::timing;
+pub use engine::analysis_configuration;
 pub use engine::catalog;
 pub use engine::comparison as model_diff;
 pub use engine::comparison::compare_snapshots;

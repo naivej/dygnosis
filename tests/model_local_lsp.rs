@@ -501,10 +501,10 @@ async fn literal_macro_reads_keep_navigation_and_synthesized_names_refuse_rename
     );
 }
 
-// A retained recovery declaration/definition after a Parse refusal cannot
-// become an accepted local navigation or completion target.
+// A written declaration after a Parse refusal can remain a source candidate,
+// but cannot become an accepted local binding or navigation target.
 #[tokio::test]
-async fn local_queries_exclude_actions_after_an_earlier_parse_refusal() {
+async fn local_queries_keep_refused_declarations_unverified() {
     let (service, _socket) = new_service();
     let server = service.inner();
     let uri = Url::parse("file:///tmp/local-refused-prefix.mod").unwrap();
@@ -514,10 +514,12 @@ async fn local_queries_exclude_actions_after_an_earlier_parse_refusal() {
     assert!(target(server, pos.clone(), false).await.is_none());
     assert!(target(server, pos.clone(), true).await.is_none());
     assert!(refs(server, pos.clone(), true).await.is_empty());
-    assert!(
-        complete(server, pos)
-            .await
-            .iter()
-            .all(|item| item.label != "z")
+    let items = complete(server, pos).await;
+    let candidate = items.iter().find(|item| item.label == "z").unwrap();
+    assert_eq!(candidate.kind, Some(CompletionItemKind::TEXT));
+    assert_eq!(
+        candidate.detail.as_deref(),
+        Some("source candidate · unverified")
     );
+    assert!(candidate.documentation.is_none());
 }

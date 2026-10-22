@@ -103,7 +103,7 @@ impl MacroEvalError {
         self.diagnostic().is_some() || matches!(self, Self::Limit(_))
     }
 
-    fn diagnostic(&self) -> Option<(&'static str, String)> {
+    pub(crate) fn diagnostic(&self) -> Option<(&'static str, String)> {
         match self {
             Self::UnknownVariable(name) => Some(("E063", format!("Unknown variable {name}"))),
             Self::UnknownFunction(name) => Some(("E063", format!("Unknown function {name}"))),
@@ -1728,6 +1728,306 @@ fn validate_macro_syntax(
     tokens: &[Token],
     budget: &mut MacroBudget,
 ) -> Result<(), (Span, MacroEvalError)> {
+    validate_macro_syntax_and_sites(source, tokens, budget, None)
+}
+
+/// Discover guarded written targets from an existing macro scan. The shared
+/// syntax walk records sites without evaluating conditions or definitions.
+#[cfg(test)]
+pub(crate) fn discover_directive_sites(
+    file: Option<&str>,
+    source: &str,
+    tokens: &[Token],
+    budget: &mut MacroBudget,
+) -> Result<
+    Vec<crate::engine::analysis_configuration::DirectiveSite>,
+    crate::engine::analysis_configuration::ConfigurationError,
+> {
+    use crate::engine::analysis_configuration::{charge, source_revision};
+    charge(budget, source.len().max(1))?;
+    discover_directive_sites_with_revision(file, source, &source_revision(source), tokens, budget)
+}
+
+/// The file inventory has already computed this exact original-text digest.
+/// Share it with target discovery instead of hashing the source a second time.
+pub(crate) fn discover_directive_sites_with_revision(
+    file: Option<&str>,
+    source: &str,
+    revision: &str,
+    tokens: &[Token],
+    budget: &mut MacroBudget,
+) -> Result<
+    Vec<crate::engine::analysis_configuration::DirectiveSite>,
+    crate::engine::analysis_configuration::ConfigurationError,
+> {
+    use crate::engine::analysis_configuration::{charge, expression_error};
+    charge(budget, revision.len().saturating_add(tokens.len()))?;
+    let mut sites = DirectiveSites {
+        file,
+        revision: revision.to_owned(),
+        sites: Vec::new(),
+        chains: Vec::new(),
+    };
+    validate_macro_syntax_and_sites(source, tokens, budget, Some(&mut sites))
+        .map_err(|(_, error)| expression_error(error))?;
+    Ok(sites.sites)
+}
+
+struct DirectiveSites<'a> {
+    file: Option<&'a str>,
+    revision: String,
+    sites: Vec<crate::engine::analysis_configuration::DirectiveSite>,
+    chains: Vec<usize>,
+}
+
+impl DirectiveSites<'_> {
+    fn record(
+        &mut self,
+        source: &str,
+        token: &Token,
+        kind: Dir,
+        budget: &mut MacroBudget,
+    ) -> Result<(), MacroEvalError> {
+        use crate::engine::analysis_configuration::{
+            BranchSite, DirectiveKind, DirectiveSite, GuardedTarget, written_id,
+        };
+        if !matches!(
+            kind,
+            Dir::Define | Dir::If | Dir::Ifdef | Dir::Ifndef | Dir::Elseif | Dir::Else | Dir::Endif
+        ) {
+            return Ok(());
+        }
+        let text = &source[token.span.start as usize..token.span.end as usize];
+        // Header copies, IDs and target guards are bounded by the existing root
+        // allowance. Bodies stay source spans, including for nested chains.
+        budget.spend_work(
+            text.len()
+                .saturating_mul(2)
+                .saturating_add(self.file.map_or(0, str::len))
+                .saturating_add(256),
+        )?;
+        // The scanner already located the directive end. Only its newline is
+        // skipped here; finding the line's indentation would repeat source work.
+        let end = token.span.end as usize;
+        let body_start = end
+            + if source.as_bytes().get(end..end.saturating_add(2)) == Some(b"\r\n".as_slice()) {
+                2
+            } else {
+                usize::from(source.as_bytes().get(end) == Some(&b'\n'))
+            };
+        match kind {
+            Dir::Define | Dir::If | Dir::Ifdef | Dir::Ifndef => {
+                let conditional = kind != Dir::Define;
+                let rest = strip_kw(text, "define").map(trim_macro_start).unwrap_or("");
+                let name = ident_len(rest).map(|length| rest[..length].to_owned());
+                let function = name
+                    .as_ref()
+                    .is_some_and(|name| trim_macro_start(&rest[name.len()..]).starts_with('('));
+                let site_kind = if conditional {
+                    DirectiveKind::Conditional
+                } else if function {
+                    DirectiveKind::FunctionDefinition
+                } else {
+                    DirectiveKind::Definition
+                };
+                if conditional {
+                    self.chains.push(self.sites.len());
+                }
+                self.sites.push(DirectiveSite {
+                    target: GuardedTarget {
+                        file: self.file.map(str::to_owned),
+                        site_id: written_id(
+                            &self.revision,
+                            if conditional { "conditional" } else { "define" },
+                            token.span,
+                        ),
+                        source_revision: self.revision.clone(),
+                    },
+                    kind: site_kind,
+                    span: token.span,
+                    directive_span: token.span,
+                    expected_text: text.to_owned(),
+                    name,
+                    branches: if conditional {
+                        vec![BranchSite {
+                            branch_id: written_id(&self.revision, "branch", token.span),
+                            directive_span: token.span,
+                            body_span: Span {
+                                start: body_start as u32,
+                                end: token.span.end,
+                            },
+                            expected_text: text.to_owned(),
+                        }]
+                    } else {
+                        Vec::new()
+                    },
+                });
+            }
+            Dir::Elseif | Dir::Else | Dir::Endif => {
+                let Some(&index) = self.chains.last() else {
+                    return Ok(());
+                };
+                let site = &mut self.sites[index];
+                if let Some(branch) = site.branches.last_mut() {
+                    branch.body_span.end = token.span.start;
+                }
+                if kind == Dir::Endif {
+                    site.span.end = token.span.end;
+                    self.chains.pop();
+                } else {
+                    site.branches.push(BranchSite {
+                        branch_id: written_id(&self.revision, "branch", token.span),
+                        directive_span: token.span,
+                        body_span: Span {
+                            start: body_start as u32,
+                            end: token.span.end,
+                        },
+                        expected_text: text.to_owned(),
+                    });
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod directive_site_tests {
+    use super::*;
+    use crate::engine::analysis_configuration::{DirectiveKind, source_revision};
+
+    #[test]
+    fn discovery_keeps_original_bytes_and_inert_nested_branch_targets() {
+        // Guards source discovery evaluating missing inputs, dropping inactive
+        // targets, normalizing guarded bytes, or borrowing a sibling chain's arm.
+        let source = "// 中文\r\n@#define FLAG = false\r\n@#if UNKNOWN\r\n@#for i in []\r\n@#define N = i\r\n@#if N\r\nvar y;\r\n@#else\r\nvar z;\r\n@#endif\r\n@#endfor\r\n@#elseif defined(FLAG)\r\nvar a;\r\n@#else\r\nvar b;\r\n@#endif\r\n";
+        let tokens = scan_macro_tokens(source);
+        let sites =
+            discover_directive_sites(Some("main.mod"), source, &tokens, &mut MacroBudget::new())
+                .unwrap();
+        let definition = sites
+            .iter()
+            .find(|site| site.name.as_deref() == Some("FLAG"))
+            .unwrap();
+        assert_eq!(definition.kind, DirectiveKind::Definition);
+        assert_eq!(definition.expected_text, "@#define FLAG = false");
+        assert_eq!(definition.target.source_revision, source_revision(source));
+        assert_eq!(definition.target.file.as_deref(), Some("main.mod"));
+        let outer = sites
+            .iter()
+            .find(|site| site.expected_text == "@#if UNKNOWN")
+            .unwrap();
+        assert_eq!(outer.kind, DirectiveKind::Conditional);
+        assert!(outer.name.is_none());
+        assert_eq!(
+            outer
+                .branches
+                .iter()
+                .map(|branch| branch.expected_text.as_str())
+                .collect::<Vec<_>>(),
+            ["@#if UNKNOWN", "@#elseif defined(FLAG)", "@#else"]
+        );
+        let nested = sites
+            .iter()
+            .find(|site| site.expected_text == "@#if N")
+            .unwrap();
+        assert!(nested.span.start > outer.span.start && nested.span.end < outer.span.end);
+        assert_ne!(nested.branches[1].branch_id, outer.branches[2].branch_id);
+        let arm = &nested.branches[1];
+        assert_eq!(
+            &source[arm.body_span.start as usize..arm.body_span.end as usize],
+            "var z;\r\n"
+        );
+        assert_eq!(
+            &source[nested.span.start as usize..nested.span.end as usize],
+            "@#if N\r\nvar y;\r\n@#else\r\nvar z;\r\n@#endif"
+        );
+        let unnamed =
+            discover_directive_sites(None, source, &tokens, &mut MacroBudget::new()).unwrap();
+        assert_eq!(definition.target.site_id, unnamed[0].target.site_id);
+    }
+
+    #[test]
+    fn discovery_uses_pinned_comment_and_definition_boundaries() {
+        // Guards interpreting commented-out directives, losing the pinned block
+        // comment behavior, or offering function definitions as variable sites.
+        let source = "// @#define HIDDEN = 1\n/*\n@#define VISIBLE = 1 + \\\\\n 2\n*/\n@#define f(x) = x + 1\n";
+        let sites = discover_directive_sites(
+            None,
+            source,
+            &scan_macro_tokens(source),
+            &mut MacroBudget::new(),
+        )
+        .unwrap();
+        assert!(
+            sites
+                .iter()
+                .all(|site| site.name.as_deref() != Some("HIDDEN"))
+        );
+        let visible = sites
+            .iter()
+            .find(|site| site.name.as_deref() == Some("VISIBLE"))
+            .unwrap();
+        assert!(visible.expected_text.contains("\\\\\n"));
+        assert_eq!(
+            sites
+                .iter()
+                .find(|site| site.name.as_deref() == Some("f"))
+                .unwrap()
+                .kind,
+            DirectiveKind::FunctionDefinition
+        );
+    }
+
+    #[test]
+    fn malformed_targets_and_cancelled_or_bounded_discovery_refuse() {
+        // Guards an override repairing malformed original syntax and a source
+        // inventory hashing or allocating records after cancellation/work stop.
+        for source in [
+            "@#define N =\n",
+            "@#if 1\nvar x;\n",
+            "@#if 1\n@#else\n@#elseif 0\n@#endif\n",
+        ] {
+            assert!(
+                discover_directive_sites(
+                    None,
+                    source,
+                    &scan_macro_tokens(source),
+                    &mut MacroBudget::new()
+                )
+                .is_err()
+            );
+        }
+        let source = "@#define N = 1\n";
+        let tokens = scan_macro_tokens(source);
+        let mut budget = MacroBudget::with_limit(
+            crate::engine::macro_work::MacroWorkLimit::new(1).unwrap(),
+            None,
+        );
+        assert_eq!(
+            discover_directive_sites(None, source, &tokens, &mut budget)
+                .unwrap_err()
+                .code,
+            "ANALYSIS_CONFIGURATION_LIMIT"
+        );
+        let cancellation = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mut budget = MacroBudget::with_limit(Default::default(), Some(cancellation));
+        assert!(
+            discover_directive_sites(None, source, &tokens, &mut budget)
+                .unwrap_err()
+                .message
+                .contains("request cancelled")
+        );
+    }
+}
+
+fn validate_macro_syntax_and_sites(
+    source: &str,
+    tokens: &[Token],
+    budget: &mut MacroBudget,
+    mut sites: Option<&mut DirectiveSites<'_>>,
+) -> Result<(), (Span, MacroEvalError)> {
     let mut stack: Vec<(Dir, bool, Span)> = Vec::new();
     let mut binder_errors = HashMap::new();
     for token in tokens {
@@ -1862,6 +2162,11 @@ fn validate_macro_syntax(
         };
         if let Some(error) = error {
             return Err((token.span, error));
+        }
+        if let Some(sites) = sites.as_deref_mut() {
+            sites
+                .record(source, token, kind, budget)
+                .map_err(|error| (token.span, error))?;
         }
     }
     if let Some((kind, _, span)) = stack.last() {

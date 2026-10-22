@@ -140,6 +140,7 @@ pub(crate) struct EquationTokenRanges {
     pub(crate) original_tokens: Vec<Range<usize>>,
 }
 
+#[cfg(test)]
 pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationTokenRanges) {
     parse_expanded_controlled(src, tokens, None, Default::default())
 }

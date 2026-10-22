@@ -254,16 +254,24 @@ end;\n";
     open(server, &root, root_text).await;
     let rows = symbols(server, &include).await;
     assert_local_tree(&rows, include_text, None);
-    let command = rows
+    let mut written = Vec::new();
+    all(&rows, &mut written);
+    let command = written
         .iter()
         .find(|row| row.name == "var_model (multiple expansions)")
         .unwrap();
     assert!(command.children.is_none());
-    let pac = rows
+    assert!(rows.iter().any(|row| row.name.starts_with("@#for name")));
+    let pac = written
         .iter()
         .find(|row| row.name == "pac_target_info(pm)")
         .unwrap();
-    let children = pac.children.as_ref().unwrap();
+    let mut descendants = Vec::new();
+    all(pac.children.as_ref().unwrap(), &mut descendants);
+    let children: Vec<_> = descendants
+        .into_iter()
+        .filter(|row| row.kind == SymbolKind::OBJECT)
+        .collect();
     assert_eq!(
         children
             .iter()
@@ -843,8 +851,11 @@ async fn outline_omits_macro_and_included_assignments_in_recovered_and_shared_vi
     assert_local_tree(&rows, text, None);
     assert_eq!(
         rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
-        ["parameters", "var", "model"]
+        ["parameters", "@#for k in 1:2", "var", "model"]
     );
+    // The written loop is visible, but its native/parameter assignments still
+    // have no Outline children.
+    assert!(rows[1].children.is_none());
     let owned = symbols(server, &child).await;
     assert_local_tree(&owned, child_text, None);
     assert_eq!(
@@ -1009,18 +1020,24 @@ async fn outline_names_keep_multiple_dimension_macro_expansion_fallbacks() {
     open(server, &root, text).await;
     let rows = symbols(server, &root).await;
     assert_local_tree(&rows, text, None);
+    let mut written = Vec::new();
+    all(&rows, &mut written);
+    assert!(
+        rows.iter()
+            .any(|row| row.name.starts_with("@#for dimension"))
+    );
     for title in [
         "model (multiple expansions)",
         "var (multiple expansions)",
         "varexo (multiple expansions)",
     ] {
-        let row = rows
+        let row = written
             .iter()
             .find(|row| row.name == title)
             .unwrap_or_else(|| panic!("{title}: {rows:?}"));
         assert!(row.detail.is_none());
     }
-    let model = rows
+    let model = written
         .iter()
         .find(|row| row.name == "model (multiple expansions)")
         .unwrap();

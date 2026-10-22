@@ -167,6 +167,7 @@ struct Inner {
     routed_library: HashMap<Url, Vec<RoutedDiagnostic>>,
     workspace: Workspace,
     semantic_views: HashMap<Url, Arc<crate::engine::analysis::symbols::SemanticModel>>,
+    source_inspection_notices: HashMap<Url, String>,
     settings: SettingsStore,
     tracked_roots: HashMap<Url, String>,
     model_info_notifications: bool,
@@ -190,6 +191,7 @@ impl Default for Inner {
             routed_library: HashMap::new(),
             workspace: Workspace::new(),
             semantic_views: HashMap::new(),
+            source_inspection_notices: HashMap::new(),
             settings: SettingsStore::default(),
             tracked_roots: HashMap::new(),
             model_info_notifications: false,
@@ -208,6 +210,28 @@ impl Default for Inner {
 }
 
 impl Inner {
+    /// One explanation per sustained source-inspection limitation. Editing a
+    /// limited file must not produce the same notice on every source request.
+    fn source_inspection_notice(&mut self, uri: &Url) -> Option<String> {
+        let inventory = self.workspace.cached_source_inventory(uri.as_str())?;
+        let Some(cause) = &inventory.coverage_cause else {
+            self.source_inspection_notices.remove(uri);
+            return None;
+        };
+        if self.source_inspection_notices.get(uri) == Some(cause) {
+            return None;
+        }
+        self.source_inspection_notices
+            .insert(uri.clone(), cause.clone());
+        let file = uri
+            .path_segments()
+            .and_then(Iterator::last)
+            .unwrap_or("this file");
+        Some(format!(
+            "Source information for {file} is incomplete. {cause} Available Outline entries and folds are retained; source names and syntax help are limited to proven source context."
+        ))
+    }
+
     fn document(&self, uri: &Url) -> Option<&OpenDoc> {
         self.docs.get(uri).or_else(|| {
             let key = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
@@ -265,6 +289,92 @@ impl Inner {
         byte: u32,
         signature: bool,
     ) -> Option<syntax_intel::Context> {
+        let inventory = self.workspace.source_inventory(uri.as_str())?;
+        let semantic_source = self.semantic_completion_source(uri, byte, &inventory);
+        self.syntax_context_with_source(uri, text, byte, signature, &inventory, semantic_source)
+    }
+
+    /// Source paths need execution evidence before they can use configured
+    /// names. Existing occurrence anchors provide that evidence without a
+    /// second macro execution or a scan of enclosing statement text.
+    fn semantic_completion_source(
+        &mut self,
+        uri: &Url,
+        byte: u32,
+        inventory: &crate::engine::analysis::source_inventory::SourceInventory,
+    ) -> bool {
+        let macro_token = inventory
+            .macro_tokens
+            .partition_point(|token| token.span.end < byte);
+        if inventory
+            .macro_tokens
+            .get(macro_token)
+            .is_some_and(|token| {
+                matches!(token.kind, TokenKind::MacroDir | TokenKind::MacroInterp)
+                    && token.span.start <= byte
+                    && byte <= token.span.end
+            })
+        {
+            return false;
+        }
+        if self.context_ambiguous(uri)
+            || inventory.coverage_cause.is_some()
+            || inventory.macro_path(byte).iter().any(|step| step.loop_body)
+        {
+            return false;
+        }
+        let roots = self.context_roots(uri);
+        if roots.is_empty() {
+            return inventory.macro_path(byte).is_empty();
+        }
+        let file = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
+        for root in roots {
+            self.prepare_root(&root);
+            if self
+                .workspace
+                .effective_positions(root.as_str(), &file, byte)
+                .len()
+                != 1
+            {
+                return false;
+            }
+            if self
+                .workspace
+                .get_effective_model(root.as_str())
+                .is_none_or(|model| model.macro_incomplete())
+                || !self.workspace.includes_complete(root.as_str())
+            {
+                return false;
+            }
+            if inventory.macro_path(byte).is_empty() {
+                continue;
+            }
+            let Some(origins) = self.workspace.effective_origins(root.as_str()) else {
+                return false;
+            };
+            let Some(model) = self.workspace.get_effective_model(root.as_str()) else {
+                return false;
+            };
+            if !model.expanded_tokens.iter().any(|token| {
+                origins.map(token.span).is_some_and(|(owner, anchor)| {
+                    owner == file && inventory.literal_anchor_on_path(anchor, byte)
+                })
+            }) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn syntax_context_with_source(
+        &mut self,
+        uri: &Url,
+        text: &str,
+        byte: u32,
+        signature: bool,
+        inventory: &crate::engine::analysis::source_inventory::SourceInventory,
+        semantic_source: bool,
+    ) -> Option<syntax_intel::Context> {
         #[cfg(test)]
         SYNTAX_CONTEXT_READS.with(|reads| reads.set(reads.get() + 1));
         let read = if signature {
@@ -272,10 +382,7 @@ impl Inner {
         } else {
             syntax_intel::context
         };
-        let local = self
-            .workspace
-            .get_model(uri.as_str())
-            .and_then(|model| read(model, text, byte));
+        let local = syntax_intel::source_context(inventory, text, byte, signature);
         // Macro and literal/comment checks concern the displayed source. Native
         // fragments can acquire a Dynare context only from a proven include.
         if local
@@ -286,6 +393,9 @@ impl Inner {
         }
         if self.context_ambiguous(uri) {
             return None;
+        }
+        if !semantic_source {
+            return local;
         }
         let roots = self.context_roots(uri);
         if roots.is_empty() {
@@ -300,10 +410,22 @@ impl Inner {
                 .effective_positions(root.as_str(), &file, byte);
             let model = self.workspace.get_effective_model(root.as_str())?;
             for position in positions {
-                contexts.push(read(model, &model.source, position)?);
+                let context = read(model, &model.source, position)?;
+                // Spliced source positions also cover discarded text. A root
+                // with no accepted statement here cannot replace a proven
+                // written block context with its generic top-level fallback.
+                contexts.push(
+                    if context.language == "top_level" && context.parent.is_none() {
+                        local.clone().unwrap_or(context)
+                    } else {
+                        context
+                    },
+                );
             }
         }
-        let first = contexts.first()?;
+        let Some(first) = contexts.first() else {
+            return local;
+        };
         contexts
             .iter()
             .all(|context| context == first)
@@ -644,6 +766,13 @@ impl Backend {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    async fn report_source_inspection(&self, uri: &Url) {
+        let notice = self.lock_inner().source_inspection_notice(uri);
+        if let Some(notice) = notice {
+            self.client.show_message(MessageType::INFO, notice).await;
+        }
+    }
+
     pub fn presentation_settings(&self, uri: &Url) -> PresentationSettings {
         self.lock_inner().presentation_for(uri)
     }
@@ -815,9 +944,14 @@ impl Backend {
         let mut inner = self.lock_inner();
         let text = inner.document(uri)?.text.clone();
         let preferences = inner.presentation_for(uri);
+        let inventory = inner.workspace.source_inventory(uri.as_str())?;
         let roots = inner.context_roots(uri);
         if inner.context_ambiguous(uri) {
-            return None;
+            let mut rows = Vec::new();
+            model_map::add_source_symbols(&mut rows, &inventory, &text, &preferences, |_| {
+                crate::engine::analysis_configuration::SourceAvailability::Unknown
+            });
+            return Some(rows);
         }
         let mut views = Vec::new();
         for root in &roots {
@@ -844,18 +978,20 @@ impl Backend {
             }
             views.push(rows);
         }
-        if roots.len() > 1 {
-            return Some(common_leaves(views));
-        }
-        if let Some(view) = views.pop().filter(|view| !view.is_empty()) {
-            return Some(view);
-        }
-        let model = inner.workspace.get_model(uri.as_str())?;
-        let report = crate::engine::language::expand::expand_report(&text);
-        Some(
+        let mut rows = if roots.len() > 1 {
+            common_leaves(views)
+        } else if let Some(view) = views.pop() {
+            view
+        } else {
+            let model = inner.workspace.get_model(uri.as_str())?;
+            let report = crate::engine::language::expand::expand_report(&text);
             WrittenView::new(uri, &text, model, &report.model_map, None, false, false)
-                .symbols(&preferences),
-        )
+                .symbols(&preferences)
+        };
+        model_map::add_source_symbols(&mut rows, &inventory, &text, &preferences, |_| {
+            crate::engine::analysis_configuration::SourceAvailability::Unknown
+        });
+        Some(rows)
     }
 
     fn workspace_symbols(&self, query: &str) -> Vec<SymbolInformation> {
@@ -1084,10 +1220,24 @@ impl Backend {
         }) {
             return Some(CompletionResponse::Array(Vec::new()));
         }
-        if let Some(item) = metadata_completion_item(&mut inner, &pos.text_document.uri, byte) {
+        let inventory = inner
+            .workspace
+            .source_inventory(pos.text_document.uri.as_str())?;
+        let semantic_source =
+            inner.semantic_completion_source(&pos.text_document.uri, byte, &inventory);
+        if semantic_source
+            && let Some(item) = metadata_completion_item(&mut inner, &pos.text_document.uri, byte)
+        {
             return Some(CompletionResponse::Array(vec![item]));
         }
-        let mut syntax_context = inner.syntax_context(&pos.text_document.uri, &text, byte, false);
+        let mut syntax_context = inner.syntax_context_with_source(
+            &pos.text_document.uri,
+            &text,
+            byte,
+            false,
+            &inventory,
+            semantic_source,
+        );
         let Some(mut syntax_context) = syntax_context.take() else {
             return Some(CompletionResponse::Array(Vec::new()));
         };
@@ -1110,8 +1260,9 @@ impl Backend {
         // Option-value completion can change the display context below. Typed
         // names keep the original source context resolved for this request.
         let source_context = syntax_context.clone();
-        if let Some(items) =
-            typed_names::completions(&mut inner, &pos.text_document.uri, byte, &source_context)
+        if semantic_source
+            && let Some(items) =
+                typed_names::completions(&mut inner, &pos.text_document.uri, byte, &source_context)
         {
             return Some(CompletionResponse::Array(items));
         }
@@ -1151,32 +1302,55 @@ impl Backend {
             }]));
         }
         let preferences = inner.presentation_for(&pos.text_document.uri);
-        let views = inner.name_views(&pos.text_document.uri)?;
-        let mut groups = views.iter().map(|(model, _)| {
-            default_completions(
-                model,
-                &preferences,
-                inner.completion_label_details,
-                inner.completion_snippets,
-                &syntax_context,
-            )
-        });
-        let mut items = groups.next()?;
-        for group in groups {
-            items.retain(|item| group.contains(item));
-        }
+        let mut items = if semantic_source {
+            let views = inner.name_views(&pos.text_document.uri)?;
+            let mut groups = views.iter().map(|(model, _)| {
+                default_completions(
+                    model,
+                    &preferences,
+                    inner.completion_label_details,
+                    inner.completion_snippets,
+                    &syntax_context,
+                )
+            });
+            let mut items = groups.next()?;
+            for group in groups {
+                items.retain(|item| group.contains(item));
+            }
+            items
+        } else {
+            syntax_intel::completions(&syntax_context)
+        };
         items.extend(value_items);
-        items.extend(locals::completions(
-            &mut inner,
-            &pos.text_document.uri,
-            byte,
-            &preferences,
-        ));
-        items.extend(typed_names::expression_completions(
-            &mut inner,
-            &pos.text_document.uri,
-            &source_context,
-        ));
+        if semantic_source {
+            items.extend(locals::completions(
+                &mut inner,
+                &pos.text_document.uri,
+                byte,
+                &preferences,
+            ));
+            items.extend(typed_names::expression_completions(
+                &mut inner,
+                &pos.text_document.uri,
+                &source_context,
+            ));
+        }
+        {
+            let mut names: HashSet<_> = items.iter().map(|item| item.label.clone()).collect();
+            for candidate in inventory.compatible_candidates(byte) {
+                let Some(name) = &candidate.name else {
+                    continue;
+                };
+                if names.insert(name.clone()) {
+                    items.push(CompletionItem {
+                        label: name.clone(),
+                        kind: Some(CompletionItemKind::TEXT),
+                        detail: Some("source candidate · unverified".into()),
+                        ..CompletionItem::default()
+                    });
+                }
+            }
+        }
         Some(CompletionResponse::Array(items))
     }
 
@@ -1387,30 +1561,30 @@ impl Backend {
     fn folding_ranges(&self, uri: &Url) -> Option<Vec<FoldingRange>> {
         let inner = self.lock_inner();
         let text = crate::engine::language::parser::normalize_newlines(&inner.document(uri)?.text);
-        let model = inner.workspace.get_model(uri.as_str())?;
+        let inventory = inner.workspace.source_inventory(uri.as_str())?;
         let index = LineIndex::new(&text);
-        let mut ranges: Vec<_> =
-            crate::engine::analysis::folding::source_folds(&text, &model.macro_directives)
-                .into_iter()
-                .filter_map(|fold| {
-                    let start_line = index.position_utf16(&text, fold.span.start).line;
-                    let end_line = index
-                        .position_utf16(&text, fold.span.end.saturating_sub(1))
-                        .line;
-                    (start_line < end_line).then_some(FoldingRange {
-                        start_line,
-                        end_line,
-                        start_character: None,
-                        end_character: None,
-                        kind: Some(if fold.comment {
-                            FoldingRangeKind::Comment
-                        } else {
-                            FoldingRangeKind::Region
-                        }),
-                        collapsed_text: None,
-                    })
+        let mut ranges: Vec<_> = inventory
+            .folds
+            .iter()
+            .filter_map(|fold| {
+                let start_line = index.position_utf16(&text, fold.span.start).line;
+                let end_line = index
+                    .position_utf16(&text, fold.span.end.saturating_sub(1))
+                    .line;
+                (start_line < end_line).then_some(FoldingRange {
+                    start_line,
+                    end_line,
+                    start_character: None,
+                    end_character: None,
+                    kind: Some(if fold.comment {
+                        FoldingRangeKind::Comment
+                    } else {
+                        FoldingRangeKind::Region
+                    }),
+                    collapsed_text: None,
                 })
-                .collect();
+            })
+            .collect();
         // VS Code exposes one fold per starting line and accepts only nested
         // or disjoint ranges. Prefer the enclosing construct at a shared line.
         ranges.sort_by_key(|range| (range.start_line, std::cmp::Reverse(range.end_line)));
@@ -2729,6 +2903,9 @@ impl LanguageServer for Backend {
                 crate::engine::workspace::include_resolver::normalize_uri(candidate.as_str()) != key
             });
             inner.document_contexts.remove(&key);
+            inner.source_inspection_notices.retain(|candidate, _| {
+                crate::engine::workspace::include_resolver::normalize_uri(candidate.as_str()) != key
+            });
             inner.workspace.remove_document(uri.as_str());
             inner.workspace_changed(&uri, false);
             inner.refresh_diagnostics(Some(&uri))
@@ -2847,9 +3024,12 @@ impl LanguageServer for Backend {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
         ordering::ready().await;
-        Ok(self
+        let result = self
             .doc_symbols(&params.text_document.uri)
-            .map(DocumentSymbolResponse::Nested))
+            .map(DocumentSymbolResponse::Nested);
+        self.report_source_inspection(&params.text_document.uri)
+            .await;
+        Ok(result)
     }
 
     async fn symbol(
@@ -2857,7 +3037,12 @@ impl LanguageServer for Backend {
         params: WorkspaceSymbolParams,
     ) -> Result<Option<Vec<SymbolInformation>>> {
         ordering::ready().await;
-        Ok(Some(self.workspace_symbols(&params.query)))
+        let result = self.workspace_symbols(&params.query);
+        let uris: Vec<_> = self.lock_inner().docs.keys().cloned().collect();
+        for uri in uris {
+            self.report_source_inspection(&uri).await;
+        }
+        Ok(Some(result))
     }
 
     async fn goto_definition(
@@ -2925,12 +3110,18 @@ impl LanguageServer for Backend {
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         ordering::ready().await;
-        Ok(self.complete(&params.text_document_position, params.context.as_ref()))
+        let result = self.complete(&params.text_document_position, params.context.as_ref());
+        self.report_source_inspection(&params.text_document_position.text_document.uri)
+            .await;
+        Ok(result)
     }
 
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
         ordering::ready().await;
-        Ok(self.signature_at(&params.text_document_position_params))
+        let result = self.signature_at(&params.text_document_position_params);
+        self.report_source_inspection(&params.text_document_position_params.text_document.uri)
+            .await;
+        Ok(result)
     }
 
     async fn prepare_rename(
@@ -2973,7 +3164,10 @@ impl LanguageServer for Backend {
 
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         ordering::ready().await;
-        Ok(self.folding_ranges(&params.text_document.uri))
+        let result = self.folding_ranges(&params.text_document.uri);
+        self.report_source_inspection(&params.text_document.uri)
+            .await;
+        Ok(result)
     }
 
     async fn selection_range(

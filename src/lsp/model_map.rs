@@ -7,6 +7,8 @@ use serde_json::{Value, json};
 use tower_lsp::lsp_types::*;
 
 use crate::engine::analysis::model_info::{TimingInfo, classify_variable_timing};
+use crate::engine::analysis::source_inventory::{SourceInventory, SourceItem, SourceItemKind};
+use crate::engine::analysis_configuration::SourceAvailability;
 use crate::engine::language::model::{Model, StatementKind, WrittenDeclaration};
 use crate::engine::language::span::{LineIndex, Span};
 use crate::engine::workspace::Workspace;
@@ -773,7 +775,7 @@ impl<'a> WrittenView<'a> {
                 ) {
                     output.push(symbol(
                         name,
-                        Some("macro definition".into()),
+                        None,
                         if function {
                             SymbolKind::FUNCTION
                         } else {
@@ -788,6 +790,147 @@ impl<'a> WrittenView<'a> {
         }
         output.sort_by_key(|row| range_key(row.range));
         output
+    }
+}
+
+/// Merge written rows by their source locations. Accepted rows keep their
+/// semantic labels, timing and equation numbers; added rows make no such claim.
+pub(crate) fn add_source_symbols(
+    rows: &mut Vec<DocumentSymbol>,
+    inventory: &SourceInventory,
+    text: &str,
+    preferences: &PresentationSettings,
+    availability: impl Fn(&SourceItem) -> SourceAvailability,
+) {
+    let enabled = |section: &str| {
+        preferences
+            .outline
+            .sections
+            .iter()
+            .any(|value| value == section)
+    };
+    let normalized = crate::engine::language::parser::normalize_newlines(text);
+    let index = LineIndex::new(&normalized);
+    let range = |span: Span| super::span_range(&index, &normalized, span);
+    fn flatten(mut row: DocumentSymbol, flat: &mut Vec<DocumentSymbol>) {
+        let children = row.children.take();
+        flat.push(row);
+        if let Some(children) = children {
+            for child in children {
+                flatten(child, flat);
+            }
+        }
+    }
+    let mut flat = Vec::new();
+    for row in rows.drain(..) {
+        flatten(row, &mut flat);
+    }
+    let mut selections: BTreeSet<_> = flat
+        .iter()
+        .map(|row| range_key(row.selection_range))
+        .collect();
+    let mut spans: BTreeSet<_> = flat.iter().map(|row| range_key(row.range)).collect();
+    for item in &inventory.items {
+        let show = match item.kind {
+            SourceItemKind::Declaration | SourceItemKind::MacroDefinition => {
+                enabled("declarations")
+            }
+            SourceItemKind::Block
+            | SourceItemKind::Conditional
+            | SourceItemKind::Branch
+            | SourceItemKind::Loop => enabled("blocks"),
+            SourceItemKind::Equation => enabled("equations"),
+            SourceItemKind::Command => enabled("commands"),
+            _ => false,
+        };
+        if !show {
+            continue;
+        }
+        let selection = range(item.selection);
+        let span = range(item.span);
+        if selections.contains(&range_key(selection)) || spans.contains(&range_key(span)) {
+            continue;
+        }
+        let state = availability(item);
+        let status = match state {
+            SourceAvailability::Active => "active",
+            SourceAvailability::Inactive => "inactive",
+            SourceAvailability::Mixed => "mixed",
+            SourceAvailability::Unknown => "unknown",
+        };
+        let literal_candidate =
+            item.kind == SourceItemKind::Declaration && item.span == item.selection;
+        let detail = if literal_candidate {
+            format!("source candidate · {status}")
+        } else if item.template {
+            format!("source template · {status}")
+        } else {
+            status.into()
+        };
+        let name = item.name.clone().unwrap_or_else(|| {
+            text.get(item.span.start as usize..item.span.end as usize)
+                .unwrap_or("source template")
+                .trim()
+                .chars()
+                .take(80)
+                .collect()
+        });
+        let name = if matches!(
+            item.kind,
+            SourceItemKind::Conditional | SourceItemKind::Branch | SourceItemKind::Loop
+        ) {
+            text.get(item.selection.start as usize..item.selection.end as usize)
+                .unwrap_or(&name)
+                .trim()
+                .chars()
+                .take(120)
+                .collect()
+        } else {
+            name
+        };
+        let icon = match item.kind {
+            SourceItemKind::Declaration if literal_candidate => SymbolKind::VARIABLE,
+            SourceItemKind::Declaration => SymbolKind::NAMESPACE,
+            SourceItemKind::Equation => SymbolKind::OPERATOR,
+            SourceItemKind::MacroDefinition if item.function => SymbolKind::FUNCTION,
+            SourceItemKind::MacroDefinition => SymbolKind::CONSTANT,
+            SourceItemKind::Command => SymbolKind::EVENT,
+            _ => SymbolKind::MODULE,
+        };
+        selections.insert(range_key(selection));
+        spans.insert(range_key(span));
+        flat.push(symbol(
+            name,
+            Some(detail),
+            icon,
+            span,
+            selection,
+            Vec::new(),
+        ));
+    }
+    // A single ordered stack groups only ranges that prove containment. It
+    // avoids searching every existing Outline row for each source candidate.
+    flat.sort_by_key(|row| (row.range.start, std::cmp::Reverse(row.range.end)));
+    let mut stack: Vec<DocumentSymbol> = Vec::new();
+    fn finish(stack: &mut Vec<DocumentSymbol>, output: &mut Vec<DocumentSymbol>) {
+        let row = stack.pop().expect("nonempty Outline stack");
+        if let Some(parent) = stack.last_mut() {
+            parent.children.get_or_insert_with(Vec::new).push(row);
+        } else {
+            output.push(row);
+        }
+    }
+    for row in flat {
+        while stack
+            .last()
+            .is_some_and(|parent| parent.range == row.range || !contains(parent.range, row.range))
+        {
+            finish(&mut stack, rows);
+        }
+        stack.push(row);
+    }
+    while !stack.is_empty() {
+        finish(&mut stack, rows);
     }
 }
 

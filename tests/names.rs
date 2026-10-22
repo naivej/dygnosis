@@ -1071,7 +1071,15 @@ async fn several_owners_keep_common_facts_and_withhold_conflicting_roles_and_tim
     let tokens = decode(&full(server, &child).await, &legend);
     assert!(tokens.iter().all(|token| token.3 == "dynareParameter"));
     let items = completion(server, &child).await;
-    assert!(!items.iter().any(|item| item.label == "y"));
+    // Conflicting owner roles still allow the written name as an unverified
+    // candidate, without selecting either owner's semantic kind or timing.
+    let candidate = items.iter().find(|item| item.label == "y").unwrap();
+    assert_eq!(candidate.kind, Some(CompletionItemKind::TEXT));
+    assert_eq!(
+        candidate.detail.as_deref(),
+        Some("source candidate · unverified")
+    );
+    assert!(candidate.documentation.is_none());
     assert!(
         items
             .iter()
