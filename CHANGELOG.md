@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.11.32
+
+- Hover and model-local completion respond faster in large models.
+- Large models are checked faster after edits.
+
 ## v0.11.31
 
 - Fix a freeze that could stop model features after rapid edits or settings changes.

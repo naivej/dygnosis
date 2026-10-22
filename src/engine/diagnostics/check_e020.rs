@@ -406,6 +406,7 @@ fn check_undeclared_equations(model: &Model, orders: &mut Vec<usize>) -> Vec<Dia
 
     let mut seen = HashSet::new();
     let mut diagnostics = Vec::new();
+    let visibility = EquationVisibility::collect(model);
     for (eq, removed) in eqs {
         if crate::engine::control::cancelled() {
             return Default::default();
@@ -420,7 +421,6 @@ fn check_undeclared_equations(model: &Model, orders: &mut Vec<usize>) -> Vec<Dia
         {
             continue;
         }
-        let visible = visible_names(model, eq);
         for r in expression_reads(model, eq) {
             if crate::engine::control::cancelled() {
                 return Default::default();
@@ -433,7 +433,7 @@ fn check_undeclared_equations(model: &Model, orders: &mut Vec<usize>) -> Vec<Dia
             if removed && model.dropped_by_surgery_after(r.name, eq.span.start) {
                 continue;
             }
-            if visible.contains(&r.name)
+            if visibility.contains(eq, r.name)
                 || local_hides_unknown(model, eq, r.name, eq.parse_order, &pounds, &earliest)
             {
                 continue;
@@ -598,48 +598,99 @@ fn undeclared_diag(
     }
 }
 
-fn visible_names(model: &Model, eq: &Equation) -> HashSet<Name> {
-    let nested_ok = |decl: &Decl| {
-        model
-            .model_block
-            .is_some_and(|block| nested_or_equal(block, decl.span))
-    };
-    let mut visible = HashSet::new();
-    // Semantic endogenous tags can declare a symbol without a separate Decl.
-    // The exact expression read captures whether that declaration was live.
-    visible.extend(
-        model
-            .model_expression_uses
+/// One check's visibility facts. Each equation queries only its read names;
+/// it does not rebuild a set from every declaration and captured use.
+#[derive(Default)]
+struct EquationVisibility {
+    declarations: HashMap<Name, usize>,
+    captured_uses: HashMap<Name, Vec<usize>>,
+    written_starts: HashMap<Name, u32>,
+}
+
+impl EquationVisibility {
+    fn collect(model: &Model) -> Self {
+        let mut visibility = Self::default();
+        for decl in visibility_decls(model) {
+            if crate::engine::control::cancelled() {
+                return visibility;
+            }
+            let nested = model
+                .model_block
+                .is_some_and(|block| nested_or_equal(block, decl.span));
+            let order = if nested { 0 } else { decl.parse_order };
+            visibility
+                .declarations
+                .entry(decl.name)
+                .and_modify(|earliest| *earliest = (*earliest).min(order))
+                .or_insert(order);
+        }
+        // Endogenous tags can declare a symbol without a separate Decl. Keep
+        // each known read's execution order, because macro spans can repeat.
+        for usage in &model.model_expression_uses {
+            if crate::engine::control::cancelled() {
+                return visibility;
+            }
+            if model
+                .symbol_kind_in_context(usage.name, usage.context)
+                .is_some()
+            {
+                visibility
+                    .captured_uses
+                    .entry(usage.name)
+                    .or_default()
+                    .push(usage.parse_order);
+            }
+        }
+        for orders in visibility.captured_uses.values_mut() {
+            if crate::engine::control::cancelled() {
+                return visibility;
+            }
+            orders.sort_unstable();
+        }
+        // Trend and epilogue visibility follows written source positions,
+        // independently of the declaration and captured-use execution rules.
+        for (name, span) in model
+            .trend_vars
             .iter()
-            .filter(|usage| {
-                eq.active_tokens.contains(&usage.parse_order)
-                    && model
-                        .symbol_kind_in_context(usage.name, usage.context)
-                        .is_some()
-            })
-            .map(|usage| usage.name),
-    );
-    for decl in visibility_decls(model) {
-        if crate::engine::control::cancelled() {
-            return Default::default();
+            .map(|trend| (trend.name, trend.span))
+            .chain(
+                model
+                    .epilogue
+                    .iter()
+                    .map(|assignment| (assignment.name, assignment.span)),
+            )
+        {
+            if crate::engine::control::cancelled() {
+                return visibility;
+            }
+            visibility
+                .written_starts
+                .entry(name)
+                .and_modify(|earliest| *earliest = (*earliest).min(span.start))
+                .or_insert(span.start);
         }
-        if nested_ok(decl) || decl.parse_order <= eq.parse_order {
-            visible.insert(decl.name);
-        }
+        visibility
     }
-    // Trend variables and epilogue names are not `Decl`s but the model block
-    // may still use each one from its declaration onward.
-    for (name, span) in model
-        .trend_vars
-        .iter()
-        .map(|t| (t.name, t.span))
-        .chain(model.epilogue.iter().map(|a| (a.name, a.span)))
-    {
-        if span.start <= eq.span.start {
-            visible.insert(name);
+
+    fn contains(&self, equation: &Equation, name: Name) -> bool {
+        if self
+            .declarations
+            .get(&name)
+            .is_some_and(|order| *order <= equation.parse_order)
+            || self
+                .written_starts
+                .get(&name)
+                .is_some_and(|start| *start <= equation.span.start)
+        {
+            return true;
         }
+        self.captured_uses.get(&name).is_some_and(|orders| {
+            let first = orders.partition_point(|order| *order < equation.active_tokens.start);
+            orders
+                .get(first)
+                .is_some_and(|order| *order < equation.active_tokens.end)
+        })
     }
-    visible
 }
 
 fn visibility_decls(model: &Model) -> Vec<&Decl> {
@@ -823,4 +874,44 @@ fn is_skipped_ref(name: &str) -> bool {
         "end",
     ];
     BUILTINS.iter().any(|b| name.eq_ignore_ascii_case(b))
+}
+
+#[cfg(test)]
+mod visibility_index_tests {
+    use super::*;
+    use crate::engine::language::parser::parse;
+
+    #[test]
+    fn late_declarations_do_not_hide_earlier_macro_copy_unknowns() {
+        // Guards a final declaration table making an earlier macro copy known.
+        // Both refused copies share the same written span; later uses are valid.
+        let source = "var y;\n@#for i in 1:2\nmodel; y=late@{i}; end;\nvar late@{i};\nmodel; y=late@{i}; end;\n@#endfor\n";
+        let model = parse(source);
+        let rows: Vec<_> = check_e020(&model)
+            .into_iter()
+            .filter(|row| row.code == "E020")
+            .collect();
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert!(rows[0].message.starts_with("Undeclared identifier 'late1'"));
+        assert!(rows[1].message.starts_with("Undeclared identifier 'late2'"));
+        assert_eq!(rows[0].span, rows[1].span);
+    }
+
+    #[test]
+    fn equation_tag_visibility_starts_at_its_captured_use() {
+        // Guards treating a later endogenous tag's captured symbol as globally
+        // visible, or losing that symbol in equations after its declaration.
+        let source = "var y; model; y=tagged; end; model; [endogenous='tagged'] tagged=0; end; model; y=tagged; end;";
+        let model = parse(source);
+        let rows: Vec<_> = check_e020(&model)
+            .into_iter()
+            .filter(|row| row.code == "E020")
+            .collect();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(
+            &model.source[rows[0].span.start as usize..rows[0].span.end as usize],
+            "tagged"
+        );
+        assert_eq!(rows[0].span.start as usize, source.find("tagged").unwrap());
+    }
 }

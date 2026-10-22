@@ -9,7 +9,7 @@ use crate::engine::analysis::equations::{EquationRow, equations, heterogeneous_e
 use crate::engine::diagnostics::{WritingContext, WritingRows};
 use crate::engine::language::expand::{EquationOrigin, ExpandReport};
 use crate::engine::language::expr::ExprKind;
-use crate::engine::language::lexer::{TokenKind, tokenize};
+use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::model::Model;
 use crate::engine::language::span::Span;
 use crate::engine::workspace::Workspace;
@@ -639,6 +639,17 @@ fn declaration_edit(source: &str, symbol: Span, name: &str) -> Option<(Span, Str
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static METADATA_LEXED_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn metadata_tokens(source: &str) -> Vec<Token> {
+    #[cfg(test)]
+    METADATA_LEXED_BYTES.with(|bytes| bytes.set(bytes.get() + source.len()));
+    tokenize(source)
+}
+
 fn group_close(source: &str, open: usize, delimiter: u8) -> Option<usize> {
     let close_kind = if delimiter == b']' {
         TokenKind::RBrack
@@ -651,7 +662,7 @@ fn group_close(source: &str, open: usize, delimiter: u8) -> Option<usize> {
         TokenKind::LParen
     };
     let mut depth = 0;
-    for token in tokenize(source.get(open..)?) {
+    for token in metadata_tokens(source.get(open..)?) {
         if token.kind == open_kind {
             depth += 1;
         }
@@ -663,6 +674,27 @@ fn group_close(source: &str, open: usize, delimiter: u8) -> Option<usize> {
         }
     }
     None
+}
+
+fn group_closes(tokens: &[Token]) -> HashMap<usize, usize> {
+    // Each delimiter kind has its own nesting depth, as in group_close. Keep
+    // that behavior for unfinished or crossed groups during editor recovery.
+    let mut parentheses = Vec::new();
+    let mut brackets = Vec::new();
+    let mut closes = HashMap::new();
+    for token in tokens {
+        let stack = match token.kind {
+            TokenKind::LParen | TokenKind::RParen => &mut parentheses,
+            TokenKind::LBrack | TokenKind::RBrack => &mut brackets,
+            _ => continue,
+        };
+        if matches!(token.kind, TokenKind::LParen | TokenKind::LBrack) {
+            stack.push(token.span.start as usize);
+        } else if let Some(open) = stack.pop() {
+            closes.insert(open, token.span.start as usize);
+        }
+    }
+    closes
 }
 
 /// Read keys as lexer tokens so comments and unrelated quoted values cannot
@@ -991,7 +1023,8 @@ fn completion_sites(source: &str, cursor: usize) -> Vec<CompletionSite> {
     {
         return Vec::new();
     }
-    let tokens = tokenize(source);
+    let tokens = metadata_tokens(source);
+    let closes = group_closes(&tokens);
     let mut sites = Vec::new();
     let mut inside_group = false;
     for token in tokens
@@ -1005,7 +1038,7 @@ fn completion_sites(source: &str, cursor: usize) -> Vec<CompletionSite> {
             _ => continue,
         };
         let open = token.span.start as usize;
-        let close = group_close(source, open, delimiter);
+        let close = closes.get(&open).copied();
         if close.is_some_and(|close| cursor > close + 1) {
             continue;
         }
@@ -1240,6 +1273,62 @@ fn cursor_in_comment(source: &str, cursor: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completion_group_index_keeps_nested_and_unfinished_group_boundaries() {
+        // Guards changed completion boundaries for nested, crossed, unfinished,
+        // quoted and commented delimiters while replacing repeated suffix lexing.
+        for source in [
+            "var y(long_name='x()'); model; [name='eq[1]']y=max(y(-1),1); end;",
+            "([)] ] unmatched( [name='tail'",
+            "var y (long_name= /* ) ] */ ''); // [ (\nmodel; [name=",
+            "@#define text = \"[(])\"\nvar y; model; y=y(-1); [name='x']y=0; end;",
+        ] {
+            let tokens = tokenize(source);
+            let closes = group_closes(&tokens);
+            for token in tokens {
+                let delimiter = match token.kind {
+                    TokenKind::LParen => b')',
+                    TokenKind::LBrack => b']',
+                    _ => continue,
+                };
+                let open = token.span.start as usize;
+                assert_eq!(
+                    closes.get(&open).copied(),
+                    group_close(source, open, delimiter),
+                    "{source} at {open}"
+                );
+            }
+        }
+        let source = "var y (long_name=\nmodel; [name=";
+        let cursor = source.len();
+        let sites = completion_sites(source, cursor);
+        assert!(
+            sites
+                .iter()
+                .any(|site| matches!(site.kind, MetadataKind::Equation)
+                    && site.group == Some(source.find('[').unwrap()))
+        );
+        assert!(completion_sites("model; /* [name= */ y=0;", "model; /* [name=".len()).is_empty());
+    }
+
+    #[test]
+    fn completion_does_not_relex_each_closed_expression_group() {
+        // Guards quadratic suffix lexing when completion follows hundreds of
+        // ordinary equations with nested function and timing parentheses.
+        let mut source = String::new();
+        for id in 1..=300 {
+            source.push_str(&format!("x{id}=max(x{id}(-1),x{id}(-2));\n"));
+        }
+        source.push_str("last_identifier");
+        METADATA_LEXED_BYTES.with(|bytes| bytes.set(0));
+        assert!(completion_sites(&source, source.len() - 1).is_empty());
+        assert_eq!(
+            METADATA_LEXED_BYTES.with(std::cell::Cell::get),
+            source.len(),
+            "closed expression groups require one full-source lexer pass"
+        );
+    }
 
     // Allocator tests exercise all rows; the editor entry point always validates
     // a single note's revision-bound scope before calling the row planner.

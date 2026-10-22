@@ -33,6 +33,21 @@ fn label(kind: &str) -> &'static str {
     }
 }
 
+pub(super) fn root_view(inner: &mut Inner, root: &Url) -> Option<Arc<SemanticModel>> {
+    let revision = inner.root_revision(root)?;
+    if let Some(view) = inner.semantic_views.get(root)
+        && view.revision == revision
+    {
+        return Some(Arc::clone(view));
+    }
+    inner.semantic_views.remove(root);
+    let view =
+        Arc::new(SemanticModel::capture(&mut inner.workspace, root.as_str(), revision).ok()?);
+    inner.semantic_views.insert(root.clone(), Arc::clone(&view));
+    inner.bound_workspace_cache();
+    Some(view)
+}
+
 fn views(inner: &mut Inner, uri: &Url) -> Option<Vec<Arc<SemanticModel>>> {
     if inner.context_ambiguous(uri) {
         return None;
@@ -43,21 +58,7 @@ fn views(inner: &mut Inner, uri: &Url) -> Option<Vec<Arc<SemanticModel>>> {
     }
     roots
         .into_iter()
-        .map(|root| {
-            let revision = inner.root_revision(&root)?;
-            if let Some(view) = inner.semantic_views.get(&root)
-                && view.revision == revision
-            {
-                return Some(Arc::clone(view));
-            }
-            inner.semantic_views.remove(&root);
-            let view = Arc::new(
-                SemanticModel::capture(&mut inner.workspace, root.as_str(), revision).ok()?,
-            );
-            inner.semantic_views.insert(root, Arc::clone(&view));
-            inner.bound_workspace_cache();
-            Some(view)
-        })
+        .map(|root| root_view(inner, &root))
         .collect()
 }
 
@@ -351,15 +352,9 @@ fn completion(binding: &Binding) -> CompletionItem {
 pub(super) fn expression_completions(
     inner: &mut Inner,
     uri: &Url,
-    byte: u32,
+    context: &syntax_intel::Context,
 ) -> Vec<CompletionItem> {
-    let Some(text) = inner.document(uri).map(|document| document.text.clone()) else {
-        return Vec::new();
-    };
-    if !inner
-        .syntax_context(uri, &text, byte, false)
-        .is_some_and(|context| context.language == "model_expression")
-    {
+    if context.language != "model_expression" {
         return Vec::new();
     }
     let Some(views) = views(inner, uri) else {
@@ -460,8 +455,7 @@ enum Slot {
     Generated,
 }
 
-fn slot(inner: &mut Inner, uri: &Url, text: &str, byte: u32) -> Option<Slot> {
-    let context = inner.syntax_context(uri, text, byte, false)?;
+fn slot(context: &syntax_intel::Context, text: &str, byte: u32) -> Option<Slot> {
     if context.language == "macro_expression" {
         return None;
     }
@@ -539,9 +533,14 @@ fn slot(inner: &mut Inner, uri: &Url, text: &str, byte: u32) -> Option<Slot> {
 }
 
 /// Some(empty) is a typed name slot with no valid declared candidates.
-pub(super) fn completions(inner: &mut Inner, uri: &Url, byte: u32) -> Option<Vec<CompletionItem>> {
+pub(super) fn completions(
+    inner: &mut Inner,
+    uri: &Url,
+    byte: u32,
+    context: &syntax_intel::Context,
+) -> Option<Vec<CompletionItem>> {
     let text = inner.document(uri)?.text.clone();
-    let slot = slot(inner, uri, &text, byte)?;
+    let slot = slot(context, &text, byte)?;
     let views = views(inner, uri)?;
     let mut groups = views.iter().map(|view| {
         let bindings = view.bindings();

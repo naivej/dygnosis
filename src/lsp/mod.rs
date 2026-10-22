@@ -23,6 +23,11 @@ mod locals;
 mod rename;
 
 #[cfg(test)]
+thread_local! {
+    static SYNTAX_CONTEXT_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
 mod ordering_tests;
 
 use serde_json::{Value, json};
@@ -239,6 +244,8 @@ impl Inner {
         byte: u32,
         signature: bool,
     ) -> Option<syntax_intel::Context> {
+        #[cfg(test)]
+        SYNTAX_CONTEXT_READS.with(|reads| reads.set(reads.get() + 1));
         let read = if signature {
             syntax_intel::signature_context
         } else {
@@ -1068,7 +1075,12 @@ impl Backend {
             ));
             return Some(CompletionResponse::Array(items));
         }
-        if let Some(items) = typed_names::completions(&mut inner, &pos.text_document.uri, byte) {
+        // Option-value completion can change the display context below. Typed
+        // names keep the original source context resolved for this request.
+        let source_context = syntax_context.clone();
+        if let Some(items) =
+            typed_names::completions(&mut inner, &pos.text_document.uri, byte, &source_context)
+        {
             return Some(CompletionResponse::Array(items));
         }
         let mut value_items = Vec::new();
@@ -1131,7 +1143,7 @@ impl Backend {
         items.extend(typed_names::expression_completions(
             &mut inner,
             &pos.text_document.uri,
-            byte,
+            &source_context,
         ));
         Some(CompletionResponse::Array(items))
     }

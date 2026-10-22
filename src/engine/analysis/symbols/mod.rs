@@ -247,6 +247,10 @@ impl SemanticModel {
         Ok(result)
     }
 
+    pub(crate) fn local_facts(&self) -> &ModelLocals {
+        &self.facts
+    }
+
     pub fn written(&self, span: Span) -> Option<(String, Span)> {
         if let Some(written) = self.mappings.get(&span) {
             return Some(written.clone());

@@ -6,9 +6,15 @@ use crate::engine::language::intern::Name;
 
 struct LocalView {
     root: Url,
-    model: Model,
-    facts: ModelLocals,
-    standalone: bool,
+    analysis: LocalAnalysis,
+}
+
+enum LocalAnalysis {
+    Effective(Arc<crate::engine::analysis::symbols::SemanticModel>),
+    Standalone {
+        model: Box<Model>,
+        facts: ModelLocals,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +26,20 @@ struct Binding {
 }
 
 impl LocalView {
+    fn model(&self) -> &Model {
+        match &self.analysis {
+            LocalAnalysis::Effective(semantic) => &semantic.model,
+            LocalAnalysis::Standalone { model, .. } => model,
+        }
+    }
+
+    fn facts(&self) -> &ModelLocals {
+        match &self.analysis {
+            LocalAnalysis::Effective(semantic) => semantic.local_facts(),
+            LocalAnalysis::Standalone { facts, .. } => facts,
+        }
+    }
+
     fn binding(
         &self,
         definition: Option<usize>,
@@ -48,13 +68,15 @@ fn views(inner: &mut Inner, uri: &Url) -> Vec<LocalView> {
     roots
         .into_iter()
         .filter_map(|root| {
-            inner.root_revision(&root)?;
-            let model = if standalone {
-                inner.workspace.get_model(root.as_str())?
-            } else {
-                inner.workspace.get_effective_model(root.as_str())?
+            if !standalone {
+                let semantic = typed_names::root_view(inner, &root)?;
+                return Some(LocalView {
+                    root,
+                    analysis: LocalAnalysis::Effective(semantic),
+                });
             }
-            .clone();
+            inner.root_revision(&root)?;
+            let model = Box::new(inner.workspace.get_model(root.as_str())?.clone());
             let facts = ModelLocals::collect_before(
                 &model,
                 crate::engine::diagnostics::parse_preflight::first_refusal(&model)
@@ -62,54 +84,107 @@ fn views(inner: &mut Inner, uri: &Url) -> Vec<LocalView> {
             );
             Some(LocalView {
                 root,
-                model,
-                facts,
-                standalone,
+                analysis: LocalAnalysis::Standalone { model, facts },
             })
         })
         .collect()
 }
 
-fn written(inner: &mut Inner, view: &LocalView, span: Span) -> Option<(String, Span)> {
-    if view.standalone {
-        Some((
+fn written(view: &LocalView, span: Span) -> Option<(String, Span)> {
+    match &view.analysis {
+        LocalAnalysis::Standalone { .. } => Some((
             crate::engine::workspace::include_resolver::normalize_uri(view.root.as_str()),
             span,
-        ))
-    } else {
-        inner
-            .workspace
-            .map_effective_origin(view.root.as_str(), span)
+        )),
+        LocalAnalysis::Effective(semantic) => semantic.written(span),
     }
 }
 
 fn location(inner: &mut Inner, view: &LocalView, span: Span) -> Option<Location> {
-    let (file, span) = written(inner, view, span)?;
+    let (file, span) = written(view, span)?;
     let uri = naming_edit_url(inner, &view.root, &file)?;
     let source = inner.workspace.get_source(&file)?;
     source.get(span.start as usize..span.end as usize)?;
     Some(Location::new(
         uri,
-        span_range(&LineIndex::new(source), source, span),
+        span_range(&local_source_index(source), source, span),
     ))
 }
 
-fn at(inner: &mut Inner, view: &LocalView, uri: &Url, byte: u32, span: Span) -> bool {
-    written(inner, view, span).is_some_and(|(file, span)| {
-        file == crate::engine::workspace::include_resolver::normalize_uri(uri.as_str())
-            && span.start <= byte
-            && byte <= span.end
-    })
+#[cfg(test)]
+thread_local! {
+    static LOCAL_SOURCE_INDEX_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-fn selected(inner: &mut Inner, view: &LocalView, uri: &Url, byte: u32) -> Vec<Binding> {
+fn local_source_index(source: &str) -> LineIndex {
+    #[cfg(test)]
+    LOCAL_SOURCE_INDEX_BUILDS.with(|builds| builds.set(builds.get() + 1));
+    LineIndex::new(source)
+}
+
+struct DescriptionSource<'a> {
+    text: &'a str,
+    index: LineIndex,
+    uri: Option<Url>,
+}
+
+/// Source conversion shared by the local descriptions in one request.
+struct DescriptionSources<'a> {
+    inner: &'a Inner,
+    root: &'a Url,
+    sources: HashMap<String, Option<DescriptionSource<'a>>>,
+}
+
+impl<'a> DescriptionSources<'a> {
+    fn new(inner: &'a Inner, root: &'a Url) -> Self {
+        Self {
+            inner,
+            root,
+            sources: HashMap::new(),
+        }
+    }
+
+    fn source(&mut self, file: &str) -> Option<&DescriptionSource<'a>> {
+        let inner = self.inner;
+        let root = self.root;
+        self.sources
+            .entry(file.to_owned())
+            .or_insert_with(|| {
+                let text = inner.workspace.get_source(file)?;
+                Some(DescriptionSource {
+                    text,
+                    index: local_source_index(text),
+                    uri: naming_edit_url(inner, root, file),
+                })
+            })
+            .as_ref()
+    }
+
+    fn location(&mut self, view: &LocalView, span: Span) -> Option<Location> {
+        let (file, span) = written(view, span)?;
+        let source = self.source(&file)?;
+        source.text.get(span.start as usize..span.end as usize)?;
+        Some(Location::new(
+            source.uri.clone()?,
+            span_range(&source.index, source.text, span),
+        ))
+    }
+}
+
+fn at(view: &LocalView, file: &str, byte: u32, span: Span) -> bool {
+    written(view, span)
+        .is_some_and(|(target, span)| target == file && span.start <= byte && byte <= span.end)
+}
+
+fn selected(view: &LocalView, uri: &Url, byte: u32) -> Vec<Binding> {
+    let file = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
     let mut result = Vec::new();
-    for (id, declaration) in view.facts.declarations.iter().enumerate() {
-        if !at(inner, view, uri, byte, declaration.span) {
+    for (id, declaration) in view.facts().declarations.iter().enumerate() {
+        if !at(view, &file, byte, declaration.span) {
             continue;
         }
         let definitions: Vec<_> = view
-            .facts
+            .facts()
             .definitions
             .iter()
             .enumerate()
@@ -123,8 +198,8 @@ fn selected(inner: &mut Inner, view: &LocalView, uri: &Url, byte: u32) -> Vec<Bi
             }));
         }
     }
-    for (id, definition) in view.facts.definitions.iter().enumerate() {
-        if at(inner, view, uri, byte, definition.target_span) {
+    for (id, definition) in view.facts().definitions.iter().enumerate() {
+        if at(view, &file, byte, definition.target_span) {
             result.push(view.binding(
                 Some(id),
                 definition.declaration,
@@ -133,8 +208,8 @@ fn selected(inner: &mut Inner, view: &LocalView, uri: &Url, byte: u32) -> Vec<Bi
             ));
         }
     }
-    for usage in &view.facts.uses {
-        if at(inner, view, uri, byte, usage.span) {
+    for usage in &view.facts().uses {
+        if at(view, &file, byte, usage.span) {
             result.push(view.binding(
                 usage.definition,
                 usage.declaration,
@@ -153,9 +228,9 @@ fn selected(inner: &mut Inner, view: &LocalView, uri: &Url, byte: u32) -> Vec<Bi
 }
 
 fn expression(view: &LocalView, binding: Binding) -> Option<&str> {
-    let definition = view.facts.definitions.get(binding.definition?)?;
+    let definition = view.facts().definitions.get(binding.definition?)?;
     Some(
-        view.model
+        view.model()
             .written_equations
             .get(definition.equation_index)?
             .equation
@@ -165,38 +240,34 @@ fn expression(view: &LocalView, binding: Binding) -> Option<&str> {
 }
 
 fn description(
-    inner: &mut Inner,
+    sources: &mut DescriptionSources<'_>,
     view: &LocalView,
     binding: Binding,
     preferences: &PresentationSettings,
 ) -> String {
     let mut text = format!(
         "**Model-local variable** {}",
-        crate::lsp::names::code(view.model.name(binding.name))
+        crate::lsp::names::code(view.model().name(binding.name))
     );
     if preferences.name_details.tex
         && let Some(tex) = binding
             .declaration
-            .and_then(|id| view.facts.declarations[id].tex_name.as_ref())
+            .and_then(|id| view.facts().declarations[id].tex_name.as_ref())
     {
         text.push_str(&format!("\n\nTeX: {}", crate::lsp::names::code(tex)));
     }
     if let Some(expression) = expression(view, binding) {
-        let definition = &view.facts.definitions[binding.definition.unwrap()];
-        let row = &view.model.written_equations[definition.equation_index];
+        let definition = &view.facts().definitions[binding.definition.unwrap()];
+        let row = &view.model().written_equations[definition.equation_index];
         let expanded = row.equation.active_tokens.clone().any(|index| {
-            let token = &view.model.expanded_tokens[index];
+            let token = &view.model().expanded_tokens[index];
             token.lexeme.as_ref().is_some_and(|lexeme| {
-                written(inner, view, token.span)
-                    .and_then(|(file, span)| {
-                        inner
-                            .workspace
-                            .get_source(&file)
-                            .and_then(|source| source.get(span.start as usize..span.end as usize))
-                            .map(str::to_owned)
+                written(view, token.span).and_then(|(file, span)| {
+                    sources.source(&file).map(|source| {
+                        source.text.get(span.start as usize..span.end as usize)
+                            == Some(lexeme.as_str())
                     })
-                    .as_deref()
-                    != Some(lexeme.as_str())
+                }) != Some(true)
             })
         });
         text.push_str(if expanded {
@@ -205,7 +276,7 @@ fn description(
             "\n\nExpression: "
         });
         text.push_str(&crate::lsp::names::code(expression));
-        if let Some(target) = location(inner, view, definition.target_span) {
+        if let Some(target) = sources.location(view, definition.target_span) {
             let line = target.range.start.line + 1;
             let column = target.range.start.character + 1;
             text.push_str(&format!(
@@ -227,13 +298,19 @@ pub(super) fn hover(inner: &mut Inner, pos: &TextDocumentPositionParams) -> Opti
     let mut descriptions = Vec::new();
     let mut found = false;
     for view in views(inner, &pos.text_document.uri) {
-        let bindings = selected(inner, &view, &pos.text_document.uri, byte);
+        let bindings = selected(&view, &pos.text_document.uri, byte);
         found |= !bindings.is_empty();
         if bindings.len() != 1 {
             descriptions.push(None);
             continue;
         }
-        descriptions.push(Some(description(inner, &view, bindings[0], &preferences)));
+        let mut sources = DescriptionSources::new(inner, &view.root);
+        descriptions.push(Some(description(
+            &mut sources,
+            &view,
+            bindings[0],
+            &preferences,
+        )));
     }
     if !found {
         return None;
@@ -261,21 +338,21 @@ pub(super) fn definition(
     let mut found = false;
     let mut targets = Vec::new();
     for view in views(inner, &pos.text_document.uri) {
-        for binding in selected(inner, &view, &pos.text_document.uri, byte) {
+        for binding in selected(&view, &pos.text_document.uri, byte) {
             found = true;
             let span = if declaration {
                 binding
                     .declaration
-                    .map(|id| view.facts.declarations[id].span)
+                    .map(|id| view.facts().declarations[id].span)
                     .or_else(|| {
                         binding
                             .definition
-                            .map(|id| view.facts.definitions[id].target_span)
+                            .map(|id| view.facts().definitions[id].target_span)
                     })
             } else {
                 binding
                     .definition
-                    .map(|id| view.facts.definitions[id].target_span)
+                    .map(|id| view.facts().definitions[id].target_span)
             };
             if let Some(target) = span.and_then(|span| location(inner, &view, span))
                 && !targets.contains(&target)
@@ -295,14 +372,14 @@ fn sites(view: &LocalView, binding: Binding, include_declaration: bool) -> Vec<(
     let mut sites = Vec::new();
     if include_declaration {
         if let Some(id) = binding.declaration {
-            sites.push((view.facts.declarations[id].span, true));
+            sites.push((view.facts().declarations[id].span, true));
         }
         if let Some(id) = binding.definition {
-            sites.push((view.facts.definitions[id].target_span, true));
+            sites.push((view.facts().definitions[id].target_span, true));
         }
     }
     sites.extend(
-        view.facts
+        view.facts()
             .uses
             .iter()
             .filter(|usage| {
@@ -327,7 +404,7 @@ pub(super) fn references(
     let mut result = Vec::new();
     let views = views(inner, &pos.text_document.uri);
     for view in &views {
-        let bindings = selected(inner, view, &pos.text_document.uri, byte);
+        let bindings = selected(view, &pos.text_document.uri, byte);
         found |= !bindings.is_empty();
         if views.len() != 1 || bindings.len() != 1 {
             continue;
@@ -353,7 +430,7 @@ pub(super) fn highlights(
     let mut found = false;
     let mut result = Vec::new();
     for view in &views {
-        let bindings = selected(inner, view, &pos.text_document.uri, byte);
+        let bindings = selected(view, &pos.text_document.uri, byte);
         found |= !bindings.is_empty();
         if views.len() != 1 || bindings.len() != 1 {
             continue;
@@ -414,15 +491,16 @@ fn expression_orders(
     } else {
         return Vec::new();
     }
+    let file = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
     let mut candidates = Vec::new();
-    for (order, token) in view.model.expanded_tokens.iter().enumerate() {
+    for (order, token) in view.model().expanded_tokens.iter().enumerate() {
         if token.kind == TokenKind::Eof {
             continue;
         }
-        let Some((file, span)) = written(inner, view, token.span) else {
+        let Some((target, span)) = written(view, token.span) else {
             continue;
         };
-        if file != crate::engine::workspace::include_resolver::normalize_uri(uri.as_str()) {
+        if target != file {
             continue;
         }
         let direct = span.start < byte && byte <= span.end;
@@ -431,16 +509,16 @@ fn expression_orders(
             continue;
         }
         let Some(dimension) =
-            crate::engine::analysis::model_locals::scope_at_order(&view.model, order)
+            crate::engine::analysis::model_locals::scope_at_order(view.model(), order)
         else {
             continue;
         };
         // A # target is not a value site. Scan this execution's current row.
-        let start = view.model.expanded_tokens[..order]
+        let start = view.model().expanded_tokens[..order]
             .iter()
             .rposition(|token| token.kind == TokenKind::Semi)
             .map_or(0, |index| index + 1);
-        let row = &view.model.expanded_tokens[start..=order];
+        let row = &view.model().expanded_tokens[start..=order];
         if row
             .first()
             .is_some_and(|token| token.kind == TokenKind::Hash)
@@ -469,16 +547,17 @@ pub(super) fn completions(
         if orders.is_empty() {
             return Vec::new();
         }
+        let mut sources = DescriptionSources::new(inner, &view.root);
         for (dimension, order) in orders {
             let mut items = Vec::new();
             for LocalBinding {
                 name,
                 declaration,
                 definition,
-            } in view.facts.available(dimension, order)
+            } in view.facts().available(dimension, order)
             {
                 let binding = view.binding(definition, declaration, name, dimension);
-                let name = view.model.name(name).to_string();
+                let name = view.model().name(name).to_string();
                 let item = CompletionItem {
                     label: name.clone(),
                     kind: Some(CompletionItemKind::VARIABLE),
@@ -487,7 +566,7 @@ pub(super) fn completions(
                     insert_text: Some(name),
                     documentation: Some(Documentation::MarkupContent(MarkupContent {
                         kind: MarkupKind::Markdown,
-                        value: description(inner, view, binding, preferences),
+                        value: description(&mut sources, view, binding, preferences),
                     })),
                     ..CompletionItem::default()
                 };
@@ -550,5 +629,182 @@ pub(super) fn info_origins(
             }
             row["origin_frames"] = source["origin_frames"].clone();
         }
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn many_local_completions_share_source_conversion_and_refresh_documentation() {
+        // Guards rebuilding complete source indexes for each local completion,
+        // incorrect include/UTF-16 links, and stale source coordinates after edits.
+        let root = Url::parse("file:///completion-sources/main.mod").unwrap();
+        let helper = Url::parse("file:///completion-sources/helper.inc").unwrap();
+        let mut text = String::from("// 😀\r\nvar ");
+        for id in 1..=240 {
+            text.push_str(&format!("y{id} "));
+        }
+        text.push_str(";\r\nmodel;\r\n@#include \"helper.inc\"\r\n");
+        for id in 1..=240 {
+            text.push_str(&format!(
+                "/* 😀 */ #local{id}=shared+y{id}(-1);\r\ny{id}=local{id};\r\n"
+            ));
+        }
+        text.push_str("end;\r\n");
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(helper.clone(), "#shared=0.5;\r\n".into(), 1);
+        server.upsert(root.clone(), text.clone(), 1);
+        for (version, prefix) in [(1, ""), (2, "// second version\r\n")] {
+            let source = format!("{prefix}{text}");
+            if version > 1 {
+                server.upsert(root.clone(), source.clone(), version);
+            }
+            let byte = source.rfind("local240").unwrap() as u32 + "local240".len() as u32;
+            let point = LineIndex::new(&source).position_utf16(&source, byte);
+            let pos = TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: root.clone() },
+                position: Position::new(point.line, point.character),
+            };
+            LOCAL_SOURCE_INDEX_BUILDS.with(|builds| builds.set(0));
+            SYNTAX_CONTEXT_READS.with(|reads| reads.set(0));
+            let Some(CompletionResponse::Array(items)) = server.complete(&pos, None) else {
+                panic!("completion items required")
+            };
+            let locals: Vec<_> = items
+                .iter()
+                .filter(|item| item.detail.as_deref() == Some("model-local variable"))
+                .collect();
+            assert_eq!(locals.len(), 241);
+            for item in &locals {
+                let Some(Documentation::MarkupContent(documentation)) = &item.documentation else {
+                    panic!("local documentation required")
+                };
+                let (uri, line, column, expression) = if item.label == "shared" {
+                    (&helper, 1, 2, "0.5".to_owned())
+                } else {
+                    let id: u32 = item.label.strip_prefix("local").unwrap().parse().unwrap();
+                    (
+                        &root,
+                        5 + 2 * (id - 1) + u32::from(version > 1),
+                        11,
+                        format!("shared+y{id}(-1)"),
+                    )
+                };
+                assert!(
+                    documentation
+                        .value
+                        .contains(&format!("Expression: `{expression}`")),
+                    "{}: {}",
+                    item.label,
+                    documentation.value
+                );
+                assert!(
+                    documentation
+                        .value
+                        .contains(&format!("[Definition]({uri}#L{line},{column})")),
+                    "{}: {}",
+                    item.label,
+                    documentation.value
+                );
+            }
+            assert_eq!(
+                LOCAL_SOURCE_INDEX_BUILDS.with(std::cell::Cell::get),
+                2,
+                "one source index per written completion source is sufficient"
+            );
+            assert_eq!(
+                SYNTAX_CONTEXT_READS.with(std::cell::Cell::get),
+                1,
+                "one resolved source context must serve the whole completion request"
+            );
+        }
+    }
+
+    #[test]
+    fn standalone_helper_keeps_its_written_model_with_a_cached_effective_view() {
+        // Guards using an expanded snapshot for a helper with no model owner.
+        let uri = Url::parse("file:///standalone-local-requests.inc").unwrap();
+        let text = "var y; model; #z=1; y=z; end;";
+        let mut inner = Inner::default();
+        inner.workspace.update_document(uri.as_str(), text);
+        let effective = typed_names::root_view(&mut inner, &uri).unwrap();
+        let views = views(&mut inner, &uri);
+        let [view] = views.as_slice() else {
+            panic!("one standalone view required")
+        };
+        assert!(matches!(view.analysis, LocalAnalysis::Standalone { .. }));
+        assert!(!std::ptr::eq(view.model(), &effective.model));
+        let target = text.find("y=z").unwrap() as u32 + 2;
+        let bindings = selected(view, &uri, target);
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(expression(view, bindings[0]), Some("1"));
+    }
+
+    fn assert_shared(
+        inner: &mut Inner,
+        uri: &Url,
+    ) -> Arc<crate::engine::analysis::symbols::SemanticModel> {
+        let semantic = typed_names::root_view(inner, uri).unwrap();
+        let views = views(inner, uri);
+        assert_eq!(views.len(), 1);
+        assert!(
+            std::ptr::eq(views[0].model(), &semantic.model),
+            "local requests cloned the shared semantic model"
+        );
+        assert!(
+            std::ptr::eq(views[0].facts(), semantic.local_facts()),
+            "local requests recollected the shared local facts"
+        );
+        semantic
+    }
+
+    #[test]
+    fn local_requests_share_semantics_and_refresh_after_edit() {
+        // Guards a full model clone and repeated local-fact collection on each
+        // hover, completion and navigation request, plus stale local expressions.
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        let uri = Url::parse("file:///shared-local-requests.mod").unwrap();
+        let text = "var y; model; #z=1; y=z; end;";
+        server.upsert(uri.clone(), text.into(), 1);
+        let pos = TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position::new(0, text.find("y=z").unwrap() as u32 + 2),
+        };
+        let original = assert_shared(&mut server.lock_inner(), &uri);
+        let hover = server.hover_at(&pos).unwrap();
+        assert!(
+            matches!(hover.contents, HoverContents::Markup(content) if content.value.contains("Expression: `1`"))
+        );
+        let Some(GotoDefinitionResponse::Scalar(definition)) = server.definition_at(&pos) else {
+            panic!("one local definition required")
+        };
+        assert_eq!(definition.uri, uri);
+        assert_eq!(
+            definition.range.start.character,
+            text.find("#z").unwrap() as u32 + 1
+        );
+        let Some(CompletionResponse::Array(items)) = server.complete(&pos, None) else {
+            panic!("local completions required")
+        };
+        assert!(items.iter().any(
+            |item| item.label == "z" && item.detail.as_deref() == Some("model-local variable")
+        ));
+        assert!(Arc::ptr_eq(
+            &original,
+            &assert_shared(&mut server.lock_inner(), &uri)
+        ));
+        server.upsert(uri.clone(), text.replace("#z=1", "#z=2"), 2);
+        let hover = server.hover_at(&pos).unwrap();
+        assert!(
+            matches!(hover.contents, HoverContents::Markup(content) if content.value.contains("Expression: `2`"))
+        );
+        assert!(!Arc::ptr_eq(
+            &original,
+            &assert_shared(&mut server.lock_inner(), &uri)
+        ));
     }
 }
