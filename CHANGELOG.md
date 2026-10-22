@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.11.31
+
+- I211 now names the VS Code setting and MCP request option to increase the
+  macro work limit when that limit stops analysis. Its **Configure macro work
+  limit** quick fix opens the setting in VS Code.
+  At the maximum allowance, the message explains that it cannot be increased
+  and the setting quick fix is not offered.
+
 ## v0.11.30
 
 - Restart Language Server closes the old connection before stopping its process.

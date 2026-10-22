@@ -2201,7 +2201,10 @@ impl Workspace {
             IncompleteReason {
                 span,
                 code: "I211",
-                message: crate::engine::language::macro_expand::i211_limit_message(limit),
+                message: crate::engine::language::macro_expand::i211_limit_message(
+                    limit,
+                    proof.budget.work_limit(),
+                ),
                 limit_name: Some(limit),
                 limit_ceiling: proof.budget.limit_ceiling(limit),
             }

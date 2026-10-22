@@ -132,8 +132,23 @@ fn i211_expression_message(expression: &str) -> String {
     }
 }
 
-pub(crate) fn i211_limit_message(limit: &str) -> String {
-    format!("Macro expansion stopped at the {limit} limit; some model checks were withheld.")
+pub(crate) fn i211_limit_message(
+    limit: &str,
+    work_limit: crate::engine::macro_work::MacroWorkLimit,
+) -> String {
+    if limit == "iteration work"
+        && work_limit.get() == crate::engine::macro_work::MacroWorkLimit::MAX
+    {
+        return "Macro expansion reached the maximum work allowance; some model checks were withheld. This allowance cannot be increased.".to_string();
+    }
+    let mut message =
+        format!("Macro expansion stopped at the {limit} limit; some model checks were withheld.");
+    if limit == "iteration work" {
+        message.push_str(
+            " Increase dynare.macroWorkLimit in VS Code Workspace Settings, or macro_work_limit in the MCP request.",
+        );
+    }
+    message
 }
 
 fn push_type_error(
@@ -194,7 +209,8 @@ fn note_eval_failure(
     match error {
         MacroEvalError::Limit(limit) => {
             state.limit.get_or_insert((span, limit));
-            push_i211(state, span, i211_limit_message(limit), Some(limit));
+            let message = i211_limit_message(limit, state.budget.work_limit());
+            push_i211(state, span, message, Some(limit));
         }
         MacroEvalError::PriorFailure => {
             state.incomplete.get_or_insert(span);
@@ -4137,6 +4153,28 @@ mod budget_regressions {
     use super::*;
 
     #[test]
+    fn exhausted_work_allowance_only_suggests_an_increase_below_the_maximum() {
+        // Guards parser work stops recommending an impossible increase at MAX.
+        use crate::engine::macro_work::MacroWorkLimit;
+        for ceiling in [MacroWorkLimit::DEFAULT, MacroWorkLimit::MAX] {
+            let mut budget =
+                MacroBudget::with_limit(MacroWorkLimit::new(ceiling as u64).unwrap(), None);
+            budget.spend_work(ceiling).unwrap();
+            let model = crate::engine::language::parser::parse_with_budget("var y;", &mut budget);
+            let reason = &model.incomplete_reasons[0];
+            assert_eq!(reason.limit_ceiling, Some((ceiling, "work units")));
+            assert_eq!(
+                reason.message.contains("Increase dynare.macroWorkLimit"),
+                ceiling < MacroWorkLimit::MAX
+            );
+            assert_eq!(
+                reason.message.contains("cannot be increased"),
+                ceiling == MacroWorkLimit::MAX
+            );
+        }
+    }
+
+    #[test]
     fn repeated_scalar_table_reads_complete_with_the_root_budget() {
         // Guards copying all 4,097 stored strings for every scalar read. The
         // table and both loops must fit the existing 1,000,000-unit allowance.
@@ -4214,6 +4252,13 @@ mod budget_regressions {
                 .iter()
                 .any(|reason| reason.limit_name == Some("iteration work"))
         );
+        // Guards an actual work stop omitting the controls needed to retry.
+        let reason = reasons
+            .iter()
+            .find(|reason| reason.limit_name == Some("iteration work"))
+            .unwrap();
+        assert!(reason.message.contains("dynare.macroWorkLimit"));
+        assert!(reason.message.contains("macro_work_limit"));
         assert!(tokens.iter().all(|token| token.kind == TokenKind::Eof));
     }
 

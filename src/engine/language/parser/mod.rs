@@ -91,7 +91,10 @@ pub(crate) fn parse_with_lines_and_evaluations_budget(
             incomplete_reasons: vec![crate::engine::language::macro_expand::IncompleteReason {
                 span,
                 code: "I211",
-                message: crate::engine::language::macro_expand::i211_limit_message(limit),
+                message: crate::engine::language::macro_expand::i211_limit_message(
+                    limit,
+                    budget.work_limit(),
+                ),
                 limit_name: Some(limit),
                 limit_ceiling: budget.limit_ceiling(limit),
             }],

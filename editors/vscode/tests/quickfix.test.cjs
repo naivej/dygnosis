@@ -132,6 +132,32 @@ async function hide(service, doc, diagnostic) {
 }
 function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
 
+test("macro work stop offers its setting even with Ignore and Explain disabled", async () => {
+  // Guards the recovery action being absent or opening unrelated settings.
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document();
+  host.settings[doc.uri.toString()] = { "diagnosticActions.ignore": false, "diagnosticActions.explain": false };
+  const diagnostic = note("I211", undefined, 3);
+  diagnostic.message = "Macro expansion stopped at the iteration work limit; some model checks were withheld.";
+  push(service, doc, [diagnostic]);
+  const actions = await offers(service, doc, [diagnostic]);
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].title, "Configure macro work limit");
+  assert.deepEqual(actions[0].diagnostics, [diagnostic]);
+  await vscode.commands.executeCommand(actions[0].command.command, ...actions[0].command.arguments);
+  assert.deepEqual(host.executed, [{ name: "workbench.action.openSettings", args: ["@id:dynare.macroWorkLimit"] }]);
+  for (const message of [
+    "Macro expansion reached the maximum work allowance; some model checks were withheld. This allowance cannot be increased.",
+    "Macro expansion stopped at the execution depth limit; some model checks were withheld.",
+    "Macro expansion stopped at the output size limit; some model checks were withheld.",
+    "Macro expression 'x' could not be evaluated; some model checks were withheld.",
+  ]) {
+    const other = note("I211", undefined, 3); other.message = message;
+    push(service, doc, [other]);
+    assert.deepEqual(await offers(service, doc, [other]), []);
+  }
+  registration.dispose();
+});
+
 test("push hide applies across files/classes and restoration replays the latest raw objects", async () => {
   const service = reset(), registration = registerDiagnosticActions(service), a = document(), b = document("b.mod");
   const original = note(), error = note("E001", undefined, 1), info = note("I208", undefined, 3);

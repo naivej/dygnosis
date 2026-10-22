@@ -277,7 +277,6 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     if (context.only && !context.only.contains(vscode.CodeActionKind.QuickFix)) return retained;
     const ignore = booleanSetting("diagnosticActions.ignore", document.uri, true, service.log);
     const explain = booleanSetting("diagnosticActions.explain", document.uri, true, service.log);
-    if (!ignore && !explain) return retained;
     for (const [key, saved] of actionContexts) if (saved.uri.toString() === document.uri.toString()) actionContexts.delete(key);
     const current = raw?.version === version ? raw.items : [];
     const visibleOwner = (diagnostic: vscode.Diagnostic): boolean =>
@@ -290,6 +289,17 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     for (const diagnostic of candidates) {
       const code = diagnosticCode(diagnostic);
       if (!code) continue;
+      // Match the work-stop sentence used by current and older engines. Other
+      // I211 limits cannot be changed with this setting.
+      if (code === "I211" && diagnostic.message.startsWith("Macro expansion stopped at the iteration work limit;")) {
+        const title = "Configure macro work limit";
+        const action = new vscode.CodeAction(title, vscode.CodeActionKind.QuickFix);
+        action.diagnostics = [diagnostic];
+        action.command = {
+          title, command: "workbench.action.openSettings", arguments: ["@id:dynare.macroWorkLimit"],
+        };
+        retained.push(action);
+      }
       const key = String(++actionSequence);
       actionContexts.set(key, { uri: document.uri, version, instance, diagnostic });
       for (const [enabled, title, command] of [
