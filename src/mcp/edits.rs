@@ -25,6 +25,21 @@ pub(super) fn edit_request(
         .workspace
         .check_cancelled()
         .map_err(|_| cancelled_error())?;
+    if snapshot.model.is_analysis_preview() && tool == "dynare_auto_fix" {
+        return Ok(ToolResult::refused(
+            "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED",
+            "Diagnostic fixes are unavailable for a definition or branch analysis preview. No edits were proposed. Reset the overrides to use source editing actions.",
+        ));
+    }
+    if snapshot.model.is_analysis_preview()
+        && tool == "dynare_code_actions"
+        && params.action_id.is_some()
+    {
+        return Ok(ToolResult::refused(
+            "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED",
+            "Source action proposals are unavailable for a definition or branch analysis preview. No edits were proposed. Reset the overrides to use source editing actions.",
+        ));
+    }
     crate::engine::control::run(snapshot.workspace.cancellation(), || match tool {
         "dynare_format" => format_request(params, snapshot),
         "dynare_auto_fix" => fix_request(params, snapshot),
@@ -483,6 +498,10 @@ fn remaining_json(snapshot: &SourceSnapshot, set: &DiagnosticSet, edits: &[Edit]
 
 fn fix_request(params: &Params, snapshot: &mut SourceSnapshot) -> Result<ToolResult, ErrorData> {
     if !params.agent_output
+        && snapshot
+            .workspace
+            .root_analysis_configuration(&snapshot.root)
+            .is_source()
         && snapshot.root_file.is_none()
         && params.target.is_none()
         && params.code.is_none()
@@ -616,12 +635,10 @@ fn proposed_capture(
         .input_revision(&snapshot.root)
         .ok_or_else(|| ErrorData::internal_error("Proposed input revision is unavailable", None))?;
     let model = workspace
-        .get_effective_model(&snapshot.root)
-        .cloned()
+        .effective_model_snapshot(&snapshot.root)
         .ok_or_else(|| ErrorData::internal_error("Proposed model is unavailable", None))?;
     let report = workspace
-        .expand_report(&snapshot.root)
-        .cloned()
+        .expand_report_snapshot(&snapshot.root)
         .ok_or_else(|| ErrorData::internal_error("Proposed source map is unavailable", None))?;
     let mut sources = snapshot.sources.clone();
     for file in sources.keys().cloned().collect::<Vec<_>>() {
@@ -640,13 +657,14 @@ fn proposed_capture(
         })
         .collect();
     Ok(SourceSnapshot {
+        source_structure: None,
         workspace,
         root: snapshot.root.clone(),
         root_file: snapshot.root_file.clone(),
         owner_roots: snapshot.owner_roots.clone(),
         revision: snapshot.revision.clone(),
-        model: std::sync::Arc::new(model),
-        report: std::sync::Arc::new(report),
+        model,
+        report,
         raw,
         sources,
         line_indexes,
@@ -891,6 +909,12 @@ fn actions_request(
     }
     let (set, rows) = owned_diagnostics(snapshot)?;
     let selected = select_diagnostics(params, snapshot, &rows)?;
+    if snapshot.model.is_analysis_preview() {
+        let omitted: Vec<_> = selected.iter().filter(|row|row.diagnostic.fix.is_some() || matches!(row.diagnostic.code.as_str(),"I208"|"I209")).map(|row|json!({"diagnostic_id":row.id,"code":"ANALYSIS_PREVIEW_EDIT_UNSUPPORTED","reason":"Source action proposals are unavailable for a definition or branch analysis preview. Reset the overrides to use source editing actions."})).collect();
+        let mut result = ToolResult::new(json!({"actions":[],"omitted_actions":omitted}));
+        result.cause("partial","ANALYSIS_PREVIEW_EDIT_UNSUPPORTED","The analysis preview is read-only for source actions. No edit proposals were returned. Reset the overrides to use source editing actions.");
+        return Ok(result);
+    }
     let unsafe_macro = macro_unsafe(snapshot);
     let mut actions = Vec::new();
     let mut omitted = Vec::new();

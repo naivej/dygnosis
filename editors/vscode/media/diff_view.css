@@ -30,7 +30,10 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; tab-size: 4
 .comparison-heading { padding: 2px 14px 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .comparison-inputs { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .comparison-selector { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
-.input-side { display: flex; align-items: baseline; gap: 8px; border: 1px solid var(--input-border); background: var(--vscode-input-background); padding: 4px 9px; max-width: 100%; min-width: 0; }
+.input-side { display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--input-border); background: var(--vscode-input-background); padding: 4px 9px; max-width: 100%; min-width: 0; }
+.input-heading { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.analysis-name, .analysis-counts { font-size: 12px; }
+.analysis-detail { color: var(--secondary); font-size: 12px; max-width: 60ch; overflow-wrap: anywhere; }
 .input-side small, .input-context { color: var(--secondary); font-size: 12px; }
 .input-side code { line-height: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .input-context { overflow-wrap: anywhere; }

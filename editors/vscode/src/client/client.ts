@@ -8,7 +8,7 @@ import {
 import { Binary, resolveBinary } from "./binary";
 import { ClientLifecycle, ManagedClient } from "./lifecycle";
 import { configurationSnapshot, macroTintOnlyChange } from "./settings";
-import { ModelInfo, parseModelInfo, record, timingModifiers, tokenRoles } from "./protocol";
+import { AnalysisConfiguration, AnalysisContext, PresetBinding, ModelInfo, parseAnalysisContext, parseModelInfo, record, timingModifiers, tokenRoles } from "./protocol";
 import { renameSymbol } from "./rename";
 import { sameSourceUri as sameUri } from "./source_uri";
 
@@ -36,6 +36,7 @@ export function extendCapabilities(capabilities: ClientCapabilities): void {
   }
   const experimental: Record<string, unknown> = record(capabilities.experimental) ? capabilities.experimental : {};
   experimental.dygnosis = { modelInfo: { schema_version: 1 }, modelInfoChanged: true, documentContext: { schema_version: 1 }, configuration: { schema_version: 1 },
+    analysisConfiguration: { schema_version: 1 },
     compareModels: { navigation_schema_version: 1 }, compareModelSnapshots: { schema_version: 1, navigation_schema_version: 2 }, effectivePreview: { navigation_schema_version: 1, dependency_candidates: true },
     workspaceStatusChanged: true };
   capabilities.experimental = experimental;
@@ -109,9 +110,15 @@ export class DygnosisClient implements vscode.Disposable {
   readonly onDidChange = this.changed.event;
   private readonly modelInfoUpdated = new vscode.EventEmitter<ModelSnapshot>();
   readonly onDidUpdateModelInfo = this.modelInfoUpdated.event;
+  private readonly analysisChanged = new vscode.EventEmitter<{root: string; context: AnalysisContext; client_instance: number}>();
+  readonly onDidChangeAnalysis = this.analysisChanged.event;
   private readonly invalidated = new vscode.EventEmitter<InputInvalidation>();
   readonly onDidInvalidate = this.invalidated.event;
-  private readonly disposables: vscode.Disposable[] = [this.output, this.changed, this.invalidated, this.modelInfoUpdated];
+  private readonly disposables: vscode.Disposable[] = [this.output, this.changed, this.invalidated, this.modelInfoUpdated, this.analysisChanged];
+  private analysisSupported = false;
+  private readonly analysisAttempts = new Map<string, number>();
+  private readonly acceptedAnalysis = new Map<string, number>();
+  private readonly analysisInstances = new WeakMap<AnalysisContext, number>();
   private readonly cache = new Map<string, CachedRequest>();
   private readonly freshTails = new Map<string, Promise<void>>();
   private readonly cancelFreshRequests = new Set<() => void>();
@@ -163,7 +170,9 @@ export class DygnosisClient implements vscode.Disposable {
       for (const [key, link] of this.includeLinks) if (sameUri(link.source, document.uri) &&
         (link.version !== version || link.instance !== instance || !links.some(current => current.target && sameUri(current.target, link.target)))) this.includeLinks.delete(key);
       return links.map(link => {
-        if (!link.target || !isRootUri(link.target)) return link;
+        const data: unknown = (link as vscode.DocumentLink & {data?: unknown}).data;
+        const sourceInclude = record(data) && data.dygnosis_source_include === true;
+        if (!link.target || link.target.scheme !== "file" || !sourceInclude && !/\.(mod|dyn|inc)$/i.test(link.target.path)) return link;
         const target = link.target;
         const existing = [...this.includeLinks].find(([, current]) => sameUri(current.source, document.uri) &&
           current.version === version && current.instance === instance && sameUri(current.target, target));
@@ -207,6 +216,7 @@ export class DygnosisClient implements vscode.Disposable {
   get client(): LanguageClient | undefined { return this.lifecycle.client?.client; }
   get currentInstance(): number { return this.instance; }
   get supportsModelInfo(): boolean { return this.modelInfoSupported; }
+  get supportsAnalysisConfiguration(): boolean { return this.analysisSupported; }
   private pruneSourceLinks(source: vscode.Uri, version?: number): void {
     for (const [key, link] of this.includeLinks) if (sameUri(link.source, source) && link.version !== version) this.includeLinks.delete(key);
   }
@@ -258,6 +268,8 @@ export class DygnosisClient implements vscode.Disposable {
     ++this.instance;
     this.clearDocumentContexts();
     this.documentContextSupported = false;
+    this.analysisSupported = false;
+    this.analysisAttempts.clear(); this.acceptedAnalysis.clear();
     this.invalidateInputs({ reason: "lifecycle" });
   }
   private invalidateInputs(event: InputInvalidation): void {
@@ -330,6 +342,8 @@ export class DygnosisClient implements vscode.Disposable {
         this.documentContextSupported = record(experimental) && record(experimental.dygnosis) &&
           record(experimental.dygnosis.documentContext) && experimental.dygnosis.documentContext.schema_version === 1 &&
           experimental.dygnosis.documentContext.command === "dynare/setDocumentContext";
+        this.analysisSupported = record(experimental) && record(experimental.dygnosis) &&
+          record(experimental.dygnosis.analysisConfiguration) && experimental.dygnosis.analysisConfiguration.schema_version === 1;
         this.instanceSubscriptions.push(client.onNotification("dynare/modelInfoChanged", (value: unknown) => {
           if (client === this.client && record(value) && value.schema_version === 1 && typeof value.root_uri === "string")
             this.invalidate(value.root_uri, undefined, typeof value.input_revision === "string" ? value.input_revision : undefined,
@@ -397,6 +411,62 @@ export class DygnosisClient implements vscode.Disposable {
     if (this.closed || token?.isCancellationRequested) return undefined;
     if (!this.modelInfoSupported) refuse("The selected engine does not support model information. Use the bundled binary or update dynare.serverPath.");
     return fresh ? this.freshModelInfo(root, document, token) : this.requestModelInfo(root, document);
+  }
+  async analysisContext(root: vscode.Uri, document = root, token?: vscode.CancellationToken, preparePreset = false): Promise<AnalysisContext | undefined> {
+    await this.ensureStarted();
+    if (this.closed || token?.isCancellationRequested) return undefined;
+    if (!this.analysisSupported) refuse("This engine does not support analysis configurations. Use the bundled engine or update dynare.serverPath.");
+    const instance = this.instance, epoch = this.epoch;
+    const version = vscode.workspace.textDocuments.find(doc => sameUri(doc.uri, document))?.version ?? null;
+    const raw = await this.execute("dynare/analysisContext", [{root_uri:root.toString(), document_uri:document.toString(), document_version:version, prepare_preset:preparePreset}], token);
+    if (this.closed || token?.isCancellationRequested || instance !== this.instance || epoch !== this.epoch ||
+        version !== (vscode.workspace.textDocuments.find(doc => sameUri(doc.uri, document))?.version ?? null)) return undefined;
+    const context = parseAnalysisContext(raw, root.toString());
+    if (context.document_uri !== document.toString() || context.document_version !== version) return undefined;
+    this.analysisInstances.set(context, instance);
+    return context;
+  }
+  async setAnalysisConfiguration(root: vscode.Uri, choices: AnalysisConfiguration, proof: AnalysisContext, includePaths: string[] | null,
+    presetBindings?: PresetBinding[], guard: () => boolean = () => true, token?: vscode.CancellationToken): Promise<AnalysisContext> {
+    await this.ensureStarted();
+    const key = root.toString(), instance = this.instance;
+    if (this.closed || !this.analysisSupported || this.analysisInstances.get(proof) !== instance || proof.root_uri !== key || !guard() || token?.isCancellationRequested)
+      refuse("The analysis selector is no longer current. Open it again before changing the configuration.");
+    const attempt = (this.analysisAttempts.get(key) ?? 0) + 1;
+    this.analysisAttempts.set(key, attempt);
+    let raw: unknown;
+    try {
+      raw = await this.execute("dynare/setAnalysisConfiguration", [{root_uri:key, document_uri:proof.document_uri, document_version:proof.document_version,
+        expected_revision:proof.revision, expected_selection_generation:proof.analysis.selection_generation, analysis:choices,
+        include_paths:includePaths, ...(presetBindings ? {preset_bindings:presetBindings} : {})}], token);
+    } finally {
+      // A cancelled or interrupted response can still follow an accepted server
+      // mutation. Clear dependent displays and reacquire authoritative state.
+      if (!this.closed && instance === this.instance) this.invalidate(key);
+    }
+    if (this.closed || instance !== this.instance) refuse("The engine restarted while changing the analysis configuration. Open the selector again.");
+    const context = parseAnalysisContext(raw, key);
+    const generation = context.analysis.selection_generation;
+    if ((this.acceptedAnalysis.get(key) ?? -1) > generation) refuse("A newer accepted analysis configuration replaced this result. Run the action again.");
+    this.acceptedAnalysis.set(key, generation);
+    this.analysisInstances.set(context, instance);
+    this.analysisChanged.fire({root:key, context, client_instance:instance});
+    if (context.partial || !context.revision) refuse(context.message || "The analysis configuration was applied, but its current source could not be guarded. Refresh the selector before another action.");
+    const currentVersion = vscode.workspace.textDocuments.find(doc => sameUri(doc.uri, vscode.Uri.parse(proof.document_uri)))?.version ?? null;
+    if (this.analysisAttempts.get(key) !== attempt || token?.isCancellationRequested || !guard() || currentVersion !== proof.document_version)
+      refuse("The analysis configuration was applied, but its pending action stopped because a newer choice or source change arrived. Run the action again.");
+    return context;
+  }
+  async validateComparisonInputs(inputs: unknown, token?: vscode.CancellationToken): Promise<boolean> {
+    await this.ensureStarted();
+    if (this.closed || token?.isCancellationRequested) return false;
+    const instance = this.instance;
+    const sides = record(inputs) ? [inputs.before, inputs.after] : inputs;
+    const raw = await this.execute("dynare/validateComparisonInputs", [{inputs:sides}], token);
+    if (this.closed || token?.isCancellationRequested || instance !== this.instance) return false;
+    if (!record(raw) || raw.schema_version !== 1 || typeof raw.current !== "boolean")
+      refuse("The engine could not validate the captured comparison. Refresh Model Diff or use the bundled engine.");
+    return raw.current;
   }
   /** Fresh navigators sharing a root/document cannot cancel one another. */
   private freshModelInfo(root: vscode.Uri, document: vscode.Uri, token?: vscode.CancellationToken): Promise<ModelSnapshot | undefined> {
@@ -489,7 +559,7 @@ export class DygnosisClient implements vscode.Disposable {
   }
   knownOwners(document: vscode.Uri): vscode.Uri[] {
     const roots = [...this.infos.values()].flatMap(info => [
-      ...(!sameUri(vscode.Uri.parse(info.root_uri), document) && this.ownsDocument(info, document) ? [info.root_uri] : []),
+      ...(!sameUri(vscode.Uri.parse(info.root_uri), document) && this.executesDocument(info, document) ? [info.root_uri] : []),
       ...(sameUri(vscode.Uri.parse(info.document_uri), document) ? info.owner_roots.filter(root => !sameUri(vscode.Uri.parse(root), document)) : []),
     ]);
     return [...new Set(roots)].map(root => vscode.Uri.parse(root));
@@ -532,16 +602,22 @@ export class DygnosisClient implements vscode.Disposable {
     if (!isAnalysisDocument(document) || token?.isCancellationRequested) return undefined;
     const key = document.uri.toString(), selected = this.selectedOwners.get(key);
     if (this.standaloneDocuments.has(key)) return document.uri;
-    if (selected && this.explicitOwnerDocuments.has(key)) {
+    if (selected) {
       const root = vscode.Uri.parse(selected);
       const info = await this.modelInfo(root, root, false, token);
       if (token?.isCancellationRequested) return undefined;
       if (this.selectedOwners.get(key) !== selected) return undefined;
       if (!info) return undefined;
-      if (this.ownsDocument(info, document.uri)) return root;
-      this.selectedOwners.delete(key);
-      this.explicitOwnerDocuments.delete(key);
-      this.ownedDocuments.delete(key);
+      if (this.ownsDocument(info, document.uri)) {
+        const retainedBrowsing = info.browsing_documents?.some(uri => sameUri(vscode.Uri.parse(uri), document.uri)) === true;
+        if (this.explicitOwnerDocuments.has(key) || retainedBrowsing) return root;
+        // An automatic sole owner must yield when a second executing root
+        // appears. Only an accepted browsing choice survives exclusion.
+      } else {
+        this.selectedOwners.delete(key);
+        this.explicitOwnerDocuments.delete(key);
+        this.ownedDocuments.delete(key);
+      }
     }
     // Discover owners only from available models, never analyze an include as a root.
     const selection = this.selectedOwners.get(key);
@@ -563,6 +639,11 @@ export class DygnosisClient implements vscode.Disposable {
     return pick.root;
   }
   private ownsDocument(info: ModelInfo, document: vscode.Uri): boolean {
+    const equal = (value: string): boolean => sameUri(vscode.Uri.parse(value), document);
+    return equal(info.root_uri) || info.browsing_documents?.some(equal) === true ||
+      info.source_browsing === true && equal(info.document_uri) || this.executesDocument(info, document);
+  }
+  private executesDocument(info: ModelInfo, document: vscode.Uri): boolean {
     const equal = (value: string): boolean => sameUri(vscode.Uri.parse(value), document);
     return equal(info.root_uri) || info.statements.some(row => row.segments.some(segment => equal(segment.uri))) ||
       info.related_files.some(row => row.kind === "include" && row.path && sameUri(vscode.Uri.file(row.path), document));
@@ -591,8 +672,14 @@ export class DygnosisClient implements vscode.Disposable {
       : owner !== root.toString() || !owned) { unavailable(); return; }
     const currentContext = (): boolean => currentInput() &&
       this.selectedOwners.get(sourceKey) === owner && this.ownedDocuments.has(sourceKey) === owned;
-    const info = await this.modelInfo(root, source.uri, true);
-    if (!info || !currentContext() || info.client_instance !== link.instance || !this.ownsDocument(info, link.target)) { unavailable(); return; }
+    // Re-resolve against the selected configuration and include paths. A source
+    // version alone cannot prove a link after an analysis-only choice changes.
+    const links: unknown = await this.client?.sendRequest("textDocument/documentLink", {textDocument:{uri:source.uri.toString()}});
+    if (!currentContext() || !Array.isArray(links) || !links.some(candidate => record(candidate) && typeof candidate.target === "string" && sameUri(vscode.Uri.parse(candidate.target), link.target))) { unavailable(); return; }
+    const target = await vscode.workspace.openTextDocument(link.target);
+    if (!currentContext()) { unavailable(); return; }
+    if (target.languageId !== "dynare") await vscode.languages.setTextDocumentLanguage(target, "dynare");
+    if (!currentContext()) { unavailable(); return; }
     await this.openSource(link.target, root, currentContext);
   }
   async modelForDocument(document: vscode.TextDocument, prompt = false): Promise<ModelSnapshot | undefined> {

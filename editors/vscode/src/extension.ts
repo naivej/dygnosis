@@ -9,6 +9,8 @@ import { registerLenses } from "./editor/lenses";
 import { registerColors } from "./editor/color";
 import { registerModelNavigation } from "./editor/model_navigation";
 import { registerStatus } from "./editor/status";
+import { registerAnalysisConfigurations } from "./editor/analysis_configuration";
+import { registerSourceCandidates } from "./editor/source_candidates";
 import * as vscode from "vscode";
 import { DygnosisClient, isAnalysisDocument } from "./client/client";
 import { registerMcp } from "./mcp/mcp";
@@ -27,7 +29,9 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
   service = client;
   context.subscriptions.push(registerWorkspaceMcp(context, client));
   const previews = registerEffectivePreview(client);
-  context.subscriptions.push(client, registerDiagnosticActions(client), registerWorkspaceStatus(client), registerLenses(client), registerStatus(client), registerModelNavigation(client), registerColors(client), registerMcp(context, client.log), previews, registerOriginJumps(client, previews), registerChanges(client, context.extensionUri),
+  const changes = registerChanges(client, context.extensionUri);
+  context.subscriptions.push(client, registerDiagnosticActions(client), registerWorkspaceStatus(client), registerLenses(client), registerStatus(client, previews), registerModelNavigation(client), registerColors(client), registerMcp(context, client.log), previews, registerOriginJumps(client, previews), changes,
+    registerAnalysisConfigurations(client, previews, changes.compareAnalysis), registerSourceCandidates(client),
     vscode.commands.registerCommand("dygnosis.restartServer", () => runCommand(client, () => client.restart())),
     vscode.commands.registerCommand("dygnosis.showOutput", () => client.output.show()),
     vscode.commands.registerCommand("dygnosis.openSettings", () => vscode.commands.executeCommand("workbench.action.openSettings", "@ext:CoconutWater.dygnosis")),

@@ -3,12 +3,15 @@
 //! The transport and Rust functions share source acquisition and analysis.
 
 mod canonical;
+#[cfg(test)]
+mod configuration_tests;
 mod edits;
 mod multi_request;
 pub(crate) mod repository_compare;
 mod request;
 mod result;
 pub(crate) mod source;
+mod source_views;
 pub(crate) mod workspace_diagnose;
 
 use std::borrow::Cow;
@@ -1815,6 +1818,8 @@ impl CompareModelsParams {
                     before: self.before.expect("validated Before selector"),
                     after: self.after.expect("validated After selector"),
                     search_paths: self.search_paths.unwrap_or_default(),
+                    analysis_before: None,
+                    analysis_after: None,
                 },
                 cancelled,
             )

@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -69,6 +70,7 @@ struct RootEntry {
     stamps: InputStamps,
     force: bool,
     cached_report: Option<Arc<RootReport>>,
+    cancellation: Option<Arc<AtomicBool>>,
 }
 
 impl RootEntry {
@@ -90,10 +92,18 @@ impl RootEntry {
             stamps: InputStamps::new(),
             force: true,
             cached_report: None,
+            cancellation: None,
+        }
+    }
+
+    fn cancel_work(&mut self) {
+        if let Some(cancellation) = self.cancellation.take() {
+            cancellation.store(true, Ordering::Relaxed);
         }
     }
 
     fn queue(&mut self, delay: Duration) {
+        self.cancel_work();
         self.generation += 1;
         self.state = "pending";
         self.due = Some(Instant::now() + delay);
@@ -104,7 +114,18 @@ impl RootEntry {
     }
 }
 
+impl Drop for RootEntry {
+    fn drop(&mut self) {
+        self.cancel_work();
+    }
+}
+
 impl WorkspaceCheckState {
+    pub(super) fn cancel_workers(&mut self) {
+        for entry in self.roots.values_mut() {
+            entry.cancel_work();
+        }
+    }
     fn update_include_files(
         &mut self,
         found: BTreeSet<Url>,
@@ -158,7 +179,7 @@ impl WorkspaceCheckState {
         self.reused_jobs = 0;
     }
 
-    fn status(&self, enabled: bool) -> Value {
+    fn status(&self, enabled: bool, workspace: &Workspace) -> Value {
         let mut counts = BTreeMap::from([
             ("pending", 0),
             ("checking", 0),
@@ -167,9 +188,13 @@ impl WorkspaceCheckState {
             ("failed", 0),
             ("excluded", 0),
         ]);
+        let mut non_default_roots = 0;
         let roots: Vec<_> = self.roots.iter().map(|(uri, entry)| {
             *counts.entry(entry.state).or_default() += 1;
+            let analysis = workspace.root_analysis_configuration(uri.as_str());
+            if entry.selected && !analysis.is_source() { non_default_roots += 1; }
             json!({"root_uri": uri, "state": entry.state, "revision": entry.revision, "errors": entry.errors, "warnings": entry.warnings, "failure": entry.failure,
+                "analysis":{"name":analysis.name,"preview":analysis.is_preview(),"source":analysis.is_source()},
                 "dependency_candidates": entry.dependency_uris})
         }).collect();
         let complete = enabled
@@ -179,7 +204,7 @@ impl WorkspaceCheckState {
             && counts["checking"] == 0;
         json!({"schema_version": SCHEMA_VERSION, "pass_revision": self.pass_revision, "enabled": enabled, "discovery": if enabled { self.discovery } else { "disabled" },
             "cancelled": self.cancelled, "complete": complete, "coverage_complete": complete && self.discovery_failures.is_empty() && counts["failed"] == 0 && counts["incomplete"] == 0,
-            "counts": counts, "roots": roots, "include_files": self.include_files, "discovery_failures": self.discovery_failures,
+            "counts": counts, "roots": roots, "non_default_roots": non_default_roots, "include_files": self.include_files, "discovery_failures": self.discovery_failures,
             "metrics": {"discovery_ms": self.discovery_ms, "analysis_ms": self.analysis_ms, "completed_jobs": self.completed_jobs, "reused_jobs": self.reused_jobs, "elapsed_ms": self.started.map(|at| at.elapsed().as_secs_f64() * 1000.0)}})
     }
 
@@ -193,6 +218,21 @@ impl WorkspaceCheckState {
 }
 
 impl Inner {
+    pub(super) fn workspace_analysis_changed(&mut self, root: &Url) {
+        if self.workspace_checks.cancelled || self.workspace_checks.finished() {
+            self.workspace_checks.begin_pass();
+        }
+        let key = normalize_uri(root.as_str());
+        for (uri, entry) in &mut self.workspace_checks.roots {
+            if entry.selected && (*uri == *root || entry.identity == key) {
+                entry.force = true;
+                entry.proven = false;
+                entry.queue(Duration::ZERO);
+            }
+        }
+        self.workspace_checks.cancelled = false;
+    }
+
     pub(super) fn align_workspace_root(&mut self, uri: &Url) {
         if !is_model_root(uri) {
             return;
@@ -256,6 +296,7 @@ impl Inner {
                     self.reports.remove(root);
                 }
             } else {
+                entry.cancel_work();
                 entry.generation += 1;
                 entry.due = None;
                 entry.state = "excluded";
@@ -305,6 +346,7 @@ impl Inner {
                     || entry.identity == key
                     || (deleted && normalize_uri(root.as_str()) == key);
                 if same_root && deleted {
+                    entry.cancel_work();
                     entry.selected = false;
                     entry.generation += 1;
                     entry.due = None;
@@ -393,7 +435,7 @@ impl Backend {
         let inner = self.lock_inner();
         inner
             .workspace_checks
-            .status(inner.settings.workspace_diagnostics)
+            .status(inner.settings.workspace_diagnostics, &inner.workspace)
     }
 
     pub async fn active_model_changed(&self, params: Value) {
@@ -455,6 +497,7 @@ impl Backend {
             if command == "dynare/recheckWorkspace" {
                 inner.workspace_reconfigure(true);
             } else if command == "dynare/cancelWorkspace" {
+                inner.workspace_checks.cancel_workers();
                 inner.workspace_checks.epoch += 1;
                 inner.workspace_checks.cancelled = true;
                 inner.workspace_checks.discovery_requested = false;
@@ -542,7 +585,7 @@ async fn run_worker(
                     })
                     .map(|(root, _)| root.clone());
                 if let Some(root) = next {
-                    let settings = inner.settings.resolve(&root);
+                    let settings = inner.prepare_root(&root);
                     let epoch = inner.workspace_checks.epoch;
                     let prior = inner
                         .workspace_checks
@@ -565,11 +608,19 @@ async fn run_worker(
                         .iter()
                         .map(|(uri, doc)| (normalize_uri(uri.as_str()), doc.version))
                         .collect();
-                    let workspace = Box::new(inner.workspace.snapshot_for_root_with_limit(
+                    let mut workspace = Box::new(inner.workspace.snapshot_for_root_with_limit(
                         root.as_str(),
                         settings.search_paths,
                         settings.macro_work_limit,
                     ));
+                    let cancellation = Arc::new(AtomicBool::new(false));
+                    workspace.set_cancellation(Arc::clone(&cancellation));
+                    inner
+                        .workspace_checks
+                        .roots
+                        .get_mut(&root)
+                        .unwrap()
+                        .cancellation = Some(cancellation);
                     Work::Check {
                         epoch,
                         generation,
@@ -690,6 +741,7 @@ async fn run_worker(
                                     .or_insert_with(RootEntry::pending);
                                 let previous = std::mem::replace(&mut entry.identity, key);
                                 if !selected {
+                                    entry.cancel_work();
                                     entry.selected = false;
                                     entry.state = "excluded";
                                     entry.due = None;
@@ -775,6 +827,7 @@ async fn run_worker(
                             inner.workspace_checks.completed_jobs += 1;
                             inner.workspace_checks.reused_jobs += u64::from(checked.reused);
                             let entry = inner.workspace_checks.roots.get_mut(&root).unwrap();
+                            entry.cancellation = None;
                             entry.identity = normalize_uri(root.as_str());
                             entry.state = if checked.complete {
                                 "checked"
@@ -880,9 +933,17 @@ fn compute(
             elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
         });
     }
-    let revision = workspace
-        .input_revision(root.as_str())
-        .ok_or_else(|| format!("Cannot read root model: {root}"))?;
+    let revision = workspace.input_revision(root.as_str()).ok_or_else(|| {
+        match workspace.analysis_selection(root.as_str()) {
+            crate::engine::analysis_configuration::AnalysisSelectionState::Stale {
+                cause, ..
+            } => format!(
+                "{}: {} Reset or select an analysis configuration before checking this model.",
+                cause.code, cause.message
+            ),
+            _ => format!("Cannot read root model: {root}"),
+        }
+    })?;
     let set = check_in_workspace_with_origins(&mut workspace, root.as_str());
     let complete = workspace.includes_complete(root.as_str())
         && workspace
@@ -913,7 +974,13 @@ fn compute(
         .map(|record| path_key(&record.path))
         .collect();
     Ok(Checked {
-        report: Arc::new(prepare_root_report(root, set, text, revision)),
+        report: Arc::new(prepare_root_report(
+            root,
+            set,
+            text,
+            revision,
+            &workspace.root_analysis_configuration(root.as_str()),
+        )),
         dependencies,
         dependency_uris,
         owner_files,
@@ -1114,7 +1181,7 @@ async fn send_status(client: &Client, state: &Mutex<Inner>) {
         inner.workspace_checks.notifications.then(|| {
             inner
                 .workspace_checks
-                .status(inner.settings.workspace_diagnostics)
+                .status(inner.settings.workspace_diagnostics, &inner.workspace)
         })
     };
     if let Some(status) = status {

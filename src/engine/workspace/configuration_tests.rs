@@ -38,6 +38,74 @@ fn names(ws: &mut Workspace) -> Vec<String> {
 }
 
 #[test]
+fn analysis_choices_and_paths_commit_together_after_one_validation() {
+    // Guards native selection changing include paths after rejecting choices,
+    // or eagerly rebuilding the model while committing one accepted change.
+    let mut ws = workspace(
+        "var y;model;\n@#include \"body.inc\"\nend;\n",
+        &[("a/body.inc", "y=1;\n"), ("b/body.inc", "y=2;\n")],
+    );
+    let first = AnalysisConfiguration {
+        defines: vec![InitialDefinition {
+            name: "FLAG".into(),
+            expression: "1".into(),
+        }],
+        ..Default::default()
+    };
+    ws.set_root_analysis_configuration_with_paths(
+        "main.mod",
+        first.clone(),
+        Some(vec![PathBuf::from("a")]),
+    )
+    .unwrap();
+    let before = ws.effective_model_snapshot("main.mod").unwrap();
+    let revision = ws.input_revision("main.mod").unwrap();
+    let mut invalid = first.clone();
+    invalid.defines.push(invalid.defines[0].clone());
+    assert!(
+        ws.set_root_analysis_configuration_with_paths(
+            "main.mod",
+            invalid,
+            Some(vec![PathBuf::from("b")])
+        )
+        .is_err()
+    );
+    assert_eq!(*ws.root_analysis_configuration("main.mod"), first);
+    assert_eq!(ws.root_paths("main.mod"), &[PathBuf::from("a")]);
+    assert_eq!(ws.input_revision("main.mod").unwrap(), revision);
+    assert!(Arc::ptr_eq(
+        &before,
+        &ws.effective_model_snapshot("main.mod").unwrap()
+    ));
+    let second = AnalysisConfiguration {
+        defines: vec![InitialDefinition {
+            name: "FLAG".into(),
+            expression: "2".into(),
+        }],
+        ..Default::default()
+    };
+    let builds = crate::engine::language::parser::PARSE_EXPANDED_BUILDS.with(|value| value.get());
+    ws.set_root_analysis_configuration_with_paths(
+        "main.mod",
+        second.clone(),
+        Some(vec![PathBuf::from("b"), PathBuf::from("b")]),
+    )
+    .unwrap();
+    assert_eq!(
+        crate::engine::language::parser::PARSE_EXPANDED_BUILDS.with(|value| value.get()),
+        builds
+    );
+    assert_eq!(ws.root_paths("main.mod"), &[PathBuf::from("b")]);
+    let after = ws.effective_model_snapshot("main.mod").unwrap();
+    assert!(!Arc::ptr_eq(&before, &after));
+    assert!(ws.snapshot_sources("main.mod").contains_key("b/body.inc"));
+    assert!(!ws.snapshot_sources("main.mod").contains_key("a/body.inc"));
+    ws.set_root_analysis_configuration_with_paths("main.mod", first, None)
+        .unwrap();
+    assert_eq!(ws.root_paths("main.mod"), &[PathBuf::from("b")]);
+}
+
+#[test]
 fn initial_false_is_defined_and_later_assignments_keep_source_order() {
     // Guards treating false as absent, globally locking inputs, or accepting
     // duplicate initial names while changing the previous selected analysis.

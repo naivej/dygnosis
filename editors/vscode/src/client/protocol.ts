@@ -30,6 +30,39 @@ export interface Dimension {
   static: string[]; predetermined: string[]; forward_looking: string[]; mixed: string[];
 }
 export interface RelatedFile { kind: string; filename: string; resolved: boolean; path?: string }
+export interface GuardedTarget { file: string | null; site_id: string; source_revision: string }
+export type AnalysisOverride =
+  { kind: "definition"; target: GuardedTarget; expression: string } |
+  { kind: "skip_definition"; target: GuardedTarget } |
+  { kind: "branch"; target: GuardedTarget; branch_id: string | null };
+export interface AnalysisConfiguration { name?: string; defines?: { name: string; expression: string }[]; overrides?: AnalysisOverride[] }
+export interface OverrideReceipt {
+  operation: AnalysisOverride; application: "applied" | "not_reached" | "unknown";
+  known_execution_count: number; execution_count: number | null; cause: string | null;
+}
+export interface AnalysisMetadata {
+  state: "selected" | "stale";
+  selection: { configuration_id: string; name: string | null; preview: boolean; invocation_scope: string };
+  configuration: AnalysisConfiguration; selection_generation: number; include_paths: string[] | null;
+  macro_complete: boolean | null; model_complete: boolean | null; overrides: OverrideReceipt[];
+  cause?: { code: string; message: string; target?: GuardedTarget } | null;
+}
+export interface DirectiveSite {
+  target: GuardedTarget; kind: "definition" | "function_definition" | "conditional";
+  name: string | null; expected_text: string; location: Location;
+  branches: { branch_id: string; expected_text: string; location: Location }[];
+}
+export interface PresetBinding {
+  operation_index: number; file: string | null; kind: DirectiveSite["kind"]; name: string | null;
+  expected_text: string; target_text: string; branch_index: number | null; branch_text: string | null;
+}
+export interface AnalysisContext {
+  schema_version: 1; root_uri: string; document_uri: string; document_version: number | null;
+  revision: string; analysis: AnalysisMetadata; sites: DirectiveSite[];
+  source_coverage: { complete: boolean; cause?: string | null }; preset_bindings?: PresetBinding[];
+  partial?: boolean; message?: string;
+  prepared_analysis?: AnalysisConfiguration; prepared_include_paths?: string[];
+}
 export interface ModelInfo {
   schema_version: 1; root_uri: string; document_uri: string;
   document_version: number | null; revision: string; complete: boolean;
@@ -44,6 +77,7 @@ export interface ModelInfo {
   heterogeneity_dimensions?: Dimension[];
   status?: string; message?: string;
   incomplete_reasons?: { code?: string; message?: string; location?: unknown }[];
+  analysis?: AnalysisMetadata; source_browsing?: boolean; browsing_documents?: string[];
 }
 export function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -73,6 +107,53 @@ function strings(value: unknown): value is string[] {
 function rows(value: unknown, validate: (row: Record<string, unknown>) => boolean): boolean {
   return Array.isArray(value) && value.every(row => record(row) && validate(row));
 }
+export function guardedTarget(value: unknown): value is GuardedTarget {
+  return record(value) && nullableString(value.file) && typeof value.site_id === "string" && typeof value.source_revision === "string";
+}
+export function analysisOverride(value: unknown): value is AnalysisOverride {
+  return record(value) && guardedTarget(value.target) && (value.kind === "definition" && typeof value.expression === "string" ||
+    value.kind === "skip_definition" || value.kind === "branch" && nullableString(value.branch_id));
+}
+export function analysisConfiguration(value: unknown): value is AnalysisConfiguration {
+  return record(value) && (value.name === undefined || typeof value.name === "string") &&
+    (value.defines === undefined || rows(value.defines, row => typeof row.name === "string" && typeof row.expression === "string")) &&
+    (value.overrides === undefined || Array.isArray(value.overrides) && value.overrides.every(analysisOverride));
+}
+export function parseAnalysisMetadata(value: unknown): AnalysisMetadata {
+  if (!record(value) || !["selected", "stale"].includes(String(value.state)) || !record(value.selection) ||
+      typeof value.selection.configuration_id !== "string" || !nullableString(value.selection.name) || typeof value.selection.preview !== "boolean" ||
+      typeof value.selection.invocation_scope !== "string" || !analysisConfiguration(value.configuration) || !natural(value.selection_generation) ||
+      !(value.include_paths === null || strings(value.include_paths)) || ![true, false, null].includes(value.macro_complete as boolean | null) ||
+      ![true, false, null].includes(value.model_complete as boolean | null) || !rows(value.overrides, row => analysisOverride(row.operation) &&
+        ["applied", "not_reached", "unknown"].includes(String(row.application)) && natural(row.known_execution_count) &&
+        (row.execution_count === null || natural(row.execution_count)) && nullableString(row.cause)) ||
+      value.state === "stale" && (!record(value.cause) || typeof value.cause.code !== "string" || typeof value.cause.message !== "string" ||
+        value.cause.target !== undefined && !guardedTarget(value.cause.target))) {
+    throw new Error("Unsupported or invalid analysis configuration. Use the bundled engine or update dynare.serverPath.");
+  }
+  return value as unknown as AnalysisMetadata;
+}
+export function parseAnalysisContext(value: unknown, root: string): AnalysisContext {
+  if (record(value) && typeof value.error === "string") throw new Error(value.error);
+  if (!record(value) || value.schema_version !== 1 || value.root_uri !== root || typeof value.document_uri !== "string" ||
+      !(value.document_version === null || natural(value.document_version)) || typeof value.revision !== "string" ||
+      !rows(value.sites, site => guardedTarget(site.target) && ["definition", "function_definition", "conditional"].includes(String(site.kind)) &&
+        nullableString(site.name) && typeof site.expected_text === "string" && location(site.location) &&
+        rows(site.branches, branch => typeof branch.branch_id === "string" && typeof branch.expected_text === "string" && location(branch.location))) ||
+      !record(value.source_coverage) || typeof value.source_coverage.complete !== "boolean" ||
+      (value.source_coverage.cause !== undefined && !nullableString(value.source_coverage.cause)) ||
+      (value.partial !== undefined && typeof value.partial !== "boolean") || (value.message !== undefined && typeof value.message !== "string") ||
+      (value.prepared_analysis !== undefined && !analysisConfiguration(value.prepared_analysis)) ||
+      (value.prepared_include_paths !== undefined && !strings(value.prepared_include_paths)) ||
+      !(value.preset_bindings === undefined || rows(value.preset_bindings, binding => natural(binding.operation_index) && nullableString(binding.file) &&
+        ["definition", "function_definition", "conditional"].includes(String(binding.kind)) && nullableString(binding.name) &&
+        typeof binding.expected_text === "string" && typeof binding.target_text === "string" &&
+        (binding.branch_index === null || natural(binding.branch_index)) && nullableString(binding.branch_text)))) {
+    throw new Error("Unsupported or invalid analysis context. Use the bundled engine or update dynare.serverPath.");
+  }
+  parseAnalysisMetadata(value.analysis);
+  return value as unknown as AnalysisContext;
+}
 /** Reject an unknown schema or malformed navigation rather than guessing. */
 export function parseModelInfo(value: unknown, root: string, document: string): ModelInfo {
   if (record(value) && typeof value.error === "string") throw new Error(value.error);
@@ -81,6 +162,8 @@ export function parseModelInfo(value: unknown, root: string, document: string): 
       typeof value.complete !== "boolean" ||
       !(value.document_version === null || natural(value.document_version)) ||
       !strings(value.owner_roots) ||
+      !(value.browsing_documents === undefined || strings(value.browsing_documents)) ||
+      !(value.source_browsing === undefined || typeof value.source_browsing === "boolean") ||
       !(value.dependency_candidates === undefined || strings(value.dependency_candidates)) ||
       !rows(value.statements, row => source(row) && typeof row.id === "string" &&
         typeof row.kind === "string" && typeof row.name === "string" &&
@@ -107,6 +190,7 @@ export function parseModelInfo(value: unknown, root: string, document: string): 
       !(value.first_model_anchor === null || location(value.first_model_anchor))) {
     throw new Error("Unsupported or invalid Dygnosis model information. Update the engine or use the bundled binary.");
   }
+  if (value.analysis !== undefined) parseAnalysisMetadata(value.analysis);
   if (value.complete && (!["n_endogenous", "n_exogenous", "n_parameters", "n_equations"]
       .every(key => natural(value[key])) ||
       !["endogenous", "exogenous", "parameters", "static", "predetermined", "forward_looking", "mixed"].every(key => strings(value[key])) ||

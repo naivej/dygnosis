@@ -553,7 +553,15 @@ exports.run = async function run() {
     const extension = vscode.extensions.getExtension("CoconutWater.dygnosis");
     assert.ok(extension);
     const service = await extension.activate();
-    assert.ok(["all", "mcp", "semantic", "folding", "presentation", "rename", "workspace", "syntax", "lifecycle"].includes(scope), "Unknown native host scope");
+    assert.ok(["all", "mcp", "semantic", "folding", "presentation", "rename", "workspace", "syntax", "lifecycle", "analysis"].includes(scope), "Unknown native host scope");
+    if (scope === "analysis") {
+      await require("./helpers/analysis_configuration_host.cjs").checkAnalysisConfigurations(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, writeObservedInput });
+      await service.shutdown();
+      evidence.artifacts_after = await historyArtifacts();
+      assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "native analysis acceptance uses one matching candidate");
+      evidence.passed = true;
+      return;
+    }
     if (scope === "lifecycle") {
       await require("./helpers/lifecycle_host.cjs").checkLifecycle(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor });
       evidence.artifacts_after = await historyArtifacts();

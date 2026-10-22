@@ -284,11 +284,27 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
     changed_allowance["macro_work_limit"] = json!(200000);
     changed_allowance["expected_revision_a"] = historical["inputs"]["before"]["revision"].clone();
     changed_allowance["expected_revision_b"] = historical["inputs"]["after"]["revision"].clone();
-    let stale_allowance = decode(wire.call("dynare_compare_models", changed_allowance));
+    let stale_reply = wire.call("dynare_compare_models", changed_allowance);
+    let stale_allowance: Value = serde_json::from_str(
+        stale_reply["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(
         stale_allowance["outcome"]["reasons"][0]["code"],
         "INPUT_CHANGED"
     );
+    for side in ["before", "after"] {
+        let summary = &stale_allowance["data"]["analysis_summaries"][side];
+        assert!(summary["analysis"].is_object(), "{stale_allowance}");
+        assert!(summary["complete"].is_null());
+        assert!(summary["counts"].is_null());
+        assert_eq!(summary["cause"]["code"], "INPUT_CHANGED");
+    }
+    assert!(stale_allowance["data"].get("navigation").is_none());
+    assert!(stale_allowance["data"].get("sources").is_none());
+    assert!(stale_allowance["proposal"].is_null());
     assert_eq!(historical["changed_equations"].as_array().unwrap().len(), 1);
     assert_eq!(
         historical["sources"]["before"]["eq.inc"],

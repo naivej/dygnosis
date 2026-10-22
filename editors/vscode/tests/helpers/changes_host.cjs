@@ -72,6 +72,13 @@ function snapshotResponse(request, changed = true) {
     const text = input.kind === "git" ? Object.fromEntries(Object.entries(input.sources).filter(([, value]) => value.kind === "text").map(([key, value]) => [key, value.text])) : { [root]: "var y; model; y = 2; end;\n" };
     inputs[side] = { kind: input.kind, input_id: input.input_id, root_file: root, revision: input.kind === "git" ? `git:${input.commit}` : input.expected_revision, complete: true, file_keys: Object.keys(text), dependency_candidates: [], search_paths: input.search_paths ?? [],
       ...(input.kind === "git" ? { repository_uri: input.repository_uri, commit: input.commit, requested_ref: input.requested_ref, source_policy: "git_tree" } : { root_uri: input.root_uri, expected_revision: input.expected_revision, source_policy: "editor_buffers_and_disk" }) };
+    if (input.analysis !== undefined) {
+      inputs[side].analysis = { revision: inputs[side].revision, selection: { configuration_id: `choices:${JSON.stringify(input.analysis)}`, name: input.analysis.name ?? null, preview: !!input.analysis.overrides?.length, invocation_scope: "explicit_macro_inputs" },
+        configuration: globalThis.structuredClone({ ...input.analysis, defines: input.analysis.defines ?? [], overrides: input.analysis.overrides ?? [] }), macro_complete: true, model_complete: true,
+        overrides: (input.analysis.overrides ?? []).map(operation => ({ operation, application: "applied", known_execution_count: 1, execution_count: 1, cause: null })) };
+      inputs[side].counts = { n_endogenous: 1, n_equations: 1, heterogeneity_dimensions: [] };
+      inputs[side].guards = [{ file: root, exists: true, directory: false, identity: null, text_sha256: "captured-text", byte_sha256: "captured-bytes", length: text[root].length }];
+    }
     sources[side] = text; navigation[side] = { ...inputs[side] };
   }
   if (changed) {
@@ -190,13 +197,13 @@ function createHost() {
     },
   };
   host.install = () => {
-    const { ComparisonFailure } = load("snapshot_compare", vscode);
+    const { ComparisonFailure, freezeWorkingSelector, prepareAnalysisSide, validateCapturedInputs } = load("snapshot_compare", vscode);
     host.ComparisonFailure = ComparisonFailure;
     const capture = async (_service, _git, history, resource, cancel) => {
       host.captures.push({ resource, cancel, history });
       return host.capture ? host.capture(resource, cancel, history) : captured(resource, history, host, service.currentInstance);
     };
-    const { registerChanges } = load("changes_editor", vscode, { "git_source_host": { createGitSources: async () => { if (host.gitUnavailable) throw new Error("Git is unavailable"); return git; } }, "snapshot_compare": { captureComparison: capture, ComparisonFailure } });
+    const { registerChanges } = load("changes_editor", vscode, { "git_source_host": { createGitSources: async () => { if (host.gitUnavailable) throw new Error("Git is unavailable"); return git; } }, "snapshot_compare": { captureComparison: capture, ComparisonFailure, freezeWorkingSelector, prepareAnalysisSide, validateCapturedInputs } });
     host.registration = registerChanges(service, Uri.file(path.resolve(__dirname, "../.."))); return host.registration;
   };
   host.open = argument => host.commands.get("dygnosis.openChanges")(argument);

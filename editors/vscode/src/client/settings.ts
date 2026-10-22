@@ -53,6 +53,7 @@ export function engineSettings(resource: vscode.Uri | undefined, log: Log) {
     outline: {
       sections: listSetting("outline.sections", resource, outlineSections, outlineSections, log),
       equationNumbers: booleanSetting("outline.equationNumbers", resource, true, log),
+      inactiveSource: booleanSetting("outline.inactiveSource", resource, true, log),
     },
     parameterValueHints: booleanSetting("parameterValueHints", resource, true, log),
   };

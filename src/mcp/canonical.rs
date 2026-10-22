@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use super::request::{ExpandedRange, LineRange, Target};
 use super::result::{Detail, Pages, ResultOptions, ToolResult};
 use super::source::{RequestControl, SourceInput};
+use crate::engine::analysis_configuration::AnalysisConfiguration;
 
 pub(super) const TOOL_NAMES: &[&str] = &[
     "dynare_syntax",
@@ -59,6 +60,9 @@ enum EquationSelector {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum BatchInput {
+    ConfiguredSources {
+        jobs: Vec<ConfiguredSource>,
+    },
     Map {
         files: BTreeMap<String, String>,
         roots: Vec<String>,
@@ -77,6 +81,21 @@ enum BatchInput {
     Sources {
         sources: Vec<SourceInput>,
     },
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ConfiguredSource {
+    source: SourceInput,
+    analysis: AnalysisConfiguration,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum View {
+    #[default]
+    Effective,
+    Source,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -100,6 +119,14 @@ enum ComparisonInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[allow(dead_code)] // Most fields pass unchanged to the common worker after typed decoding.
 struct Params {
+    /// Explicit request-local macro choices; saved editor presets are not inputs.
+    analysis: Option<AnalysisConfiguration>,
+    /// Independent choices for the Before side of comparison.
+    analysis_a: Option<AnalysisConfiguration>,
+    /// Independent choices for the After side of comparison.
+    analysis_b: Option<AnalysisConfiguration>,
+    /// Effective model facts (default) or labelled written source candidates/templates.
+    view: Option<View>,
     source: Option<SourceInput>,
     batch: Option<BatchInput>,
     comparison: Option<ComparisonInput>,
@@ -173,7 +200,12 @@ fn fields(tool: &str) -> Vec<&'static str> {
         tool,
         "dynare_syntax" | "dynare_diagnostic_info" | "dynare_compare_models"
     ) {
-        fields.extend(["source", "expected_revision", "macro_work_limit"]);
+        fields.extend([
+            "source",
+            "analysis",
+            "expected_revision",
+            "macro_work_limit",
+        ]);
     }
     fields.extend_from_slice(match tool {
         "dynare_syntax" => &["name", "search", "kind", "context", "parent"],
@@ -186,9 +218,18 @@ fn fields(tool: &str) -> Vec<&'static str> {
             "file",
             "root",
         ],
-        "dynare_model_info" => &[],
-        "dynare_symbol_info" => &["symbol", "include_declaration", "occurrences"],
-        "dynare_equations" => &["symbol", "equation", "name", "tags", "scope", "dimension"],
+        "dynare_model_info" => &["file"],
+        "dynare_symbol_info" => &["symbol", "view", "include_declaration", "occurrences"],
+        "dynare_equations" => &[
+            "symbol",
+            "equation",
+            "name",
+            "tags",
+            "scope",
+            "dimension",
+            "view",
+            "file",
+        ],
         "dynare_expand" => &["line_range", "expanded_range", "equation"],
         "dynare_actions" => &[
             "target",
@@ -203,6 +244,8 @@ fn fields(tool: &str) -> Vec<&'static str> {
         "dynare_extract" => &["names", "tags", "dimension", "equation"],
         "dynare_compare_models" => &[
             "comparison",
+            "analysis_a",
+            "analysis_b",
             "macro_work_limit",
             "expected_revision_a",
             "expected_revision_b",
@@ -251,6 +294,12 @@ pub(super) fn input_schema(tool: &str) -> Arc<serde_json::Map<String, Value>> {
         let property = &mut schema["properties"][key];
         *property = json!({"allOf":[property.clone(),{"not":{"type":"null"}}]});
     }
+    if tool == "dynare_equations" {
+        schema.insert("allOf".into(),json!([{"if":{"required":["view"],"properties":{"view":{"const":"source"}}},"then":{"not":{"anyOf":[{"required":["symbol"]},{"required":["equation"]},{"required":["scope"]},{"required":["dimension"]}]}}}]));
+    }
+    if tool == "dynare_symbol_info" {
+        schema.insert("allOf".into(),json!([{"if":{"required":["view"],"properties":{"view":{"const":"source"}}},"then":{"properties":{"sections":{"maxItems":0}},"not":{"anyOf":[{"required":["occurrences"]},{"required":["include_declaration"]},{"properties":{"symbol":{"required":["binding_id"]}},"required":["symbol"]}]}}}]));
+    }
     super::request::prune_definitions(&mut schema);
     Arc::new(schema)
 }
@@ -260,19 +309,22 @@ pub(super) fn advertised_tools(structured: bool) -> Vec<Tool> {
         let description=match name {
             "dynare_syntax"=>"Look up pinned Dynare syntax: commands, blocks, instructions, functions, operators, macros and options. Select name or search; kind, context and parent distinguish forms with the same spelling. Exact forms include signatures, value rules and bounded options. Omit filters for a bounded index. No model source is needed.",
             "dynare_diagnostic_info"=>"Look up diagnostic meaning and correction guidance. An exact code returns its explanation; kind, severity and search return bounded catalog summaries. This catalog does not report problems in a model. No model source is needed.",
-            "dynare_diagnose"=>"Check one source or an explicit batch of model roots. Returns aggregate summary, per-root reports and revisions, and paged diagnostics in the same shape. Batch map roots are exact keys; paths read saved server-host files; sources can mix explicit text/map/disk inputs. Each partial, failed or unfinished root explains its cause; an incomplete zero count is not a clean-model claim.",
-            "dynare_model_info"=>"Give a model overview and its source relationships. Default summary has scalar counts and model kind. Select structure for timing lists and block flags, or declarations, assignments, model_locals, statements, blocks, sources, includes or scope for detail. sources includes resolved/missing includes and companion lookup causes. Unnamed text cannot discover file relationships. Counts describe written source before transformations.",
-            "dynare_symbol_info"=>"Inspect one resolved binding and its accepted uses in one call. Select a unique name, written target or returned binding identity. Default sections are definition, metadata and references; assignments and expanded occurrences are optional. References-only works directly without an earlier lookup. Ambiguous names return candidates; lookalike text is excluded.",
-            "dynare_equations"=>"Find and inspect equations, tags, identifiers, timing and verified source locations. Name, tag, scope/dimension and resolved-symbol filters combine with AND. A symbol name works directly. Index selectors are zero-based within aggregate or dimension scope; identities select one expanded row. Incomplete analysis withholds authoritative counts.",
+            "dynare_diagnose"=>"Check one source with optional analysis choices, or an explicit batch. configured_sources.jobs contains source and analysis for each job and permits repeated roots. job:1, job:2 and later identities key expected_revisions; each job spends the finite root-job allowance. Other batches cannot share analysis. Results distinguish jobs from distinct roots, and retain each partial, failed or unfinished cause. An incomplete zero count is not a clean-model claim.",
+            "dynare_model_info"=>"Give a configured model overview or inspect written source. Default summary has effective counts and model kind before transformations. Select analysis for explicit choices and override receipts; source_structure returns written items, guarded directive targets and branch IDs, availability and separate source coverage. Optional file selects one source under the same input policy, without making it an executed include. Other sections are structure, declarations, assignments, model_locals, statements, blocks, sources, includes and scope. Written source-item counts are not effective equation counts.",
+            "dynare_symbol_info"=>"Inspect a resolved binding with view=effective (default), using a unique name, written target or returned binding identity. Default sections are definition, metadata and references; assignments and expanded occurrences are optional. References-only works directly. view=source instead accepts a literal name or written target and returns labelled source candidates with availability and coverage, without binding identities or accepted references. An inactive written target need not have an effective binding.",
+            "dynare_equations"=>"Inspect view=effective equations (default), tags, timing and verified locations under the requested analysis. Name, tag, scope/dimension and resolved-symbol filters combine with AND; scoped indices are zero-based. Incomplete analysis withholds authoritative counts. view=source returns written equation templates filtered by name, tags or file, with source_id, conditions, availability and separate coverage. Source-item counts are not equation counts; source IDs cannot select expansion or extraction.",
             "dynare_expand"=>"Show include/macro-expanded text with verified written origins. Focus with inclusive line_range, exclusive-end expanded_range or an equation identity. A range cutting a row omits its origin and states why. Partial expansion retains available text and its causes.",
             "dynare_actions"=>"Discover source action summaries or request a complete verified proposal. Select action_id with its expected_revision for one alternative. Set fixes=true to propose compatible proven diagnostic fixes, optionally by code, target or diagnostic_ids, without a discovery call. Alternatives are never combined automatically. Skipped and remaining work is explained. No file is written.",
             "dynare_rename"=>"Propose a complete rename of one resolved binding. A unique name works directly; a target or binding identity can disambiguate. Incomplete sources, collisions, generated names or incompatible checked owners withhold the complete proposal with a cause. No file is written.",
             "dynare_format"=>"Propose whitespace formatting for the root or selected source file. Optional whole-line line_range is one-based and inclusive. formatIndent is tab or one to eight spaces. Native text and source outside the selected lines retain their layout. No file is written.",
             "dynare_extract"=>"Produce a selected equation fragment with required declarations, local definitions and model context. Names combine with OR; tags combine with AND. Select a returned identity or scoped zero-based index for unnamed equations. Omitted setup is explicit; no numerical or runnable-model claim is inferred.",
-            "dynare_compare_models"=>"Compare two model snapshots and captured source. Sources use explicit text/map/disk inputs. Repository input selects local Git or saved Working versions on this server host; no fetch or editor-buffer read occurs. Filters select semantic families and change kinds. Coverage and source navigation retain each side's identity; no algebraic or numerical equivalence is inferred.",
+            "dynare_compare_models"=>"Compare two model snapshots with independent analysis_a and analysis_b choices. Same source text can produce different model facts; both choices and revisions remain explicit. Sources use text/map/disk inputs; current disk inputs share validated positive and negative file facts. Repository input selects local Git or saved Working versions on the server host; no fetch or editor-buffer read occurs. Historical targets use that side's source revisions, not current target identities. Filters select semantic families and change kinds; coverage and navigation retain both captured identities. No numerical equivalence is inferred.",
             _=>unreachable!(),
         };
-        let mut tool=Tool::new(name,format!("{description} Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave."),input_schema(name))
+        let configuration = if matches!(name,"dynare_syntax"|"dynare_diagnostic_info") {String::new()} else {
+            let argument=if name=="dynare_compare_models"{"analysis_a and analysis_b"}else{"analysis"};
+            format!(" Optional {argument} supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported.")};
+        let mut tool=Tool::new(name,format!("{description}{configuration} Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave."),input_schema(name))
             .with_annotations(ToolAnnotations::new().read_only(true).destructive(false).idempotent(true).open_world(false));
         if structured {let mut schema=super::result::output_schema().as_ref().clone();schema["properties"]["schema_version"]=json!({"const":3});tool.output_schema=Some(Arc::new(schema));}
         tool
@@ -291,7 +343,7 @@ fn defaults(arguments: &mut Value, params: &Params, tool: &str) {
             "dynare_model_info" => {
                 object.insert("sections".into(), json!(["summary"]));
             }
-            "dynare_symbol_info" => {
+            "dynare_symbol_info" if params.view != Some(View::Source) => {
                 object.insert(
                     "sections".into(),
                     json!(["definition", "metadata", "references"]),
@@ -355,6 +407,11 @@ pub(super) fn dispatch(
     if tool == "dynare_diagnose" && (params.source.is_some() == params.batch.is_some()) {
         return Err(invalid("Choose exactly one source or batch"));
     }
+    if tool == "dynare_diagnose" && params.batch.is_some() && params.analysis.is_some() {
+        return Err(invalid(
+            "A batch cannot share analysis choices. Use batch.kind=configured_sources with explicit source and analysis jobs.",
+        ));
+    }
     if tool == "dynare_diagnose" {
         let object = arguments.as_object_mut().unwrap();
         object.remove("batch");
@@ -367,6 +424,9 @@ pub(super) fn dispatch(
                 ));
             }
             match batch {
+                BatchInput::ConfiguredSources { jobs } => {
+                    json!({"configured_sources":jobs.iter().map(|job|json!({"source":job.source,"analysis":job.analysis})).collect::<Vec<_>>()})
+                }
                 BatchInput::Map {
                     files,
                     roots,
@@ -407,6 +467,12 @@ pub(super) fn dispatch(
         return super::multi_request::dispatch_batch(arguments, control);
     }
     if tool == "dynare_compare_models" {
+        if let Some(analysis) = arguments.as_object_mut().unwrap().remove("analysis_a") {
+            arguments["analysis_before"] = analysis;
+        }
+        if let Some(analysis) = arguments.as_object_mut().unwrap().remove("analysis_b") {
+            arguments["analysis_after"] = analysis;
+        }
         arguments.as_object_mut().unwrap().remove("comparison");
         match params
             .comparison
@@ -496,6 +562,15 @@ pub(super) fn dispatch(
         }
     }
     if tool == "dynare_symbol_info" {
+        if params.view == Some(View::Source)
+            && (params.occurrences.is_some()
+                || params.include_declaration.is_some()
+                || !params.sections.is_empty())
+        {
+            return Err(invalid(
+                "Source symbol view returns candidates. Effective sections, occurrences and include_declaration are unavailable in this view.",
+            ));
+        }
         for section in &params.sections {
             if !["definition", "metadata", "assignments", "references"].contains(&section.as_str())
             {
@@ -671,6 +746,17 @@ pub(super) fn page_collections(path: &str, value: &mut Value, pages: &mut Pages,
             }
         }
         Value::Object(object) => {
+            let complete = object
+                .get("source_coverage")
+                .or_else(|| {
+                    object
+                        .contains_key("source_item_count")
+                        .then(|| object.get("coverage"))
+                        .flatten()
+                })
+                .and_then(|coverage| coverage.get("complete"))
+                .and_then(Value::as_bool)
+                .unwrap_or(complete);
             for (key, value) in object.iter_mut() {
                 if [
                     "proposal",
@@ -691,6 +777,8 @@ pub(super) fn page_collections(path: &str, value: &mut Value, pages: &mut Pages,
                     "declaration",
                     "definition",
                     "scope",
+                    "analysis",
+                    "source_coverage",
                 ]
                 .contains(&key.as_str())
                 {

@@ -8,15 +8,48 @@ import { GitSources, HistoricalCapture, HistoricalInput } from "./git_source";
 import { DiffSide, DiffSnapshot, parseDiff, parseSnapshotDiff } from "./diff_view";
 import { HistoricalSources } from "./history_sources";
 import { engineSettings } from "../client/settings";
-import { record } from "../client/protocol";
+import { analysisConfiguration, parseAnalysisContext, parseAnalysisMetadata, record } from "../client/protocol";
+import type { AnalysisConfiguration, AnalysisMetadata } from "../client/protocol";
+import type { AnalysisSide } from "../editor/analysis_configuration";
 import { normalizeGitText } from "./git_provenance";
 import { semanticCapability } from "./semantic_view";
 
-interface WorkingInput { kind: "working"; input_id: string; root_uri: string; expected_revision: string; search_paths?: string[] }
+interface WorkingInput { kind: "working"; input_id: string; root_uri: string; expected_revision: string; search_paths?: string[]; analysis?: AnalysisConfiguration }
+type ConfiguredHistoricalInput = HistoricalInput & { analysis?: AnalysisConfiguration };
+export type CapturedAnalysis = Pick<AnalysisMetadata, "selection" | "configuration" | "macro_complete" | "model_complete" | "overrides">;
+export interface ComparisonCounts { n_endogenous: number; n_equations: number; heterogeneity_dimensions: { dimension: string; n_endogenous: number; n_equations: number }[] }
+export interface AnalysisSummary {
+  analysis?: CapturedAnalysis; requested_analysis?: AnalysisConfiguration | null; complete: boolean | null;
+  counts: ComparisonCounts | null; counts_cause?: string; cause?: { code: string; message: string };
+}
 export interface SnapshotEnvelope {
   input_id: string; kind: "working" | "git"; root_file: string; revision: string; complete: boolean;
   file_keys: string[]; dependency_candidates: string[]; search_paths: string[];
   commit?: string;
+  analysis?: CapturedAnalysis; counts?: ComparisonCounts; guards?: unknown[];
+}
+
+/** Freeze executable choices without changing the live root selection. */
+export async function prepareAnalysisSide(service: DygnosisClient, root: vscode.Uri, side: AnalysisSide, token: vscode.CancellationToken): Promise<ModelSelector> {
+  const proof = await service.analysisContext(root, root, token);
+  assertActive(token);
+  if (!proof) throw new ComparisonFailure("INPUT_CHANGED", "The source changed while preparing the comparison. Select its configurations again.");
+  const raw = await service.execute("dynare/analysisContext", [{ root_uri: root.toString(), document_uri: proof.document_uri, document_version: proof.document_version,
+    expected_revision: proof.revision, expected_selection_generation: proof.analysis.selection_generation, prepare_analysis: side.analysis,
+    include_paths: side.include_paths, ...(side.preset_bindings ? { preset_bindings: side.preset_bindings } : {}) }], token);
+  assertActive(token);
+  const prepared = parseAnalysisContext(raw, root.toString());
+  if (!prepared.prepared_analysis || !prepared.prepared_include_paths)
+    throw new Error("The engine returned unsupported comparison choices. Use the bundled binary.");
+  return { kind: "working", root_uri: root.toString(), analysis: structuredClone(prepared.prepared_analysis), search_paths: [...prepared.prepared_include_paths] };
+}
+
+export async function freezeWorkingSelector(service: DygnosisClient, input: ModelSelector, token: vscode.CancellationToken): Promise<ModelSelector> {
+  if (input.kind !== "working" || input.analysis !== undefined || !service.supportsAnalysisConfiguration) return input;
+  const root = vscode.Uri.parse(input.root_uri), context = await service.analysisContext(root, root, token);
+  assertActive(token);
+  if (!context) throw new ComparisonFailure("INPUT_CHANGED", "The model source changed while capturing its analysis configuration. Open the comparison again.");
+  return { ...input, analysis: structuredClone(context.analysis.configuration), search_paths: input.search_paths ?? context.analysis.include_paths ?? configuredSearchPaths(root, service) };
 }
 export interface CapturedComparison {
   snapshot: DiffSnapshot; inputs: Record<DiffSide, SnapshotEnvelope>; sourceUris: Record<DiffSide, Map<string, vscode.Uri>>;
@@ -25,7 +58,53 @@ export interface CapturedComparison {
   instance: number;
 }
 export class ComparisonFailure extends Error {
-  constructor(readonly code: string, message: string, readonly side?: DiffSide, readonly fileKey?: string) { super(message); }
+  constructor(readonly code: string, message: string, readonly side?: DiffSide, readonly fileKey?: string, readonly summaries?: Record<DiffSide, AnalysisSummary>) { super(message); }
+}
+function configurationKey(value: AnalysisConfiguration): string {
+  return JSON.stringify({ name: value.name ?? null, defines: (value.defines ?? []).map(input => [input.name, input.expression]),
+    overrides: (value.overrides ?? []).map(operation => [operation.kind, operation.target.file, operation.target.site_id, operation.target.source_revision,
+      operation.kind === "definition" ? operation.expression : operation.kind === "branch" ? operation.branch_id : null]) });
+}
+function comparisonCounts(value: unknown): value is ComparisonCounts {
+  const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+  return record(value) && count(value.n_endogenous) && count(value.n_equations) && Array.isArray(value.heterogeneity_dimensions) &&
+    value.heterogeneity_dimensions.every(row => record(row) && typeof row.dimension === "string" && count(row.n_endogenous) && count(row.n_equations));
+}
+function failureSummaries(value: unknown, inputs: Record<DiffSide, WorkingInput | ConfiguredHistoricalInput>): Record<DiffSide, AnalysisSummary> | undefined {
+  if (value === undefined) return undefined;
+  if (!record(value)) throw new Error("The engine returned invalid comparison summaries.");
+  const summaries = {} as Record<DiffSide, AnalysisSummary>;
+  for (const side of ["before", "after"] as const) {
+    const raw = value[side];
+    if (!record(raw) || !(typeof raw.complete === "boolean" || raw.complete === null) ||
+      !(raw.counts === null || comparisonCounts(raw.counts)) ||
+      (raw.counts_cause !== undefined && raw.counts_cause !== null && typeof raw.counts_cause !== "string") ||
+      (raw.cause !== undefined && (!record(raw.cause) || typeof raw.cause.code !== "string" || typeof raw.cause.message !== "string")) ||
+      (raw.requested_analysis !== undefined && raw.requested_analysis !== null && !analysisConfiguration(raw.requested_analysis)))
+      throw new Error("The engine returned invalid comparison summaries.");
+    let analysis: CapturedAnalysis | undefined;
+    if (raw.analysis !== undefined) {
+      if (!record(raw.analysis)) throw new Error("The engine returned invalid comparison analysis.");
+      analysis = parseAnalysisMetadata({ ...raw.analysis, state: "selected", selection_generation: 0, include_paths: null });
+    }
+    const configuration = analysis?.configuration ?? raw.requested_analysis, requested = inputs[side].analysis;
+    if (requested && (!analysisConfiguration(configuration) || configurationKey(configuration) !== configurationKey(requested)))
+      throw new Error("The engine returned different analysis choices for this comparison summary.");
+    summaries[side] = { ...(analysis ? { analysis } : {}), ...(raw.requested_analysis !== undefined ? { requested_analysis: raw.requested_analysis } : {}),
+      complete: raw.complete, counts: raw.counts,
+      ...(typeof raw.counts_cause === "string" ? { counts_cause: raw.counts_cause } : {}),
+      ...(record(raw.cause) ? { cause: { code: raw.cause.code as string, message: raw.cause.message as string } } : {}) };
+  }
+  return summaries;
+}
+
+export async function validateCapturedInputs(service: DygnosisClient, result: Pick<CapturedComparison, "inputs" | "working" | "instance">, token?: vscode.CancellationToken): Promise<boolean> {
+  if (service.currentInstance !== result.instance || token?.isCancellationRequested) return false;
+  if (result.working.length && (["before", "after"] as const).filter(side => result.inputs[side].kind === "working").every(side => Array.isArray(result.inputs[side].guards))) {
+    return await service.validateComparisonInputs(result.inputs, token) && service.currentInstance === result.instance;
+  }
+  const verified = await Promise.all(result.working.map(input => service.revalidate(input.root, input.expected, result.instance, input.root, token)));
+  return verified.every(Boolean) && service.currentInstance === result.instance;
 }
 function assertActive(token: vscode.CancellationToken): void { if (token.isCancellationRequested) throw new ComparisonFailure("CANCELLED", "Comparison capture was cancelled."); }
 function requireCompleteModel(info: ModelSnapshot | undefined, side: DiffSide): asserts info is ModelSnapshot {
@@ -51,6 +130,18 @@ function envelope(value: unknown, input: WorkingInput | HistoricalInput): Snapsh
         value.commit !== input.commit || value.requested_ref !== input.requested_ref || value.source_policy !== "git_tree" :
         value.root_uri !== input.root_uri || value.expected_revision !== input.expected_revision || value.source_policy !== "editor_buffers_and_disk"))
     throw new Error("The engine returned a different snapshot identity. Refresh with the bundled binary.");
+  if (value.analysis !== undefined) {
+    // The shared capture omits the native session's mutable selection fields.
+    const parsed = parseAnalysisMetadata({ ...value.analysis as object, state: "selected", selection_generation: 0, include_paths: null });
+    if (!record(value.analysis) || value.analysis.revision !== value.revision) throw new Error("The engine returned a different analysis revision for this comparison input.");
+    const requested = (input as WorkingInput | ConfiguredHistoricalInput).analysis;
+    if (requested && configurationKey(parsed.configuration) !== configurationKey(requested)) throw new Error("The engine returned different analysis choices for this comparison input.");
+  } else if ((input as WorkingInput | ConfiguredHistoricalInput).analysis !== undefined) throw new Error("The engine omitted the selected analysis configuration from this comparison input.");
+  if (value.counts !== undefined) {
+    const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+    if (!record(value.counts) || !count(value.counts.n_endogenous) || !count(value.counts.n_equations) || !Array.isArray(value.counts.heterogeneity_dimensions) || value.counts.heterogeneity_dimensions.some(row => !record(row) || typeof row.dimension !== "string" || !count(row.n_endogenous) || !count(row.n_equations))) throw new Error("The engine returned invalid comparison counts.");
+  }
+  if (value.guards !== undefined && !Array.isArray(value.guards)) throw new Error("The engine returned invalid comparison source guards.");
   return value as unknown as SnapshotEnvelope;
 }
 function sourceTexts(value: unknown): Record<string, string> {
@@ -69,6 +160,7 @@ export async function captureComparison(service: DygnosisClient, git: () => Prom
   if (record(capability) && !supported) throw new Error("This engine advertises an unsupported comparison. Update dynare.serverPath or use the bundled binary.");
   const semantic = semanticCapability(capability);
   if (!supported) {
+    if (resource.before.analysis !== undefined || resource.after.analysis !== undefined) throw new ComparisonFailure("UNSUPPORTED_ANALYSIS", "This engine cannot compare explicit analysis configurations. Use the bundled binary or update dynare.serverPath.");
     if (resource.before.kind === "working" && resource.after.kind === "working") return captureLegacy(service, resource, token);
     throw new Error("This engine does not support history comparison. Update dynare.serverPath or use the bundled binary.");
   }
@@ -79,25 +171,31 @@ export async function captureComparison(service: DygnosisClient, git: () => Prom
   const withHistory = resource.before.kind === "git" || resource.after.kind === "git";
   const searchPaths = withHistory ? configuredSearchPaths(vscode.Uri.parse(resource.context_uri), service) : undefined;
   const instance = service.currentInstance;
-  const prepare = async (side: DiffSide, selector: ModelSelector): Promise<WorkingInput | HistoricalInput> => {
+  const prepare = async (side: DiffSide, selector: ModelSelector): Promise<WorkingInput | ConfiguredHistoricalInput> => {
     assertActive(token);
     if (selector.kind === "working") {
+      selector = await freezeWorkingSelector(service, selector, token);
+      selectors[side] = selector;
+      if (selector.kind !== "working") throw new Error("The comparison root changed during capture.");
       const root = vscode.Uri.parse(selector.root_uri), info = await service.modelInfo(root, root, true, token);
-      requireCompleteModel(info, side);
-      working.push({ root, expected: info.revision });
-      return { kind: "working", input_id: ids[side], root_uri: selector.root_uri, expected_revision: info.revision, ...(searchPaths ? { search_paths: searchPaths } : {}) };
+      if (selector.analysis === undefined) requireCompleteModel(info, side);
+      const expected = info?.revision || (await service.analysisContext(root, root, token))?.revision;
+      if (!expected) throw new ComparisonFailure("ROOT_NOT_FOUND", "The Working model source is unavailable.", side);
+      working.push({ root, expected });
+      const paths = selector.search_paths ?? searchPaths;
+      return { kind: "working", input_id: ids[side], root_uri: selector.root_uri, expected_revision: expected, ...(paths ? { search_paths: paths } : {}), ...(selector.analysis ? { analysis: selector.analysis } : {}) };
     }
     const sources = await git(), repository = await sources.repositoryFor(vscode.Uri.parse(selector.repository_uri), abort.signal);
     if (repository.rootUri.toString() !== selector.repository_uri) throw new ComparisonFailure("REPOSITORY_CHANGED", "The selected repository is unavailable. Choose its source again.", side);
     const commit = await sources.resolve(repository, selector.commit, abort.signal);
     commit.requested_ref = selector.requested_ref;
     const capture = await sources.capture(repository, commit, selector.root_file, abort.signal); captures.set(side, capture);
-    const folders = (searchPaths ?? []).map(folder => {
+    const folders = (selector.search_paths ?? searchPaths ?? []).map(folder => {
       const relative = path.relative(repository.rootUri.fsPath, folder).split(path.sep).join("/");
       // Keep an external folder explicit; the engine must refuse it if an active include needs it.
       return relative === "" ? "." : relative.startsWith("../") || path.isAbsolute(relative) ? folder.split(path.sep).join("/") : relative;
     });
-    return capture.input(ids[side], folders);
+    return { ...capture.input(ids[side], folders), ...(selector.analysis ? { analysis: selector.analysis } : {}) };
   };
   let holder: object | undefined;
   try {
@@ -109,7 +207,7 @@ export async function captureComparison(service: DygnosisClient, git: () => Prom
       if (!record(result)) throw new Error("The engine returned an invalid snapshot response.");
       if (result.state === "failure") {
         const side = result.side === "before" || result.side === "after" ? result.side : undefined;
-        throw new ComparisonFailure(String(result.code), `${side ? `${side === "before" ? "Before" : "After"}: ` : ""}${String(result.message)}${typeof result.file_key === "string" ? ` (${result.file_key})` : ""}`, side, typeof result.file_key === "string" ? result.file_key : undefined);
+        throw new ComparisonFailure(String(result.code), `${side ? `${side === "before" ? "Before" : "After"}: ` : ""}${String(result.message)}${typeof result.file_key === "string" ? ` (${result.file_key})` : ""}`, side, typeof result.file_key === "string" ? result.file_key : undefined, failureSummaries(result.analysis_summaries, inputs));
       }
       if (result.state === "needs_sources") {
         if (!Array.isArray(result.requests) || !result.requests.length) throw new Error("Historical capture made no progress.");
@@ -122,15 +220,15 @@ export async function captureComparison(service: DygnosisClient, git: () => Prom
           const count = Object.keys(capture.sources).length;
           await capture.load(keys, abort.signal);
           progress ||= Object.keys(capture.sources).length > count;
-          inputs[side] = capture.input(ids[side], (inputs[side] as HistoricalInput).search_paths);
+          const previous = inputs[side];
+          inputs[side] = { ...capture.input(ids[side], (previous as HistoricalInput).search_paths), ...(previous.analysis ? { analysis: previous.analysis } : {}) };
         }
         if (!progress) throw new Error("Historical capture made no progress. Refresh or choose another revision.");
         continue;
       }
       if (result.state !== "result" || !record(result.inputs) || result.inputs.schema_version !== 1 || !record(result.sources)) throw new Error("The engine returned an unsupported snapshot response.");
-      const verified = await Promise.all(working.map(input => service.revalidate(input.root, input.expected, instance, input.root, token)));
-      if (verified.some(info => !info) || service.currentInstance !== instance) throw new ComparisonFailure("INPUT_CHANGED", "The Working model changed during capture. Refresh the comparison.");
       const envelopes = { before: envelope(result.inputs.before, inputs.before), after: envelope(result.inputs.after, inputs.after) };
+      if (!await validateCapturedInputs(service, { inputs: envelopes, working, instance }, token)) throw new ComparisonFailure("INPUT_CHANGED", "The Working source changed during capture. Refresh the comparison.");
       const texts = { before: sourceTexts(result.sources.before), after: sourceTexts(result.sources.after) };
       const sourceUris = { before: new Map<string, vscode.Uri>(), after: new Map<string, vscode.Uri>() }; holder = {};
       for (const side of ["before", "after"] as const) {

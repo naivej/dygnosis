@@ -21,3 +21,10 @@ everything inside that folder.
 Exclusions apply only to background model roots. Open files and dependencies of
 other models remain checked. Saved `.inc` files are not separate workspace
 checks and do not contribute to the model counts.
+
+Workspace checks use the selected analysis configuration for each model root.
+When a root uses a non-Source configuration, its row shows that
+configuration's name (and **preview** when applicable). The workspace status
+also reports how many roots use a non-Source configuration. Choose a root's
+configuration from its open source editor or macro expansion preview; see
+[Inspect macro expansion](effective-model.md#choose-the-analysis-configuration).

@@ -271,6 +271,7 @@ impl Pages {
                 "files",
                 "source",
                 "sources",
+                "configured_sources",
                 "active_file",
                 "file_content_a",
                 "file_content_b",

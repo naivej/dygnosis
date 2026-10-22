@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.32",
+  "version": "0.11.33",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -236,6 +236,49 @@
         "title": "Show mod changes",
         "category": "Dygnosis",
         "icon": "$(diff)"
+      },
+      {
+        "command": "dygnosis.selectAnalysisConfiguration",
+        "title": "Select Analysis Configuration",
+        "category": "Dynare",
+        "icon": "$(settings-gear)",
+        "enablement": "dygnosis.analysisDocument || dygnosis.effectivePreview"
+      },
+      {
+        "command": "dygnosis.resetAnalysisConfiguration",
+        "title": "Reset Analysis Configuration",
+        "category": "Dynare",
+        "enablement": "dygnosis.analysisDocument || dygnosis.effectivePreview"
+      },
+      {
+        "command": "dygnosis.overrideMacroDefinition",
+        "title": "Override Macro Definition for Analysis",
+        "category": "Dynare",
+        "enablement": "dygnosis.analysisDocument"
+      },
+      {
+        "command": "dygnosis.previewMacroBranch",
+        "title": "Preview Macro Branch",
+        "category": "Dynare",
+        "enablement": "dygnosis.analysisDocument"
+      },
+      {
+        "command": "dygnosis.saveAnalysisConfiguration",
+        "title": "Save Analysis Configuration",
+        "category": "Dynare",
+        "enablement": "dygnosis.analysisDocument || dygnosis.effectivePreview"
+      },
+      {
+        "command": "dygnosis.compareAnalysisConfigurations",
+        "title": "Compare Analysis Configurations",
+        "category": "Dynare",
+        "enablement": "dygnosis.analysisDocument || dygnosis.effectivePreview"
+      },
+      {
+        "command": "dygnosis.goToSourceCandidate",
+        "title": "Go to Source Candidate",
+        "category": "Dynare",
+        "enablement": "dygnosis.analysisDocument"
       }
     ],
     "menus": {
@@ -264,6 +307,11 @@
           "command": "dygnosis.openHelp",
           "when": "resourceScheme == dygnosis-effective",
           "group": "navigation@99"
+        },
+        {
+          "command": "dygnosis.selectAnalysisConfiguration",
+          "when": "(dygnosis.analysisDocument && dygnosis.toolbarActions) || (dygnosis.effectivePreview && dygnosis.previewToolbarActions)",
+          "group": "navigation@1.5"
         }
       ],
       "editor/context": [
@@ -296,6 +344,26 @@
           "command": "dygnosis.openHelp",
           "when": "resourceScheme == dygnosis-effective",
           "group": "navigation@99"
+        },
+        {
+          "command": "dygnosis.selectAnalysisConfiguration",
+          "when": "(dygnosis.analysisDocument && dygnosis.contextActions) || (dygnosis.effectivePreview && dygnosis.previewContextActions)",
+          "group": "dygnosis_analysis"
+        },
+        {
+          "command": "dygnosis.overrideMacroDefinition",
+          "when": "dygnosis.analysisDocument && dygnosis.contextActions",
+          "group": "dygnosis_analysis"
+        },
+        {
+          "command": "dygnosis.previewMacroBranch",
+          "when": "dygnosis.analysisDocument && dygnosis.contextActions",
+          "group": "dygnosis_analysis"
+        },
+        {
+          "command": "dygnosis.goToSourceCandidate",
+          "when": "dygnosis.analysisDocument && dygnosis.contextActions",
+          "group": "dygnosis_analysis"
         }
       ],
       "commandPalette": [
@@ -435,6 +503,47 @@
             "default": "tab",
             "scope": "resource",
             "description": "Use a tab or 1–8 spaces for indentation."
+          },
+          "dynare.analysisConfigurations": {
+            "type": "array",
+            "default": [],
+            "scope": "resource",
+            "description": "Saved analysis configurations for model roots in this folder. Use Dynare: Save Analysis Configuration to create a preset and Select Analysis Configuration to apply it. Each session starts with Source. Root and include paths are relative to the owning workspace folder.",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "root",
+                "analysis"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "root": {
+                  "type": "string"
+                },
+                "analysis": {
+                  "type": "object",
+                  "description": "Macro inputs and preview choices saved by Dygnosis."
+                },
+                "includePaths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Replace this root’s search paths for this selection. Omit to inherit Search Paths."
+                },
+                "bindings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  },
+                  "description": "Written directive evidence saved by Dygnosis for guarded overrides."
+                }
+              }
+            }
           }
         }
       },
@@ -494,6 +603,12 @@
             ],
             "scope": "resource",
             "description": "Aggregate counts shown in the status bar, in this order. Empty hides the bar."
+          },
+          "dynare.outline.inactiveSource": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Show recognizable inactive source entries in Outline and breadcrumbs. Availability follows the selected analysis configuration."
           }
         }
       },

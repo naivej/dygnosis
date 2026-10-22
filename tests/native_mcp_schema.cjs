@@ -65,18 +65,37 @@ async function bundledValidator(appPath, expectedVersion) {
   const hostVersion = JSON.parse(fs.readFileSync(path.join(appPath, 'package.json'), 'utf8')).version;
   assert.equal(hostVersion, expectedVersion, 'Unexpected VS Code host version');
   const main = path.join(appPath, 'extensions/json-language-features/server/dist/node/jsonServerMain.js');
-  // Expose webpack's loader while skipping the language server entry point.
-  // All validator and schema code still comes from the installed VS Code build.
   const source = fs.readFileSync(main, 'utf8');
-  const marker = 'var s=i(5474)';
-  assert.ok(source.includes(marker), 'VS Code JSON server bundle layout changed');
   const context = {
     require: createRequire(main), exports: {}, process,
     console, URL, fetch, setTimeout, clearTimeout,
   };
-  vm.runInNewContext(source.replace(marker, 'globalThis.bundleRequire=i;var s={}'), context);
-  await context.bundleRequire.e(875);
-  const api = context.bundleRequire(7547);
+  let api;
+  const webpackMarker = 'var s=i(5474)';
+  if (source.includes(webpackMarker)) {
+    // Expose webpack's loader while skipping the language server entry point.
+    // All validator and schema code still comes from the installed VS Code build.
+    vm.runInNewContext(source.replace(webpackMarker, 'globalThis.bundleRequire=i;var s={}'), context);
+    await context.bundleRequire.e(875);
+    api = context.bundleRequire(7547);
+  } else {
+    // Newer hosts bundle the JSON server as ESM with lazy CJS-style modules.
+    // Expose only the validator and document factory, and skip the server entry.
+    const bootstrap = "import { createRequire } from 'module'; const require = createRequire(import.meta.url);";
+    const entryPoint = 'T0();\n//# sourceMappingURL=jsonServerMain.js.map';
+    const exportMarkers = ['function Hu(e)', 'var $m=ue(', 'ir=ue(()=>', 'ic||(ic={})'];
+    assert.ok(source.startsWith(bootstrap), 'VS Code JSON server ESM bootstrap layout changed');
+    assert.ok(source.includes(entryPoint), 'VS Code JSON server ESM entry point changed');
+    for (const marker of exportMarkers) assert.ok(source.includes(marker), `VS Code JSON server validator export seam changed: ${marker}`);
+    const testEntry = 'ir();$m();globalThis.nativeValidator={getLanguageService:Hu,TextDocument:ic};';
+    const fsImport = 'import{promises as b0}from"fs";';
+    assert.ok(source.includes(fsImport), 'VS Code JSON server filesystem import changed');
+    const testSource = source.replace(bootstrap, '').replace(fsImport, 'const b0=require("fs").promises;').replace(entryPoint, testEntry);
+    vm.runInNewContext(testSource, context);
+    api = context.nativeValidator;
+    assert.ok(api && typeof api.getLanguageService === 'function' && typeof api.TextDocument?.create === 'function',
+      `VS Code JSON server native validator exports are unavailable (factory=${typeof api?.getLanguageService}, document=${typeof api?.TextDocument}, create=${typeof api?.TextDocument?.create})`);
+  }
   const requestedUris = [];
   const service = api.getLanguageService({
     workspaceContext: { resolveRelativePath: (relative, base) => new URL(relative, base).toString() },

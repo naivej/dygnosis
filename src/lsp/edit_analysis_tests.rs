@@ -81,7 +81,7 @@ async fn written_intelligence_shares_inventory_without_accepting_dormant_model_f
     );
     assert!(!candidate.detail.as_deref().unwrap().contains("static"));
     let equation = find(&rows, "sleeping").unwrap();
-    assert_eq!(equation.detail.as_deref(), Some("unknown"));
+    assert_eq!(equation.detail.as_deref(), Some("inactive"));
     assert_eq!(find(&rows, "FLAG").unwrap().detail, None);
     let byte = source.find("dormant=1").unwrap() as u32 + 8;
     let context = server

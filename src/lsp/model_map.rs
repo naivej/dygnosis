@@ -852,6 +852,9 @@ pub(crate) fn add_source_symbols(
             continue;
         }
         let state = availability(item);
+        if state == SourceAvailability::Inactive && !preferences.outline.inactive_source {
+            continue;
+        }
         let status = match state {
             SourceAvailability::Active => "active",
             SourceAvailability::Inactive => "inactive",

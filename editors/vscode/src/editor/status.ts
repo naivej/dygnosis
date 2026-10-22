@@ -1,7 +1,9 @@
 import * as vscode from "vscode";
-import { DygnosisClient, isAnalysisDocument, isRootUri } from "../client/client";
+import { DygnosisClient, isAnalysisDocument } from "../client/client";
 import { ModelInfo } from "../client/protocol";
 import { booleanSetting, listSetting } from "../client/settings";
+import { analysisLabel } from "./analysis_configuration";
+import type { EffectivePreviewRegistry } from "./preview";
 
 export const statusCounts = ["endogenous", "exogenous", "equations"];
 export type StatusCount = "endogenous" | "exogenous" | "equations";
@@ -36,12 +38,21 @@ function incompleteDetail(info: ModelInfo): string {
 
 /** Sum scope counts for the status bar; retain each scope's facts in the hover. */
 export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusContent {
+  const analysis = info.analysis;
+  const label = analysis ? `Dynare: ${analysisLabel(analysis)}` : "Dynare";
+  const analysisDetail = analysis ? [
+    `Analysis: ${analysisLabel(analysis)}`,
+    `Root: ${info.root_uri}`,
+    ...(analysis.configuration.defines ?? []).map(input => `${input.name} = ${input.expression}`),
+    ...analysis.overrides.map(receipt => `${receipt.operation.kind}: ${receipt.application}${receipt.execution_count === null ? " (later applications unknown)" : ` (${receipt.execution_count})`}${receipt.cause ? ` — ${receipt.cause}` : ""}`),
+    ...(analysis.cause ? [analysis.cause.message] : []),
+  ].join("\n") : "";
   if (!info.complete) {
     const detail = incompleteDetail(info);
     return {
-      text: "$(info) Dynare: incomplete",
-      tooltip: `${detail}\nCounts are unavailable.`,
-      accessibilityLabel: "Dynare model expansion is incomplete. Counts are unavailable. Focus Outline.",
+      text: `$(info) ${label}: ${analysis?.state === "stale" ? "source only" : "incomplete"}`,
+      tooltip: `${analysisDetail ? `${analysisDetail}\n` : ""}${detail}\nCounts are unavailable.`,
+      accessibilityLabel: "Dynare model expansion is incomplete. Counts are unavailable. Choose the analysis configuration.",
     };
   }
   const groups = [
@@ -56,9 +67,13 @@ export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusConte
   if (shown.some(count => !validCount(count.value))) return {
     text: "$(info) Dynare: unavailable",
     tooltip: "Model counts are unavailable.",
-    accessibilityLabel: "Dynare model counts are unavailable. Focus Outline.",
+    accessibilityLabel: "Dynare model counts are unavailable. Choose the analysis configuration.",
   };
   const tooltip = new vscode.MarkdownString(), report: string[] = [];
+  if (analysisDetail) {
+    tooltip.appendText(analysisDetail).appendMarkdown("\n\n[Select analysis configuration](command:dygnosis.selectAnalysisConfiguration) · [Reset](command:dygnosis.resetAnalysisConfiguration)\n\n");
+    tooltip.isTrusted = { enabledCommands: ["dygnosis.selectAnalysisConfiguration", "dygnosis.resetAnalysisConfiguration"] };
+  }
   for (const group of groups) {
     if (report.length) tooltip.appendMarkdown("\n\n");
     tooltip.appendMarkdown("**").appendText(group.title).appendMarkdown("**\n\n");
@@ -70,17 +85,17 @@ export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusConte
     report.push(group.title, ...lines);
   }
   return {
-    text: shown.map(count => `$(${count.icon}) ${String(count.value)}`).join("  "),
+    text: `${analysis ? `${label}  ` : ""}${shown.map(count => `$(${count.icon}) ${String(count.value)}`).join("  ")}`,
     tooltip,
-    accessibilityLabel: `Dynare model counts. Total: ${shown.map(count => `${String(count.value)} ${count.label}`).join(", ")}. ${report.join(". ")}. Focus Outline.`,
+    accessibilityLabel: `Dynare model counts. Total: ${shown.map(count => `${String(count.value)} ${count.label}`).join(", ")}. ${report.join(". ")}. Choose the analysis configuration.`,
   };
 }
 
 /** One item follows the displayed root document and the client's chosen owner. */
-export function registerStatus(service: DygnosisClient): vscode.Disposable {
+export function registerStatus(service: DygnosisClient, previews?: EffectivePreviewRegistry): vscode.Disposable {
   const item = vscode.window.createStatusBarItem("dygnosis.modelCounts", vscode.StatusBarAlignment.Left, 40);
   item.name = "Dynare model counts";
-  item.command = "outline.focus";
+  item.command = "dygnosis.selectAnalysisConfiguration";
   let generation = 0;
   let disposed = false;
   const content = (value: StatusContent): void => {
@@ -100,7 +115,8 @@ export function registerStatus(service: DygnosisClient): vscode.Disposable {
     item.tooltip = undefined;
     item.accessibilityInformation = undefined;
     const document = vscode.window.activeTextEditor?.document;
-    if (disposed || !document || document.isClosed || !isAnalysisDocument(document) || !isRootUri(document.uri)) return;
+    const preview = document && previews?.get(document.uri);
+    if (disposed || !document || document.isClosed || !isAnalysisDocument(document) && !preview) return;
     const settings = preferences(document);
     if (!settings.enabled || settings.counts.length === 0) return;
     const uri = document.uri.toString(), version = document.version;
@@ -114,17 +130,17 @@ export function registerStatus(service: DygnosisClient): vscode.Disposable {
     content({
       text: "$(sync~spin) Dynare: updating",
       tooltip: "Refreshing model counts…",
-      accessibilityLabel: "Dynare model counts are updating. Focus Outline.",
+      accessibilityLabel: "Dynare model counts are updating. Choose the analysis configuration.",
     });
     const unavailable = (): void => content({
       text: "$(info) Dynare: unavailable",
       tooltip: service.supportsModelInfo
         ? "Model counts are unavailable. Choose a model root, or open Dygnosis Output for details."
         : "Model counts are unavailable. Restart the Dygnosis language server, or use the bundled binary in Settings.",
-      accessibilityLabel: "Dynare model counts are unavailable. Focus Outline.",
+      accessibilityLabel: "Dynare model counts are unavailable. Choose the analysis configuration.",
     });
     const update = async (): Promise<void> => {
-      const root = await service.rootForDocument(document);
+      const root = preview?.root ?? await service.rootForDocument(document);
       if (!current()) return;
       if (!root) {
         content({
@@ -135,10 +151,11 @@ export function registerStatus(service: DygnosisClient): vscode.Disposable {
         return;
       }
       const client = service.client;
-      const info = await service.modelInfo(root, document.uri);
+      const requestedDocument = preview ? root : document.uri;
+      const info = await service.modelInfo(root, requestedDocument);
       if (!current() || client !== service.client) return;
       if (!info) { unavailable(); return; }
-      if (info.root_uri !== root.toString() || info.document_uri !== uri || info.document_version !== version) {
+      if (info.root_uri !== root.toString() || info.document_uri !== requestedDocument.toString() || !preview && info.document_version !== version) {
         unavailable(); return;
       }
       content(modelStatus(info, settings.counts));

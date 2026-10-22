@@ -160,6 +160,7 @@ fn changes_input(request: &Request) -> bool {
                     "dynare/recheckWorkspace"
                         | "dynare/cancelWorkspace"
                         | "dynare/setDocumentContext"
+                        | "dynare/setAnalysisConfiguration"
                 )
             }))
 }

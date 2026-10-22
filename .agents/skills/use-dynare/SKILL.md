@@ -100,10 +100,12 @@ unverified first pass). Then search the web for the paper. Check that a file exi
 Use this path when the user has a `.mod` file and wants a change, an extension, a review or a fix.
 
 1. **Baseline.** Read the file. Inspect includes and companions with `dynare_model_info`, selecting
-   `sources` and `structure`; use a named map or disk source. Run `dynare_diagnose`. Record the timing
-   convention, the counts and the diagnostics that exist before your change.
+   `sources`, `structure` and `analysis`; use a named map or disk source. Run `dynare_diagnose` with the
+   same choices. Record the selected configuration, coverage, timing, counts and existing diagnostics.
 2. **Locate.** Find the equations with `dynare_equations` (prefer the `name` filter) or, for
-   macro-generated text, `dynare_expand`. Edit the written source at the returned location.
+   macro-generated text, `dynare_expand`. For inactive source or model variants, follow
+   "Inspect source and configurations" in `references/dygnosis-workflow.md`. Edit the written source
+   at the verified location for the intended configuration.
 3. **Classify the change.**
    - Modification (parameters, equations, calibration): edit directly.
    - Extension (a mechanism, a shock): keep R4. If the extension changes the structure (for example a
@@ -189,7 +191,8 @@ next one.
   conditions: one equation fewer than endogenous variables for each policy instrument. Heterogeneous
   models count each heterogeneity dimension separately. Check with `dynare_equations` `count_gap`;
   Dygnosis reports a mismatch as E188 or W013 (heterogeneous: E192, W208). These counts describe the
-  written model, before Dynare adds its `AUX_*` auxiliary variables.
+  selected effective model, before Dynare adds its `AUX_*` auxiliary variables. Written source
+  templates have separate counts and do not establish a model count gap.
 - **R5 Names.** Follow the manual: no symbol named after a Dynare command or built-in function (case is
   ignored; for example `Ln`, `shocks`); no `i` and no `inv` (write investment as `invest`); with a
   user-written steady-state file, no MATLAB function names such as `alpha`, `beta`, `gamma` (write
@@ -235,7 +238,7 @@ Account for every item below. Write the item, or name it as not applicable.
 1. The delivered files: `.mod`, derivation note, steady-state file, run script, figures.
 2. The model and the experiment in one or two sentences, and the timing convention of stock variables.
 3. Static evidence: the Dygnosis tools you ran, their inputs (root file, includes), the codes reported,
-   and the completeness of the expansion. Name what was not checked.
+   selected configuration or analysis preview, and model/source coverage. Name what was not checked.
 4. Numerical evidence: Dynare version, commands and outcome (steady-state residuals, rank condition,
    key numbers), or the execution limit and the commands for the user. For a numerical steady state,
    say whether the steady-state pass in "Numerical runs" held. When a command or option meaning came

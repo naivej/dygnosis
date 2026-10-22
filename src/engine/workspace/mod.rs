@@ -4,6 +4,7 @@
 //! Overlay (editor/MCP in-memory text) beats disk. Include and companion
 //! records are stored here. This module does not emit diagnostic codes.
 
+mod analysis_context;
 pub mod check_walk;
 pub mod companion;
 #[cfg(test)]
@@ -100,6 +101,26 @@ struct Doc {
 }
 
 impl Doc {
+    fn source_digest(&self) -> String {
+        use sha2::{Digest, Sha256};
+        if let Some(source) = self
+            .macro_source
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_ref()
+        {
+            return source.source_revision.clone();
+        }
+        if let Some(source) = self
+            .model
+            .get()
+            .and_then(|model| model.macro_source.as_ref())
+        {
+            return source.source_revision.clone();
+        }
+        format!("{:x}", Sha256::digest(self.source.as_bytes()))
+    }
+
     fn macro_source(&self, budget: &mut MacroBudget) -> Result<Arc<MacroSource>, MacroEvalError> {
         budget.spend_work(1)?;
         let mut cached = self
@@ -445,7 +466,7 @@ struct RetainedRoot {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct InputFile {
+pub(crate) struct InputFile {
     overlay: bool,
     bytes: Option<Vec<u8>>,
     exists: bool,
@@ -456,14 +477,38 @@ struct InputFile {
     overlay_generation: Option<u64>,
 }
 
+impl InputFile {
+    pub(crate) fn captured_bytes(&self) -> usize {
+        if self.directory {
+            return 0;
+        }
+        self.length
+            .and_then(|length| usize::try_from(length).ok())
+            .unwrap_or_else(|| self.bytes.as_ref().map_or(0, Vec::len))
+    }
+}
+
 struct SourceLookup {
     known: HashSet<String>,
     aliases: HashMap<String, Option<String>>,
 }
 
+pub(crate) struct SourceIncludeLookup {
+    root: String,
+    paths: Vec<PathBuf>,
+    lookup: SourceLookup,
+    budget: MacroBudget,
+    candidate_work: usize,
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static SOURCE_LOOKUP_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Checked source and lookup fact. Missing candidates and directories have no
 /// text digest; regular source files have a digest of their original UTF-8 text.
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InputGuard {
     pub file: String,
     pub exists: bool,
@@ -497,6 +542,9 @@ impl InputStamps {
 /// URI/path-keyed document index plus include graph walks.
 #[derive(Default)]
 pub struct Workspace {
+    // Pair-local immutable body reuse. These keys do not enter include lookup
+    // until that side independently selects them under its own source policy.
+    comparison_reuse: HashMap<String, Arc<Doc>>,
     source_projections: Vec<source_structure::SourceProjection>,
     retained_roots: Vec<RetainedRoot>,
     docs: HashMap<String, Arc<Doc>>,
@@ -527,6 +575,183 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    pub(crate) fn validate_comparison_inputs(
+        &self,
+        root: &str,
+        after: &Workspace,
+        after_root: &str,
+        common_current: bool,
+        limits: (usize, usize),
+        captured_guards: Option<(&[InputGuard], &[InputGuard])>,
+    ) -> Result<(), ConfigurationError> {
+        let old = self.comparison_guards(root);
+        let new = after.comparison_guards(after_root);
+        let (mut files, mut bytes) = (0usize, 0usize);
+        for (input, previous) in [(old, None), (new, old.filter(|_| common_current))] {
+            for (file, fact) in input.into_iter().flatten() {
+                if self.cancelled() || after.cancelled() {
+                    return Err(ConfigurationError::new(
+                        "CANCELLED",
+                        "Comparison input validation was cancelled. No comparison facts were produced.",
+                    ));
+                }
+                if let Some(previous) = previous.and_then(|previous| previous.get(file)) {
+                    if previous != fact {
+                        return Err(ConfigurationError::new(
+                            "INPUT_CHANGED",
+                            "Shared current source bytes or lookup facts changed between the two captures. Refresh the comparison.",
+                        ));
+                    }
+                    continue;
+                }
+                if captured_guards.is_none() {
+                    files = files.saturating_add(1);
+                    bytes = bytes.saturating_add(fact.captured_bytes());
+                }
+                if files > limits.0 || bytes > limits.1 {
+                    return Err(ConfigurationError::new(
+                        "CAPTURE_LIMIT",
+                        "The comparison's source and lookup union exceeds its file or byte allowance. No comparison facts were produced.",
+                    ));
+                }
+            }
+        }
+        if !self.input_snapshot_is_current(root) || !after.input_snapshot_is_current(after_root) {
+            return Err(ConfigurationError::new(
+                "INPUT_CHANGED",
+                "Comparison inputs changed while reading them. Refresh the comparison.",
+            ));
+        }
+        if let Some((before_guards, after_guards)) = captured_guards {
+            if before_guards.len() > limits.0 || after_guards.len() > limits.0 {
+                return Err(ConfigurationError::new(
+                    "CAPTURE_LIMIT",
+                    "The comparison's source and lookup union exceeds its file or byte allowance. No comparison facts were produced.",
+                ));
+            }
+            // MCP can capture additional explicit owners. Its retained guard
+            // sets cover those inputs without acquiring or analysing them again.
+            let previous: BTreeMap<_, _> = before_guards
+                .iter()
+                .map(|guard| (guard.file.as_str(), guard))
+                .collect();
+            for (workspace, selected, guards, earlier) in [
+                (self, old, before_guards, None),
+                (
+                    after,
+                    new,
+                    after_guards,
+                    common_current.then_some(&previous),
+                ),
+            ] {
+                for guard in guards {
+                    if self.cancelled() || after.cancelled() {
+                        return Err(ConfigurationError::new(
+                            "CANCELLED",
+                            "Comparison input validation was cancelled. No comparison facts were produced.",
+                        ));
+                    }
+                    if let Some(prior) =
+                        earlier.and_then(|earlier| earlier.get(guard.file.as_str()))
+                    {
+                        if *prior != guard {
+                            return Err(ConfigurationError::new(
+                                "INPUT_CHANGED",
+                                "Shared current source bytes or lookup facts changed between the two captures. Refresh the comparison.",
+                            ));
+                        }
+                    } else {
+                        files = files.saturating_add(1);
+                        bytes = bytes.saturating_add(if guard.directory {
+                            0
+                        } else {
+                            guard
+                                .length
+                                .and_then(|length| usize::try_from(length).ok())
+                                .unwrap_or(0)
+                        });
+                        if files > limits.0 || bytes > limits.1 {
+                            return Err(ConfigurationError::new(
+                                "CAPTURE_LIMIT",
+                                "The comparison's source and lookup union exceeds its file or byte allowance. No comparison facts were produced.",
+                            ));
+                        }
+                    }
+                    // Selected-root guards were rechecked above. Check only
+                    // extra-owner facts, plus large files needing content proof.
+                    if (selected.is_none_or(|selected| !selected.contains_key(&guard.file))
+                        || guard.exists && !guard.directory && guard.byte_sha256.is_none())
+                        && !workspace.source_guards_are_current(std::slice::from_ref(guard))
+                    {
+                        return Err(ConfigurationError::new(
+                            "INPUT_CHANGED",
+                            "Comparison inputs changed while reading them. Refresh the comparison.",
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn comparison_guards(&self, root: &str) -> Option<&BTreeMap<String, InputFile>> {
+        let key = if self.overlay_only {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
+        self.input_snapshots.get(&key)
+    }
+
+    pub(crate) fn comparison_inputs_match(&self, root: &str, live: &Workspace) -> bool {
+        !self.cancelled()
+            && self.input_snapshot_is_current(root)
+            && self.comparison_guards(root).is_some_and(|guards| {
+                guards
+                    .iter()
+                    .all(|(file, fact)| !self.cancelled() && live.input_file(file) == *fact)
+            })
+    }
+
+    /// Retain only immutable bodies from a completed, policy-compatible input.
+    /// A fallback body never participates in include candidate selection.
+    pub(crate) fn reuse_comparison_sources(&mut self, previous: &Workspace, root: &str) {
+        if self.cancelled()
+            || self.overlay_only != previous.overlay_only
+            || self.snapshot_lookup.is_some()
+            || previous.snapshot_lookup.is_some()
+        {
+            return;
+        }
+        let Some(guards) = previous.comparison_guards(root) else {
+            return;
+        };
+        let mut bytes = 0usize;
+        let (byte_limit, file_limit) = self
+            .source_limits
+            .map(|(_, bytes, files)| (bytes, files))
+            .unwrap_or((16 * 1024 * 1024, 100_000));
+        for key in guards.keys() {
+            if self.cancelled() {
+                break;
+            }
+            let Some(doc) = previous.docs.get(key) else {
+                continue;
+            };
+            bytes = bytes.saturating_add(doc.source.len());
+            if bytes > byte_limit || self.comparison_reuse.len() >= file_limit {
+                break;
+            }
+            if let Some(current) = self.docs.get_mut(key) {
+                if current.source == doc.source && current.overlay == doc.overlay {
+                    *current = Arc::clone(doc);
+                }
+            } else if !self.overlay_only && !doc.overlay {
+                self.comparison_reuse.insert(key.clone(), Arc::clone(doc));
+            }
+        }
+    }
+
     fn retain_root_result(&mut self, key: &str) -> Option<RetainedRoot> {
         if !self.effective.contains_key(key) || !self.spliced.contains_key(key) || self.cancelled()
         {
@@ -706,20 +931,45 @@ impl Workspace {
         root: &str,
         choices: AnalysisConfiguration,
     ) -> Result<AnalysisSelection, ConfigurationError> {
+        self.set_root_analysis_configuration_with_paths(root, choices, None)
+    }
+
+    /// Validate choices once, then commit them and optional root include paths
+    /// together. A refused change preserves both accepted inputs.
+    pub fn set_root_analysis_configuration_with_paths(
+        &mut self,
+        root: &str,
+        choices: AnalysisConfiguration,
+        paths: Option<Vec<PathBuf>>,
+    ) -> Result<AnalysisSelection, ConfigurationError> {
         let key = self.ensure_loaded(root).ok_or_else(|| {
             ConfigurationError::new("ROOT_NOT_FOUND", "The model root is unavailable.")
         })?;
+        let mut budget = self.macro_budget(&key);
+        if let Some(paths) = &paths {
+            charge(
+                &mut budget,
+                paths.iter().fold(1usize, |bytes, path| {
+                    bytes
+                        .saturating_add(path.as_os_str().len())
+                        .saturating_add(1)
+                }),
+            )?;
+        }
+        let paths = paths.map(|paths| append_unique(&[], &paths));
+        let paths_changed = paths
+            .as_ref()
+            .is_some_and(|paths| self.root_search_paths.get(&key) != Some(paths));
         if let Some(current) = self
             .root_analyses
             .get(&key)
-            .filter(|current| current.choices == choices)
+            .filter(|current| current.choices == choices && !paths_changed)
             .cloned()
         {
             self.checked_analysis(&key)?;
             return Ok(current.selection.clone());
         }
         let previous_result = self.retain_root_result(&key);
-        let mut budget = self.macro_budget(&key);
         charge(&mut budget, 1)?;
         let initial = choices.validate_initial(&mut budget)?;
         let mut overrides = Vec::new();
@@ -781,8 +1031,15 @@ impl Workspace {
             .root_analyses
             .get(&key)
             .map(|analysis| analysis.selection.configuration_id.as_str());
-        let unchanged = previous == Some(selection.configuration_id.as_str())
-            || previous.is_none() && choices.is_source();
+        let unchanged = !paths_changed
+            && (previous == Some(selection.configuration_id.as_str())
+                || previous.is_none() && choices.is_source());
+        if let Some(paths) = paths {
+            self.root_search_paths.insert(key.clone(), paths);
+            if is_virtual_uri(root) {
+                self.virtual_roots.insert(key.clone());
+            }
+        }
         if choices.is_source() && choices.name.is_none() {
             self.root_analyses.remove(&key);
         } else {
@@ -946,6 +1203,7 @@ impl Workspace {
         snapshot.unnamed_roots = self.unnamed_roots.clone();
         snapshot.cancellation = self.cancellation.clone();
         snapshot.source_limits = self.source_limits;
+        snapshot.comparison_reuse = self.comparison_reuse.clone();
         snapshot.docs = self
             .docs
             .iter()
@@ -1133,10 +1391,9 @@ impl Workspace {
         };
         for (key, fact) in &input.sources {
             if let crate::engine::comparison::compare_snapshots::SourceFact::Text { text } = fact {
-                workspace.insert_overlay(
-                    key,
-                    crate::engine::language::parser::normalize_newlines(text),
-                );
+                // MacroSource owns normalization and source-offset transport;
+                // guarded targets identify the original acquired bytes.
+                workspace.insert_overlay(key, text.clone());
             }
         }
         workspace
@@ -1669,7 +1926,9 @@ impl Workspace {
                     exists: state.exists,
                     directory: state.directory,
                     identity: state.identity.clone(),
-                    text_sha256: text.map(|text| format!("{:x}", Sha256::digest(text.as_bytes()))),
+                    text_sha256: text
+                        .map(|text| format!("{:x}", Sha256::digest(text.as_bytes())))
+                        .or_else(|| self.docs.get(file).map(|doc| doc.source_digest())),
                     byte_sha256: state
                         .bytes
                         .as_ref()
@@ -2297,6 +2556,10 @@ impl Workspace {
         }
         let path = uri_to_path(uri);
         if path.exists() {
+            if let Some(doc) = self.comparison_reuse.remove(&key) {
+                self.docs.insert(key.clone(), doc);
+                return Some(key);
+            }
             self.load_from_disk(&path)?;
             return Some(path_key(&path));
         }
@@ -2472,6 +2735,12 @@ impl Workspace {
             }
             return Ok(None);
         }
+        if let Some(doc) = self.comparison_reuse.remove(key) {
+            budget.spend_work(1)?;
+            let source = Arc::clone(&doc.source);
+            self.docs.insert(key.to_owned(), doc);
+            return Ok(Some(source));
+        }
         let path = PathBuf::from(key);
         let Some(source) = read_include_text(&path, budget)? else {
             return Ok(None);
@@ -2504,6 +2773,126 @@ impl Workspace {
         append_unique(self.root_paths(root), extra)
     }
 
+    pub(crate) fn source_include_lookup(
+        &mut self,
+        root: &str,
+    ) -> Result<SourceIncludeLookup, ConfigurationError> {
+        let key = self.ensure_loaded(root).ok_or_else(|| {
+            ConfigurationError::new("ROOT_NOT_FOUND", "The model root is unavailable.")
+        })?;
+        let mut budget = self.macro_budget(&key);
+        let paths = self
+            .spliced
+            .get(&key)
+            .map(|source| source.include_search.as_slice())
+            .unwrap_or_default();
+        charge(
+            &mut budget,
+            paths.iter().fold(1usize, |bytes, path| {
+                bytes
+                    .saturating_add(path.as_os_str().len())
+                    .saturating_add(1)
+            }),
+        )?;
+        charge(
+            &mut budget,
+            self.root_paths(&key).iter().fold(1usize, |bytes, path| {
+                bytes
+                    .saturating_add(path.as_os_str().len())
+                    .saturating_add(1)
+            }),
+        )?;
+        let paths = self.configured_search(&key, paths);
+        let lookup = self.source_lookup(&mut budget).map_err(expression_error)?;
+        let candidate_work = paths.iter().fold(1usize, |bytes, path| {
+            bytes
+                .saturating_add(path.as_os_str().len())
+                .saturating_add(1)
+        });
+        Ok(SourceIncludeLookup {
+            root: key,
+            paths,
+            lookup,
+            budget,
+            candidate_work,
+        })
+    }
+
+    pub(crate) fn source_include_target(
+        &mut self,
+        request: &mut SourceIncludeLookup,
+        including: &str,
+        literal: &str,
+    ) -> Result<Option<String>, ConfigurationError> {
+        let fallback = if self.root_search_paths.contains_key(&request.root) || self.overlay_only {
+            0
+        } else {
+            request.lookup.known.len()
+        };
+        charge(
+            &mut request.budget,
+            literal
+                .len()
+                .saturating_mul(request.paths.len().saturating_add(2))
+                .saturating_add(including.len())
+                .saturating_add(request.candidate_work)
+                .saturating_add(fallback)
+                .saturating_add(1),
+        )?;
+        let result = self.resolve_source_target_with_paths(
+            &request.root,
+            including,
+            literal,
+            &request.paths,
+            &request.lookup,
+        );
+        charge(&mut request.budget, 1)?;
+        Ok(result)
+    }
+
+    /// Existing acquired macro scans suffice for a literal browsing relation;
+    /// no written inventory or configured availability projection is needed.
+    pub(crate) fn source_include_sources(
+        &self,
+        request: &mut SourceIncludeLookup,
+    ) -> Result<Vec<(String, Arc<MacroSource>)>, ConfigurationError> {
+        charge(&mut request.budget, request.root.len().saturating_add(1))?;
+        let mut keys = HashSet::from([request.root.clone()]);
+        if let Some(records) = self.records.get(&request.root) {
+            for record in &records.resolved {
+                charge(
+                    &mut request.budget,
+                    record.path.as_os_str().len().saturating_add(1),
+                )?;
+                let key = if self.overlay_only {
+                    let candidate = overlay_path_key(&record.path);
+                    request
+                        .lookup
+                        .aliases
+                        .get(&candidate)
+                        .cloned()
+                        .flatten()
+                        .unwrap_or(candidate)
+                } else {
+                    path_key(&record.path)
+                };
+                keys.insert(key);
+            }
+        }
+        let mut files = Vec::new();
+        for key in keys {
+            charge(&mut request.budget, key.len().saturating_add(1))?;
+            if let Some(doc) = self.docs.get(&key) {
+                files.push((
+                    key,
+                    doc.macro_source(&mut request.budget)
+                        .map_err(expression_error)?,
+                ));
+            }
+        }
+        Ok(files)
+    }
+
     /// Inspect a literal source edge with the existing lookup policy, without
     /// adding executed dependencies, owners, or negative execution candidates.
     fn source_lookup(&self, budget: &mut MacroBudget) -> Result<SourceLookup, MacroEvalError> {
@@ -2512,6 +2901,8 @@ impl Workspace {
                 .saturating_add(key.len().saturating_mul(3))
                 .saturating_add(1)
         }))?;
+        #[cfg(test)]
+        SOURCE_LOOKUP_BUILDS.with(|builds| builds.set(builds.get() + 1));
         let known = self.known_keys();
         let mut aliases: HashMap<String, Option<String>> = HashMap::new();
         for key in &known {
@@ -2532,22 +2923,33 @@ impl Workspace {
         lookup: &SourceLookup,
     ) -> Option<String> {
         let paths = self.configured_search(root, extra_paths);
+        self.resolve_source_target_with_paths(root, including, name, &paths, lookup)
+    }
+
+    fn resolve_source_target_with_paths(
+        &mut self,
+        root: &str,
+        including: &str,
+        name: &str,
+        paths: &[PathBuf],
+        lookup: &SourceLookup,
+    ) -> Option<String> {
         if self.snapshot_lookup.is_some() {
-            return self.snapshot_include_key(including, name, &paths);
+            return self.snapshot_include_key(including, name, paths);
         }
         if self.virtual_roots.contains(root) {
             return None;
         }
         if self.overlay_only {
             return self
-                .overlay_candidates(including, name, &paths)
+                .overlay_candidates(including, name, paths)
                 .into_iter()
                 .find_map(|candidate| lookup.aliases.get(&candidate).cloned().flatten());
         }
         let resolved = if self.root_search_paths.contains_key(root) {
-            resolve_scoped_include_path(name, including, &paths, Some(&lookup.known))
+            resolve_scoped_include_path(name, including, paths, Some(&lookup.known))
         } else {
-            resolve_include_path(name, including, &paths, Some(&lookup.known))
+            resolve_include_path(name, including, paths, Some(&lookup.known))
         };
         resolved.map(|path| self.include_key(&path))
     }

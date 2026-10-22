@@ -2319,7 +2319,11 @@ fn initialize_capabilities_wave_c() {
         .expect("executeCommand")
         .commands
         .clone();
-    assert_eq!(commands.len(), 10, "commands: {commands:?}");
+    assert_eq!(commands.len(), 14, "commands: {commands:?}");
+    assert!(commands.contains(&"dynare/validateComparisonInputs".into()));
+    assert!(commands.contains(&"dynare/analysisContext".into()));
+    assert!(commands.contains(&"dynare/setAnalysisConfiguration".into()));
+    assert!(commands.contains(&"dynare/sourceCandidates".into()));
     assert!(commands.contains(&"dynare/setDocumentContext".into()));
     assert!(commands.contains(&"dynare/explainDiagnostic".into()));
     assert!(commands.contains(&"dynare/compareModels".into()));

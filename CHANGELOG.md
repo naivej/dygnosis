@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.11.33
+
+- Choose one analysis configuration for a model root from the source editor or
+  macro expansion preview. Set initial macro values, preview a definition or
+  conditional branch, or save choices for later use. Saved configurations do
+  not become the startup selection; each session starts with Source.
+- Browse recognizable inactive source in Outline and use the source-candidate
+  picker to open written names that are not active declarations. Inactive
+  source remains separate from executed model facts and counts.
+- Compare two captured analysis configurations in Model Diff. Each side keeps
+  its own choices with its source, including when the source text is unchanged.
+- MCP source inspection, expansion, checking and comparison accept explicit
+  analysis choices. Calls keep their choices request-local, and source views
+  keep written candidates separate from effective model facts.
+
 ## v0.11.32
 
 - Hover and model-local completion respond faster in large models.

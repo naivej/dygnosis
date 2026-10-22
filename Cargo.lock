@@ -300,7 +300,7 @@ dependencies = [
 
 [[package]]
 name = "dygnosis"
-version = "0.11.32"
+version = "0.11.33"
 dependencies = [
  "clap",
  "libm",

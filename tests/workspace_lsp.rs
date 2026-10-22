@@ -165,6 +165,21 @@ impl Wire {
         );
         self.notify("initialized", json!({}));
     }
+    async fn start_analysis(&mut self, files: &Files, workspace: bool) {
+        self.request("initialize", json!({"workspaceFolders":[files.folder("")],
+            "capabilities":{"experimental":{"dygnosis":{"documentContext":{"schema_version":1},"analysisConfiguration":{"schema_version":1}}}},
+            "initializationOptions":{"dynare":{"workspaceDiagnostics":workspace}}})).await;
+        self.notify("initialized", json!({}));
+    }
+    async fn analysis_context(&mut self, root: &str) -> Value {
+        self.command_args("dynare/analysisContext", json!({"root_uri":root}))
+            .await
+    }
+    async fn select_analysis(&mut self, root: &str, proof: &Value, analysis: Value) -> Value {
+        self.command_args("dynare/setAnalysisConfiguration",json!({"root_uri":root,
+            "expected_revision":proof["revision"],"expected_selection_generation":proof["analysis"]["selection_generation"],
+            "analysis":analysis,"include_paths":null})).await
+    }
     async fn choose_context(&mut self, document: &str, version: i32, root: &str) -> Value {
         let info = self
             .command_args(
@@ -234,6 +249,295 @@ fn root<'a>(status: &'a Value, uri: &str) -> &'a Value {
         .iter()
         .find(|entry| entry["root_uri"] == uri)
         .unwrap_or_else(|| panic!("root absent {uri}: {status}"))
+}
+
+fn outline_named<'a>(rows: &'a Value, name: &str) -> Option<&'a Value> {
+    rows.as_array()?.iter().find_map(|row| {
+        if row["name"] == name {
+            Some(row)
+        } else {
+            outline_named(&row["children"], name)
+        }
+    })
+}
+
+// Guards one selected context for counts/expansion/Outline, refused late choices,
+// and stale overrides retaining their label while source browsing still works.
+#[tokio::test]
+async fn captured_configuration_guards_ignore_live_choices_and_watch_both_sides() {
+    // Model Diff must keep frozen choices after a live switch, but reject a
+    // changed B-only overlay or a newly present higher-priority include.
+    let files = Files::new();
+    let text = "@#ifndef MODE\n@#define MODE=0\n@#endif\nvar y;\n@#if MODE\n@#include \"values.data\"\nmodel;y=p;end;\n@#else\nmodel;y=0;end;\n@#endif\n";
+    files.write("root.mod", text);
+    files.write("lib/values.data", "parameters p; p=1;\n");
+    let root = files.uri("root.mod");
+    let mut wire = Wire::new();
+    wire.start_analysis(&files, false).await;
+    wire.open(&root, text, 1);
+    let context = wire.analysis_context(&root).await;
+    let model = wire
+        .command_args("dynare/modelInfo", json!({"root_uri":root}))
+        .await;
+    let side = |id: &str, analysis: Value| {
+        json!({"kind":"working","input_id":id,"root_uri":root,
+        "expected_revision":model["revision"],"analysis":analysis,"search_paths":[files.0.join("lib").to_string_lossy()]})
+    };
+    let comparison = wire.command_args("dynare/compareModelSnapshots", json!({"schema_version":1,
+        "before":side("A",json!({})),"after":side("B",json!({"defines":[{"name":"MODE","expression":"1"}]}))})).await;
+    assert!(
+        comparison["inputs"]["after"]["guards"].is_array(),
+        "{comparison}"
+    );
+    let guards = json!({"inputs":[comparison["inputs"]["before"],comparison["inputs"]["after"]]});
+    assert_eq!(
+        wire.command_args("dynare/validateComparisonInputs", guards.clone())
+            .await["current"],
+        true
+    );
+    let selected = wire
+        .select_analysis(
+            &root,
+            &context,
+            json!({"name":"Live choice","defines":[{"name":"MODE","expression":"0"}]}),
+        )
+        .await;
+    assert_eq!(selected["accepted"], true, "{selected}");
+    assert_eq!(
+        wire.command_args("dynare/validateComparisonInputs", guards.clone())
+            .await["current"],
+        true
+    );
+    wire.open(&files.uri("lib/values.data"), "parameters p; p=2;\n", 1);
+    assert_eq!(
+        wire.command_args("dynare/validateComparisonInputs", guards.clone())
+            .await["current"],
+        false
+    );
+    wire.notify(
+        "textDocument/didClose",
+        json!({"textDocument":{"uri":files.uri("lib/values.data")}}),
+    );
+    assert_eq!(
+        wire.command_args("dynare/validateComparisonInputs", guards.clone())
+            .await["current"],
+        true
+    );
+    files.write("values.data", "parameters p; p=9;\n");
+    assert_eq!(
+        wire.command_args("dynare/validateComparisonInputs", guards)
+            .await["current"],
+        false
+    );
+}
+
+#[tokio::test]
+async fn failed_configuration_comparison_keeps_both_side_summaries_over_stdio() {
+    // A missing include on B must not erase A's captured choice or turn B's
+    // unavailable counts into zero or expose navigation from a failed pair.
+    let files = Files::new();
+    let text = "@#ifndef ALT\n@#define ALT=0\n@#endif\nvar y;\n@#if ALT\n@#include \"missing.inc\"\n@#endif\nmodel; y=0; end;\n";
+    files.write("root.mod", text);
+    let root = files.uri("root.mod");
+    let mut wire = Wire::new();
+    wire.start_analysis(&files, false).await;
+    wire.open(&root, text, 1);
+    let model = wire
+        .command_args("dynare/modelInfo", json!({"root_uri":root}))
+        .await;
+    let side = |id: &str, analysis: Value| {
+        json!({"kind":"working","input_id":id,
+        "root_uri":root,"expected_revision":model["revision"],"analysis":analysis})
+    };
+    let failed = wire.command_args("dynare/compareModelSnapshots", json!({"schema_version":1,
+        "before":side("A",json!({})),
+        "after":side("B",json!({"name":"Missing include choice","defines":[{"name":"ALT","expression":"1"}]}))})).await;
+    assert_eq!(failed["state"], "failure", "{failed}");
+    assert_eq!(failed["code"], "INCOMPLETE_INPUT", "{failed}");
+    let before = &failed["analysis_summaries"]["before"];
+    let after = &failed["analysis_summaries"]["after"];
+    assert_eq!(before["complete"], true, "{failed}");
+    assert_eq!(after["complete"], false, "{failed}");
+    assert_eq!(
+        after["analysis"]["selection"]["name"],
+        "Missing include choice"
+    );
+    assert_ne!(
+        before["analysis"]["selection"]["configuration_id"],
+        after["analysis"]["selection"]["configuration_id"]
+    );
+    for summary in [before, after] {
+        assert!(summary["counts"].is_null(), "{summary}");
+        assert!(
+            summary["counts_cause"]
+                .as_str()
+                .is_some_and(|cause| !cause.is_empty()),
+            "{summary}"
+        );
+    }
+    assert!(
+        after["counts_cause"]
+            .as_str()
+            .unwrap()
+            .contains("missing.inc"),
+        "{after}"
+    );
+    for field in ["changes", "sources", "navigation"] {
+        assert!(
+            failed.get(field).is_none(),
+            "Failed comparison exposed {field}: {failed}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn analysis_choices_refresh_both_views_and_stale_source_browsing_over_stdio() {
+    let files = Files::new();
+    let text = "@#ifndef MODE\n@#define MODE=0\n@#endif\nvar y;\n@#if MODE==0\nmodel; y=0; end;\n@#else\nparameters p;\nmodel; y=p; end;\n@#endif\n";
+    files.write("root.mod", text);
+    let uri = files.uri("root.mod");
+    let mut wire = Wire::new();
+    wire.start_analysis(&files, false).await;
+    wire.open(&uri, text, 1);
+    let symbols = wire
+        .request(
+            "textDocument/documentSymbol",
+            json!({"textDocument":{"uri":uri}}),
+        )
+        .await;
+    assert!(
+        outline_named(&symbols, "p").unwrap()["detail"]
+            .as_str()
+            .unwrap()
+            .contains("inactive"),
+        "{symbols}"
+    );
+    let proof = wire.analysis_context(&uri).await;
+    let selected = wire
+        .select_analysis(
+            &uri,
+            &proof,
+            json!({"name":"Alternative","defines":[{"name":"MODE","expression":"1"}]}),
+        )
+        .await;
+    assert_eq!(selected["accepted"], true, "{selected}");
+    let info = wire
+        .command_args("dynare/modelInfo", json!({"root_uri":uri}))
+        .await;
+    assert_eq!(info["n_parameters"], 1, "{info}");
+    assert_eq!(info["analysis"]["selection"]["name"], "Alternative");
+    let expanded = wire
+        .command_args(
+            "dynare/showEffectiveModel",
+            json!({"root_uri":uri,"layout":"source"}),
+        )
+        .await;
+    assert_eq!(
+        expanded["analysis"]["selection"]["configuration_id"],
+        info["analysis"]["selection"]["configuration_id"]
+    );
+    assert!(
+        expanded["effective_text"].as_str().unwrap().contains("y=p"),
+        "{expanded}"
+    );
+    let refused = wire.select_analysis(&uri, &proof, json!({})).await;
+    assert_eq!(refused["code"], "ANALYSIS_CONTEXT_STALE", "{refused}");
+    let target = selected["sites"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|site| site["name"] == "MODE")
+        .unwrap()["target"]
+        .clone();
+    let preview=wire.select_analysis(&uri,&selected,json!({"name":"Policy preview","overrides":[{"kind":"definition","target":target,"expression":"1"}]})).await;
+    assert_eq!(
+        preview["analysis"]["selection"]["preview"], true,
+        "{preview}"
+    );
+    let changed = text.replace("MODE=0", "MODE=2");
+    wire.change(&uri, &changed, 2);
+    let stale = wire
+        .command_args("dynare/modelInfo", json!({"root_uri":uri}))
+        .await;
+    assert_eq!(stale["analysis"]["state"], "stale", "{stale}");
+    assert_eq!(stale["analysis"]["selection"]["name"], "Policy preview");
+    assert!(stale.get("n_equations").is_none(), "{stale}");
+    let symbols = wire
+        .request(
+            "textDocument/documentSymbol",
+            json!({"textDocument":{"uri":uri}}),
+        )
+        .await;
+    assert!(outline_named(&symbols, "p").is_some(), "{symbols}");
+    let current = wire.analysis_context(&uri).await;
+    assert_eq!(
+        wire.select_analysis(&uri, &current, json!({})).await["accepted"],
+        true
+    );
+    assert_eq!(fs::read_to_string(files.0.join("root.mod")).unwrap(), text);
+}
+
+// Guards excluded open helpers acquiring standalone errors, configured saved
+// reports reusing Source diagnostics, and workspace totals counting profiles.
+#[tokio::test]
+async fn configured_saved_checks_and_dormant_helpers_share_root_context_over_stdio() {
+    let files = Files::new();
+    let text = "@#ifndef ON\n@#define ON=1\n@#endif\n@#if ON\n@#include \"helper.inc\"\n@#else\nvar y; model; y=0; end;\n@#endif\n";
+    let helper = "@#define supplied=ON\nvar x; model; x=unknown; end;\n";
+    files.write("root.mod", text);
+    files.write("helper.inc", helper);
+    let uri = files.uri("root.mod");
+    let h = files.uri("helper.inc");
+    let mut wire = Wire::new();
+    wire.start_analysis(&files, true).await;
+    wire.complete().await;
+    wire.open(&uri, text, 1);
+    wire.open(&h, helper, 1);
+    assert!(has_code(&wire.pull(&h).await, "E020"));
+    let proof = wire.analysis_context(&uri).await;
+    let selected = wire
+        .select_analysis(
+            &uri,
+            &proof,
+            json!({"name":"Without helper","defines":[{"name":"ON","expression":"0"}]}),
+        )
+        .await;
+    assert_eq!(selected["accepted"], true, "{selected}");
+    let info = wire
+        .command_args("dynare/modelInfo", json!({"root_uri":uri,"document_uri":h}))
+        .await;
+    assert_eq!(info["source_browsing"], true, "{info}");
+    let notes = wire.pull(&h).await;
+    assert!(
+        !has_code(&notes, "E020") && !has_code(&notes, "E063"),
+        "{notes:?}"
+    );
+    wire.close(&h);
+    wire.close(&uri);
+    let status = wire.complete().await;
+    assert_eq!(status["non_default_roots"], 1, "{status}");
+    assert_eq!(root(&status, &uri)["errors"], 0, "{status}");
+    let proof = wire.analysis_context(&uri).await;
+    let selected = wire
+        .select_analysis(
+            &uri,
+            &proof,
+            json!({"name":"With helper","defines":[{"name":"ON","expression":"1"}]}),
+        )
+        .await;
+    assert_eq!(selected["accepted"], true, "{selected}");
+    let status = wire.complete().await;
+    assert!(
+        root(&status, &uri)["errors"].as_u64().unwrap() > 0,
+        "{status}"
+    );
+    assert!(
+        wire.pull(&h)
+            .await
+            .iter()
+            .filter(|row| row["code"] == "E020")
+            .all(|row| row["message"].as_str().unwrap().contains("With helper"))
+    );
 }
 
 // Guards phantom standalone macro errors and workspace contributions leaking into

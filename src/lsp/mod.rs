@@ -12,7 +12,10 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+mod analysis_configuration;
+mod comparison_inputs;
 mod document_context;
+mod source_intelligence;
 mod workspace_checks;
 
 mod ordering;
@@ -173,6 +176,7 @@ struct Inner {
     model_info_notifications: bool,
     document_context_enabled: bool,
     document_contexts: HashMap<String, Url>,
+    analysis_configuration: analysis_configuration::AnalysisState,
     token_refresh: bool,
     hint_refresh: bool,
     semantic_mapping: SemanticMapping,
@@ -197,6 +201,7 @@ impl Default for Inner {
             model_info_notifications: false,
             document_context_enabled: false,
             document_contexts: HashMap::new(),
+            analysis_configuration: analysis_configuration::AnalysisState::default(),
             token_refresh: false,
             hint_refresh: false,
             semantic_mapping: SemanticMapping::default(),
@@ -274,12 +279,21 @@ impl Inner {
         Some(views)
     }
     fn prepare_root(&mut self, uri: &Url) -> ResourceSettings {
-        let settings = self.settings.resolve(uri);
+        let mut settings = self.settings.resolve(uri);
+        if let Some(paths) = self.analysis_configuration.paths_for(uri) {
+            settings.search_paths = paths.to_vec();
+        }
         self.workspace
             .set_root_search_paths(uri.as_str(), settings.search_paths.clone());
         self.workspace
             .set_root_macro_work_limit(uri.as_str(), settings.macro_work_limit);
         settings
+    }
+
+    fn analysis_configuration_committed(&mut self, root: &Url) {
+        self.semantic_views.remove(root);
+        self.workspace_analysis_changed(root);
+        self.reports.remove(root);
     }
 
     fn syntax_context(
@@ -535,7 +549,8 @@ impl Inner {
                 .map(|doc| Arc::from(doc.text.as_str()))
                 .or_else(|| self.workspace.get_source(uri.as_str()).map(Arc::from))
                 .unwrap_or_default();
-            let report = prepare_root_report(uri, set, text, revision);
+            let choices = self.workspace.root_analysis_configuration(uri.as_str());
+            let report = prepare_root_report(uri, set, text, revision, &choices);
             self.reports.insert(uri.clone(), Arc::new(report));
         }
         self.reports
@@ -863,8 +878,20 @@ impl Backend {
 
     fn hover_at(&self, pos: &TextDocumentPositionParams) -> Option<Hover> {
         let mut inner = self.lock_inner();
+        if let Some(document) = inner.document(&pos.text_document.uri) {
+            let index = LineIndex::new(&document.text);
+            let byte = index.offset_utf16(&document.text, span_pos(pos.position));
+            if let Some(hover) =
+                source_intelligence::hover(&mut inner, &pos.text_document.uri, byte)
+            {
+                return Some(hover);
+            }
+        }
         if let Some(hover) = locals::hover(&mut inner, pos) {
-            return hover;
+            return hover.map(|mut hover| {
+                source_intelligence::label(&inner, &pos.text_document.uri, &mut hover);
+                hover
+            });
         }
         if is_model_root(&pos.text_document.uri) {
             inner.workspace_checks.active = Some(pos.text_document.uri.clone());
@@ -874,7 +901,10 @@ impl Backend {
         let index = LineIndex::new(&normalized);
         let byte = index.offset_utf16(&text, span_pos(pos.position));
         if let Some(hover) = typed_names::hover(&mut inner, pos) {
-            return hover;
+            return hover.map(|mut hover| {
+                source_intelligence::label(&inner, &pos.text_document.uri, &mut hover);
+                hover
+            });
         }
         let (word, span) = syntax_intel::word_at(&text, byte)?;
         let range = Some(span_range(&index, &text, span));
@@ -937,7 +967,9 @@ impl Backend {
         if !descriptions.all(|description| description.as_ref() == Some(&md)) {
             return None;
         }
-        Some(markdown_hover(md, range))
+        let mut hover = markdown_hover(md, range);
+        source_intelligence::label(&inner, &pos.text_document.uri, &mut hover);
+        Some(hover)
     }
 
     fn doc_symbols(&self, uri: &Url) -> Option<Vec<DocumentSymbol>> {
@@ -946,6 +978,13 @@ impl Backend {
         let preferences = inner.presentation_for(uri);
         let inventory = inner.workspace.source_inventory(uri.as_str())?;
         let roots = inner.context_roots(uri);
+        let projected = source_intelligence::file(&mut inner, uri);
+        let availability: HashMap<_, _> = projected
+            .as_ref()
+            .into_iter()
+            .flat_map(|file| file.availability.iter())
+            .map(|item| (item.source_id.as_str(), item.availability))
+            .collect();
         if inner.context_ambiguous(uri) {
             let mut rows = Vec::new();
             model_map::add_source_symbols(&mut rows, &inventory, &text, &preferences, |_| {
@@ -956,8 +995,12 @@ impl Backend {
         let mut views = Vec::new();
         for root in &roots {
             inner.root_revision(root);
-            let model = inner.workspace.get_effective_model(root.as_str())?.clone();
-            let report = inner.workspace.expand_report(root.as_str())?.clone();
+            let Some(model) = inner.workspace.get_effective_model(root.as_str()).cloned() else {
+                continue;
+            };
+            let Some(report) = inner.workspace.expand_report(root.as_str()).cloned() else {
+                continue;
+            };
             let authoritative = roots.len() == 1
                 && report.complete
                 && report.model_map.complete
@@ -982,14 +1025,19 @@ impl Backend {
             common_leaves(views)
         } else if let Some(view) = views.pop() {
             view
-        } else {
+        } else if roots.is_empty() {
             let model = inner.workspace.get_model(uri.as_str())?;
             let report = crate::engine::language::expand::expand_report(&text);
             WrittenView::new(uri, &text, model, &report.model_map, None, false, false)
                 .symbols(&preferences)
+        } else {
+            Vec::new()
         };
-        model_map::add_source_symbols(&mut rows, &inventory, &text, &preferences, |_| {
-            crate::engine::analysis_configuration::SourceAvailability::Unknown
+        model_map::add_source_symbols(&mut rows, &inventory, &text, &preferences, |item| {
+            availability
+                .get(item.source_id.as_str())
+                .copied()
+                .unwrap_or_default()
         });
         Some(rows)
     }
@@ -1437,6 +1485,18 @@ impl Backend {
             if !seen_fixes.insert(seen_key) {
                 continue;
             }
+            if inner
+                .workspace
+                .root_analysis_configuration(row.root.as_str())
+                .is_preview()
+            {
+                actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                    title: fix_title(lib), kind: Some(CodeActionKind::QUICKFIX),
+                    disabled: Some(CodeActionDisabled { reason: "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED: Diagnostic fixes are unavailable while a definition or branch preview is selected. Reset Analysis Configuration before requesting this edit.".into() }),
+                    diagnostics: Some(vec![row.lsp_diagnostic.clone()]), ..CodeAction::default()
+                }));
+                continue;
+            }
             let edit = TextEdit {
                 range: Range::new(
                     lsp_pos_from_scalar(&index, &row.text, fix.start_line, fix.start_char),
@@ -1684,6 +1744,8 @@ impl Backend {
             .map(|c| c.to_vec())
             .unwrap_or_default();
         let mut links = Vec::new();
+        let roots = inner.context_roots(uri);
+        let source_root = (roots.len() == 1).then(|| roots[0].clone());
         for inc in &includes {
             let resolved = records.resolved.iter().find(|r| {
                 (r.span.start == inc.span.start && r.span.end == inc.span.end)
@@ -1699,7 +1761,9 @@ impl Backend {
                 range: span_range(&index, &text, inc.span),
                 target: Some(target),
                 tooltip: Some(format!("Open {}", inc.filename)),
-                data: None,
+                data: source_root
+                    .as_ref()
+                    .map(|root| json!({"dygnosis_source_include":true,"root_uri":root})),
             });
         }
         for rec in &companions {
@@ -1719,6 +1783,16 @@ impl Backend {
                 tooltip: Some(format!("{} {basename}", rec.kind.as_str())),
                 data: None,
             });
+        }
+        for link in source_intelligence::literal_links(&mut inner, uri, &text) {
+            if let Some(existing) = links
+                .iter_mut()
+                .find(|existing| existing.range == link.range)
+            {
+                *existing = link;
+            } else {
+                links.push(link);
+            }
         }
         if links.is_empty() { None } else { Some(links) }
     }
@@ -1929,10 +2003,17 @@ impl Backend {
             "dynare/explainDiagnostic" => explain_command(arguments),
             "dynare/compareModels" => self.compare_command(arguments),
             "dynare/compareModelSnapshots" => self.compare_snapshot_command(arguments),
+            "dynare/validateComparisonInputs" => {
+                comparison_inputs::validate(&self.lock_inner(), arguments)
+            }
             "dynare/showEffectiveModel" => self.show_effective_model_command(arguments),
             "dynare/captureRename" => rename::capture_command(&mut self.lock_inner(), arguments)
-                .unwrap_or_else(|reason| json!({"error":reason, "code":"RENAME_REFUSED"})),
+                .unwrap_or_else(rename::refusal_json),
             "dynare/modelInfo" => self.model_info_command(arguments),
+            "dynare/analysisContext" => self.analysis_context_command(arguments),
+            "dynare/sourceCandidates" => {
+                source_intelligence::candidates(&mut self.lock_inner(), arguments)
+            }
             _ => json!({"error": format!("unknown command {command}"), "code": "UNKNOWN_COMMAND"}),
         };
         self.lock_inner().bound_workspace_cache();
@@ -1966,17 +2047,30 @@ impl Backend {
         if !["file", "untitled"].contains(&root.scheme()) {
             return json!({"error":"Model information requires a file or untitled root URI", "code":"UNSUPPORTED_URI"});
         }
-        let Some(revision) = inner.root_revision(&root) else {
-            return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND"});
-        };
-        if crate::engine::workspace::include_resolver::normalize_uri(document.as_str())
-            != crate::engine::workspace::include_resolver::normalize_uri(root.as_str())
-            && !inner.workspace.owner_roots(document.as_str()).contains(
-                &crate::engine::workspace::include_resolver::normalize_uri(root.as_str()),
-            )
+        let revision = inner.root_revision(&root);
+        let analysis = analysis_configuration::metadata(&mut inner, &root);
+        let document_key =
+            crate::engine::workspace::include_resolver::normalize_uri(document.as_str());
+        if document_key != crate::engine::workspace::include_resolver::normalize_uri(root.as_str())
+            && inner.document_contexts.get(&document_key) != Some(&root)
+            && !inner.source_browsing_relation(&root, &document)
         {
             return json!({"error":"The displayed document does not belong to the chosen model root", "code":"DOCUMENT_NOT_OWNED"});
         }
+        if analysis["state"] == "stale" {
+            let Some(revision) = analysis_configuration::context_revision(&mut inner, &root) else {
+                return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND"});
+            };
+            let cause = &analysis["cause"];
+            return json!({"schema_version":MODEL_INFO_SCHEMA_VERSION,"root_uri":root,"document_uri":document,
+                "document_version":inner.document(&document).map(|doc|doc.version),"revision":revision,"complete":false,
+                "analysis":analysis,"status":"stale","message":cause["message"],"incomplete_reasons":[cause],
+                "owner_roots":inner.known_owner_roots(&document),"browsing_documents":inner.browsing_documents(&root),
+                "statements":[],"declarations":[],"equations":[],"related_files":[],"block_categories":[],"first_model_anchor":null});
+        }
+        let Some(revision) = revision else {
+            return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND"});
+        };
         let Some(model) = inner.workspace.get_effective_model(root.as_str()).cloned() else {
             return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND"});
         };
@@ -2028,6 +2122,14 @@ impl Backend {
         result["document_version"] = json!(inner.document(&document).map(|doc| doc.version));
         result["revision"] = json!(revision);
         result["complete"] = json!(complete);
+        result["analysis"] = analysis;
+        result["browsing_documents"] = json!(inner.browsing_documents(&root));
+        result["source_browsing"] = json!(
+            document != root
+                && !inner.workspace.owner_roots(document.as_str()).contains(
+                    &crate::engine::workspace::include_resolver::normalize_uri(root.as_str())
+                )
+        );
         result["owner_roots"] = json!(inner.known_owner_roots(&document));
         result["dependency_candidates"] = json!(
             inner
@@ -2173,10 +2275,11 @@ impl Backend {
     fn capture_snapshot_input(
         &self,
         input: &crate::engine::comparison::compare_snapshots::SnapshotInput,
+        previous: Option<&crate::engine::comparison::compare_snapshots::CapturedSnapshot>,
     ) -> crate::engine::comparison::compare_snapshots::SnapshotCapture {
         use crate::engine::comparison::compare_snapshots::{
             SnapshotCapture, SnapshotFailure, SnapshotInput, capture_git_snapshot_with_limit,
-            capture_working_snapshot,
+            capture_working_snapshot_configured,
         };
         match input {
             SnapshotInput::Git(input) => {
@@ -2193,6 +2296,7 @@ impl Backend {
                 root_uri,
                 expected_revision,
                 search_paths,
+                analysis,
             } => {
                 let Some(uri) = Url::parse(root_uri).ok().filter(|uri| {
                     is_model_root(uri) && matches!(uri.scheme(), "file" | "untitled")
@@ -2210,9 +2314,12 @@ impl Backend {
                         None,
                     ));
                 }
-                let workspace = {
+                let mut workspace = {
                     let mut inner = self.lock_inner();
-                    let Some(current) = inner.root_revision(&uri) else {
+                    let Some(current) = inner
+                        .root_revision(&uri)
+                        .or_else(|| analysis_configuration::context_revision(&mut inner, &uri))
+                    else {
                         return SnapshotCapture::Failure(SnapshotFailure::new(
                             "ROOT_NOT_FOUND",
                             "Working model root is unavailable",
@@ -2234,11 +2341,15 @@ impl Backend {
                         None => inner.workspace.snapshot_with_root_settings(root_uri),
                     }
                 };
-                let mut capture = capture_working_snapshot(
+                if let Some(previous) = previous {
+                    previous.reuse_sources_for(&mut workspace);
+                }
+                let mut capture = capture_working_snapshot_configured(
                     workspace,
                     root_uri,
                     input_id,
                     "editor_buffers_and_disk",
+                    analysis.clone(),
                 );
                 if let SnapshotCapture::Ready(input) = &mut capture {
                     input.inputs["expected_revision"] = json!(expected_revision);
@@ -2251,8 +2362,37 @@ impl Backend {
     fn compare_snapshot_command(&self, arguments: &[Value]) -> Value {
         use crate::engine::comparison::compare_snapshots::{
             SNAPSHOT_SCHEMA_VERSION, SnapshotCapture, SnapshotCompareRequest, SnapshotCoordinates,
-            SnapshotFailure, SnapshotInput, compare_captured_snapshots,
+            SnapshotFailure, SnapshotInput, compare_captured_snapshots_ref, validate_working_pair,
         };
+        fn summarized(
+            mut result: Value,
+            old: &SnapshotCapture,
+            new: &SnapshotCapture,
+            request: &SnapshotCompareRequest,
+        ) -> Value {
+            let source = crate::engine::analysis_configuration::AnalysisConfiguration::default();
+            let requested = |input: &SnapshotInput| {
+                input
+                    .analysis()
+                    .cloned()
+                    .or_else(|| matches!(input, SnapshotInput::Git(_)).then(|| source.clone()))
+            };
+            let before = requested(&request.before);
+            let after = requested(&request.after);
+            let mut summaries = json!({"before":old.analysis_summary(before.as_ref()),"after":new.analysis_summary(after.as_ref())});
+            if matches!(result["code"].as_str(), Some("INPUT_CHANGED" | "CANCELLED")) {
+                for side in ["before", "after"] {
+                    summaries[side]["complete"] = Value::Null;
+                    summaries[side]["counts"] = Value::Null;
+                    summaries[side]["counts_cause"] = result["message"].clone();
+                }
+            }
+            result["analysis_summaries"] = summaries;
+            if let Some(result) = result.as_object_mut() {
+                result.remove("analysis_summary");
+            }
+            result
+        }
         let request = arguments
             .first()
             .cloned()
@@ -2267,15 +2407,23 @@ impl Backend {
             )
             .response("before");
         };
-        let old = self.capture_snapshot_input(&request.before);
-        let new = self.capture_snapshot_input(&request.after);
+        let mut old = self.capture_snapshot_input(&request.before, None);
+        let mut new = self.capture_snapshot_input(
+            &request.after,
+            match &old {
+                SnapshotCapture::Ready(input) => Some(input),
+                _ => None,
+            },
+        );
         let mut needs = Vec::new();
         for (side, input, captured) in [
             ("before", &request.before, &old),
             ("after", &request.after, &new),
         ] {
             match captured {
-                SnapshotCapture::Failure(failure) => return failure.response(side),
+                SnapshotCapture::Failure(failure) => {
+                    return summarized(failure.response(side), &old, &new, &request);
+                }
                 SnapshotCapture::NeedsSources(keys) => {
                     let SnapshotInput::Git(input) = input else {
                         unreachable!("only historical sources are deferred")
@@ -2295,23 +2443,40 @@ impl Backend {
             } = input
             {
                 let uri = Url::parse(root_uri).expect("validated Working root");
-                if self.lock_inner().root_revision(&uri).as_ref() != Some(expected_revision) {
-                    return SnapshotFailure::new(
-                        "INPUT_CHANGED",
-                        "Working model changed during capture; refresh the comparison",
-                        Some(root_uri.clone()),
-                    )
-                    .response(side);
+                let mut inner = self.lock_inner();
+                if inner
+                    .root_revision(&uri)
+                    .or_else(|| analysis_configuration::context_revision(&mut inner, &uri))
+                    .as_ref()
+                    != Some(expected_revision)
+                {
+                    return summarized(
+                        SnapshotFailure::new(
+                            "INPUT_CHANGED",
+                            "Working model changed during capture; refresh the comparison",
+                            Some(root_uri.clone()),
+                        )
+                        .response(side),
+                        &old,
+                        &new,
+                        &request,
+                    );
                 }
             }
         }
         if !needs.is_empty() {
             return json!({"state":"needs_sources","requests":needs});
         }
-        let (SnapshotCapture::Ready(old), SnapshotCapture::Ready(new)) = (old, new) else {
+        let (SnapshotCapture::Ready(old_input), SnapshotCapture::Ready(new_input)) =
+            (&mut old, &mut new)
+        else {
             unreachable!("finished captures")
         };
-        let result = compare_captured_snapshots(*old, *new, SnapshotCoordinates::Lsp);
+        let result = compare_captured_snapshots_ref(old_input, new_input, SnapshotCoordinates::Lsp);
+        let mut inner = self.lock_inner();
+        if let Err(failure) = validate_working_pair(old_input, new_input, Some(&inner.workspace)) {
+            return summarized(failure.response("after"), &old, &new, &request);
+        }
         for (side, input) in [("before", &request.before), ("after", &request.after)] {
             if let SnapshotInput::Working {
                 root_uri,
@@ -2320,17 +2485,31 @@ impl Backend {
             } = input
             {
                 let uri = Url::parse(root_uri).expect("validated Working root");
-                if self.lock_inner().root_revision(&uri).as_ref() != Some(expected_revision) {
-                    return SnapshotFailure::new(
-                        "INPUT_CHANGED",
-                        "Working model changed during comparison; refresh the comparison",
-                        Some(root_uri.clone()),
-                    )
-                    .response(side);
+                if inner
+                    .root_revision(&uri)
+                    .or_else(|| analysis_configuration::context_revision(&mut inner, &uri))
+                    .as_ref()
+                    != Some(expected_revision)
+                {
+                    return summarized(
+                        SnapshotFailure::new(
+                            "INPUT_CHANGED",
+                            "Working model changed during comparison; refresh the comparison",
+                            Some(root_uri.clone()),
+                        )
+                        .response(side),
+                        &old,
+                        &new,
+                        &request,
+                    );
                 }
             }
         }
-        result
+        if result["state"] == "failure" {
+            summarized(result, &old, &new, &request)
+        } else {
+            result
+        }
     }
 
     fn show_effective_model_command(&self, arguments: &[Value]) -> Value {
@@ -2348,8 +2527,11 @@ impl Backend {
             return json!({"success": false, "code":"ROOT_REQUIRED", "message":"Choose a .mod or .dyn owner root for the effective model", "owner_roots":inner.known_owner_roots(&uri)});
         }
         let Some(revision) = inner.root_revision(&uri) else {
-            return json!({"success": false, "message": "Document not available"});
+            let analysis = analysis_configuration::metadata(&mut inner, &uri);
+            return json!({"success": false, "code":analysis["cause"]["code"].as_str().unwrap_or("ROOT_NOT_FOUND"),
+                "message":analysis["cause"]["message"].as_str().unwrap_or("The model root is unavailable. Open the root before expanding it."), "analysis":analysis});
         };
+        let analysis = analysis_configuration::metadata(&mut inner, &uri);
         let Some(report) = inner.workspace.expand_report(uri.as_str()).cloned() else {
             return json!({"success": false, "message": "Document not available"});
         };
@@ -2442,6 +2624,7 @@ impl Backend {
         let mut result = json!({
             "uri": uri.as_str(),
             "root_uri": uri,
+            "analysis": analysis,
             "revision": revision,
             "document_version": inner.document(&uri).map(|doc| doc.version),
             "complete": complete,
@@ -2757,6 +2940,15 @@ impl LanguageServer for Backend {
                 .and_then(|value| value.get("schema_version"))
                 .and_then(Value::as_u64)
                 == Some(1);
+            inner.analysis_configuration.enabled = params
+                .capabilities
+                .experimental
+                .as_ref()
+                .and_then(|value| value.get("dygnosis"))
+                .and_then(|value| value.get("analysisConfiguration"))
+                .and_then(|value| value.get("schema_version"))
+                .and_then(Value::as_u64)
+                == Some(1);
             inner.workspace_checks.notifications = params
                 .capabilities
                 .experimental
@@ -2812,6 +3004,7 @@ impl LanguageServer for Backend {
         self.presentation_refresh.stop();
         let mut inner = self.lock_inner();
         inner.workspace_checks.shutdown = true;
+        inner.workspace_checks.cancel_workers();
         inner.workspace_checks.epoch += 1;
         ordering::committed();
         self.workspace_wake.notify_one();
@@ -3221,6 +3414,11 @@ impl LanguageServer for Backend {
         if params.command == "dynare/setDocumentContext" {
             return Ok(Some(self.set_document_context(&params.arguments).await));
         }
+        if params.command == "dynare/setAnalysisConfiguration" {
+            return Ok(Some(
+                self.set_analysis_configuration(&params.arguments).await,
+            ));
+        }
         if matches!(
             params.command.as_str(),
             "dynare/workspaceStatus" | "dynare/recheckWorkspace" | "dynare/cancelWorkspace"
@@ -3256,9 +3454,25 @@ impl LanguageServer for Backend {
         let output = self.output_gate.lock().await;
         let to_publish = {
             let mut inner = self.lock_inner();
+            let removed: Vec<_> = params
+                .event
+                .removed
+                .iter()
+                .map(|folder| folder.uri.clone())
+                .collect();
+            let reset = inner.analysis_configuration.reset_removed(&removed);
             inner
                 .settings
                 .change_folders(params.event.added, params.event.removed);
+            for root in reset {
+                let paths = inner.settings.resolve(&root).search_paths;
+                let _ = inner.workspace.set_root_analysis_configuration_with_paths(
+                    root.as_str(),
+                    Default::default(),
+                    Some(paths),
+                );
+                inner.analysis_configuration_committed(&root);
+            }
             inner.document_contexts.clear();
             inner.workspace_reconfigure(true);
             inner.refresh_diagnostics(None)
@@ -3354,9 +3568,13 @@ pub fn initialize_result() -> InitializeResult {
                     "dynare/explainDiagnostic".into(),
                     "dynare/compareModels".into(),
                     "dynare/compareModelSnapshots".into(),
+                    "dynare/validateComparisonInputs".into(),
                     "dynare/showEffectiveModel".into(),
                     "dynare/captureRename".into(),
                     "dynare/modelInfo".into(),
+                    "dynare/analysisContext".into(),
+                    "dynare/setAnalysisConfiguration".into(),
+                    "dynare/sourceCandidates".into(),
                     "dynare/setDocumentContext".into(),
                     "dynare/workspaceStatus".into(),
                     "dynare/recheckWorkspace".into(),
@@ -3377,6 +3595,7 @@ pub fn initialize_result() -> InitializeResult {
                 "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true, "model_locals": true},
                 "modelInfoChanged": true,
                 "documentContext": {"command":"dynare/setDocumentContext", "schema_version":1},
+                "analysisConfiguration": {"schema_version":1,"context_command":"dynare/analysisContext","set_command":"dynare/setAnalysisConfiguration","source_candidates_command":"dynare/sourceCandidates"},
                 "rename": {"command":"dynare/captureRename", "schema_version":1, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES},
                 "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
                 "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
@@ -3431,6 +3650,7 @@ fn prepare_root_report(
     set: DiagnosticSet,
     text: Arc<str>,
     revision: String,
+    analysis: &crate::engine::analysis_configuration::AnalysisConfiguration,
 ) -> RootReport {
     let errors = set
         .diagnostics
@@ -3476,6 +3696,16 @@ fn prepare_root_report(
                 .into_iter()
                 .zip(converted)
                 .map(|(diagnostic, mut item)| {
+                    if !analysis.is_source() {
+                        let name = analysis.name.as_deref().unwrap_or("Custom");
+                        let suffix = if analysis.is_preview() {
+                            " (preview)"
+                        } else {
+                            ""
+                        };
+                        item.source = Some(format!("Dygnosis · {name}{suffix}"));
+                        item.message = format!("[{name}{suffix}] {}", item.message);
+                    }
                     // Every row needs provenance for replay after a root
                     // revision notification, including ordinary checks.
                     let data = item
@@ -3626,6 +3856,19 @@ fn naming_action_for_root(
     let revision = note.data.as_ref()?.get("input_revision")?.as_str()?;
     if inner.workspace.input_revision(root.as_str()).as_deref() != Some(revision) {
         return None;
+    }
+    if inner
+        .workspace
+        .root_analysis_configuration(root.as_str())
+        .is_preview()
+    {
+        let title = match &note.code {
+            Some(NumberOrString::String(code)) if code == "I208" => "Add equation tags",
+            Some(NumberOrString::String(code)) if code == "I209" => "Add long names",
+            _ => return None,
+        };
+        return Some(CodeAction {title:title.into(),kind:Some(CodeActionKind::QUICKFIX),diagnostics:Some(vec![note]),
+            disabled:Some(CodeActionDisabled{reason:"ANALYSIS_PREVIEW_EDIT_UNSUPPORTED: Diagnostic fixes are unavailable while a definition or branch preview is selected. Reset Analysis Configuration before requesting this edit.".into()}),..CodeAction::default()});
     }
     if params
         .context

@@ -428,9 +428,38 @@
     const message = event.data; if (!message || message.type !== "render" || !Array.isArray(message.rows)) return;
     payload = message; references = new Map((message.references ?? []).map(reference => [reference.pointer, reference])); choices = message.choices;
     controls.models.replaceChildren();
-    for (const [label, input] of [["Before", message.before], ["After", message.after]]) {
+    for (const [side, label, input] of [["before", "Before", message.before], ["after", "After", message.after]]) {
       const model = node("div", undefined, "input-side"), parts = input.split(" · "); model.title = input;
-      model.append(node("small", label), node("code", basename(parts[0])), node("span", parts.slice(1).join(" · "), "input-context")); controls.models.append(model);
+      const heading = node("div", undefined, "input-heading");
+      heading.append(node("small", label), node("code", basename(parts[0])), node("span", parts.slice(1).join(" · "), "input-context")); model.append(heading);
+      const summary = message.analysisSummaries?.[side], analysis = summary?.analysis;
+      if (summary) {
+        const configuration = analysis?.configuration ?? summary.requested_analysis, preview = analysis?.selection.preview ?? !!configuration?.overrides?.length;
+        const name = analysis?.selection.name ?? configuration?.name ?? (preview ? "Analysis preview" : configuration?.defines?.length ? "Macro inputs" : configuration ? "Source" : "Analysis unavailable");
+        const complete = summary.complete === undefined ? analysis?.model_complete : summary.complete;
+        model.append(node("p", `${name}${preview ? " (preview)" : ""} · ${complete === true ? "Complete" : complete === false ? "Incomplete" : "Completeness unavailable"}`, "analysis-name"));
+        if (configuration) {
+        model.append(node("p", `Initial macro inputs: ${configuration.defines?.map(input => `${input.name}=${input.expression}`).join("; ") || "none"}`, "analysis-detail"));
+        }
+        if (!analysis) for (const operation of configuration?.overrides ?? []) {
+          const file = operation.target.file === null ? "unnamed model" : basename(operation.target.file.replaceAll("\\", "/"));
+          const choice = operation.kind === "definition" ? `Definition in ${file}: ${operation.expression}` : operation.kind === "skip_definition" ? `Skip definition in ${file}` : `${operation.branch_id === null ? "No branch" : "Selected branch"} in ${file}`;
+          model.append(node("p", `${choice} · application unavailable`, "analysis-detail"));
+        }
+        for (const receipt of analysis?.overrides ?? []) {
+          const operation = receipt.operation, file = operation.target.file === null ? "unnamed model" : basename(operation.target.file.replaceAll("\\", "/"));
+          const choice = operation.kind === "definition" ? `Definition in ${file}: ${operation.expression}` : operation.kind === "skip_definition" ? `Skip definition in ${file}` : `${operation.branch_id === null ? "No branch" : "Selected branch"} in ${file}`;
+          const state = receipt.application === "applied" ? `${receipt.execution_count === null ? "applied at least" : "applied"} ${receipt.known_execution_count} time${receipt.known_execution_count === 1 ? "" : "s"}` : receipt.application === "not_reached" ? "not reached" : "application unknown";
+          model.append(node("p", `${choice} · ${state}${receipt.cause ? `. ${receipt.cause}` : ""}`, "analysis-detail"));
+        }
+        if (summary.counts) {
+          const counts = value => `${value.n_equations} ${value.n_equations === 1 ? "equation" : "equations"} · ${value.n_endogenous} endogenous ${value.n_endogenous === 1 ? "variable" : "variables"}`;
+          model.append(node("p", counts(summary.counts), "analysis-counts"));
+          for (const dimension of summary.counts.heterogeneity_dimensions) model.append(node("p", `${dimension.dimension}: ${counts(dimension)}`, "analysis-detail"));
+        } else model.append(node("p", summary.counts_cause || "Model counts are unavailable for this captured input.", "analysis-detail"));
+        if (summary.cause?.message && summary.cause.message !== summary.counts_cause) model.append(node("p", summary.cause.message, "analysis-detail"));
+      }
+      controls.models.append(model);
     }
     controls.status.textContent = message.message; controls.status.className = message.status; controls.refresh.disabled = message.status === "loading";
     controls.status.hidden = message.status === "ready" && message.message === "Current comparison";

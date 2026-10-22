@@ -92,14 +92,15 @@ function service(options = {}) {
       const initialized = deferred();
       const client = {
         initializeResult: { serverInfo: { name: "dygnosis", version: "one" }, capabilities: {
-          experimental: { dygnosis: { modelInfo: { schema_version: 1 }, ...(options.documentContext ? { documentContext: { schema_version: 1, command: "dynare/setDocumentContext" } } : {}) } }, documentSymbolProvider: true,
+          experimental: { dygnosis: { modelInfo: { schema_version: 1 }, ...(options.analysis ? {analysisConfiguration:{schema_version:1}} : {}), ...(options.documentContext ? { documentContext: { schema_version: 1, command: "dynare/setDocumentContext" } } : {}) } }, documentSymbolProvider: true,
           executeCommandProvider: { commands: ["dynare/modelInfo", "dynare/showEffectiveModel", ...(options.documentContext ? ["dynare/setDocumentContext"] : [])] },
         } },
         sendNotification: (method, params) => { host.notifications.push({ method, params }); return options.notify?.(method, params) ?? Promise.resolve(); },
         onNotification: (_method, listener) => { client.notify = listener; return new Disposable(); },
         onDidChangeState: listener => { client.state = listener; return new Disposable(); },
         getFeature: request => ({ clear() { (host.clearedFeatures ??= []).push(request); }, unregister() {}, register() { ++host.symbols; } }),
-        sendRequest: () => Promise.resolve(model()),
+        sendRequest: (method, params) => Promise.resolve(method === "textDocument/documentLink"
+          ? host.links?.(params) ?? [] : model()),
       };
       const managed = { client, disposed: false,
         start: () => { capture({ workspaceFolders: host.folders.map(folder => ({ uri: folder.uri.toString(), name: folder.name })), capabilities: {}, initializationOptions: settings }); if (!options.pending) initialized.resolve(); return initialized.promise; },
@@ -154,6 +155,50 @@ test("restart closes the protocol before destroying the server input stream", as
     await client.shutdown(); childProcess.spawn = previousSpawn; languageClient.LanguageClient = previousClient;
     for (const child of children) { child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy(); }
   }
+});
+
+function analysisContext(root, generation = 0, name = null) {
+  return {schema_version:1,root_uri:root.toString(),document_uri:root.toString(),document_version:null,revision:`source-${generation}`,
+    analysis:{state:"selected",selection:{configuration_id:`choice-${generation}`,name,preview:false,invocation_scope:"explicit_macro_inputs"},
+      configuration:name ? {name} : {},selection_generation:generation,include_paths:null,macro_complete:true,model_complete:true,overrides:[]},
+    sites:[],source_coverage:{complete:true}};
+}
+
+test("a delayed analysis acknowledgment cannot relabel a newer accepted configuration", async () => {
+  // The server can accept two ordered choices before the first reply reaches a view.
+  reset(); const client = service({analysis:true}); await client.ensureStarted();
+  const root = Uri.parse("file:///workspace/root.mod"), delayed = deferred(), events = [];
+  let current = analysisContext(root);
+  client.execute = async (command, args) => {
+    if (command === "dynare/analysisContext") return globalThis.structuredClone(current);
+    if (args[0].analysis.name === "First") { current = analysisContext(root,1,"First"); return delayed.promise; }
+    current = analysisContext(root,2,"Second"); return {...current,accepted:true};
+  };
+  const subscription = client.onDidChangeAnalysis(event => events.push(event.context.analysis.selection.name));
+  const firstProof = await client.analysisContext(root);
+  const first = client.setAnalysisConfiguration(root,{name:"First"},firstProof,null); void first.catch(() => {});
+  await flush();
+  const secondProof = await client.analysisContext(root);
+  await client.setAnalysisConfiguration(root,{name:"Second"},secondProof,null);
+  delayed.resolve({...analysisContext(root,1,"First"),accepted:true});
+  await assert.rejects(first,/newer accepted analysis configuration/);
+  assert.deepEqual(events,["Second"]);
+  subscription.dispose(); await client.shutdown();
+});
+
+test("accepted partial analysis updates selection before refusing its dependent action", async () => {
+  // A failed follow-up source inspection must not leave the UI on the old choice.
+  reset(); const client = service({analysis:true}); await client.ensureStarted();
+  const root = Uri.parse("file:///workspace/root.mod"), events = [];
+  client.execute = async command => command === "dynare/analysisContext" ? analysisContext(root) :
+    {...analysisContext(root,1,"Accepted"),accepted:true,revision:"",partial:true,message:"Accepted, but source inspection reached its allowance."};
+  const subscription = client.onDidChangeAnalysis(event => events.push(event.context.analysis.selection.name));
+  const proof = await client.analysisContext(root);
+  await assert.rejects(client.setAnalysisConfiguration(root,{name:"Accepted"},proof,null),/Accepted, but source inspection/);
+  assert.deepEqual(events,["Accepted"]);
+  await client.restart();
+  await assert.rejects(client.setAnalysisConfiguration(root,{},proof,null),/selector is no longer current/);
+  subscription.dispose(); await client.shutdown();
 });
 
 test("an obsolete startup cannot clear the replacement startup promise", async () => {
@@ -578,6 +623,7 @@ test("engine stop and explicit shutdown invalidate their instance immediately", 
 test("native include links route through the retained owner before opening a mod fragment", async () => {
   reset(); const client = service(); await client.ensureStarted();
   const root = Uri.parse("file:///workspace/root.mod"), target = Uri.parse("file:///workspace/fragment.mod");
+  host.links = () => [{ target: target.toString() }];
   const source = { uri: root, languageId: "dynare", version: 1 }; host.documents.push(source);
   const info = { ...model(root.toString(), [{ kind: "include", filename: "fragment.mod", resolved: true, path: target.fsPath }]), client_instance: client.currentInstance };
   client.modelInfo = () => Promise.resolve(info);
@@ -591,6 +637,7 @@ test("native include links route through the retained owner before opening a mod
 test("an editor-cached native link remains usable after another same-version provider request", async () => {
   reset(); const client = service(); await client.ensureStarted();
   const root = Uri.parse("file:///workspace/root.mod"), target = Uri.parse("file:///workspace/fragment.mod");
+  host.links = () => [{ target: target.toString() }];
   const source = { uri: root, languageId: "dynare", version: 1 }; host.documents.push(source); host.editor = { document: source };
   const info = { ...model(root.toString(), [{ kind: "include", filename: "fragment.mod", resolved: true, path: target.fsPath }]), client_instance: client.currentInstance };
   client.modelInfo = () => Promise.resolve(info);
@@ -624,6 +671,7 @@ test("native include validation refuses a newer owner or editor selected while i
   for (const changed of ["owner", "editor"]) {
     reset(); const client = service(); await client.ensureStarted(); const pending = deferred();
     const a = Uri.parse("file:///workspace/a.mod"), b = Uri.parse("file:///workspace/b.mod"), target = Uri.parse("file:///workspace/fragment.mod");
+    host.links = () => pending.promise.then(() => [{ target: target.toString() }]);
     const source = { uri: a, languageId: "dynare", version: 1 }; host.documents.push(source); host.editor = { document: source };
     const related = [{ kind: "include", filename: "fragment.mod", resolved: true, path: target.fsPath }];
     const info = { ...model(a.toString(), related), client_instance: client.currentInstance };
@@ -643,6 +691,7 @@ test("native include validation refuses a newer owner or editor selected while i
 test("native include opening accepts an intentional owner pick before guarding validation", async () => {
   reset(); const client = service(); await client.ensureStarted();
   const root = Uri.parse("file:///workspace/root.mod"), target = Uri.parse("file:///workspace/fragment.mod");
+  host.links = () => [{ target: target.toString() }];
   const source = { uri: Uri.parse("file:///workspace/shared.inc"), languageId: "dynare", version: 1 };
   host.documents.push(source); host.editor = { document: source };
   const info = { ...model(root.toString(), [{ kind: "include", filename: "fragment.mod", resolved: true, path: target.fsPath }]), client_instance: client.currentInstance };

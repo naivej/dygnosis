@@ -57,6 +57,7 @@ pub(crate) struct ScopedEquation {
 /// tool accepts only its own projection; validation checks cross-field rules.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub(crate) struct Params {
+    pub view: Option<super::canonical::View>,
     #[serde(skip)]
     #[schemars(skip)]
     /// Agent projections use selected sections and shared page allowances.
@@ -138,6 +139,7 @@ impl std::ops::Deref for Params {
 
 const SOURCE_FIELDS: &[&str] = &[
     "source",
+    "analysis",
     "file_content",
     "active_file",
     "files",
@@ -156,15 +158,17 @@ fn fields(tool: &str) -> Vec<&'static str> {
     }
     fields.extend_from_slice(match tool {
         "dynare_diagnose" => &["code", "severity", "file"],
-        "dynare_model_info" | "dynare_related_files" => &[],
+        "dynare_model_info" => &["file"],
+        "dynare_related_files" => &[],
         "dynare_find_references" => &[
             "symbol",
             "binding_id",
             "target",
             "include_declaration",
             "occurrences",
+            "view",
         ],
-        "dynare_symbol_info" => &["symbol", "binding_id", "target"],
+        "dynare_symbol_info" => &["symbol", "binding_id", "target", "view"],
         "dynare_rename" => &["old_name", "binding_id", "target", "new_name"],
         "dynare_equations" => &[
             "name",
@@ -177,6 +181,8 @@ fn fields(tool: &str) -> Vec<&'static str> {
             "target",
             "equation_id",
             "equation",
+            "view",
+            "file",
         ],
         "dynare_expand" => &["line_range", "expanded_range", "equation_id"],
         "dynare_format" => &["file", "line_range", "formatIndent"],
@@ -398,11 +404,19 @@ fn dispatch_query(
         return catalog(tool, &arguments, &params);
     }
     let input = params.source_args.input().map_err(|e| invalid(e.message))?;
-    let mut snapshot = match super::source::resolve_source(
-        input,
-        params.expected_revision.as_deref(),
-        &control,
-    ) {
+    let inspection = super::source_views::inspection(tool, &params)?;
+    let acquired = if params.analysis.is_none() && inspection.is_none() {
+        super::source::resolve_source(input, params.expected_revision.as_deref(), &control)
+    } else {
+        super::source::resolve_source_configured(
+            input,
+            params.expected_revision.as_deref(),
+            &control,
+            params.analysis.as_ref(),
+            inspection.as_ref(),
+        )
+    };
+    let mut snapshot = match acquired {
         Ok(snapshot) => snapshot,
         Err(error) if error.invalid_arguments => return Err(invalid(error.message)),
         Err(error) => {
@@ -417,6 +431,9 @@ fn dispatch_query(
         .check()
         .map_err(|e| rmcp::ErrorData::internal_error(e.message, None))?;
     let mut result = match tool {
+        "dynare_symbol_info" if params.view == Some(super::canonical::View::Source) => {
+            super::source_views::symbols(&snapshot, &params)?
+        }
         "dynare_find_references" | "dynare_symbol_info" | "dynare_rename" => {
             symbols(tool, &params, &mut snapshot)?
         }
@@ -464,6 +481,9 @@ fn dispatch_query(
             ToolResult::new(rows)
         }
         "dynare_model_info" => ToolResult::new(model_info(&mut snapshot, &params)?),
+        "dynare_equations" if params.view == Some(super::canonical::View::Source) => {
+            super::source_views::equations(&snapshot, &params)?
+        }
         "dynare_equations" => equation_query(&mut snapshot, &params)?,
         "dynare_expand" => expand_query(&snapshot, &params)?,
         "dynare_related_files" => {
@@ -494,6 +514,19 @@ fn dispatch_query(
         _ => return Err(invalid(format!("Unknown tool: {tool}"))),
     };
     result.inputs = vec![snapshot.inputs.clone()];
+    if params.agent_output
+        && matches!(tool, "dynare_symbol_info" | "dynare_equations")
+        && params.view != Some(super::canonical::View::Source)
+        && let Some(data) = result.data.as_object_mut()
+    {
+        data.insert("view".into(), json!("effective"));
+    }
+    if matches!(tool, "dynare_expand" | "dynare_extract" | "dynare_format")
+        && let Some(data) = result.data.as_object_mut()
+    {
+        data.insert("analysis".into(), snapshot.inputs["analysis"].clone());
+    }
+    super::source_views::outcomes(&snapshot, &mut result);
     result.coverage = Some(json!(
         snapshot
             .analyses
@@ -510,10 +543,14 @@ fn dispatch_query(
         result.cause("partial","INCOMPLETE_INPUT","Only available source facts are returned. Includes, parsing or macro expansion prevent complete model coverage; see coverage reasons.");
     }
     project_and_page(tool, &arguments, &params, &snapshot.revision, &mut result)?;
-    if snapshot
-        .owner_roots
-        .iter()
-        .any(|root| !snapshot.workspace.input_snapshot_is_current(root))
+    if snapshot.source_structure.is_some()
+        && !snapshot
+            .workspace
+            .source_guards_are_current(&snapshot.guards)
+        || snapshot
+            .owner_roots
+            .iter()
+            .any(|root| !snapshot.workspace.input_snapshot_is_current(root))
     {
         return Ok(ToolResult::refused("INPUT_CHANGED","Source inputs changed before the result was returned. No stale facts or edits were returned.").wire());
     }
@@ -590,6 +627,8 @@ fn source_json(
 
 fn model_info(snapshot: &mut SourceSnapshot, params: &Params) -> Result<Value, rmcp::ErrorData> {
     let valid = [
+        "analysis",
+        "source_structure",
         "summary",
         "declarations",
         "assignments",
@@ -610,6 +649,12 @@ fn model_info(snapshot: &mut SourceSnapshot, params: &Params) -> Result<Value, r
         json!({"status":"incomplete","incomplete_reasons":snapshot.coverage["reasons"]})
     };
     let want = |name: &str| params.output.sections.iter().any(|section| section == name);
+    if want("analysis") {
+        data["analysis"] = snapshot.inputs["analysis"].clone();
+    }
+    if want("source_structure") {
+        data["source_structure"] = super::source_views::structure_json(snapshot);
+    }
     if params.agent_output && want("structure") && snapshot.coverage["complete"] == true {
         data["structure"] = super::model_info_with_unit(&unit(snapshot));
     }
@@ -883,6 +928,11 @@ pub(crate) fn selected_equation(
     snapshot: &SourceSnapshot,
     id: &str,
 ) -> Result<usize, rmcp::ErrorData> {
+    if !id.starts_with(&format!("{}:equation:", snapshot.revision)) {
+        return Err(invalid(
+            "equation_id must be an accepted effective equation identity from this revision. Written source_id values select no effective equation; analyze a configuration that emits the template, then query effective equations.",
+        ));
+    }
     snapshot
         .report
         .model_map
@@ -1119,6 +1169,12 @@ fn symbols(
     snapshot: &mut SourceSnapshot,
 ) -> Result<ToolResult, rmcp::ErrorData> {
     let rename = tool == "dynare_rename";
+    if rename && snapshot.model.is_analysis_preview() {
+        return Ok(ToolResult::refused(
+            "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED",
+            "Rename is unavailable for a definition or branch analysis preview. No edits were proposed. Reset the overrides to use source editing actions.",
+        ));
+    }
     if rename
         && params
             .new_name
@@ -1144,6 +1200,9 @@ fn symbols(
                     "NO_MATCH",
                     "No matching symbol binding was found in the selected model.",
                 );
+            } else if tool == "dynare_symbol_info" {
+                result.cause(if snapshot.coverage["complete"]==true{"unchanged"}else{"partial"}, "BINDING_UNAVAILABLE", "No accepted symbol binding is available for this selection under the selected analysis configuration. Coverage identifies any incomplete model facts. Use dynare_symbol_info with view=source and a literal name or written target to inspect source candidates; those candidates do not establish references.");
+                result.data["source_view"] = json!({"tool":"dynare_symbol_info","view":"source"});
             }
             return Ok(result);
         }
@@ -1395,7 +1454,7 @@ pub(crate) fn proposal_result(
     Ok((
         data,
         json!({"revision":snapshot.revision,"source_policy":snapshot.inputs["source_policy"],"checked_owners":snapshot.inputs["checked_owners"],
-        "include_dirs":snapshot.inputs["include_dirs"],"macro_work_limit":snapshot.inputs["macro_work_limit"],"inputs":guards,"edits":wire}),
+        "include_dirs":snapshot.inputs["include_dirs"],"macro_work_limit":snapshot.inputs["macro_work_limit"],"analysis":snapshot.inputs["analysis"],"inputs":guards,"edits":wire}),
     ))
 }
 

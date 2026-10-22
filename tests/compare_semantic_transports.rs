@@ -742,6 +742,7 @@ fn captured_files(id: &str, files: BTreeMap<String, String>) -> CapturedSnapshot
             "b".repeat(40)
         },
         requested_ref: None,
+        analysis: None,
         search_paths: Vec::new(),
         manifest: files
             .keys()

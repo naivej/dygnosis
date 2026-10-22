@@ -468,6 +468,20 @@ test("failed or incomplete refresh clears authoritative rows and shows a distinc
   host.capture = () => { throw new Error("local object absent"); }; host.message({ type: "refresh" }); await flush(); assert.equal(host.last().status, "failure"); assert.deepEqual(host.last().rows, []);
 });
 
+test("incomplete refresh keeps read-only side summaries and removes source actions", async t => {
+  const { host } = setup(t); await host.openSaved(comparison());
+  const summaries = { before: { requested_analysis: { name: "Policy A", defines: [{ name: "ON", expression: "false" }] }, complete: true, counts: null, counts_cause: "Comparison stopped before counting." },
+    after: { requested_analysis: { name: "Policy B", defines: [{ name: "ON", expression: "true" }] }, complete: false, counts: null, counts_cause: "The active include missing.inc is unavailable." } };
+  host.capture = () => { throw new host.ComparisonFailure("INCOMPLETE_INPUT", "The active include missing.inc is unavailable.", "after", "missing.inc", summaries); };
+  host.message({ type: "refresh" }); await flush();
+  const shown = host.shown.length;
+  assert.equal(host.last().status, "incomplete"); assert.deepEqual(host.last().rows, []);
+  assert.deepEqual(host.last().analysisSummaries, summaries);
+  assert.equal(host.panels[0].document.result, undefined);
+  host.source("before"); host.source("after"); host.message({ type: "rootTextDiff", token: host.last().token }); await flush();
+  assert.equal(host.shown.length, shown); assert.equal(host.calls.filter(call => call.id === "vscode.diff").length, 0);
+});
+
 test("comparison selectors survive reload without source bodies and invalid selectors fail explicitly", () => {
   const resource = comparison(historical(commits.old, "path/model.mod", "release"), historical());
   assert.deepEqual(resourceData(JSON.parse(resourceQuery(resource))), resource); assert.match(resourceName(resource), /aaaaaaa.*bbbbbbb.*dygnosis-changes$/);
@@ -476,6 +490,101 @@ test("comparison selectors survive reload without source bodies and invalid sele
     const value = JSON.parse(JSON.stringify(resource)); mutate(value); assert.throws(() => resourceData(value));
   }
   assert.equal(selector({ kind: "working", root_uri: "untitled:/draft.mod" }), true);
+});
+
+test("analysis selectors retain independent choices and paths across resource reload", () => {
+  const left = { ...working(), analysis: { name: "Policy A", defines: [{ name: "N", expression: "1" }] }, search_paths: ["/models/a"] };
+  const right = { ...working(), analysis: {}, search_paths: ["/models/b"] };
+  const resource = comparison(left, right);
+  assert.deepEqual(resourceData(JSON.parse(resourceQuery(resource))), resource);
+  assert.match(resourceName(resource), /Policy A.*Source/);
+  for (const analysis of [{ defines: [{ name: "N", expression: null }] }, { overrides: [{ kind: "unknown" }] }]) assert.equal(selector({ ...left, analysis }), false);
+  assert.equal(selector({ ...left, search_paths: [null] }), false);
+});
+
+test("Compare Analysis prepares both presets without changing the live selection", async t => {
+  const { host, service } = setup(t);
+  service.supportsAnalysisConfiguration = true;
+  const proof = { schema_version: 1, root_uri: anchorUri.toString(), document_uri: anchorUri.toString(), document_version: null, revision: "current-source",
+    analysis: { state: "selected", selection: { configuration_id: "live", name: "Live policy", preview: false, invocation_scope: "explicit_macro_inputs" }, configuration: {}, selection_generation: 3, include_paths: null, macro_complete: true, model_complete: true, overrides: [] }, sites: [], source_coverage: { complete: true } };
+  service.analysisContext = async () => proof;
+  let changes = 0; service.setAnalysisConfiguration = async () => { changes++; };
+  host.engine = (command, [request]) => {
+    assert.equal(command, "dynare/analysisContext"); assert.equal(request.expected_revision, proof.revision);
+    return { ...proof, prepared_analysis: request.prepare_analysis, prepared_include_paths: request.include_paths ?? ["/inherited"] };
+  };
+  const left = { analysis: { name: "Policy A", defines: [{ name: "N", expression: "1" }] }, include_paths: ["/chosen/a"] };
+  const right = { analysis: {}, include_paths: null };
+  await host.registration.compareAnalysis(anchorUri, left, right);
+  assert.equal(changes, 0);
+  assert.equal(host.captures.length, 1);
+  assert.deepEqual(host.captures[0].resource.before.analysis, left.analysis);
+  assert.deepEqual(host.captures[0].resource.before.search_paths, ["/chosen/a"]);
+  assert.deepEqual(host.captures[0].resource.after.analysis, {});
+  assert.deepEqual(host.captures[0].resource.after.search_paths, ["/inherited"]);
+  assert.equal(host.last().status, "ready");
+  const saved = resourceData(JSON.parse(host.panels[0].document.uri.query));
+  assert.deepEqual(saved.before.analysis, left.analysis);
+});
+
+test("explicit comparison choices can complete while the live root is incomplete", async t => {
+  const { host, service, vscode, git, token } = createHost(), { HistoricalSources } = load("history_sources", vscode), history = new HistoricalSources(async () => "unused"); t.after(() => history.dispose());
+  const { captureComparison } = load("snapshot_compare", vscode);
+  service.supportsAnalysisConfiguration = true;
+  host.modelInfo = () => ({ revision: "stale-live-context", complete: false, message: "The live preview is stale." });
+  service.validateComparisonInputs = async inputs => { assert.ok(inputs.before.guards.length && inputs.after.guards.length); return true; };
+  const resource = comparison({ ...working(), analysis: { defines: [{ name: "N", expression: "1" }] }, search_paths: [] }, { ...working(), analysis: { defines: [{ name: "N", expression: "2" }] }, search_paths: [] });
+  const result = await captureComparison(service, async () => git, history, resource, token());
+  assert.equal(result.snapshot.rows.length, 1);
+  assert.deepEqual(result.texts.before, result.texts.after, "semantic differences can have identical original source text");
+  assert.equal(host.revalidations.length, 0, "captured guards do not reselect the live configuration");
+  assert.equal(host.engineCalls[0].args[0].before.analysis.defines[0].expression, "1");
+  assert.equal(host.engineCalls[0].args[0].after.analysis.defines[0].expression, "2");
+  host.engine = (_command, [request]) => { const result = snapshotResponse(request); result.inputs.after.analysis.configuration.defines[0].expression = "999"; return result; };
+  await assert.rejects(captureComparison(service, async () => git, history, resource, token()), /different analysis choices/);
+});
+
+test("capture validates both incomplete comparison summaries without retaining navigation", async t => {
+  const { host, service, vscode, git, token } = createHost(), { HistoricalSources } = load("history_sources", vscode), history = new HistoricalSources(async () => "unused"); t.after(() => history.dispose());
+  const { captureComparison, ComparisonFailure } = load("snapshot_compare", vscode);
+  const resource = comparison({ ...working(), analysis: { name: "Policy A", defines: [{ name: "ON", expression: "false" }] } }, { ...working(), analysis: { name: "Policy B", defines: [{ name: "ON", expression: "true" }] } });
+  let malformed = false;
+  host.engine = (_command, [request]) => {
+    const result = snapshotResponse(request), before = result.inputs.before.analysis, after = result.inputs.after.analysis;
+    after.model_complete = false;
+    if (malformed) after.configuration.defines[0].expression = "false";
+    return { state: "failure", code: "INCOMPLETE_INPUT", side: "after", message: "The active include missing.inc is unavailable.", analysis_summaries: {
+      before: { analysis: before, complete: true, counts: null, counts_cause: "Comparison stopped before counting." },
+      after: { analysis: after, complete: false, counts: null, counts_cause: "The active include missing.inc is unavailable." } } };
+  };
+  await assert.rejects(captureComparison(service, async () => git, history, resource, token()), error => {
+    assert.ok(error instanceof ComparisonFailure); assert.equal(error.code, "INCOMPLETE_INPUT");
+    assert.equal(error.summaries.before.analysis.configuration.name, "Policy A"); assert.equal(error.summaries.before.complete, true);
+    assert.equal(error.summaries.after.analysis.configuration.name, "Policy B"); assert.equal(error.summaries.after.complete, false);
+    assert.equal(error.summaries.before.counts, null); assert.equal(error.summaries.after.counts, null);
+    assert.equal(error.summaries.after.navigation, undefined); return true;
+  });
+  malformed = true;
+  await assert.rejects(captureComparison(service, async () => git, history, resource, token()), /different analysis choices/);
+});
+
+test("frozen comparison survives live selection change but invalidates for a B-only source change", async t => {
+  const { host, service } = setup(t);
+  let current = true; service.validateComparisonInputs = async () => current;
+  host.capture = (resource, _token, history) => {
+    const result = captured(resource, history, host, service.currentInstance);
+    for (const side of ["before", "after"]) result.inputs[side].guards = [{ file: result.inputs[side].root_file }];
+    return result;
+  };
+  await host.openSaved(comparison(working(baselineUri), working()));
+  const panels = host.panels.length;
+  host.changed.fire({ root: anchorUri.toString(), reason: "input", modelRevision: "different-live-choice" }); await flush();
+  assert.equal(host.last().status, "ready");
+  host.source("after"); await flush();
+  assert.equal(host.shown.length, 1); assert.equal(host.panels.length, panels);
+  const onlyAfter = [...host.panels[0].document.result.sourceUris.after.values()].at(-1);
+  current = false; host.changed.fire({ uri: onlyAfter.toString(), reason: "file" }); await flush();
+  assert.equal(host.last().status, "stale");
 });
 
 test("capture handshake pins IDs and Working revision while only engine-requested historical paths are loaded", async t => {

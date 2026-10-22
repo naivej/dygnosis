@@ -14,6 +14,33 @@ Dynare's internal equation transformations.
 
 For model structure, open VS Code's **Outline** while the preview is active.
 
+## Choose the analysis configuration
+
+The source editor and macro expansion preview use one analysis configuration
+for the model root. To change it, run **Dynare: Select Analysis Configuration**
+from either view or use the model status. The selector starts with **Source**,
+which uses the macro inputs written in the model. Choose **Set macro inputs…**
+to enter initial values, or select a saved configuration for this root.
+
+To change one written macro definition, place the cursor on it in the source
+editor and run **Dynare: Override Macro Definition for Analysis**. Enter a
+replacement expression or choose **Skip this definition**. To inspect another
+arm of a conditional, place the cursor in its chain and run **Dynare: Preview
+Macro Branch**; choose a listed arm or **No branch**. These choices affect the
+analysis and preview. They do not change the `.mod` or include file. The model
+status and preview title identify the selected configuration; previews are
+labelled.
+
+Run **Dynare: Reset Analysis Configuration** to return to **Source**. To save
+the current choices for later, run **Dynare: Save Analysis Configuration**
+from a model in a workspace folder. Saved configurations are available from
+the selector, but do not start automatically in a new session. The folder's
+saved presets are listed in [Dynare: Analysis Configurations](settings:dynare.analysisConfigurations).
+For comparison steps, see [Review model changes](structural-diff.md).
+
+Counts and other model facts come from the selected configuration. To browse
+written code outside that selection, see [Inactive source](navigate-code.md#inactive-source).
+
 | Action | Shortcut | Result |
 |---|---|---|
 | **Dygnosis: Go to written source** | `Ctrl+Alt+G` (`Cmd+Alt+G` on macOS) | Jumps from the cursor or selection in the preview to the line in your model or include file that produced it (for example, `beta_1` jumps to `beta_@{j}`). |

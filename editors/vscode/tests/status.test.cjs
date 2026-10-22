@@ -116,7 +116,7 @@ test("total icons and separate count blocks retain every class and dimension in 
   assert.equal(tooltipText(value.tooltip), report.join("\n"));
   assert.match(value.tooltip.value, /^\*\*Aggregate model\*\*/);
   assert.doesNotMatch(tooltipText(value.tooltip), /main\.mod|before transformation|Click/);
-  assert.equal(value.accessibilityLabel, `Dynare model counts. Total: 104 endogenous, 12 exogenous, 93 equations. ${report.join(". ")}. Focus Outline.`);
+  assert.equal(value.accessibilityLabel, `Dynare model counts. Total: 104 endogenous, 12 exogenous, 93 equations. ${report.join(". ")}. Choose the analysis configuration.`);
   assert.doesNotMatch(value.text, /warning|error/);
 });
 
@@ -197,13 +197,13 @@ test("ignored diagnostic codes do not remove incomplete hover reasons", () => {
   }), ["equations"]);
   assert.match(tooltipText(value.tooltip), /Macro expression '1 in 1:3' could not be evaluated/);
 });
-test("default status is native, accessible, and focuses Outline", async () => {
+test("default status is native, accessible, and selects the shared analysis configuration", async () => {
   const env = setup();
   const registration = registerStatus(env.service);
   await flush();
   const item = env.host.items[0];
   assert.equal(item.id, "dygnosis.modelCounts");
-  assert.equal(item.command, "outline.focus");
+  assert.equal(item.command, "dygnosis.selectAnalysisConfiguration");
   assert.equal(item.name, "Dynare model counts");
   assert.equal(item.visible, true);
   assert.match(item.accessibilityInformation.label, /Total: 104 endogenous/);
@@ -244,9 +244,8 @@ test("invalid settings are safely filtered or fall back with an Output explanati
   assert.ok(env.service.logged.some(message => message.includes("Invalid or repeated entries")));
   registration.dispose();
 });
-test("includes, virtual previews, other languages and no editor do not request or show counts", async () => {
+test("unregistered virtual previews, other languages and no editor do not request or show counts", async () => {
   const cases = [
-    document("file:///workspace/includes.inc"),
     document("dygnosis-effective:/main.mod"),
     document("file:///workspace/main.mod", { languageId: "plaintext" }),
     undefined,
@@ -334,7 +333,7 @@ test("root changes and active-editor changes reject old replies", async () => {
   env.service.modelInfo = () => late.promise;
   env.changed.fire();
   await flush();
-  env.host.editor = { document: document("file:///workspace/part.inc") };
+  env.host.editor = { document: document("file:///workspace/part.inc", { languageId: "plaintext" }) };
   env.host.active.fire(env.host.editor);
   late.resolve(facts(env.doc));
   await flush();

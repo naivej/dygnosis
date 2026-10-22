@@ -116,7 +116,7 @@ const vscode = {
     },
     openTextDocument: async value => {
       host.loads.push(value.toString());
-      if (host.load) return host.load(value);
+      if (host.load && !host.providers.has(value.scheme)) return host.load(value);
       let document = host.documents.get(value.toString());
       if (!document) {
         const provider = host.providers.get(value.scheme);
@@ -162,8 +162,8 @@ function setup(options = {}) {
     active: new Emitter(), selection: new Emitter(), edited: new Emitter(), closed: new Emitter(), configured: new Emitter(),
     opened: new Emitter(), foldersChanged: new Emitter() };
   const rootDocument = doc(main); host.documents.set(main, rootDocument); host.editor = { document: rootDocument, selection: new Range(1, 0), viewColumn: 1, setDecorations() {} };
-  const changed = new Emitter(), presentation = new Emitter();
-  const service = { currentInstance: 1, changed, presentation, onDidChange: presentation.event, onDidInvalidate: changed.event,
+  const changed = new Emitter(), presentation = new Emitter(), analysis = new Emitter();
+  const service = { currentInstance: 1, changed, presentation, analysis, onDidChangeAnalysis: analysis.event, onDidChange: presentation.event, onDidInvalidate: changed.event,
     logged: [], requests: [], validations: [], jumps: [],
     client: { initializeResult: { capabilities: { experimental: { dygnosis: { effectivePreview: {
       command: "dynare/showEffectiveModel", navigation_schema_version: 1, dependency_candidates: true,
@@ -253,10 +253,13 @@ test("preview Outline uses its captured display ranges and follows Refresh and c
   const refreshed = payload({ effective_text: "// heading\nmodel;\ny = 1;\nend;", document_symbols: [{ ...model,
     range: new Range(1, 0, 3, 4), selectionRange: new Range(1, 0, 1, 5),
     children: [{ ...model.children[0], range: new Range(2, 0, 2, 5), selectionRange: new Range(2, 0, 2, 5) }] }] });
-  assert.equal(env.previews.replace(session, refreshed), true);
-  assert.deepEqual(provide(session.document)[0].children[0].selectionRange, new Range(2, 0, 2, 5));
-  session.document.text += "changed"; assert.deepEqual(provide(session.document), []);
-  env.close(session); assert.deepEqual(provide(session.document), []);
+  const next = await env.previews.replace(session, refreshed);
+  assert.ok(next); assert.notEqual(next.uri.toString(), session.uri.toString());
+  assert.deepEqual(provide(session.document), [], "old display has no current Outline");
+  assert.equal(session.result.document_symbols[0].range.start.line, 0);
+  assert.deepEqual(provide(next.document)[0].children[0].selectionRange, new Range(2, 0, 2, 5));
+  next.document.text += "changed"; assert.deepEqual(provide(next.document), []);
+  env.close(next); assert.deepEqual(provide(next.document), []);
   env.registration.dispose(); env.previews.dispose(); assert.equal(env.host.outline, undefined);
 });
 
@@ -264,18 +267,18 @@ test("preview Outline uses its captured display ranges and follows Refresh and c
 test("preview Outline validates hierarchy and offsets partial previews without parsing their text", async () => {
   const env = setup();
   const leaf = { name: "y", kind: 12, range: new Range(1, 0, 1, 5), selectionRange: new Range(1, 0, 1, 1) };
-  const session = await env.show(), provide = () => env.host.outline.provider.provideDocumentSymbols(session.document);
+  let session = await env.show(); const provide = () => env.host.outline.provider.provideDocumentSymbols(session.document);
   for (const row of [
     { ...leaf, kind: 99 }, { ...leaf, range: new Range(1, 0, 4, 0) },
     { ...leaf, selectionRange: new Range(1, 0, 1, 6) },
     { ...leaf, children: [{ ...leaf, range: new Range(0, 0, 0, 3) }] },
   ]) {
-    env.previews.replace(session, payload({ document_symbols: [row] })); assert.deepEqual(provide(), []);
+    session = await env.previews.replace(session, payload({ document_symbols: [row] })); assert.deepEqual(provide(), []);
   }
-  env.previews.replace(session, payload()); assert.deepEqual(provide(), [], "older engines omit preview symbols");
-  env.previews.replace(session, payload({ complete: false, status: "incomplete", message: "Missing include.", document_symbols: [leaf] }));
+  session = await env.previews.replace(session, payload()); assert.deepEqual(provide(), [], "older engines omit preview symbols");
+  session = await env.previews.replace(session, payload({ complete: false, status: "incomplete", message: "Missing include.", document_symbols: [leaf] }));
   assert.deepEqual(provide()[0].selectionRange, new Range(3, 0, 3, 1));
-  env.previews.replace(session, payload({ effective_text: "// 😀\nmodel;\ny=1;\nend;", document_symbols: [
+  session = await env.previews.replace(session, payload({ effective_text: "// 😀\nmodel;\ny=1;\nend;", document_symbols: [
     { ...leaf, range: new Range(0, 0, 0, 5), selectionRange: new Range(0, 3, 0, 4) },
   ] }));
   assert.deepEqual(provide(), [], "a range cannot split a UTF-16 surrogate pair");
@@ -365,10 +368,101 @@ test("root edits disable jumps until refresh atomically replaces text and naviga
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
   await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 0);
   await env.run("refreshEffectiveModel");
-  assert.equal(session.text, env.service.value.effective_text);
-  assert.equal(session.result.navigation[0].id, "changed");
+  assert.equal(env.previews.sessions().at(-1).text, env.service.value.effective_text);
+  assert.notEqual(env.previews.sessions().at(-1).uri.toString(), session.uri.toString());
+  assert.equal(env.previews.sessions().at(-1).result.navigation[0].id, "changed");
+  assert.equal(session.result.navigation[0].id, "e1", "old captured result stays unchanged");
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
   await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 1);
+  env.registration.dispose(); env.previews.dispose();
+});
+
+test("an explicit expansion refusal preserves its engine cause and opens no preview", async () => {
+  const env = setup();
+  env.service.value = { success: false, message: "The selected definition changed. Reset or select the configuration again." };
+  await env.run("showEffectiveModel");
+  assert.equal(env.previews.sessions().length, 0);
+  assert.equal(env.host.editor.document, env.rootDocument);
+  assert.equal(env.service.validations.length, 0, "a refused result cannot start a navigation proof");
+  assert.match(env.host.messages.at(-1), /selected definition changed/);
+  env.registration.dispose(); env.previews.dispose();
+});
+
+test("a refused refresh retains the captured display and reports its engine cause", async () => {
+  const env = setup(), original = await env.show(), validations = env.service.validations.length;
+  env.service.changed.fire({ reason: "input", root: main });
+  env.service.value = { success: false, message: "The selected branch changed. Reset or select the configuration again." };
+  await env.run("refreshEffectiveModel");
+  assert.equal(env.previews.sessions()[0], original);
+  assert.equal(env.host.editor.document, original.document);
+  assert.equal(original.result.revision, "current");
+  assert.equal(env.service.validations.length, validations, "a refused refresh cannot start another proof");
+  assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
+  assert.match(env.host.messages.at(-1), /selected branch changed.*displayed text keeps its old configuration/);
+  env.registration.dispose(); env.previews.dispose();
+});
+
+test("a hidden configured preview keeps its old label and refreshes once before current actions on reveal", async () => {
+  const env = setup(), original = await env.show();
+  env.host.visibleEditors = [];
+  env.service.value = payload({ revision: "configured", effective_text: "model;\ny = 2;\nend;" });
+  const before = env.service.requests.length;
+  env.service.analysis.fire({ root: main });
+  assert.equal(env.service.requests.length, before, "hidden displays defer expansion");
+  assert.match(original.document.getText(), /OUTDATED EXPANSION/);
+  assert.match(original.text, /y = 1/);
+  assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
+  const editor = { document: original.document, selection: new Range(1, 0), setDecorations() {} };
+  env.host.visibleEditors = [editor]; env.host.editor = editor;
+  env.host.active.fire(editor);
+  await new Promise(resolve => setTimeout(resolve, 90));
+  await flush(); await flush();
+  const current = env.previews.sessions().at(-1);
+  assert.notEqual(current.uri.toString(), original.uri.toString());
+  assert.match(current.text, /y = 2/);
+  assert.equal(env.service.requests.length, before + 1);
+  assert.equal(env.service.validations.length, 2, "initial proof and one retained refresh proof");
+  assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
+  env.registration.dispose(); env.previews.dispose();
+});
+
+test("real client refresh explains an engine refusal and retains the prior usable captured result", async () => {
+  const env = await realClientSetup();
+  try {
+    const original = await env.show();
+    assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
+    assert.match(original.text, /y = 1/);
+    const proofs = env.engine.infos.length;
+    env.engine.value = { success: false, message: "The selected branch changed. Reset or select the configuration again." };
+    env.service.invalidate(main);
+    await env.run("refreshEffectiveModel");
+    assert.equal(env.previews.sessions()[0], original);
+    assert.equal(env.host.editor.document, original.document);
+    assert.equal(original.result.revision, "current");
+    assert.equal(env.engine.infos.length, proofs);
+    assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
+    const message = env.host.messages.at(-1);
+    assert.match(message, /selected branch changed.*displayed text keeps its old configuration/);
+    assert.equal(message.split("selected branch changed").length - 1, 1);
+    assert.equal(message.split("displayed text keeps its old configuration").length - 1, 1);
+  } finally { await env.dispose(); }
+});
+
+test("a late input notification retries the accepted configuration refresh without publishing the cancelled result", async () => {
+  const env = setup(), original = await env.show(), held = deferred();
+  let attempts = 0;
+  env.service.value = payload({ revision: "configured", effective_text: "model;\ny = 2;\nend;" });
+  env.service.executeHook = () => ++attempts === 1 ? held.promise : JSON.parse(JSON.stringify(env.service.value));
+  env.service.analysis.fire({ root: main });
+  await new Promise(resolve => setTimeout(resolve, 90));
+  env.service.changed.fire({ reason: "input", root: main });
+  held.resolve(payload({ revision: "obsolete" }));
+  await new Promise(resolve => setTimeout(resolve, 90)); await flush();
+  const current = env.previews.sessions().at(-1);
+  assert.notEqual(current.uri.toString(), original.uri.toString());
+  assert.equal(current.result.revision, "configured");
+  assert.equal(attempts, 2);
+  assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
   env.registration.dispose(); env.previews.dispose();
 });
 
@@ -409,7 +503,8 @@ test("several previews retain independent roots and refresh an unopened root", a
   env.service.value = payload({ document_version: null, navigation: [row({ written_locations: [target(main, new Range(1, 0, 1, 3), null)] })] });
   env.activate(first); await env.run("refreshEffectiveModel");
   assert.equal(env.service.requests.at(-1).args[0].root_uri, main);
-  assert.equal(first.result.document_version, null); assert.equal(second.result.root_uri, other);
+  assert.equal(env.previews.sessions().find(item => item.root.toString() === main).result.document_version, null);
+  assert.equal(first.result.document_version, 1); assert.equal(second.result.root_uri, other);
   env.host.load = async value => {
     const loaded = doc(value.toString()); env.host.documents.set(value.toString(), loaded);
     env.service.value.document_version = loaded.version; env.service.value.navigation[0].written_locations[0].document_version = loaded.version;
@@ -426,7 +521,8 @@ test("older override preserves basic preview and refresh while origins remain un
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
   await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 0);
   env.service.value = { effective_text: "model;\ny = 2;\nend;" }; await env.run("refreshEffectiveModel");
-  assert.ok(session.text.includes("y = 2"));
+  assert.ok(env.previews.sessions().at(-1).text.includes("y = 2"));
+  assert.ok(session.text.includes("y = 1"));
   assert.equal(env.host.messages.length, 1);
   assert.match(env.host.messages[0], /engine does not support verified source jumps/);
   assert.deepEqual(env.service.requests[0].args, [main]);
@@ -567,7 +663,8 @@ test("superseded refresh cancels old result and publishes one text/navigation pa
   const latestRefresh = env.run("refreshEffectiveModel"); assert.equal(oldToken.isCancellationRequested, true);
   second.resolve(payload({ effective_text: "model;\ny = 2;\nend;", navigation: [row({ id: "second" })] })); await latestRefresh;
   first.resolve(payload({ effective_text: "model;\ny = 9;\nend;", navigation: [row({ id: "first" })] })); await oldRefresh;
-  assert.equal(session.result.navigation[0].id, "second"); assert.match(session.text, /y = 2/);
+  assert.equal(env.previews.sessions().at(-1).result.navigation[0].id, "second"); assert.match(env.previews.sessions().at(-1).text, /y = 2/);
+  assert.equal(session.result.navigation[0].id, "e1");
   env.registration.dispose(); env.previews.dispose();
 });
 
@@ -679,7 +776,7 @@ test("a superseded source load cannot stale a newer refresh for valid or invalid
     if (kind === "range") loaded.text = "";
     held.resolve(loaded); await oldNavigation;
     assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true, kind);
-    assert.equal(session.result.navigation[0].id, "newer-row"); assert.match(session.text, /y = 2/);
+    assert.equal(env.previews.sessions().at(-1).result.navigation[0].id, "newer-row"); assert.notEqual(session.uri.toString(), env.previews.sessions().at(-1).uri.toString()); assert.match(env.previews.sessions().at(-1).text, /y = 2/);
     assert.equal(env.service.jumps.length, 0); assert.equal(env.host.messages.length, 0);
     env.registration.dispose(); env.previews.dispose();
   }
@@ -696,7 +793,7 @@ test("a superseded post-loader validation cannot disable newly committed navigat
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
   held.resolve(original); await oldNavigation;
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
-  assert.equal(session.result.navigation[0].id, "newer-row"); assert.match(session.text, /y = 2/);
+  assert.equal(env.previews.sessions().at(-1).result.navigation[0].id, "newer-row"); assert.notEqual(session.uri.toString(), env.previews.sessions().at(-1).uri.toString()); assert.match(env.previews.sessions().at(-1).text, /y = 2/);
   assert.equal(env.service.jumps.length, 0); assert.equal(env.host.messages.length, 0);
   env.registration.dispose(); env.previews.dispose();
 });
@@ -826,7 +923,7 @@ test("real client Refresh supersedes an unresolved initial proof without waiting
   env.engine.value = payload({ revision: "newer", effective_text: "model;\ny = 2;\nend;", navigation: [row({ id: "newer-row" })] });
   const refreshing = env.run("refreshEffectiveModel"); await flush();
   assert.equal(env.engine.infos[0].token.isCancellationRequested, true); assert.equal(env.engine.infos.length, 2);
-  await refreshing; assert.equal(session.result.navigation[0].id, "newer-row");
+  await refreshing; assert.equal(env.previews.sessions().at(-1).result.navigation[0].id, "newer-row"); assert.notEqual(session.uri.toString(), env.previews.sessions().at(-1).uri.toString());
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
   env.engine.infos[0].reply.resolve(env.engine.snapshot()); await env.dispose();
 });
@@ -844,11 +941,11 @@ test("real client supersede and close cancel only obsolete proofs while two othe
   assert.equal(env.engine.infos.length, baseline + 2, "the first live queued proof starts without the obsolete reply");
   env.close(first); await obsoleteNavigation; await obsoleteRefresh; await flush();
   assert.equal(env.engine.infos.length, baseline + 2); assert.equal(env.engine.infos[baseline + 1].token.isCancellationRequested, false);
-  env.engine.infos[baseline + 1].reply.resolve(env.engine.snapshot()); await secondRefresh; await flush();
+  env.engine.infos[baseline + 1].reply.resolve(env.engine.snapshot()); await secondRefresh; await flush(); const updatedSecond = env.previews.sessions().at(-1);
   assert.equal(env.engine.infos.length, baseline + 3); assert.equal(env.engine.infos[baseline + 2].token.isCancellationRequested, false);
-  env.engine.infos[baseline + 2].reply.resolve(env.engine.snapshot()); await thirdRefresh;
-  env.activate(second); assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
-  env.activate(third); assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
+  env.engine.infos[baseline + 2].reply.resolve(env.engine.snapshot()); await thirdRefresh; const updatedThird = env.previews.sessions().at(-1);
+  env.activate(updatedSecond); assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
+  env.activate(updatedThird); assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
   assert.equal(env.engine.infos.length, baseline + 3, "the closed view's queued proof never starts");
   env.engine.infos[baseline].reply.resolve(env.engine.snapshot()); await env.dispose();
 });
@@ -960,8 +1057,9 @@ test("Refresh still supersedes a source load made unavailable by filesystem obse
     const oldJump = env.run("goToWrittenSource"); await flush();
     assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
     await env.run("refreshEffectiveModel"); held.resolve(loaded); await oldJump;
-    assert.equal(env.host.editor.document, session.document); assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
-    assert.equal(session.result.navigation[0].written_locations[0].document_version, 1);
+    assert.equal(env.host.editor.document, env.previews.sessions().at(-1).document); assert.notEqual(env.host.editor.document, session.document); assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
+    assert.equal(session.result.navigation[0].written_locations[0].document_version, null, "old captured mapping is unchanged");
+    assert.equal(env.previews.sessions().at(-1).result.navigation[0].written_locations[0].document_version, 1);
   } finally { await env.dispose(); }
 });
 

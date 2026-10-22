@@ -44,6 +44,19 @@ Under declarations, each variable row shows its timing class, `long_name` and
 their dimension (such as `model(heterogeneity=households)`). Named `@#define`
 macros also appear as entries.
 
+## Inactive source
+
+The Outline can show recognizable entries written in inactive macro branches
+and loop bodies, without active equation numbers. Use [Dynare: Outline: Inactive
+Source](settings:dynare.outline.inactiveSource) to hide or show them.
+
+For a name that appears only in inactive source, place the cursor on the name
+and choose **Go to Source Candidate**. The picker labels each result
+**source candidate · unverified**. Choosing one opens its written location.
+You can also follow literal include links to browse unused files. Browsing
+these locations does not add them to the active model.
+To analyze a different branch, see [Choose the analysis configuration](effective-model.md#choose-the-analysis-configuration).
+
 ## Model-local variables
 
 For a model-local variable (`#name = expression;`), **Go to Definition** opens

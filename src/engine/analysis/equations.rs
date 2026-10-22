@@ -248,16 +248,21 @@ fn is_counted(eq: &Equation) -> bool {
 }
 
 fn collapsed_equation_count(model: &Model) -> usize {
+    collapsed_counted_rows(&equations(model))
+}
+
+/// Reuse accepted equation rows when a caller already owns their analysis.
+pub(crate) fn collapsed_counted_rows(rows: &[EquationRow]) -> usize {
     let mut n = 0;
     let mut seen = HashSet::new();
-    for row in equations(model) {
+    for row in rows {
         if crate::engine::control::cancelled() {
             break;
         }
         let occbin = !row.name.is_empty()
             && (row.tags.contains_key("bind") || row.tags.contains_key("relax"));
         if occbin {
-            if seen.insert(row.name) {
+            if seen.insert(row.name.as_str()) {
                 n += 1;
             }
         } else {

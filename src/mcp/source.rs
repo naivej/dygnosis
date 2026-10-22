@@ -13,15 +13,95 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use crate::engine::analysis_configuration::{
+    AnalysisConfiguration, SourceStructure, SourceStructureQuery,
+};
 use crate::engine::language::span::{LineIndex, Span};
 use crate::engine::language::{expand::ExpandReport, model::Model};
 use crate::engine::macro_work::MacroWorkLimit;
 use crate::engine::workspace::include_resolver::{normalize_uri, supplied_path_key};
-use crate::engine::workspace::{InputGuard, Workspace};
+use crate::engine::workspace::{InputGuard, InputStamps, Workspace};
+
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum CaptureBoundary {
+    SourceStructure,
+    AnalysisMetadata,
+}
+
+#[cfg(test)]
+type CaptureHook = (CaptureBoundary, Box<dyn FnOnce()>);
+
+#[cfg(test)]
+thread_local! {
+    static CAPTURE_HOOK: std::cell::RefCell<Option<CaptureHook>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(super) fn with_capture_hook<T>(
+    boundary: CaptureBoundary,
+    hook: impl FnOnce() + 'static,
+    action: impl FnOnce() -> T,
+) -> T {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            CAPTURE_HOOK.with(|slot| {
+                slot.borrow_mut().take();
+            });
+        }
+    }
+    CAPTURE_HOOK.with(|slot| {
+        assert!(
+            slot.borrow_mut()
+                .replace((boundary, Box::new(hook)))
+                .is_none()
+        );
+    });
+    let _reset = Reset;
+    action()
+}
+
+#[cfg(test)]
+fn capture_boundary(boundary: CaptureBoundary) {
+    let hook = CAPTURE_HOOK.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot
+            .as_ref()
+            .is_some_and(|(selected, _)| *selected == boundary)
+        {
+            slot.take().map(|(_, hook)| hook)
+        } else {
+            None
+        }
+    });
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+fn captured_owners_current(
+    workspace: &Workspace,
+    proofs: &BTreeMap<String, (String, InputStamps)>,
+) -> Result<(), SourceError> {
+    workspace
+        .check_cancelled()
+        .map_err(|_| SourceError::failure("CANCELLED", "The request was cancelled"))?;
+    if proofs
+        .values()
+        .any(|(_, proof)| !workspace.inputs_match(proof))
+    {
+        return Err(SourceError::failure(
+            "INPUT_CHANGED",
+            "An analyzed source or lookup changed during capture. No model facts were returned under refreshed input guards. Repeat the request.",
+        ));
+    }
+    Ok(())
+}
 
 const TEXT_ROOT: &str = "dygnosis-text:/root.mod";
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SourceInput {
     /// Unnamed supplied source. It cannot read includes or companions from disk.
@@ -50,6 +130,8 @@ pub enum SourceInput {
 /// Shared single-model parameters, flattened by tool parameter structs.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 pub struct SourceArgs {
+    /// Request-local macro inputs and guarded analysis overrides. Omission selects Source.
+    pub analysis: Option<AnalysisConfiguration>,
     /// Finite macro work units per checked root, from 1 to 100000000. Omission uses the default. Source, output, value-size and depth bounds remain separate.
     #[serde(default)]
     pub macro_work_limit: MacroWorkLimit,
@@ -214,6 +296,7 @@ pub struct SourceAnalysis {
 }
 
 pub struct SourceSnapshot {
+    pub source_structure: Option<SourceStructure>,
     pub workspace: Workspace,
     /// Internal selected root. Text mode uses an explicitly synthetic root.
     pub root: String,
@@ -261,6 +344,38 @@ pub fn resolve_source(
     input: SourceInput,
     expected_revision: Option<&str>,
     control: &RequestControl,
+) -> Result<SourceSnapshot, SourceError> {
+    resolve_source_configured(input, expected_revision, control, None, None)
+}
+
+/// Acquire choices and explicitly inspected files under the same source policy
+/// before computing identity. Source browsing never adds an execution owner.
+pub fn resolve_source_configured(
+    input: SourceInput,
+    expected_revision: Option<&str>,
+    control: &RequestControl,
+    analysis: Option<&AnalysisConfiguration>,
+    inspection: Option<&SourceStructureQuery>,
+) -> Result<SourceSnapshot, SourceError> {
+    resolve_source_configured_reusing(
+        input,
+        expected_revision,
+        control,
+        analysis,
+        inspection,
+        None,
+    )
+}
+
+/// A caller can share immutable source records from another explicit job.
+/// Only exactly equal caller inputs can also share root analysis results.
+pub(super) fn resolve_source_configured_reusing(
+    input: SourceInput,
+    expected_revision: Option<&str>,
+    control: &RequestControl,
+    analysis: Option<&AnalysisConfiguration>,
+    inspection: Option<&SourceStructureQuery>,
+    previous: Option<(&SourceSnapshot, bool)>,
 ) -> Result<SourceSnapshot, SourceError> {
     control.check()?;
     let (mut workspace, root, owner_roots, kind, include_dirs, root_file) = match input {
@@ -388,15 +503,40 @@ pub fn resolve_source(
         control.limits.max_source_bytes,
         control.limits.max_files,
     );
+    if let Some((previous, exact_input)) = previous {
+        if exact_input
+            && root == previous.root
+            && owner_roots == previous.owner_roots
+            && control.macro_work_limit == previous.workspace.root_macro_work_limit(&previous.root)
+        {
+            workspace = previous.workspace.snapshot_with_root_settings(&root);
+            // A copied selection is request-local. Omission still selects Source.
+            workspace
+                .set_root_analysis_configuration(&root, analysis.cloned().unwrap_or_default())
+                .map_err(|error| SourceError::failure(error.code, error.message))?;
+        } else {
+            workspace.reuse_comparison_sources(&previous.workspace, &previous.root);
+        }
+    }
+    if let Some(analysis) = analysis {
+        workspace
+            .set_root_analysis_configuration(&root, analysis.clone())
+            .map_err(|error| SourceError::failure(error.code, error.message))?;
+    }
     let mut analyses = BTreeMap::new();
+    let mut owner_proofs = BTreeMap::new();
     let mut guards = BTreeMap::new();
     let mut sources = BTreeMap::new();
     for owner in &owner_roots {
         control.check()?;
-        if workspace.input_revision(owner).is_none() {
+        let Some(owner_revision) = workspace.input_revision(owner) else {
             control.check()?;
             return Err(acquisition_error(&workspace, owner));
-        }
+        };
+        owner_proofs.insert(
+            owner.clone(),
+            (owner_revision, workspace.input_stamps(owner)),
+        );
         let model = workspace.effective_model_snapshot(owner).ok_or_else(|| {
             control
                 .check()
@@ -417,6 +557,7 @@ pub fn resolve_source(
                 "Source inputs changed while reading them; repeat the request",
             ));
         }
+        captured_owners_current(&workspace, &owner_proofs)?;
         let includes_complete = workspace.includes_complete(owner);
         let causes = crate::engine::control::run(Some(Arc::clone(&control.cancelled)), || {
             crate::engine::analysis::model_info::incomplete_causes(&mut workspace, owner, &model)
@@ -483,10 +624,49 @@ pub fn resolve_source(
         }
         control.complete_phase("Analyze source");
     }
+    #[cfg(test)]
+    if inspection.is_some() {
+        capture_boundary(CaptureBoundary::SourceStructure);
+    }
+    captured_owners_current(&workspace, &owner_proofs)?;
+    let source_structure = inspection
+        .map(|query| workspace.source_structure(&root, query))
+        .transpose()
+        .map_err(|error| SourceError::failure(error.code, error.message))?;
+    captured_owners_current(&workspace, &owner_proofs)?;
+    if source_structure
+        .as_ref()
+        .and_then(|structure| structure.analysis_revision.as_deref())
+        .is_some_and(|revision| revision != owner_proofs[&root].0)
+    {
+        return Err(SourceError::failure(
+            "INPUT_CHANGED",
+            "Source inspection refreshed the analyzed input identity. No earlier model facts were returned. Repeat the request.",
+        ));
+    }
+    if let Some(structure) = &source_structure {
+        for guard in &structure.input_guards {
+            guards.insert(guard.file.clone(), guard.clone());
+        }
+        for file in &structure.files {
+            sources.insert(
+                file.file.clone().unwrap_or_else(|| root.clone()),
+                file.text.as_str().to_owned(),
+            );
+        }
+    }
     if let Some(message) = workspace.acquisition_limit() {
         return Err(SourceError::failure("SOURCE_LIMIT", message));
     }
-    if guards.len() > control.limits.max_files {
+    if guards.len() > control.limits.max_files
+        || guards
+            .values()
+            .filter(|guard| guard.exists && !guard.directory)
+            .try_fold(0usize, |bytes, guard| {
+                bytes.checked_add(guard.length.unwrap_or(0) as usize)
+            })
+            .is_none_or(|bytes| bytes > control.limits.max_source_bytes)
+    {
         return Err(SourceError::failure(
             "SOURCE_LIMIT",
             "Checked source and lookup candidate count exceeds the request file limit",
@@ -502,7 +682,26 @@ pub fn resolve_source(
         }
     }
     let guards: Vec<_> = guards.into_values().collect();
-    let identity = json!({"source_policy":kind,"root":root_file,"owner_roots":owner_roots,"include_dirs":include_dirs,"macro_work_limit":control.macro_work_limit,"guards":guards});
+    if source_structure.is_some() && !workspace.source_guards_are_current(&guards) {
+        return Err(SourceError::failure(
+            "INPUT_CHANGED",
+            "Source or lookup facts changed while capturing this request; repeat the request.",
+        ));
+    }
+    #[cfg(test)]
+    capture_boundary(CaptureBoundary::AnalysisMetadata);
+    captured_owners_current(&workspace, &owner_proofs)?;
+    let metadata = workspace
+        .analysis_metadata(&root)
+        .map_err(|error| SourceError::failure(error.code, error.message))?;
+    captured_owners_current(&workspace, &owner_proofs)?;
+    if metadata.revision != owner_proofs[&root].0 {
+        return Err(SourceError::failure(
+            "INPUT_CHANGED",
+            "Analysis metadata refreshed the analyzed input identity. No earlier model facts were returned. Repeat the request.",
+        ));
+    }
+    let identity = json!({"source_policy":kind,"root":root_file,"owner_roots":owner_roots,"include_dirs":include_dirs,"macro_work_limit":control.macro_work_limit,"guards":guards,"configuration_id":metadata.selection.configuration_id,"source_structure_revision":source_structure.as_ref().map(|source| &source.revision)});
     let revision = sha256(serde_json::to_vec(&identity).expect("source identity is serializable"));
     if expected_revision.is_some_and(|expected| expected != revision) {
         return Err(SourceError::failure(
@@ -520,6 +719,7 @@ pub fn resolve_source(
         .cloned()
         .ok_or_else(|| acquisition_error(&workspace, &root))?;
     let mut inputs = json!({"source_policy":kind,"root":root_file,"synthetic_root":kind=="text","checked_owners":if kind=="text" { Vec::new() } else { owner_roots.clone() },"include_dirs":include_dirs,"macro_work_limit":control.macro_work_limit,"revision":revision,"guards":guards});
+    inputs["analysis"] = serde_json::to_value(metadata.as_ref()).expect("analysis metadata");
     if kind == "text"
         && let Some(rows) = inputs["guards"].as_array_mut()
     {
@@ -533,6 +733,7 @@ pub fn resolve_source(
         .collect();
     control.check()?;
     Ok(SourceSnapshot {
+        source_structure,
         workspace,
         root,
         root_file,

@@ -148,6 +148,32 @@ test("webview uses text nodes, labels source sides and disables missing/stale lo
   buttons[1].fire("click"); assert.equal(env.posted.at(-1).side, "after"); assert.equal(env.posted.at(-1).rowId, "/added_endogenous/0");
   env.render({ status: "stale", message: "Out of date" }); assert.ok(descendants(env.elements.results).filter(element => element.tag === "button" && element.attributes["aria-label"]?.startsWith("Open")).every(button => button.disabled));
 });
+
+test("comparison headers explain captured inputs, receipts and separate dimension counts", () => {
+  const env = webview();
+  const analysis = { selection: { name: "Policy <A>", preview: true }, configuration: { defines: [{ name: "N", expression: "2" }] }, model_complete: true,
+    overrides: [{ operation: { kind: "definition", target: { file: "main.mod" }, expression: "1" }, application: "not_reached", known_execution_count: 0, execution_count: 0, cause: "The parent branch was not reached." }] };
+  env.render({ analysisSummaries: { before: { analysis, counts: { n_equations: 1, n_endogenous: 1, heterogeneity_dimensions: [{ dimension: "households", n_equations: 2, n_endogenous: 3 }] } }, after: { analysis: { ...analysis, selection: { name: null, preview: false }, configuration: {}, overrides: [] } } } });
+  const text = env.elements.models.textContent;
+  assert.match(text, /Policy <A> \(preview\) · Complete/);
+  assert.match(text, /Initial macro inputs: N=2/);
+  assert.match(text, /Definition in main.mod: 1 · not reached.*parent branch was not reached/);
+  assert.match(text, /1 equation · 1 endogenous variable/);
+  assert.match(text, /households: 2 equations · 3 endogenous variables/);
+  assert.match(text, /Model counts are unavailable for this captured input/);
+});
+test("incomplete comparison headers keep both choices and explain unavailable counts", () => {
+  const env = webview();
+  env.render({ rows: [], status: "incomplete", analysisSummaries: {
+    before: { requested_analysis: { name: "Policy A", defines: [{ name: "ON", expression: "false" }] }, complete: true, counts: null, counts_cause: "Comparison stopped before counting the models." },
+    after: { requested_analysis: { name: "Policy B", defines: [{ name: "ON", expression: "true" }] }, complete: false, counts: null, counts_cause: "The active include missing.inc is unavailable." },
+  } });
+  const text = env.elements.models.textContent;
+  assert.match(text, /Policy A · Complete.*Initial macro inputs: ON=false/);
+  assert.match(text, /Policy B · Incomplete.*Initial macro inputs: ON=true/);
+  assert.match(text, /Comparison stopped before counting the models/); assert.match(text, /active include missing.inc is unavailable/);
+  assert.doesNotMatch(text, /0 equations|0 endogenous/);
+});
 test("every model change renders its own Before and After cards in its group", () => {
   const env = webview(), rows = parseDiff(fixture(), before, after).rows; env.render();
   const groups = descendants(env.elements.results).filter(element => element.attributes["data-group"]).map(element => element.attributes["data-group"]);

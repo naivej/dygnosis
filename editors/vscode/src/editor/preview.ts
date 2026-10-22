@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { DygnosisClient } from "../client/client";
 import { NavigationContext, validateNavigationContext } from "./model_navigation";
 import { location, Position, Range, record } from "../client/protocol";
+import { analysisLabel, resultAnalysis } from "./analysis_configuration";
 
 export interface EffectivePreviewSession {
   readonly uri: vscode.Uri;
@@ -12,13 +13,16 @@ export interface EffectivePreviewSession {
   result: unknown;
   text: string;
   generation: number;
+  outdated?: string;
+  readonly navigationProof?: { revision: string; instance: number };
 }
 export interface EffectivePreviewRegistry extends vscode.Disposable {
   readonly onDidCreate: vscode.Event<EffectivePreviewSession>;
   readonly onDidClose: vscode.Event<EffectivePreviewSession>;
   sessions(): EffectivePreviewSession[];
   get(uri: vscode.Uri): EffectivePreviewSession | undefined;
-  replace(session: EffectivePreviewSession, result: unknown): boolean;
+  markOutdated(session: EffectivePreviewSession, cause: string): void;
+  replace(session: EffectivePreviewSession, result: unknown, current?: () => boolean, navigationProof?: { revision: string; instance: number }): Promise<EffectivePreviewSession | undefined>;
 }
 /** Older engines omit this array. Messages stay out of the Problems list. */
 export function appendMacroMessages(output: vscode.OutputChannel, result: unknown): void {
@@ -38,6 +42,12 @@ function previewText(result: unknown): string | undefined {
   const explanation = reasons.length ? reasons.join("\n") : record(result) && typeof result.message === "string" ? result.message : "Complete model counts and source jumps are unavailable. Resolve the model problems and refresh.";
   return record(result) && typeof result.effective_text === "string"
     ? (result.status === "incomplete" ? `// INCOMPLETE EXPANSION — this preview is partial.\n// ${explanation.replace(/\r?\n/g, "\n// ")}\n` : "") + result.effective_text : undefined;
+}
+
+function previewName(root: vscode.Uri, result: unknown): string {
+  const analysis = resultAnalysis(result), label = analysis ? analysisLabel(analysis) : "Source";
+  const basename = (root.path.split("/").at(-1) ?? "model.mod").replace(/\.(mod|dyn)$/i, "");
+  return `${basename} — ${label.replace(/[/\\:\r\n]/g, " ").slice(0, 100)}.mod`;
 }
 
 /** Symbols select the exact display snapshot; source jumps retain their separate revision proof. */
@@ -107,7 +117,7 @@ export function registerEffectivePreview(service: DygnosisClient): EffectivePrev
   const outline = vscode.languages.registerDocumentSymbolProvider({ language: "dynare", scheme: "dygnosis-effective" }, {
     provideDocumentSymbols(document) {
       const session = sessions.get(document.uri.toString());
-      return !disposed && session?.document === document && !document.isClosed && document.getText() === session.text
+      return !disposed && session?.document === document && !session.outdated && !document.isClosed && document.getText() === session.text
         ? previewSymbols(session.result, session.text) : [];
     },
   });
@@ -119,6 +129,7 @@ export function registerEffectivePreview(service: DygnosisClient): EffectivePrev
       typeof argument.info.client_instance === "number" && typeof argument.version === "number" &&
       record(argument.document) && record(argument.root) ? argument as unknown as NavigationContext : undefined;
     if (disposed) return;
+    let selectionWatcher: vscode.Disposable | undefined;
     const expired = (): never => refuse("The source or model changed. Request macro expansion again from the current Dynare document.");
     try {
     if (!document) { refuse("Open a Dynare model or include before expanding macros."); }
@@ -132,14 +143,18 @@ export function registerEffectivePreview(service: DygnosisClient): EffectivePrev
       if (!root) { refuse("Open a model root or choose a known owner for this include."); }
       await service.ensureStarted();
       const instance = service.currentInstance;
-      const validRoot = async (): Promise<boolean> => await valid() && service.currentInstance === instance &&
+      let selectionChanged = false;
+      selectionWatcher = service.onDidChangeAnalysis?.(event => { if (event.root === root.toString()) selectionChanged = true; });
+      const validRoot = async (): Promise<boolean> => !selectionChanged && await valid() && service.currentInstance === instance &&
         (await service.rootForDocument(document))?.toString() === root.toString() && await valid() && service.currentInstance === instance;
       if (!await validRoot()) { expired(); }
       const result = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, root, true));
       if (!await validRoot()) { expired(); }
+      if (record(result) && result.success === false && typeof result.message === "string")
+        refuse(`Macro expansion is unavailable: ${result.message}`);
       if (!record(result) || typeof result.effective_text !== "string") throw new Error("This engine cannot show macro expansion. Update dynare.serverPath or use the bundled binary.");
       appendMacroMessages(service.output, result);
-      const uri = vscode.Uri.from({ scheme: "dygnosis-effective", path: `/${++sequence}/${root.path.split("/").at(-1) ?? "model.mod"}` });
+      const uri = vscode.Uri.from({ scheme: "dygnosis-effective", path: `/${++sequence}/${previewName(root, result)}` });
       const rendered = previewText(result)!;
       text.set(uri.toString(), rendered);
       const preview = await vscode.workspace.openTextDocument(uri);
@@ -152,6 +167,7 @@ export function registerEffectivePreview(service: DygnosisClient): EffectivePrev
       created.fire(session);
       await vscode.window.showTextDocument(preview, { viewColumn: vscode.ViewColumn.Beside, preview: false });
     } catch (error) { if (!disposed) await explainFailure(service, error); }
+    finally { selectionWatcher?.dispose(); }
   });
   const close = vscode.workspace.onDidCloseTextDocument(document => {
     if (document.uri.scheme !== "dygnosis-effective") return;
@@ -167,12 +183,38 @@ export function registerEffectivePreview(service: DygnosisClient): EffectivePrev
   return {
     onDidCreate: created.event, onDidClose: closed.event,
     sessions: () => [...sessions.values()], get: uri => sessions.get(uri.toString()),
-    replace(session, result) {
+    markOutdated(session, cause) {
+      if (disposed || sessions.get(session.uri.toString()) !== session) return;
+      if (session.outdated === cause) return;
+      session.outdated = cause; ++session.generation;
+      text.set(session.uri.toString(), `// OUTDATED EXPANSION — ${cause.replace(/\r?\n/g, " ")}\n// Refresh macro expansion before using this result.\n${session.text}`);
+      contentChanged.fire(session.uri);
+    },
+    async replace(session, result, current = () => true, navigationProof) {
       const rendered = previewText(result);
-      if (disposed || sessions.get(session.uri.toString()) !== session || rendered === undefined) return false;
-      session.result = result; session.text = rendered; ++session.generation;
-      text.set(session.uri.toString(), rendered); contentChanged.fire(session.uri);
-      return true;
+      const valid = (): boolean => !disposed && sessions.get(session.uri.toString()) === session && !session.document.isClosed && current();
+      if (!valid() || rendered === undefined) return undefined;
+      const uri = vscode.Uri.from({ scheme: "dygnosis-effective", path: `/${++sequence}/${previewName(session.root, result)}` });
+      text.set(uri.toString(), rendered);
+      const document = await vscode.workspace.openTextDocument(uri);
+      if (!valid()) { text.delete(uri.toString()); return undefined; }
+      await vscode.languages.setTextDocumentLanguage(document, "dynare");
+      if (!valid()) { text.delete(uri.toString()); return undefined; }
+      const next: EffectivePreviewSession = { uri, root: session.root, document, instance: service.currentInstance, result, text: rendered, generation: 0, navigationProof };
+      sessions.set(uri.toString(), next); created.fire(next);
+      const visible = vscode.window.visibleTextEditors.find(editor => editor.document === session.document);
+      if (visible) await vscode.window.showTextDocument(document, { viewColumn: visible.viewColumn, preview: false, preserveFocus: vscode.window.activeTextEditor !== visible });
+      if (!valid()) {
+        sessions.delete(uri.toString()); closed.fire(next); text.delete(uri.toString());
+        return undefined;
+      }
+      ++session.generation; sessions.delete(session.uri.toString()); closed.fire(session);
+      const tabs = (vscode.window.tabGroups?.all ?? []).flatMap(group => group.tabs).filter(tab => {
+        const input = tab.input as { uri?: vscode.Uri };
+        return input.uri?.toString() === session.uri.toString();
+      });
+      if (tabs.length) await vscode.window.tabGroups.close(tabs, true);
+      return next;
     },
     dispose: () => { disposable.dispose(); },
   };

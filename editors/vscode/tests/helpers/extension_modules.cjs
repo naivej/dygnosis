@@ -3,6 +3,8 @@ const path = require("node:path");
 
 const outputRoot = path.resolve(__dirname, "../../out");
 const moduleFiles = Object.freeze({
+  analysis_configuration: "editor/analysis_configuration",
+  source_candidates: "editor/source_candidates",
   binary: "client/binary",
   captured_text: "comparison/captured_text",
   changes_editor: "comparison/changes_editor",

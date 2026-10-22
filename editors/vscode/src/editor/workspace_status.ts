@@ -11,6 +11,7 @@ type DiscoveryState = "pending" | "discovering" | "complete" | "cancelled" | "di
 export interface WorkspaceRoot {
   root_uri: string; state: RootState; revision: string | null;
   errors: number; warnings: number; failure: string | null; dependency_candidates: string[];
+  analysis?: {name: string | null; preview: boolean; source: boolean};
 }
 export interface WorkspaceStatus {
   schema_version: 1; pass_revision: number; enabled: boolean; discovery: DiscoveryState;
@@ -18,6 +19,7 @@ export interface WorkspaceStatus {
   counts: Record<RootState, number>; roots: WorkspaceRoot[];
   discovery_failures: { folder_uri: string; failure: string }[];
   include_files?: string[];
+  non_default_roots?: number;
   metrics: { discovery_ms: number; analysis_ms: number; completed_jobs: number; reused_jobs: number; elapsed_ms: number | null };
 }
 export interface WorkspaceCapability {
@@ -68,10 +70,12 @@ export function parseWorkspaceStatus(value: unknown): WorkspaceStatus {
         !root.dependency_candidates.every(fileUri)) return invalid();
     const key = identity(vscode.Uri.parse(root.root_uri));
     if (rootKeys.has(key)) return invalid(); rootKeys.add(key);
+    if (root.analysis !== undefined && (!record(root.analysis) || !nullableText(root.analysis.name) || typeof root.analysis.preview !== "boolean" || typeof root.analysis.source !== "boolean")) return invalid();
     return { root_uri: root.root_uri, state: root.state as RootState, revision: root.revision, errors: root.errors,
-      warnings: root.warnings, failure: root.failure, dependency_candidates: root.dependency_candidates };
+      warnings: root.warnings, failure: root.failure, dependency_candidates: root.dependency_candidates, analysis: root.analysis as WorkspaceRoot["analysis"] };
   });
   if (states.some(state => roots.filter(root => root.state === state).length !== counts[state])) return invalid();
+  if (value.non_default_roots !== undefined && (!integer(value.non_default_roots) || value.non_default_roots !== roots.filter(root => root.state !== "excluded" && root.analysis?.source === false).length)) return invalid();
   const failures = value.discovery_failures.map((failure: unknown) => {
     if (!record(failure) || !fileUri(failure.folder_uri) || typeof failure.failure !== "string") return invalid();
     return { folder_uri: failure.folder_uri, failure: failure.failure };
@@ -94,7 +98,7 @@ export function parseWorkspaceStatus(value: unknown): WorkspaceStatus {
       (value.coverage_complete && (!value.complete || failures.length > 0 || counts.failed > 0 || counts.incomplete > 0))) return invalid();
   return { schema_version: 1, pass_revision: value.pass_revision, enabled: value.enabled, discovery: value.discovery as DiscoveryState,
     cancelled: value.cancelled, complete: value.complete, coverage_complete: value.coverage_complete, counts, roots, include_files: includeFiles, discovery_failures: failures,
-    metrics: { discovery_ms: metrics.discovery_ms, analysis_ms: metrics.analysis_ms, completed_jobs: metrics.completed_jobs,
+    non_default_roots: value.non_default_roots, metrics: { discovery_ms: metrics.discovery_ms, analysis_ms: metrics.analysis_ms, completed_jobs: metrics.completed_jobs,
       reused_jobs: metrics.reused_jobs, elapsed_ms: metrics.elapsed_ms } };
 }
 export function parseWorkspaceCapability(initializeResult: unknown): WorkspaceCapability | undefined {
@@ -126,6 +130,7 @@ export function workspaceStatusContent(status: WorkspaceStatus): StatusContent {
   if (notFullyChecked) rows.push(["Not fully checked", notFullyChecked]);
   if (counts.excluded) rows.push(["Excluded", counts.excluded]);
   const notes: string[] = [];
+  if (status.non_default_roots) notes.push(`${status.non_default_roots} root model${status.non_default_roots === 1 ? " uses" : "s use"} a non-default analysis configuration.`);
   if (!status.enabled) notes.push("Workspace diagnostics are off. Enable dynare.workspaceDiagnostics in Settings.");
   else {
     if (status.cancelled) {
@@ -193,9 +198,10 @@ function treeRows(status: WorkspaceStatus, currentFolders: readonly vscode.Works
       const detail = `${root.state === "checked" ? "Checked" : root.state[0].toUpperCase() + root.state.slice(1)}${root.state === "checked" ? ` · ${diagnostics(root.errors, "Error")}, ${diagnostics(root.warnings, "Warning")}` : ""}`;
       const item = new WorkspaceItem(keyFor(uri), label, root.state === "failed" || root.state === "incomplete" ? "warning" :
         root.state === "checked" ? root.errors ? "error" : "check" : root.state === "checking" ? "sync~spin" : root.state === "excluded" ? "circle-slash" : "clock");
-      item.resourceUri = uri; item.description = detail;
-      item.tooltip = `${uri.fsPath}\n${detail}${root.failure ? `\n${root.failure}` : ""}`;
-      item.accessibilityInformation = { label: `${label}. ${detail}` };
+      const analysis = root.analysis && !root.analysis.source ? ` · ${root.analysis.name ?? "Custom"}${root.analysis.preview ? " (preview)" : ""}` : "";
+      item.resourceUri = uri; item.description = detail + analysis;
+      item.tooltip = `${uri.fsPath}\n${detail}${analysis}${root.failure ? `\n${root.failure}` : ""}`;
+      item.accessibilityInformation = { label: `${label}. ${detail}${analysis}` };
       item.command = { command: "vscode.open", title: "Open model", arguments: [uri] };
       addFile(uri, item);
     }

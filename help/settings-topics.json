@@ -5,6 +5,8 @@
   "dynare.formatIndent": "edit-models",
   "dynare.outline.sections": "navigate-code",
   "dynare.outline.equationNumbers": "navigate-code",
+  "dynare.outline.inactiveSource": "navigate-code",
+  "dynare.analysisConfigurations": "effective-model",
   "dynare.statusBar.enabled": "model-and-includes",
   "dynare.statusBar.counts": "model-and-includes",
   "dynare.nameDetails.longName": "appearance",

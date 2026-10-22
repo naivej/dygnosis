@@ -16,8 +16,8 @@ use serde_json::{Value, json};
 use crate::engine::comparison::compare_snapshots::{
     CapturedSnapshot, GitSnapshotInput, MAX_SNAPSHOT_FILES, MAX_SNAPSHOT_SOURCE_BYTES,
     ManifestEntry, SnapshotCapture, SnapshotCoordinates, SnapshotFailure, SourceFact,
-    capture_git_snapshot_with_limit, capture_working_snapshot, compare_captured_snapshots,
-    tree_path,
+    capture_git_snapshot_with_limit, capture_working_snapshot_configured,
+    compare_captured_snapshots, tree_path,
 };
 use crate::engine::workspace::Workspace;
 
@@ -80,6 +80,8 @@ pub(crate) struct RepositoryComparison {
     pub before: RepositorySelector,
     pub after: RepositorySelector,
     pub search_paths: Vec<String>,
+    pub analysis_before: Option<crate::engine::analysis_configuration::AnalysisConfiguration>,
+    pub analysis_after: Option<crate::engine::analysis_configuration::AnalysisConfiguration>,
 }
 
 struct Acquisition<'a> {
@@ -266,6 +268,8 @@ impl Acquisition<'_> {
         commit: Option<String>,
         side: &str,
         search_paths: &[String],
+        analysis: Option<&crate::engine::analysis_configuration::AnalysisConfiguration>,
+        reuse: Option<&CapturedSnapshot>,
     ) -> Result<CapturedSnapshot, SnapshotFailure> {
         self.check()?;
         let root_file = selector.root_file();
@@ -292,6 +296,7 @@ impl Acquisition<'_> {
                     RepositorySelector::Git { requested_ref, .. } => Some(requested_ref.clone()),
                     _ => None,
                 },
+                analysis: analysis.cloned(),
                 search_paths: search_paths
                     .iter()
                     .map(|path| historical_search_path(&self.repository, path))
@@ -433,7 +438,16 @@ impl Acquisition<'_> {
             if let Some(cancellation) = &self.cancellation {
                 workspace.set_cancellation(Arc::clone(cancellation));
             }
-            match capture_working_snapshot(workspace, &root_uri, side, "saved_files") {
+            if let Some(previous) = reuse {
+                previous.reuse_sources_for(&mut workspace);
+            }
+            match capture_working_snapshot_configured(
+                workspace,
+                &root_uri,
+                side,
+                "saved_files",
+                analysis.cloned(),
+            ) {
                 SnapshotCapture::Ready(value) => *value,
                 SnapshotCapture::Failure(failure) => return Err(failure),
                 SnapshotCapture::NeedsSources(_) => {
@@ -495,6 +509,13 @@ impl Acquisition<'_> {
             .as_object_mut()
             .expect("snapshot identity")
             .remove("revision");
+        // Display names label retained choices without changing their input
+        // identity or invalidating semantic continuations.
+        for field in ["selection", "configuration"] {
+            if let Some(value) = identity["analysis"][field].as_object_mut() {
+                value.remove("name");
+            }
+        }
         identity["guards"] = json!(guards);
         identity["source_digests"] = json!(
             captured
@@ -668,6 +689,12 @@ fn compare_repository_control(
             "search_paths":params.search_paths, "resolved_search_paths":params.search_paths.iter().map(|path| Path::new(&params.repository_path).join(path).to_string_lossy().into_owned()).collect::<Vec<_>>(),
             "macro_work_limit":control.map(|control|control.macro_work_limit).unwrap_or_default(),
             "complete":false, "revision":null});
+        let requested = if side == "before" {
+            &params.analysis_before
+        } else {
+            &params.analysis_after
+        };
+        identity["analysis_requested"] = json!(requested.clone().unwrap_or_default());
         match selector {
             RepositorySelector::Git { requested_ref, .. } => {
                 identity["kind"] = json!("git");
@@ -686,6 +713,27 @@ fn compare_repository_control(
         "before":identify("before", &params.before), "after":identify("after", &params.after)});
     let mut result = compare_repository_inner(params, cancelled, &mut inputs, control);
     if result["state"] != "result" {
+        let mut summaries = json!({});
+        for side in ["before", "after"] {
+            summaries[side] = if result["side"] == side && result["analysis_summary"].is_object() {
+                result["analysis_summary"].clone()
+            } else if inputs[side]["analysis"].is_object() {
+                json!({"analysis":inputs[side]["analysis"],"complete":inputs[side]["complete"],"counts":null,
+                    "counts_cause":"Model counts were not computed because the comparison stopped before comparing the models."})
+            } else {
+                json!({"requested_analysis":inputs[side]["analysis_requested"],"complete":null,"counts":null,
+                    "counts_cause":result["message"],"cause":{"code":result["code"],"message":result["message"]}})
+            };
+            if matches!(result["code"].as_str(), Some("INPUT_CHANGED" | "CANCELLED")) {
+                summaries[side]["complete"] = Value::Null;
+                summaries[side]["counts"] = Value::Null;
+                summaries[side]["counts_cause"] = result["message"].clone();
+            }
+        }
+        result["analysis_summaries"] = summaries;
+        if let Some(result) = result.as_object_mut() {
+            result.remove("analysis_summary");
+        }
         if let Some(side) = result["side"].as_str() {
             inputs[side]["complete"] = json!(false);
         }
@@ -759,16 +807,24 @@ fn compare_repository_inner(
         before_commit,
         "before",
         &params.search_paths,
+        params.analysis_before.as_ref(),
+        None,
     ) {
         Ok(value) => value,
         Err(failure) => return failure.response("before"),
     };
     inputs["before"] = before.inputs.clone();
-    let after =
-        match acquisition.capture(&params.after, after_commit, "after", &params.search_paths) {
-            Ok(value) => value,
-            Err(failure) => return failure.response("after"),
-        };
+    let after = match acquisition.capture(
+        &params.after,
+        after_commit,
+        "after",
+        &params.search_paths,
+        params.analysis_after.as_ref(),
+        Some(&before),
+    ) {
+        Ok(value) => value,
+        Err(failure) => return failure.response("after"),
+    };
     inputs["after"] = after.inputs.clone();
     if let Err(failure) = acquisition.check() {
         return failure.response("after");
@@ -857,6 +913,8 @@ mod tests {
                     repository_path: self.0.to_string_lossy().into_owned(),
                     before,
                     after,
+                    analysis_before: None,
+                    analysis_after: None,
                     search_paths: search_paths.iter().map(|path| (*path).to_owned()).collect(),
                 },
                 &|| false,
@@ -885,6 +943,61 @@ mod tests {
 
     const ROOT: &str = "var y;\nmodel;\n@#include \"equations.inc\"\nend;\n";
 
+    #[test]
+    fn incomplete_repository_pair_retains_both_analysis_summaries_without_counts() {
+        // Guards losing the ready historical side when the configured Working
+        // side reaches a missing include. No comparison row pass ran.
+        let repo = TestRepository::new();
+        repo.write("main.mod", "var y;model;y=0;end;\n");
+        let commit = repo.commit();
+        repo.write(
+            "main.mod",
+            "var y;model;\n@#if ON\n@#include \"missing.inc\"\n@#endif\nend;\n",
+        );
+        let result = compare_repository(
+            RepositoryComparison {
+                repository_path: repo.0.to_string_lossy().into_owned(),
+                before: git("main.mod", &commit),
+                after: working("main.mod"),
+                search_paths: vec![],
+                analysis_before: None,
+                analysis_after: Some(
+                    crate::engine::analysis_configuration::AnalysisConfiguration {
+                        name: Some("Policy B".into()),
+                        defines: vec![crate::engine::analysis_configuration::InitialDefinition {
+                            name: "ON".into(),
+                            expression: "true".into(),
+                        }],
+                        ..Default::default()
+                    },
+                ),
+            },
+            &|| false,
+        );
+        assert_eq!(result["state"], "failure", "{result}");
+        assert_eq!(result["code"], "INCOMPLETE_INPUT");
+        assert_eq!(result["analysis_summaries"]["before"]["complete"], true);
+        assert_eq!(result["analysis_summaries"]["after"]["complete"], false);
+        assert_eq!(
+            result["analysis_summaries"]["after"]["analysis"]["configuration"]["name"],
+            "Policy B"
+        );
+        for side in ["before", "after"] {
+            assert!(result["analysis_summaries"][side]["counts"].is_null());
+            assert!(
+                !result["analysis_summaries"][side]["counts_cause"]
+                    .as_str()
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        assert!(
+            result.get("changed_equations").is_none()
+                && result.get("navigation").is_none()
+                && result.get("sources").is_none()
+        );
+    }
+
     // Two sides must count their exact failed search candidates as well as
     // loaded bodies. The same tree path belongs to each side's own namespace.
     #[test]
@@ -898,6 +1011,8 @@ mod tests {
             before: git("models/main.mod", &commit),
             after: git("models/main.mod", &commit),
             search_paths: vec!["missing".into(), "common".into()],
+            analysis_before: None,
+            analysis_after: None,
         };
         let first =
             compare_repository_bounded(params(), &super::super::source::RequestControl::default());
@@ -1044,7 +1159,7 @@ mod tests {
         let pinned = acquisition.resolve(&selector).unwrap();
         repo.git(&["tag", "--force", "baseline", "HEAD"]);
         let captured = acquisition
-            .capture(&selector, pinned, "before", &["common".into()])
+            .capture(&selector, pinned, "before", &["common".into()], None, None)
             .unwrap_or_else(|failure| panic!("{}", failure.message));
         assert_eq!(
             captured.inputs["commit"], first,
@@ -1097,14 +1212,21 @@ mod tests {
             checked_keys: BTreeSet::new(),
         };
         let before = acquisition
-            .capture(&git("main.mod", &commit), Some(commit), "before", &[])
+            .capture(
+                &git("main.mod", &commit),
+                Some(commit),
+                "before",
+                &[],
+                None,
+                None,
+            )
             .unwrap_or_else(|f| panic!("{}", f.message));
         assert_eq!(
             acquisition.reads, 1,
             "Inactive include bodies must not be read"
         );
         let after = acquisition
-            .capture(&working("main.mod"), None, "after", &[])
+            .capture(&working("main.mod"), None, "after", &[], None, None)
             .unwrap_or_else(|f| panic!("{}", f.message));
         repo.write("main.mod", "var y;\nmodel;\n[name='eq'] y=2;\nend;\n");
         let result = compare_captured_snapshots(before, after, SnapshotCoordinates::Mcp);
@@ -1226,6 +1348,8 @@ mod tests {
                 before: git("main.mod", "HEAD"),
                 after: working("main.mod"),
                 search_paths: Vec::new(),
+                analysis_before: None,
+                analysis_after: None,
             },
             &|| true,
         );

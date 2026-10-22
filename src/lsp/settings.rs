@@ -30,6 +30,7 @@ pub struct NameDetails {
 pub struct OutlinePreferences {
     pub sections: Vec<String>,
     pub equation_numbers: bool,
+    pub inactive_source: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -49,6 +50,7 @@ impl Default for PresentationSettings {
             outline: OutlinePreferences {
                 sections: OUTLINE_SECTIONS.iter().map(|s| (*s).to_owned()).collect(),
                 equation_numbers: true,
+                inactive_source: true,
             },
             parameter_value_hints: true,
         }
@@ -330,6 +332,12 @@ fn read_settings(value: &Value, settings: &mut ResourceSettings, explanations: &
             outline,
             "equationNumbers",
             &mut settings.presentation.outline.equation_numbers,
+            explanations,
+        );
+        read_bool(
+            outline,
+            "inactiveSource",
+            &mut settings.presentation.outline.inactive_source,
             explanations,
         );
         if let Some(raw) = outline.get("sections") {

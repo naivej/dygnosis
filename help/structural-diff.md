@@ -40,6 +40,14 @@ context**—and displays **Before** and **After** cards side by side.
 
 ## Comparison scope
 
+To compare two macro configurations of the same model, run **Dynare: Compare
+Analysis Configurations** from the source editor or its macro expansion
+preview. Choose configuration **A** and configuration **B**. The comparison
+keeps both choices with their captured source, even if you later change the
+model's selected configuration. Model Diff can show changed model facts when
+the source text is the same. This compares structural model information; it
+does not run Dynare or compare numerical results.
+
 Comparisons report structural source changes rather than algebraic or numerical
 equivalence. Equations that cannot be paired appear as separate **Removed** and
 **Added** rows; give an equation the same unique `[name='...']` tag in both

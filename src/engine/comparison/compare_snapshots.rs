@@ -3,10 +3,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::engine::analysis_configuration::{
+    AnalysisConfiguration, AnalysisMetadata, ConfigurationError,
+};
 use crate::engine::comparison::compare_navigation::{
     ComparisonInput, Coordinates, navigation_json,
 };
@@ -46,6 +50,8 @@ pub struct GitSnapshotInput {
     #[serde(default)]
     pub requested_ref: Option<String>,
     #[serde(default)]
+    pub analysis: Option<AnalysisConfiguration>,
+    #[serde(default)]
     pub search_paths: Vec<String>,
     pub manifest: BTreeMap<String, ManifestEntry>,
     #[serde(default)]
@@ -62,7 +68,18 @@ pub enum SnapshotInput {
         expected_revision: String,
         #[serde(default)]
         search_paths: Option<Vec<String>>,
+        #[serde(default)]
+        analysis: Option<AnalysisConfiguration>,
     },
+}
+
+impl SnapshotInput {
+    pub fn analysis(&self) -> Option<&AnalysisConfiguration> {
+        match self {
+            Self::Git(input) => input.analysis.as_ref(),
+            Self::Working { analysis, .. } => analysis.as_ref(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -79,6 +96,8 @@ pub struct SnapshotFailure {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    analysis_summary: Option<Box<Value>>,
     #[serde(skip)]
     work_limits: Vec<Value>,
 }
@@ -89,8 +108,17 @@ impl SnapshotFailure {
             code: code.to_owned(),
             message: message.into(),
             file_key,
+            analysis_summary: None,
             work_limits: Vec::new(),
         }
+    }
+
+    fn with_analysis(mut self, analysis: &AnalysisMetadata) -> Self {
+        self.analysis_summary = Some(Box::new(
+            json!({"analysis":analysis,"complete":analysis.model_complete,"counts":null,
+            "counts_cause":self.message,"cause":{"code":self.code,"message":self.message}}),
+        ));
+        self
     }
 
     pub fn response(&self, side: &str) -> Value {
@@ -248,28 +276,71 @@ pub enum SnapshotCapture {
     Failure(SnapshotFailure),
 }
 
+impl SnapshotCapture {
+    /// Read-only explanation survives a refused pair. Counts remain unavailable
+    /// until the comparison's existing equation-row pass has produced them.
+    pub fn analysis_summary(&self, requested: Option<&AnalysisConfiguration>) -> Value {
+        match self {
+            Self::Ready(input) => json!({"analysis":input.analysis.as_ref(),"complete":input.analysis.model_complete,
+                "counts":input.inputs.get("counts"),"counts_cause":if input.inputs.get("counts").is_none() {Some("Model counts were not computed because the comparison stopped before comparing the models.")}else{None}}),
+            Self::Failure(failure) => failure.analysis_summary.as_deref().cloned().unwrap_or_else(|| json!({"requested_analysis":requested,"complete":null,"counts":null,
+                "counts_cause":failure.message,"cause":{"code":failure.code,"message":failure.message}})),
+            Self::NeedsSources(_) => json!({"requested_analysis":requested,"complete":null,"counts":null,
+                "counts_cause":"Source acquisition has not finished for this side."}),
+        }
+    }
+}
+
 /// This input owns its workspace. Historical text never enters the editor's
 /// diagnostics, owners, scans, or ordinary analysis caches.
 pub struct CapturedSnapshot {
     workspace: Workspace,
     root: String,
-    model: Model,
+    model: Arc<Model>,
+    pub analysis: Arc<AnalysisMetadata>,
     input_id: String,
     revision: String,
     pub inputs: Value,
     pub sources: BTreeMap<String, String>,
     historical: bool,
+    guards: Vec<crate::engine::workspace::InputGuard>,
 }
 
 impl CapturedSnapshot {
+    /// Reuse only source bodies permitted by the next side's own source policy.
+    pub fn reuse_sources_for(&self, workspace: &mut Workspace) {
+        if !self.historical {
+            workspace.reuse_comparison_sources(&self.workspace, &self.root);
+        }
+    }
+
+    /// Validate all current-source guards, including files reached only by this
+    /// captured configuration, against live editor overlays when supplied.
+    pub fn is_current_with(&self, live: &Workspace) -> bool {
+        self.historical
+            || self.workspace.comparison_inputs_match(&self.root, live)
+                && self.large_content_guards_current(live)
+    }
+
+    fn large_content_guards_current(&self, workspace: &Workspace) -> bool {
+        self.guards
+            .iter()
+            .filter(|guard| guard.exists && !guard.directory && guard.byte_sha256.is_none())
+            .all(|guard| workspace.source_guards_are_current(std::slice::from_ref(guard)))
+    }
     /// A transport can bind its content-based input identity before navigation
     /// is produced. Existing editor captures retain their native revision.
     pub(crate) fn rebind_revision(&mut self, revision: String) {
         self.inputs["revision"] = json!(revision);
+        Arc::make_mut(&mut self.analysis).revision = revision.clone();
+        self.inputs["analysis"] = json!(self.analysis.as_ref());
         self.revision = revision;
     }
 
     pub(crate) fn input_guards(&self) -> Vec<crate::engine::workspace::InputGuard> {
+        if !self.guards.is_empty() {
+            return self.guards.clone();
+        }
         if let Some(lookup) = &self.workspace.snapshot_lookup {
             use sha2::{Digest, Sha256};
             let keys: BTreeSet<_> = lookup
@@ -277,6 +348,13 @@ impl CapturedSnapshot {
                 .iter()
                 .chain(lookup.checked_directories.iter())
                 .chain(self.sources.keys())
+                .chain(
+                    self.analysis
+                        .configuration
+                        .overrides
+                        .iter()
+                        .filter_map(|operation| operation.target().file.as_ref()),
+                )
                 .cloned()
                 .collect();
             return keys
@@ -307,6 +385,57 @@ impl CapturedSnapshot {
         }
         self.workspace.input_guards(&self.root)
     }
+}
+
+fn configuration_failure(error: ConfigurationError) -> SnapshotFailure {
+    SnapshotFailure::new(
+        error.code,
+        error.message,
+        error.target.and_then(|target| target.file),
+    )
+}
+
+/// Establish one publishable current input from both sides' retained facts.
+/// No retry can turn a changed overlap into two different accepted edits.
+pub fn validate_working_pair(
+    before: &CapturedSnapshot,
+    after: &CapturedSnapshot,
+    live: Option<&Workspace>,
+) -> Result<(), SnapshotFailure> {
+    let common_current = before.inputs["source_policy"] == after.inputs["source_policy"]
+        && matches!(
+            before.inputs["source_policy"].as_str(),
+            Some("saved_files" | "editor_buffers_and_disk")
+        );
+    if !before.historical && !after.historical {
+        before
+            .workspace
+            .validate_comparison_inputs(
+                &before.root,
+                &after.workspace,
+                &after.root,
+                common_current,
+                (MAX_SNAPSHOT_FILES, MAX_SNAPSHOT_SOURCE_BYTES),
+                None,
+            )
+            .map_err(configuration_failure)?;
+    }
+    for input in [before, after]
+        .into_iter()
+        .filter(|input| !input.historical)
+    {
+        let current = match live {
+            Some(live) => input.is_current_with(live),
+            None => {
+                input.workspace.input_snapshot_is_current(&input.root)
+                    && input.large_content_guards_current(&input.workspace)
+            }
+        };
+        if !current {
+            return Err(input_changed());
+        }
+    }
+    Ok(())
 }
 
 pub fn capture_git_snapshot(input: &GitSnapshotInput) -> SnapshotCapture {
@@ -415,6 +544,55 @@ pub(crate) fn capture_git_snapshot_with_limit(
     {
         return invalid("Snapshot source keys must belong to the manifest");
     }
+    let mut needed = BTreeSet::new();
+    if !input.sources.contains_key(&input.root_file) {
+        needed.insert(input.root_file.clone());
+    }
+    if let Some(analysis) = &input.analysis {
+        for operation in &analysis.overrides {
+            let Some(file) = &operation.target().file else {
+                return SnapshotCapture::Failure(SnapshotFailure::new(
+                    "ANALYSIS_TARGET_MISSING",
+                    "A historical override needs a named file in the selected tree",
+                    None,
+                ));
+            };
+            if tree_path("", file).as_deref() != Some(file) {
+                return SnapshotCapture::Failure(SnapshotFailure::new(
+                    "UNSUPPORTED_SOURCE",
+                    "The historical override target is outside the selected tree",
+                    Some(file.clone()),
+                ));
+            }
+            let Some(entry) = input.manifest.get(file) else {
+                return SnapshotCapture::Failure(SnapshotFailure::new(
+                    "ANALYSIS_TARGET_MISSING",
+                    "The override source file is absent from the selected commit",
+                    Some(file.clone()),
+                ));
+            };
+            if !matches!(entry.mode.as_str(), "100644" | "100755") {
+                return SnapshotCapture::Failure(SnapshotFailure::new(
+                    "UNSUPPORTED_SOURCE",
+                    "Historical override targets cannot be symlinks or gitlinks",
+                    Some(file.clone()),
+                ));
+            }
+            if let Some(SourceFact::Failure { code, message }) = input.sources.get(file) {
+                return SnapshotCapture::Failure(SnapshotFailure::new(
+                    code,
+                    message,
+                    Some(file.clone()),
+                ));
+            }
+            if !input.sources.contains_key(file) {
+                needed.insert(file.clone());
+            }
+        }
+    }
+    if !needed.is_empty() {
+        return SnapshotCapture::NeedsSources(needed.into_iter().collect());
+    }
     match input.sources.get(&input.root_file) {
         None => return SnapshotCapture::NeedsSources(vec![input.root_file.clone()]),
         Some(SourceFact::Failure { code, message }) => {
@@ -430,7 +608,13 @@ pub(crate) fn capture_git_snapshot_with_limit(
     if let Some(flag) = &cancellation {
         workspace.set_cancellation(std::sync::Arc::clone(flag));
     }
-    let model = workspace.get_effective_model(&input.root_file).cloned();
+    if let Some(analysis) = &input.analysis
+        && let Err(error) =
+            workspace.set_root_analysis_configuration(&input.root_file, analysis.clone())
+    {
+        return SnapshotCapture::Failure(configuration_failure(error));
+    }
+    let model = workspace.effective_model_snapshot(&input.root_file);
     if stopped() {
         return cancelled();
     }
@@ -447,8 +631,12 @@ pub(crate) fn capture_git_snapshot_with_limit(
     if !lookup.requested.is_empty() {
         return SnapshotCapture::NeedsSources(lookup.requested.iter().cloned().collect());
     }
+    let mut analysis = match workspace.analysis_metadata(&input.root_file) {
+        Ok(metadata) => metadata,
+        Err(error) => return SnapshotCapture::Failure(configuration_failure(error)),
+    };
     if let Some(failure) = incomplete(&mut workspace, &input.root_file, &model) {
-        return SnapshotCapture::Failure(failure);
+        return SnapshotCapture::Failure(failure.with_analysis(&analysis));
     }
     let sources = workspace.snapshot_sources(&input.root_file);
     let mut hash = std::collections::hash_map::DefaultHasher::new();
@@ -457,36 +645,68 @@ pub(crate) fn capture_git_snapshot_with_limit(
     input.root_file.hash(&mut hash);
     input.search_paths.hash(&mut hash);
     macro_work_limit.hash(&mut hash);
+    analysis.revision.hash(&mut hash);
+    analysis.selection.configuration_id.hash(&mut hash);
     sources.hash(&mut hash);
     for key in sources.keys() {
         input.manifest.get(key).hash(&mut hash);
     }
     let revision = format!("{:016x}", hash.finish());
+    Arc::get_mut(&mut analysis)
+        .expect("new metadata capture")
+        .revision = revision.clone();
     let inputs = json!({"kind":"git", "input_id":input.input_id, "root_file":input.root_file,
         "repository_uri":input.repository_uri, "commit":input.commit, "requested_ref":input.requested_ref,
         "revision":revision, "search_paths":input.search_paths, "macro_work_limit":macro_work_limit, "complete":true,
-        "source_policy":"git_tree", "file_keys":sources.keys().collect::<Vec<_>>(), "dependency_candidates":[]});
-    SnapshotCapture::Ready(Box::new(CapturedSnapshot {
+        "source_policy":"git_tree", "analysis":analysis.as_ref(), "file_keys":sources.keys().collect::<Vec<_>>(), "dependency_candidates":[]});
+    let mut captured = CapturedSnapshot {
         workspace,
         root: input.root_file.clone(),
         model,
+        analysis,
         input_id: input.input_id.clone(),
         revision,
         inputs,
         sources,
         historical: true,
-    }))
+        guards: Vec::new(),
+    };
+    captured.guards = captured.input_guards();
+    captured.inputs["guards"] = json!(captured.guards);
+    SnapshotCapture::Ready(Box::new(captured))
 }
 
 /// Capture a caller-owned Working workspace. MCP supplies saved files; LSP
 /// supplies an isolated overlay/disk workspace and checks its live revision.
 pub fn capture_working_snapshot(
-    mut workspace: Workspace,
+    workspace: Workspace,
     root_uri: &str,
     input_id: &str,
     source_policy: &str,
 ) -> SnapshotCapture {
-    let Some(revision) = workspace.input_revision(root_uri) else {
+    capture_working_snapshot_configured(workspace, root_uri, input_id, source_policy, None)
+}
+
+pub fn capture_working_snapshot_configured(
+    mut workspace: Workspace,
+    root_uri: &str,
+    input_id: &str,
+    source_policy: &str,
+    choices: Option<AnalysisConfiguration>,
+) -> SnapshotCapture {
+    if let Some(choices) = choices
+        && let Err(error) = workspace.set_root_analysis_configuration(root_uri, choices)
+    {
+        return SnapshotCapture::Failure(configuration_failure(error));
+    }
+    let analysis = match workspace.analysis_metadata(root_uri) {
+        Ok(metadata) => Some(metadata),
+        Err(error) if error.code != "ROOT_NOT_FOUND" => {
+            return SnapshotCapture::Failure(configuration_failure(error));
+        }
+        Err(_) => None,
+    };
+    let Some(analysis) = analysis else {
         if !crate::engine::workspace::include_resolver::is_virtual_uri(root_uri)
             && crate::engine::workspace::include_resolver::uri_to_path(root_uri).is_file()
         {
@@ -502,7 +722,8 @@ pub fn capture_working_snapshot(
             Some(root_uri.to_owned()),
         ));
     };
-    let Some(model) = workspace.get_effective_model(root_uri).cloned() else {
+    let revision = analysis.revision.clone();
+    let Some(model) = workspace.effective_model_snapshot(root_uri) else {
         return SnapshotCapture::Failure(SnapshotFailure::new(
             "ROOT_NOT_FOUND",
             "Working model root could not be read",
@@ -510,26 +731,29 @@ pub fn capture_working_snapshot(
         ));
     };
     if let Some(failure) = incomplete(&mut workspace, root_uri, &model) {
-        return SnapshotCapture::Failure(failure);
+        return SnapshotCapture::Failure(failure.with_analysis(&analysis));
     }
     if !workspace.input_snapshot_is_current(root_uri) {
         return SnapshotCapture::Failure(input_changed());
     }
     let sources = workspace.snapshot_sources(root_uri);
+    let guards = workspace.input_guards(root_uri);
     let inputs = json!({"kind":"working", "input_id":input_id, "root_uri":root_uri,
         "root_file":crate::engine::workspace::include_resolver::normalize_uri(root_uri), "revision":revision,
         "search_paths":workspace.snapshot_search_paths(root_uri), "macro_work_limit":workspace.root_macro_work_limit(root_uri), "complete":true, "source_policy":source_policy,
-        "file_keys":sources.keys().collect::<Vec<_>>(),
+        "analysis":analysis.as_ref(), "guards":guards, "file_keys":sources.keys().collect::<Vec<_>>(),
         "dependency_candidates":workspace.input_candidate_paths(root_uri).iter().filter_map(|path| tower_lsp::lsp_types::Url::from_file_path(path).ok()).collect::<Vec<_>>()});
     SnapshotCapture::Ready(Box::new(CapturedSnapshot {
         workspace,
         root: root_uri.to_owned(),
         model,
+        analysis,
         input_id: input_id.to_owned(),
         revision,
         inputs,
         sources,
         historical: false,
+        guards,
     }))
 }
 
@@ -571,6 +795,206 @@ fn input_changed() -> SnapshotFailure {
         "Comparison inputs changed while reading them; refresh the comparison",
         None,
     )
+}
+
+#[cfg(test)]
+mod configured_capture_tests {
+    use super::*;
+    use crate::engine::analysis_configuration::{
+        AnalysisOverride, InitialDefinition, SourceStructureQuery,
+    };
+
+    fn captured(
+        workspace: Workspace,
+        id: &str,
+        choices: Option<AnalysisConfiguration>,
+    ) -> CapturedSnapshot {
+        match capture_working_snapshot_configured(
+            workspace,
+            "root.mod",
+            id,
+            "editor_buffers_and_disk",
+            choices,
+        ) {
+            SnapshotCapture::Ready(input) => *input,
+            SnapshotCapture::Failure(error) => panic!("{}: {}", error.code, error.message),
+            _ => panic!("working capture cannot request historical text"),
+        }
+    }
+
+    #[test]
+    fn working_capture_inherits_or_resets_only_its_own_selection() {
+        // Guards a comparison resetting the live editor root, or an explicit
+        // Source side silently inheriting a preview from that root.
+        let source = "@#define N = 0\nvar y;model;y=@{N};end;\n";
+        let mut live =
+            Workspace::overlay_documents(&BTreeMap::from([("root.mod".into(), source.into())]));
+        let target = live
+            .source_structure("root.mod", &SourceStructureQuery::default())
+            .unwrap()
+            .files[0]
+            .sites[0]
+            .target
+            .clone();
+        let preview = AnalysisConfiguration {
+            overrides: vec![AnalysisOverride::Definition {
+                target,
+                expression: "1".into(),
+            }],
+            ..Default::default()
+        };
+        live.set_root_analysis_configuration("root.mod", preview.clone())
+            .unwrap();
+        let original = live.effective_model_snapshot("root.mod").unwrap();
+        let before = captured(live.snapshot_with_root_settings("root.mod"), "before", None);
+        let after = captured(
+            live.snapshot_with_root_settings("root.mod"),
+            "after",
+            Some(AnalysisConfiguration::default()),
+        );
+        assert!(before.analysis.selection.preview);
+        assert!(!after.analysis.selection.preview);
+        assert_eq!(before.analysis.configuration, preview);
+        assert!(after.analysis.configuration.is_source());
+        let result = compare_captured_snapshots(before, after, SnapshotCoordinates::Lsp);
+        assert_eq!(result["state"], "result", "{result}");
+        assert_eq!(
+            result["diff"]["changed_equations"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(*live.root_analysis_configuration("root.mod"), preview);
+        assert!(Arc::ptr_eq(
+            &original,
+            &live.effective_model_snapshot("root.mod").unwrap()
+        ));
+    }
+
+    #[test]
+    fn comparison_reuses_original_macro_source_and_bounds_the_union() {
+        // Guards a second configuration rescanning the same original source,
+        // and union validation overlooking its own finite input allowance.
+        let files = BTreeMap::from([("root.mod".into(), "var y;model;y=@{N};end;\n".into())]);
+        let choices = |expression: &str| AnalysisConfiguration {
+            defines: vec![InitialDefinition {
+                name: "N".into(),
+                expression: expression.into(),
+            }],
+            ..Default::default()
+        };
+        let before = captured(
+            Workspace::overlay_documents(&files),
+            "before",
+            Some(choices("1")),
+        );
+        let original = before
+            .workspace
+            .source_document("root.mod", "root.mod")
+            .unwrap()
+            .macro_source()
+            .unwrap();
+        let mut next = Workspace::overlay_documents(&files);
+        before.reuse_sources_for(&mut next);
+        let after = captured(next, "after", Some(choices("2")));
+        let reused = after
+            .workspace
+            .source_document("root.mod", "root.mod")
+            .unwrap()
+            .macro_source()
+            .unwrap();
+        assert!(Arc::ptr_eq(&original, &reused));
+        assert_eq!(
+            before
+                .workspace
+                .validate_comparison_inputs(
+                    "root.mod",
+                    &after.workspace,
+                    "root.mod",
+                    true,
+                    (0, MAX_SNAPSHOT_SOURCE_BYTES),
+                    None,
+                )
+                .unwrap_err()
+                .code,
+            "CAPTURE_LIMIT"
+        );
+        let mut after = after;
+        after
+            .workspace
+            .set_cancellation(Arc::new(std::sync::atomic::AtomicBool::new(true)));
+        assert_eq!(
+            validate_working_pair(&before, &after, None)
+                .unwrap_err()
+                .code,
+            "CANCELLED"
+        );
+    }
+
+    #[test]
+    fn live_union_checks_second_side_only_overlay_and_distinct_supplied_sources() {
+        // Guards final editor validation checking only the live Source root's
+        // dependencies, and treating intentionally distinct supplied texts as
+        // accidental edits of one current source snapshot.
+        let root = "@#if ON\n@#include \"body.inc\"\n@#else\nvar y;model;y=0;end;\n@#endif\n";
+        let files = BTreeMap::from([
+            ("root.mod".into(), root.into()),
+            ("body.inc".into(), "var y;model;y=1;end;\n".into()),
+        ]);
+        let choices = |expression: &str| AnalysisConfiguration {
+            defines: vec![InitialDefinition {
+                name: "ON".into(),
+                expression: expression.into(),
+            }],
+            ..Default::default()
+        };
+        let before = captured(
+            Workspace::overlay_documents(&files),
+            "before",
+            Some(choices("false")),
+        );
+        let after = captured(
+            Workspace::overlay_documents(&files),
+            "after",
+            Some(choices("true")),
+        );
+        let mut live = Workspace::overlay_documents(&files);
+        validate_working_pair(&before, &after, Some(&live)).unwrap();
+        live.update_document("body.inc", "var y;model;y=2;end;\n");
+        assert_eq!(
+            validate_working_pair(&before, &after, Some(&live))
+                .unwrap_err()
+                .code,
+            "INPUT_CHANGED"
+        );
+        let mut a = captured(
+            Workspace::overlay_documents(&BTreeMap::from([(
+                "root.mod".into(),
+                "var y;model;y=1;end;".into(),
+            )])),
+            "before",
+            None,
+        );
+        let mut b = captured(
+            Workspace::overlay_documents(&BTreeMap::from([(
+                "root.mod".into(),
+                "var y;model;y=2;end;".into(),
+            )])),
+            "after",
+            None,
+        );
+        assert_eq!(
+            validate_working_pair(&a, &b, None).unwrap_err().code,
+            "INPUT_CHANGED"
+        );
+        a.inputs["source_policy"] = json!("supplied_files");
+        b.inputs["source_policy"] = json!("supplied_files");
+        assert_eq!(
+            compare_captured_snapshots(a, b, SnapshotCoordinates::Mcp)["state"],
+            "result"
+        );
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -691,6 +1115,16 @@ pub fn compare_captured_snapshots(
     mut after: CapturedSnapshot,
     coordinates: SnapshotCoordinates,
 ) -> Value {
+    compare_captured_snapshots_ref(&mut before, &mut after, coordinates)
+}
+
+/// Keep the immutable input guards available for a transport's final live
+/// overlay check after the comparison's derived work has completed.
+pub fn compare_captured_snapshots_ref(
+    before: &mut CapturedSnapshot,
+    after: &mut CapturedSnapshot,
+    coordinates: SnapshotCoordinates,
+) -> Value {
     if before.input_id == after.input_id {
         return SnapshotFailure::new(
             "INVALID_ARGUMENTS",
@@ -698,6 +1132,9 @@ pub fn compare_captured_snapshots(
             None,
         )
         .response("before");
+    }
+    if let Err(failure) = validate_working_pair(before, after, None) {
+        return failure.response("after");
     }
     let mut diff = compare_models_with_sources(
         &before.model,
@@ -717,6 +1154,8 @@ pub fn compare_captured_snapshots(
                 origin_uri: Some(&after.root),
             }),
     );
+    before.inputs["counts"] = json!(diff.input_counts.0);
+    after.inputs["counts"] = json!(diff.input_counts.1);
     let old = ComparisonInput::capture(
         &mut before.workspace,
         &before.root,
@@ -753,7 +1192,7 @@ pub fn compare_captured_snapshots(
         crate::engine::comparison::semantic_diff::Side::After,
     )
     .with_snapshot_identity(&after.input_id, after.inputs["commit"].as_str());
-    let include_pairs = source_pairs(&before, &after);
+    let include_pairs = source_pairs(before, after);
     crate::engine::comparison::compare_navigation::populate_written_statements(
         &mut diff, &old, &new,
     );
@@ -769,6 +1208,9 @@ pub fn compare_captured_snapshots(
         if !input.historical && !input.workspace.input_snapshot_is_current(&input.root) {
             return input_changed().response(side);
         }
+    }
+    if let Err(failure) = validate_working_pair(before, after, None) {
+        return failure.response("after");
     }
     json!({"state":"result", "inputs":{"schema_version":SNAPSHOT_SCHEMA_VERSION, "before":before.inputs, "after":after.inputs},
         "diff":diff.to_json(), "navigation":navigation_json(&diff, &old, &new, match coordinates { SnapshotCoordinates::Lsp => Coordinates::SnapshotLsp, SnapshotCoordinates::Mcp => Coordinates::SnapshotMcp }),
@@ -790,7 +1232,15 @@ mod source_identity_tests {
         CapturedSnapshot {
             workspace,
             root: root.into(),
-            model: crate::parse(""),
+            model: Arc::new(crate::parse("")),
+            analysis: Arc::new(AnalysisMetadata {
+                selection: crate::parse("").analysis_selection().clone(),
+                configuration: AnalysisConfiguration::default(),
+                revision: String::new(),
+                macro_complete: true,
+                model_complete: true,
+                overrides: Vec::new(),
+            }),
             input_id: if historical { "old" } else { "new" }.into(),
             revision: String::new(),
             inputs: json!({"root_file":root,"repository_uri":repository}),
@@ -800,6 +1250,7 @@ mod source_identity_tests {
                 .map(|key| ((*key).into(), String::new()))
                 .collect(),
             historical,
+            guards: Vec::new(),
         }
     }
 

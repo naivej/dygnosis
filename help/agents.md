@@ -17,6 +17,23 @@ and parameters. Editing tools return proposed changes for your agent to apply.
 | [dynare_expand](tool:dynare_expand) | Macro- and include-expanded model text with links back to the written source lines. |
 | [dynare_symbol_info](tool:dynare_symbol_info) | A symbol's declaration, metadata (`long_name`, TeX), timing, parameter assignments and references. |
 
+Source-backed inspection tools also accept optional `analysis` choices. Omit
+them to use **Source**. To inspect inactive written text, request
+`source_structure` from `dynare_model_info`, or use `view: "source"` with
+`dynare_equations` or `dynare_symbol_info`. Source results show written
+templates or unverified candidates and their availability; they do not provide
+effective equation numbers, bindings or references. Inspecting a dormant file
+does not make it an executed include. Counts that are unavailable remain null
+or omitted with their cause.
+
+Use `analysis.defines` for ordered initial macro values. Use
+`analysis.overrides` for a guarded definition replacement, `skip_definition`,
+or a selected conditional branch. Find the target identity first in
+`dynare_model_info`'s `source_structure`. A branch choice of `null` selects no
+arm. These choices affect analysis without editing source files. A saved
+VS Code preset name is not a substitute for the explicit choices in an MCP
+request.
+
 ## Write and revise
 
 | Tool | What it provides |
@@ -34,6 +51,11 @@ and parameters. Editing tools return proposed changes for your agent to apply.
 | [dynare_diagnose](tool:dynare_diagnose) | Diagnostics and check status for a model or a batch of model roots. |
 | [dynare_diagnostic_info](tool:dynare_diagnostic_info) | Explanations and fix guidance for diagnostic codes (`Shared`, `Added` and `Skipped`). |
 | [dynare_compare_models](tool:dynare_compare_models) | Structural and text differences between two models or between Git revisions and working files. |
+
+`dynare_compare_models` accepts independent `analysis_a` and `analysis_b`
+choices. Each side reports its choices and revision, so unchanged source text
+can still have different model facts. The comparison uses those captured
+choices even if a live editor selection later changes.
 
 ## Connect MCP
 

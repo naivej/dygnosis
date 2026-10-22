@@ -25,6 +25,11 @@ pub(super) const STALE: &str =
     "Model inputs changed during Rename. Refresh the model and try again.";
 pub(super) const IDENTIFIER: &str = symbols::IDENTIFIER.message;
 pub(super) const WRITABLE: &str = "A Rename target is unavailable or read-only. Make every affected source writable and try again.";
+pub(super) const PREVIEW: &str = "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED: Rename is unavailable while a definition or branch analysis preview is selected. No edits were proposed. Reset Analysis Configuration before requesting Rename.";
+
+pub(super) fn refusal_json(reason: &'static str) -> Value {
+    json!({"error":reason,"code":if reason==PREVIEW{"ANALYSIS_PREVIEW_EDIT_UNSUPPORTED"}else{"RENAME_REFUSED"}})
+}
 
 pub(super) struct Decision {
     pub range: Range,
@@ -73,6 +78,13 @@ pub(super) fn decide(
     let file = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
     let mut views = Vec::new();
     for root in &roots {
+        if inner
+            .workspace
+            .root_analysis_configuration(root.as_str())
+            .is_preview()
+        {
+            return Err(PREVIEW);
+        }
         views.push(capture(inner, root)?);
     }
     let binding = views[0]
@@ -110,8 +122,13 @@ pub(super) fn decide(
         }
     }
     let proposal = loop {
-        let proposal =
-            symbols::rename(&views, 0, &binding, replacement).map_err(|reason| reason.message)?;
+        let proposal = symbols::rename(&views, 0, &binding, replacement).map_err(|reason| {
+            if reason.code == "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED" {
+                PREVIEW
+            } else {
+                reason.message
+            }
+        })?;
         let mut additional = Vec::new();
         for edit in &proposal.edits {
             let target_uri = naming_edit_url(inner, &roots[0], &edit.file).ok_or(MAPPING)?;

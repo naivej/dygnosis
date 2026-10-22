@@ -75,6 +75,43 @@ discovery skips generated `+<model>` folders. Single and batch Diagnose share
 root's `ok`, `partial`, `failed` or `unfinished` status. Unnamed text has the
 input identity `input:1`; it does not acquire an invented file path.
 
+## Inspect source and configurations
+
+Use this path for inactive code, macro inputs or alternative branches.
+
+1. Query Model Info with `sections: ["analysis", "source_structure"]`. Add
+   `file` to inspect a particular supplied or saved source. Read source coverage
+   and the returned guarded directive targets before choosing an override.
+2. Find written equations with Equations `view: "source"` or names with Symbol
+   Info `view: "source"`. These are templates and source candidates. Their
+   availability can be active, inactive, mixed or unknown; their source IDs
+   cannot select effective expansion, extraction or Rename.
+3. For explicit macro inputs, pass `analysis` on each model request, for example
+   `{"defines":[{"name":"POLICY","expression":"1"}]}`. Inputs are ordered;
+   later source definitions can replace them. Omit an absent input: false and
+   zero are still defined for `@#ifdef`.
+4. For a hypothetical definition or branch, use the returned target and source
+   revision in an override. Runtime schemas give the supported operations.
+   Requery after `ANALYSIS_TARGET_STALE`; select a current site instead of
+   moving an old target to a similar line.
+5. Run Diagnose and inspect effective Equations or Expand with the same choices.
+   Read `inputs[].analysis`, completeness and override receipts. A not-reached
+   override can leave a complete model while the requested preview is partial.
+
+MCP choices belong to one request. They do not change the editor's selection;
+omission selects Source. A name labels the choices and does not load a saved
+preset. An override makes an **analysis preview**. It describes hypothetical
+source and does not establish an equivalent official Dynare invocation.
+Rename and diagnostic fixes are unavailable in a preview; inspect the stated
+cause and use verified written edits when the task requires a source change.
+
+To check several configurations, use Diagnose
+`batch: {kind: "configured_sources", jobs: [{source, analysis}, ...]}`.
+Repeated roots remain separate `job:1`, `job:2`, and later jobs. Read each
+job's result and retain `root_revisions` by job identity for continuation.
+Each job uses the finite job allowance. Other batch forms use Source and
+reject shared `analysis`.
+
 ## Select names and equations
 
 Symbol Info, Equations and Rename share one typed `symbol` selector:
@@ -122,7 +159,7 @@ Collections default to 25 rows shared across the response. `page_size` can be
 1–1000. `selection.collections` gives returned, available and total matches,
 with `total_matches: null` when complete totals are unavailable. Continue only
 when the task needs more rows and `selection.continuation` is non-null. Keep
-source, selectors, sections, filters and page size, with the original guard:
+source, analysis choices, view, selectors, sections, filters and page size, with the original guard:
 
 - Single-model requests: `expected_revision` from `inputs[0].revision`.
 - Single-source Diagnose: `expected_revision` from its `data.root_revisions`.
@@ -138,16 +175,18 @@ list does not establish a steady state, determinacy, the economics or a
 successful experiment. Run official Dynare under MATLAB for those claims
 (`debugging.md`, “Run-and-fix loop”).
 
-Counts describe written source before transformations and are authoritative
+Effective counts describe the selected model before transformations and are authoritative
 only with complete coverage. Model locals stay outside equation counts and
 retain execution and dimension scope. Per-use `timing` is the written offset;
 `dynare_timing` and timing classes apply the `predetermined_variables`
 convention. Static replacement rows do not contribute dynamic timing.
+Source-template totals describe written inventory and have separate source
+coverage. An unavailable total is null; a returned page length is not a total.
 
 MCP positions are one-based Unicode-scalar columns with exclusive ends.
 Missing origins are unavailable targets. Obtain current locations after edits.
 Source limits are 1,000,000 UTF-8 bytes per file, 8 MiB combined source, 256
-files or lookup candidates and 64 checked roots. Expansion and output have
+files or lookup candidates and 64 root jobs, including repeated configured jobs. Expansion and output have
 separate 8 MiB limits; `macro_work_limit` selects finite analysis work.
 
 ## Propose and apply changes
@@ -165,7 +204,7 @@ and conflicts, and report skipped and remaining work. Rename and Format have
 their own direct tools. Unsafe Rename inputs withhold its complete proposal.
 
 Before applying, verify the proposal revision, source policy, checked owners,
-include folders, macro work limit, every input guard and every edit's
+include folders, selected analysis, macro work limit, every input guard and every edit's
 `expected_text`. Guards cover unchanged dependencies and missing candidates,
 with identity, hashes and length. For saved disk input, repeat the proposal
 request with its original `expected_revision` first. Apply the complete edit
@@ -191,6 +230,14 @@ saved host files. Relative search folders resolve against the repository.
 Historical dependencies come only from the selected commit; outside sources,
 symlinks and gitlinks fail explicitly. No Git fetch occurs.
 
+Use `analysis_a` and `analysis_b` for independent Before and After choices.
+For a configuration comparison, supply the same source on both sides and
+change these choices. Omission selects Source, including historical sides;
+guarded overrides must match that side's actual text. A failed comparison
+retains `data.analysis_summaries` with available metadata and causes. Null
+counts mean unavailable work, not a zero-equation model. It provides no diff
+or source navigation until both sides can be compared.
+
 Follow navigation with its side, input identity, captured source and commit.
 Comparison reports retained source/fact changes, not algebraic or numerical
 equivalence. Coverage can remain partial for retained-history limits even when
@@ -198,6 +245,6 @@ both source captures are complete.
 
 ## Report
 
-Name the tools used, roots and includes, codes, coverage and omitted work.
+Name the tools used, roots and includes, selected choices, codes, coverage and omitted work.
 Keep static findings separate from numerical results. If tools were
 unavailable, say that the Dygnosis checks were not run.

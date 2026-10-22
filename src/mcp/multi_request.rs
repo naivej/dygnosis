@@ -9,9 +9,18 @@ use std::path::Path;
 
 use super::result::{Pages, ResultOptions, ToolResult};
 use super::source::{self, RequestControl, SourceInput, SourceSnapshot};
+use crate::engine::analysis_configuration::AnalysisConfiguration;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConfiguredJob {
+    source: SourceInput,
+    analysis: AnalysisConfiguration,
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct BatchParams {
+    analysis: Option<AnalysisConfiguration>,
     /// Finite macro work units applied separately to each checked root, from 1 to 100000000. Omission uses the default; source and batch limits are independent.
     #[serde(default)]
     macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
@@ -42,6 +51,8 @@ struct BatchParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct CompareParams {
+    analysis_before: Option<AnalysisConfiguration>,
+    analysis_after: Option<AnalysisConfiguration>,
     /// Finite macro work units applied separately to Before and After, from 1 to 100000000. Omission uses the default; source and comparison limits are independent.
     #[serde(default)]
     macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
@@ -95,10 +106,35 @@ pub(super) fn dispatch_batch(
         .map(|value| serde_json::from_value(value.clone()))
         .transpose()
         .map_err(|error| invalid(error.to_string()))?;
+    let configured: Option<Vec<ConfiguredJob>> = arguments
+        .get("configured_sources")
+        .map(|value| serde_json::from_value(value.clone()))
+        .transpose()
+        .map_err(|error| invalid(error.to_string()))?;
+    if configured.as_ref().is_some_and(Vec::is_empty) {
+        return Err(invalid("configured_sources.jobs must be nonempty"));
+    }
     if explicit.as_ref().is_some_and(Vec::is_empty) {
         return Err(invalid("sources must be nonempty"));
     }
     let mut explicit_inputs = BTreeMap::new();
+    let mut job_analyses = BTreeMap::new();
+    let mut job_roots = BTreeMap::new();
+    let mut job_order = Vec::new();
+    let configured_mode = configured.is_some();
+    if let Some(jobs) = configured {
+        for (index, job) in jobs.into_iter().enumerate() {
+            let identity = format!("job:{}", index + 1);
+            let root = match &job.source {
+                SourceInput::Text { .. } => format!("input:{}", index + 1),
+                SourceInput::Map { root, .. } | SourceInput::Disk { root, .. } => root.clone(),
+            };
+            job_order.push(identity.clone());
+            job_roots.insert(identity.clone(), root);
+            job_analyses.insert(identity.clone(), job.analysis);
+            explicit_inputs.insert(identity, job.source);
+        }
+    }
     if let Some(sources) = explicit {
         for (index, input) in sources.into_iter().enumerate() {
             let identity = match &input {
@@ -113,6 +149,11 @@ pub(super) fn dispatch_batch(
     let params: BatchParams =
         serde_json::from_value(arguments.clone()).map_err(|error| invalid(error.to_string()))?;
     control.macro_work_limit = params.macro_work_limit;
+    if configured_mode && params.analysis.is_some() {
+        return Err(invalid(
+            "Configured jobs carry their own analysis choices; omit shared analysis",
+        ));
+    }
     if params.output.continuation.is_some() && params.expected_revisions.is_empty() {
         return Err(invalid(
             "A batch continuation requires expected_revisions for its checked roots",
@@ -141,7 +182,9 @@ pub(super) fn dispatch_batch(
             }
         })
         .collect();
-    let (mut roots, discovery_complete, discovery_limits) = if !explicit_inputs.is_empty() {
+    let (mut roots, discovery_complete, discovery_limits) = if configured_mode {
+        (job_order, true, Vec::new())
+    } else if !explicit_inputs.is_empty() {
         (explicit_inputs.keys().cloned().collect(), true, Vec::new())
     } else if map_mode {
         let files = params
@@ -176,7 +219,11 @@ pub(super) fn dispatch_batch(
         discover_paths(params.paths.as_ref().unwrap(), &exclusions, &control)?
     };
     roots.retain(|root| {
-        params.root.as_ref().is_none_or(|filter| filter == root) && !excluded(root, &exclusions)
+        params
+            .root
+            .as_ref()
+            .is_none_or(|filter| filter == root || job_roots.get(root) == Some(filter))
+            && !excluded(root, &exclusions)
     });
     if roots.is_empty()
         && discovery_complete
@@ -225,7 +272,20 @@ pub(super) fn dispatch_batch(
             }
         };
         let expected = params.expected_revisions.get(root).map(String::as_str);
-        match source::resolve_source(input, expected, &control) {
+        let previous = snapshots.last().map(|(report, snapshot)| {
+            let previous_input = reports[*report]["root"]
+                .as_str()
+                .and_then(|root| explicit_inputs.get(root));
+            (snapshot, previous_input == Some(&input))
+        });
+        match source::resolve_source_configured_reusing(
+            input,
+            expected,
+            &control,
+            job_analyses.get(root).or(params.analysis.as_ref()),
+            None,
+            previous,
+        ) {
             Ok(mut snapshot) => {
                 if params.output.continuation.is_some()
                     && !params.expected_revisions.contains_key(root)
@@ -263,6 +323,9 @@ pub(super) fn dispatch_batch(
                         .map(|(file, text)| (file.clone(), text.clone())),
                 );
                 revisions.insert(root.clone(), snapshot.revision.clone());
+                if configured_mode {
+                    snapshot.inputs["job_id"] = json!(root);
+                }
                 result.inputs.push(snapshot.inputs.clone());
                 coverages.push(snapshot.coverage.clone());
                 let include_failure=snapshot.workspace.include_records(&snapshot.root).and_then(|records| {
@@ -299,6 +362,24 @@ pub(super) fn dispatch_batch(
                         reports.push(json!({"root":root,"status":"partial","diagnostics":diagnostics,"failure":"Available diagnostics were checked. Checks that require complete parsing, macro expansion or source mapping were withheld.","code":"INCOMPLETE_INPUT","reasons":reasons,"completed":["source capture","available diagnostic checks"],"omitted":["checks that require complete model analysis"]}));
                     }
                 }
+                let report = reports.last_mut().expect("captured source report");
+                report["analysis"] = snapshot.inputs["analysis"].clone();
+                let mut application = ToolResult::new(Value::Null);
+                super::source_views::outcomes(&snapshot, &mut application);
+                if !application.outcome.reasons.is_empty() {
+                    report["analysis_outcome"] = json!(application.outcome);
+                    if report["status"] == "ok" {
+                        report["status"] = json!("partial");
+                        report["completed"] =
+                            json!(["configured model analysis", "diagnostic checks"]);
+                        report["omitted"] = json!([
+                            "requested override execution; see analysis_outcome and application receipts"
+                        ]);
+                    }
+                    for reason in application.outcome.reasons {
+                        result.cause("partial", &reason.code, reason.message);
+                    }
+                }
                 snapshots.push((reports.len() - 1, snapshot));
                 control.complete_phase("Diagnose root");
             }
@@ -322,6 +403,16 @@ pub(super) fn dispatch_batch(
         }
     }
     let mut summary = json!({"checked":0,"partial":0,"failed":0,"unfinished":0,"errors":0,"warnings":0,"information":0,"discovery_complete":discovery_complete,"diagnostic_totals_complete":coverages.iter().all(|coverage|coverage["complete"]==true)});
+    if configured_mode {
+        summary["jobs"] = json!(roots.len());
+        summary["distinct_roots"] = json!(
+            roots
+                .iter()
+                .filter_map(|job| job_roots.get(job))
+                .collect::<BTreeSet<_>>()
+                .len()
+        );
+    }
     for root in &reports {
         let field = match root["status"].as_str() {
             Some("ok") => "checked",
@@ -339,7 +430,9 @@ pub(super) fn dispatch_batch(
             summary[field] = json!(summary[field].as_u64().unwrap() + 1);
         }
     }
-    if reports.iter().any(|root| root["status"] != "ok")
+    if reports
+        .iter()
+        .any(|root| root["status"] != "ok" && root["analysis_outcome"].is_null())
         || coverages
             .iter()
             .any(|coverage| coverage["complete"] != true)
@@ -389,6 +482,13 @@ pub(super) fn dispatch_batch(
         }
     }
     result.selection = pages.finish(&params.output);
+    if configured_mode {
+        for row in reports.iter_mut().chain(coverages.iter_mut()) {
+            let job = row["root"].as_str().unwrap_or("").to_owned();
+            row["job_id"] = json!(job);
+            row["root"] = json!(job_roots.get(&job));
+        }
+    }
     result.coverage = Some(json!({"roots":coverages,"discovery_complete":discovery_complete}));
     result.data =
         json!({"summary":summary,"roots":reports,"revision":revision,"root_revisions":revisions});
@@ -585,6 +685,8 @@ fn comparison_mode(
                 before: params.base.before.as_ref().unwrap().clone(),
                 after: params.base.after.as_ref().unwrap().clone(),
                 search_paths: params.base.search_paths.clone().unwrap_or_default(),
+                analysis_before: params.analysis_before.clone(),
+                analysis_after: params.analysis_after.clone(),
             },
             &control,
         );
@@ -598,68 +700,160 @@ fn comparison_mode(
             params.expected_revision_b.as_deref(),
         ]) {
             if expected.is_some_and(|expected| input["revision"].as_str() != Some(expected)) {
-                return Ok(ToolResult::refused("INPUT_CHANGED", "Comparison inputs no longer match their expected revisions; start a new comparison").wire());
+                let message = "Comparison inputs no longer match their expected revisions; start a new comparison";
+                let mut summaries = data["analysis_summaries"]
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default();
+                for (index, side) in ["before", "after"].into_iter().enumerate() {
+                    let requested = if index == 0 {
+                        params.analysis_before.as_ref()
+                    } else {
+                        params.analysis_after.as_ref()
+                    };
+                    let summary = summaries
+                        .entry(side.to_owned())
+                        .or_insert_with(|| json!({"requested_analysis":requested}));
+                    if inputs[index]["analysis"].is_object() {
+                        summary["analysis"] = inputs[index]["analysis"].clone();
+                    }
+                    summary["complete"] = Value::Null;
+                    summary["counts"] = Value::Null;
+                    summary["counts_cause"] = json!(message);
+                    summary["cause"] = json!({"code":"INPUT_CHANGED","message":message});
+                }
+                let mut refused = ToolResult::refused("INPUT_CHANGED", message);
+                refused.data = json!({"analysis_summaries":summaries});
+                return Ok(refused.wire());
             }
         }
         let coverage = data.get("coverage").cloned().unwrap_or_else(|| json!({"before":{"complete":inputs[0]["complete"]},"after":{"complete":inputs[1]["complete"]}}));
         (data, inputs, coverage)
     } else {
-        let acquire = |before: bool, expected: Option<&str>| {
+        let acquire = |before: bool, expected: Option<&str>, previous: Option<&SourceSnapshot>| {
             if let Some((a, b)) = &sources {
-                source::resolve_source(
+                source::resolve_source_configured_reusing(
                     if before { a.clone() } else { b.clone() },
                     expected,
                     &control,
+                    if before {
+                        params.analysis_before.as_ref()
+                    } else {
+                        params.analysis_after.as_ref()
+                    },
+                    None,
+                    previous.map(|previous| (previous, a == b)),
                 )
             } else {
-                comparison_source(&params.base, before, expected, &control)
+                comparison_source(
+                    &params.base,
+                    before,
+                    expected,
+                    &control,
+                    if before {
+                        params.analysis_before.as_ref()
+                    } else {
+                        params.analysis_after.as_ref()
+                    },
+                    previous,
+                )
             }
         };
-        let mut before = match acquire(true, params.expected_revision_a.as_deref()) {
+        let mut before = match acquire(true, params.expected_revision_a.as_deref(), None) {
             Ok(snapshot) => snapshot,
-            Err(error) => return failed_comparison_source(error, "before", &control.limits),
+            Err(error) => {
+                return failed_comparison_source(error, "before", &control.limits, None, &params);
+            }
         };
-        let mut after = match acquire(false, params.expected_revision_b.as_deref()) {
+        let mut after = match acquire(false, params.expected_revision_b.as_deref(), Some(&before)) {
             Ok(snapshot) => snapshot,
-            Err(error) => return failed_comparison_source(error, "after", &control.limits),
+            Err(error) => {
+                return failed_comparison_source(
+                    error,
+                    "after",
+                    &control.limits,
+                    Some(&before),
+                    &params,
+                );
+            }
         };
-        if before
-            .sources
-            .values()
-            .chain(after.sources.values())
-            .map(String::len)
-            .sum::<usize>()
-            > control.limits.max_source_bytes
-            || before
-                .guards
-                .iter()
-                .map(|guard| guard.file.as_str())
-                .chain(before.sources.keys().map(String::as_str))
-                .collect::<BTreeSet<_>>()
-                .len()
-                + after
+        let common_current =
+            before.inputs["source_policy"] == "disk" && after.inputs["source_policy"] == "disk";
+        if let Err(error) = before.workspace.validate_comparison_inputs(
+            &before.root,
+            &after.workspace,
+            &after.root,
+            common_current,
+            (control.limits.max_files, control.limits.max_source_bytes),
+            Some((&before.guards, &after.guards)),
+        ) {
+            let code = if error.code == "CAPTURE_LIMIT" {
+                "SOURCE_LIMIT"
+            } else {
+                error.code
+            };
+            let summaries = supplied_analysis_summaries(
+                Some(&before),
+                Some(&after),
+                &params,
+                Some((code, &error.message)),
+                Some((code, &error.message)),
+            );
+            let mut refused = ToolResult::refused(code, error.message);
+            refused.data = json!({"analysis_summaries":summaries});
+            if code == "SOURCE_LIMIT" {
+                refused.limits.push(json!({"code":"SOURCE_LIMIT","ceilings":control.limits,"affected":"comparison input capture","omitted":"comparison model facts and navigation"}));
+            }
+            return Ok(refused.wire());
+        }
+        // Current saved files have one validated positive/negative union above.
+        // Deliberately distinct supplied inputs retain additive acquisition caps.
+        if !common_current
+            && (before
+                .sources
+                .values()
+                .chain(after.sources.values())
+                .map(String::len)
+                .sum::<usize>()
+                > control.limits.max_source_bytes
+                || before
                     .guards
                     .iter()
                     .map(|guard| guard.file.as_str())
-                    .chain(after.sources.keys().map(String::as_str))
+                    .chain(before.sources.keys().map(String::as_str))
                     .collect::<BTreeSet<_>>()
                     .len()
-                > control.limits.max_files
+                    + after
+                        .guards
+                        .iter()
+                        .map(|guard| guard.file.as_str())
+                        .chain(after.sources.keys().map(String::as_str))
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                    > control.limits.max_files)
         {
             let mut result = ToolResult::refused(
                 "SOURCE_LIMIT",
                 "The two comparison inputs exceed the request source-byte or checked-file and lookup-candidate limit. No comparison facts were produced.",
             );
+            result.data = json!({"analysis_summaries":supplied_analysis_summaries(Some(&before),Some(&after),&params,Some(("SOURCE_LIMIT","The pair exceeds the request source limit.")),Some(("SOURCE_LIMIT","The pair exceeds the request source limit.")))});
             result.limits.push(json!({"code":"SOURCE_LIMIT","ceilings":control.limits,"affected":"comparison input capture","omitted":"comparison model facts and navigation"}));
             return Ok(result.wire());
         }
         let inputs = vec![before.inputs.clone(), after.inputs.clone()];
         let coverage = json!({"before":before.coverage,"after":after.coverage});
-        let data = if before.coverage["complete"] != true || after.coverage["complete"] != true {
+        let mut data = if before.coverage["complete"] != true || after.coverage["complete"] != true
+        {
             json!({"status":"incomplete","message":"Comparison inputs are incomplete; change arrays and source navigation were withheld.","inputs":coverage})
         } else {
             compare_supplied(&mut before, &mut after, &control)?
         };
+        if data["status"] == "incomplete" || data["error"].is_string() {
+            let cause = data["code"].as_str().zip(data["error"].as_str());
+            let summaries =
+                supplied_analysis_summaries(Some(&before), Some(&after), &params, cause, cause);
+            data["analysis_summaries"] = summaries;
+        }
         (data, inputs, coverage)
     };
     control.check().map_err(source_error)?;
@@ -717,6 +911,8 @@ fn comparison_source(
     before: bool,
     expected: Option<&str>,
     control: &RequestControl,
+    analysis: Option<&AnalysisConfiguration>,
+    previous: Option<&SourceSnapshot>,
 ) -> Result<SourceSnapshot, source::SourceError> {
     let (text, active, preferred, side) = if before {
         (
@@ -764,7 +960,14 @@ fn comparison_source(
     } else {
         SourceInput::Text { text: text.into() }
     };
-    let mut snapshot = source::resolve_source(input, expected, control)?;
+    let mut snapshot = source::resolve_source_configured_reusing(
+        input,
+        expected,
+        control,
+        analysis,
+        None,
+        previous.map(|previous| (previous, false)),
+    )?;
     snapshot.inputs["side"] = json!(side);
     if active.is_none() {
         snapshot.root_file = None;
@@ -779,16 +982,62 @@ fn failed_comparison_source(
     error: source::SourceError,
     side: &str,
     ceilings: &source::SourceLimits,
+    before: Option<&SourceSnapshot>,
+    params: &CompareParams,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     if error.invalid_arguments || error.code == "CANCELLED" {
         return Err(source_error(error));
     }
+    let summaries = supplied_analysis_summaries(
+        before,
+        None,
+        params,
+        (side == "before").then_some((error.code, error.message.as_str())),
+        (side == "after").then_some((error.code, error.message.as_str())),
+    );
     let mut result = ToolResult::refused(error.code, error.message);
+    result.data = json!({"analysis_summaries":summaries});
     if matches!(error.code, "SOURCE_LIMIT" | "ROOT_LIMIT") {
         result.limits.push(json!({"code":error.code,"ceilings":ceilings,"side":side,"affected":"comparison input capture","omitted":"comparison model facts and navigation"}));
     }
     result.coverage = Some(json!({"side":side,"complete":false}));
     Ok(result.wire())
+}
+
+/// Explain retained captures without running model counts or another analysis.
+fn supplied_analysis_summaries(
+    before: Option<&SourceSnapshot>,
+    after: Option<&SourceSnapshot>,
+    params: &CompareParams,
+    before_cause: Option<(&str, &str)>,
+    after_cause: Option<(&str, &str)>,
+) -> Value {
+    let summary = |snapshot: Option<&SourceSnapshot>,
+                   requested: Option<&AnalysisConfiguration>,
+                   cause: Option<(&str, &str)>| {
+        let mut value = json!({"requested_analysis":requested,"complete":null,"counts":null,
+            "counts_cause":"Model counts are unavailable because the comparison stopped before publishing model facts."});
+        if let Some(snapshot) = snapshot {
+            value["analysis"] = snapshot.inputs["analysis"].clone();
+            value["complete"] = snapshot.inputs["analysis"]["model_complete"].clone();
+            if snapshot.coverage["complete"] != true {
+                let reason = &snapshot.coverage["reasons"][0];
+                value["cause"] = json!({"code":reason["code"].as_str().unwrap_or("INCOMPLETE_INPUT"),"message":reason["message"].as_str().unwrap_or("This side has incomplete model analysis.")});
+                value["counts_cause"] = value["cause"]["message"].clone();
+            }
+        }
+        if let Some((code, message)) = cause {
+            value["cause"] = json!({"code":code,"message":message});
+            value["counts_cause"] = json!(message);
+        } else if snapshot.is_none() {
+            value["counts_cause"] = json!(
+                "Source acquisition did not finish for this side because the comparison stopped."
+            );
+        }
+        value
+    };
+    json!({"before":summary(before,params.analysis_before.as_ref(),before_cause),
+        "after":summary(after,params.analysis_after.as_ref(),after_cause)})
 }
 
 fn compare_supplied(
@@ -865,6 +1114,18 @@ fn compare_supplied(
     {
         return Ok(
             json!({"error":"Comparison inputs changed while reading them; repeat the request","code":"INPUT_CHANGED"}),
+        );
+    }
+    if let Err(error) = before.workspace.validate_comparison_inputs(
+        &before.root,
+        &after.workspace,
+        &after.root,
+        before.inputs["source_policy"] == "disk" && after.inputs["source_policy"] == "disk",
+        (control.limits.max_files, control.limits.max_source_bytes),
+        Some((&before.guards, &after.guards)),
+    ) {
+        return Ok(
+            json!({"error":error.message,"code":if error.code=="CAPTURE_LIMIT"{"SOURCE_LIMIT"}else{error.code}}),
         );
     }
     let mut data = diff.to_json();
@@ -1248,7 +1509,13 @@ mod tests {
         let second = run("dynare_compare_models", next, RequestControl::default());
         assert_eq!(second["outcome"]["status"], "refused");
         assert_eq!(second["outcome"]["reasons"][0]["code"], "INPUT_CHANGED");
-        assert!(second["data"].is_null());
+        assert!(second["data"].get("navigation").is_none());
+        assert!(second["data"].get("semantic").is_none());
+        assert_eq!(
+            second["data"]["analysis_summaries"]["after"]["cause"]["code"],
+            "INPUT_CHANGED"
+        );
+        assert!(second["data"]["analysis_summaries"]["after"]["counts"].is_null());
     }
 
     // An already-cancelled request starts no roots and records no late progress.
@@ -1426,7 +1693,14 @@ mod tests {
         assert_eq!(result["outcome"]["reasons"][0]["code"], "SOURCE_LIMIT");
         assert_eq!(result["limits"][0]["code"], "SOURCE_LIMIT");
         assert_eq!(result["limits"][0]["ceilings"]["max_files"], 1);
-        assert!(result["data"].is_null());
+        for side in ["before", "after"] {
+            let summary = &result["data"]["analysis_summaries"][side];
+            assert!(summary["counts"].is_null());
+            assert_eq!(summary["cause"]["code"], "SOURCE_LIMIT");
+        }
+        assert!(result["data"].get("navigation").is_none());
+        assert!(result["data"].get("changed_equations").is_none());
+        assert!(result["proposal"].is_null());
     }
 
     // Missing search candidates from several roots share one request budget.

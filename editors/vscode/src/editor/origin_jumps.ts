@@ -9,7 +9,7 @@ import type { Location, Position, Range } from "../client/protocol";
 import { booleanSetting, listSetting, macroTintOnlyChange } from "../client/settings";
 
 /** The input-only event and native placement option are integrated with 0.11.2. */
-export interface OriginJumpClient extends Pick<DygnosisClient, "client" | "currentInstance" | "log" | "failure" | "revalidate" | "execute" | "output"> {
+export interface OriginJumpClient extends Pick<DygnosisClient, "client" | "currentInstance" | "log" | "failure" | "revalidate" | "execute" | "output" | "onDidChangeAnalysis"> {
   readonly onDidInvalidate: vscode.Event<InputInvalidation>;
   openLocation(location: Location, root?: vscode.Uri, guard?: NavigationGuard, options?: { viewColumn?: vscode.ViewColumn; reuseOpen?: boolean }): Promise<void>;
 }
@@ -206,7 +206,8 @@ export function projectRegionTarget(payload: PreviewNavigation, region: SourceRe
 interface State {
   session: EffectivePreviewSession; payload?: PreviewNavigation; instance: number; stale: boolean; closed: boolean;
   epoch: number; operation: number; cancellation?: vscode.CancellationTokenSource; subscriptions: vscode.Disposable[]; watchers: vscode.Disposable[];
-  fileEpoch: number; loadingOperation?: number; pendingFile: boolean;
+  fileEpoch: number; loadingOperation?: number; pendingFile: boolean; refreshOnReveal?: boolean;
+  refreshTimer?: ReturnType<typeof setTimeout>; refreshAttempts?: number;
 }
 export function registerOriginJumps(service: OriginJumpClient, previews: EffectivePreviewRegistry): vscode.Disposable {
   const states = new Map<EffectivePreviewSession, State>();
@@ -258,7 +259,12 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     ++state.operation; state.cancellation?.cancel(); state.cancellation?.dispose(); state.cancellation = undefined;
     state.loadingOperation = undefined; state.pendingFile = false;
   };
-  const stale = (state: State): void => { state.stale = true; ++state.epoch; cancel(state); clearMacroTint(state); updateContext(); };
+  const stale = (state: State): void => {
+    state.stale = true; ++state.epoch; cancel(state); clearMacroTint(state);
+    previews.markOutdated?.(state.session, "Its source or analysis configuration changed; the displayed text keeps its captured configuration.");
+    updateContext();
+    if (state.refreshOnReveal) scheduleConfigurationRefresh(state);
+  };
   const observeFile = (state: State, target: string): void => {
     if (!(state.payload?.dependency_candidates ?? [state.session.root.toString()]).some(candidate => sameUri(candidate, target))) return;
     ++state.fileEpoch;
@@ -302,6 +308,10 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     if (supportsNavigation(service)) {
       try {
         state.payload = parsePreviewNavigation(session.result, session.root); watch(state);
+        if (session.navigationProof?.revision === state.payload.revision && session.navigationProof.instance === service.currentInstance &&
+            state.payload.complete && rootVersionMatches(state, state.payload)) {
+          state.stale = false; updateContext(); return;
+        }
         const request = begin(state);
         void service.revalidate(session.root, state.payload.revision, state.instance, session.root, request.token).then(info => {
           if (!disposed && !state.closed && state.operation === request.operation && state.epoch === request.epoch && !request.token.isCancellationRequested &&
@@ -316,6 +326,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     const state = states.get(session);
     if (!state) return;
     state.closed = true; cancel(state); clearMacroTint(state);
+    if (state.refreshTimer) clearTimeout(state.refreshTimer);
     for (const subscription of [...state.subscriptions, ...state.watchers]) subscription.dispose();
     states.delete(session); updateContext();
   };
@@ -324,10 +335,9 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     return { operation: state.operation, epoch: state.epoch, token: state.cancellation.token };
   };
   const unavailable = (): never => refuse("This preview has changed or its source is unavailable. Refresh macro expansion and choose the row again.");
-  const refresh = async (): Promise<void> => {
-    const state = activeState();
+  const refreshState = async (state: State): Promise<void> => {
     if (disposed) return;
-    if (!state) { refuse("Open a macro expansion preview before refreshing it."); }
+    if (state.refreshTimer) { clearTimeout(state.refreshTimer); state.refreshTimer = undefined; }
     state.stale = true; const request = begin(state); updateContext();
     const instance = service.currentInstance, generation = state.session.generation;
     const current = (): boolean => !disposed && !state.closed && state.operation === request.operation && state.epoch === request.epoch &&
@@ -335,6 +345,8 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     try {
       const result = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, state.session.root), request.token);
       if (!current()) return;
+      if (record(result) && result.success === false && typeof result.message === "string")
+        refuse(result.message);
       let payload: PreviewNavigation | undefined;
       if (supportsNavigation(service)) {
         payload = parsePreviewNavigation(result, state.session.root);
@@ -345,10 +357,41 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       if (!record(result) || typeof result.effective_text !== "string") throw new Error("This engine cannot refresh the effective model. Update dynare.serverPath or use the bundled binary.");
       appendMacroMessages(service.output, result);
       if (!current()) return;
-      state.payload = payload; state.instance = instance; state.stale = !payload?.complete;
-      if (!previews.replace(state.session, result)) { unavailable(); return; }
-      watch(state); updateContext();
-    } catch (error) { if (current()) throw error; }
+      const replaced = await previews.replace(state.session, result, current,
+        payload ? { revision: payload.revision, instance } : undefined);
+      if (!replaced) { if (current()) unavailable(); return; }
+      // The new immutable display reuses this loader's accepted proof.
+      updateContext();
+    } catch (error) {
+      if (current()) throw new Error(`Macro expansion was not refreshed: ${error instanceof Error ? error.message : String(error)} The displayed text keeps its old configuration.`, { cause: error });
+    }
+    finally {
+      if (state.operation === request.operation) {
+        state.cancellation?.dispose(); state.cancellation = undefined;
+      }
+    }
+  };
+  const scheduleConfigurationRefresh = (state: State): void => {
+    if (disposed || state.closed || !state.refreshOnReveal) return;
+    if (state.refreshTimer) clearTimeout(state.refreshTimer);
+    if (!vscode.window.visibleTextEditors.some(editor => editor.document === state.session.document)) return;
+    state.refreshTimer = setTimeout(() => {
+      state.refreshTimer = undefined;
+      if (disposed || state.closed || !state.refreshOnReveal ||
+          !vscode.window.visibleTextEditors.some(editor => editor.document === state.session.document)) return;
+      if (!(state.refreshAttempts ?? 0)) {
+        state.refreshOnReveal = false;
+        void service.failure("The analysis configuration changed, but its macro expansion could not stay current. The displayed text keeps its old configuration. Refresh macro expansion again.");
+        return;
+      }
+      state.refreshAttempts = (state.refreshAttempts ?? 0) - 1;
+      void refreshState(state).catch(error => service.failure(String(error)));
+    }, 75);
+  };
+  const refresh = async (): Promise<void> => {
+    const state = activeState();
+    if (!state) refuse("Open a macro expansion preview before refreshing it.");
+    await refreshState(state);
   };
   const openTarget = async (state: State, editor: vscode.TextEditor, target: PreviewLocation, proofMatch: (fresh: PreviewNavigation, loadedDocument?: vscode.TextDocument) => boolean): Promise<void> => {
     const request = begin(state), generation = state.session.generation, documentVersion = editor.document.version, instance = state.instance;
@@ -508,11 +551,24 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       }
     }
   };
+  const visible = (): void => {
+    updateContext();
+    for (const state of states.values()) if (state.refreshOnReveal && !state.closed && !state.cancellation)
+      scheduleConfigurationRefresh(state);
+  };
+  const analysisChanged = service.onDidChangeAnalysis?.(event => {
+    for (const state of [...states.values()]) if (sameUri(event.root, state.session.root.toString())) {
+      stale(state);
+      state.refreshOnReveal = true;
+      state.refreshAttempts = 4;
+      scheduleConfigurationRefresh(state);
+    }
+  });
   const subscriptions = [previews.onDidCreate(attach), previews.onDidClose(detach),
     vscode.commands.registerCommand("dygnosis.goToWrittenSource", () => runCommand(service, navigate, () => !disposed)),
     vscode.commands.registerCommand("dygnosis.refreshEffectiveModel", () => runCommand(service, refresh, () => !disposed)),
     vscode.window.onDidChangeActiveTextEditor(updateContext), vscode.window.onDidChangeTextEditorSelection(updateContext),
-    vscode.window.onDidChangeVisibleTextEditors(updateContext),
+    vscode.window.onDidChangeVisibleTextEditors(visible),
     vscode.workspace.onDidChangeConfiguration(event => {
       if (event.affectsConfiguration("dynare.effectiveModel.macroTint") || event.affectsConfiguration("dynare")) updateContext();
     })];
@@ -522,6 +578,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     disposed = true;
     for (const session of [...states.keys()]) detach(session);
     for (const subscription of subscriptions) subscription.dispose();
+    analysisChanged?.dispose();
     macroDecoration.dispose();
     updateContext();
   });

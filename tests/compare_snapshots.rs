@@ -2,10 +2,15 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dygnosis::Workspace;
+use dygnosis::analysis_configuration::{
+    AnalysisConfiguration, AnalysisOverride, InitialDefinition, SourceFileSelection,
+    SourceStructureQuery,
+};
 use dygnosis::compare_snapshots::{
     CapturedSnapshot, GitSnapshotInput, ManifestEntry, SnapshotCapture, SnapshotCoordinates,
     SourceFact, capture_git_snapshot, capture_working_snapshot, compare_captured_snapshots,
 };
+use dygnosis::compare_snapshots::{capture_working_snapshot_configured, validate_working_pair};
 use serde_json::Value;
 
 fn input(id: &str, root: &str, files: &[(&str, &str)]) -> GitSnapshotInput {
@@ -19,6 +24,7 @@ fn input(id: &str, root: &str, files: &[(&str, &str)]) -> GitSnapshotInput {
             "b".repeat(40)
         },
         requested_ref: None,
+        analysis: None,
         search_paths: Vec::new(),
         manifest: files
             .iter()
@@ -54,6 +60,219 @@ fn ready(input: &GitSnapshotInput) -> CapturedSnapshot {
             panic!("unexpected failure: {}: {}", failure.code, failure.message)
         }
     }
+}
+
+fn defined(name: &str, expression: &str) -> AnalysisConfiguration {
+    AnalysisConfiguration {
+        defines: vec![InitialDefinition {
+            name: name.into(),
+            expression: expression.into(),
+        }],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn incomplete_capture_retains_actual_choices_and_read_only_side_summaries() {
+    // Guards a complete first side and an incomplete second side losing both
+    // explanations, or reporting invented zero counts after capture stops.
+    let mut before_input = input(
+        "before",
+        "root.mod",
+        &[(
+            "root.mod",
+            "var y;model;\n@#if ON\n@#include \"missing.inc\"\n@#else\ny=0;\n@#endif\nend;\n",
+        )],
+    );
+    before_input.analysis = Some(defined("ON", "false"));
+    let mut after_input = before_input.clone();
+    after_input.input_id = "after".into();
+    after_input.analysis = Some(defined("ON", "true"));
+    let before = capture_git_snapshot(&before_input);
+    let after = capture_git_snapshot(&after_input);
+    assert!(matches!(&before, SnapshotCapture::Ready(_)));
+    assert!(
+        matches!(&after, SnapshotCapture::Failure(failure) if failure.code == "INCOMPLETE_INPUT")
+    );
+    for (capture, expression, complete) in [(&before, "false", true), (&after, "true", false)] {
+        let summary = capture.analysis_summary(Some(&defined("ON", expression)));
+        assert_eq!(
+            summary["analysis"]["configuration"]["defines"][0]["expression"],
+            expression
+        );
+        assert_eq!(summary["complete"], complete);
+        assert!(summary["counts"].is_null());
+        assert!(!summary["counts_cause"].as_str().unwrap().is_empty());
+        assert!(summary.get("sources").is_none() && summary.get("navigation").is_none());
+    }
+    let missing = SnapshotCapture::Failure(dygnosis::compare_snapshots::SnapshotFailure::new(
+        "ROOT_NOT_FOUND",
+        "The root is unavailable.",
+        None,
+    ));
+    let summary = missing.analysis_summary(Some(&defined("ON", "true")));
+    assert_eq!(
+        summary["requested_analysis"]["defines"][0]["expression"],
+        "true"
+    );
+    assert!(summary["complete"].is_null() && summary["counts"].is_null());
+}
+
+#[test]
+fn configuration_only_comparison_retains_choices_and_empty_source_diff() {
+    // Guards comparing unchanged text under Source instead of each side's
+    // requested values, or dropping the explanation of a semantic-only change.
+    let mut before = input(
+        "before",
+        "root.mod",
+        &[("root.mod", "var y;model;y=@{N};end;\n")],
+    );
+    before.analysis = Some(defined("N", "1"));
+    let mut after = before.clone();
+    after.input_id = "after".into();
+    after.analysis = Some(defined("N", "2"));
+    let old = ready(&before);
+    let new = ready(&after);
+    assert_ne!(
+        old.analysis.selection.configuration_id,
+        new.analysis.selection.configuration_id
+    );
+    let result = compare_captured_snapshots(old, new, SnapshotCoordinates::Lsp);
+    assert_eq!(result["state"], "result", "{result}");
+    assert_eq!(
+        result["diff"]["changed_equations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        result["diff"]["source_changes"]["files"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "{result}"
+    );
+    for side in ["before", "after"] {
+        assert_eq!(
+            result["inputs"][side]["analysis"]["revision"],
+            result["inputs"][side]["revision"]
+        );
+        assert_eq!(result["inputs"][side]["counts"]["n_equations"], 1);
+        assert_eq!(result["inputs"][side]["counts"]["n_endogenous"], 1);
+    }
+    assert_eq!(
+        result["inputs"]["before"]["analysis"]["configuration"]["defines"][0]["expression"],
+        "1"
+    );
+    assert_eq!(
+        result["inputs"]["after"]["analysis"]["configuration"]["defines"][0]["expression"],
+        "2"
+    );
+}
+
+#[test]
+fn historical_override_requests_present_unloaded_target_and_refuses_missing_target() {
+    // Guards a dormant but present target being mistaken for missing, and a
+    // missing historical target being supplied by the current filesystem.
+    let root = "var y;model;y=0;end;\n";
+    let dormant = "// exact raw target revision\r\n@#define N = 0\r\n";
+    let mut discovery = Workspace::new();
+    discovery.update_document("root.mod", root);
+    discovery.update_document("dormant.inc", dormant);
+    let structure = discovery
+        .source_structure(
+            "root.mod",
+            &SourceStructureQuery {
+                files: vec![SourceFileSelection::File("dormant.inc".into())],
+            },
+        )
+        .unwrap();
+    let mut target = structure.files[0].sites[0].target.clone();
+    target.file = Some("dormant.inc".into());
+    let mut snapshot = input(
+        "before",
+        "root.mod",
+        &[("root.mod", root), ("dormant.inc", dormant)],
+    );
+    snapshot.analysis = Some(AnalysisConfiguration {
+        overrides: vec![AnalysisOverride::Definition {
+            target,
+            expression: "1".into(),
+        }],
+        ..Default::default()
+    });
+    let body = snapshot.sources.remove("dormant.inc").unwrap();
+    assert!(
+        matches!(capture_git_snapshot(&snapshot), SnapshotCapture::NeedsSources(keys) if keys == ["dormant.inc"])
+    );
+    snapshot.sources.insert("dormant.inc".into(), body);
+    let captured = ready(&snapshot);
+    assert!(captured.analysis.selection.preview);
+    assert_eq!(
+        captured.inputs["analysis"]["overrides"][0]["application"],
+        "not_reached"
+    );
+    assert!(!captured.sources.contains_key("dormant.inc"));
+    snapshot.sources.remove("dormant.inc");
+    snapshot.manifest.remove("dormant.inc");
+    assert!(
+        matches!(capture_git_snapshot(&snapshot), SnapshotCapture::Failure(failure) if failure.code == "ANALYSIS_TARGET_MISSING")
+    );
+}
+
+#[test]
+fn paired_current_capture_guards_second_side_inputs_and_negative_candidates() {
+    // Guards publishing after only the first configuration's dependencies were
+    // revalidated. The second side alone reaches the helper and its prior miss.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let directory = std::env::temp_dir().join(format!(
+        "dygnosis-config-pair-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(directory.join("common")).unwrap();
+    let root = directory.join("root.mod");
+    let helper = directory.join("common/chosen.inc");
+    std::fs::write(
+        &root,
+        "var y;model;\n@#if ON\n@#include \"chosen.inc\"\n@#else\ny=0;\n@#endif\nend;\n",
+    )
+    .unwrap();
+    std::fs::write(&helper, "y=1;\n").unwrap();
+    let capture = |id, on, previous: Option<&CapturedSnapshot>| {
+        let mut workspace = Workspace::with_search_paths(vec![directory.join("common")]);
+        if let Some(previous) = previous {
+            previous.reuse_sources_for(&mut workspace);
+        }
+        match capture_working_snapshot_configured(
+            workspace,
+            root.to_str().unwrap(),
+            id,
+            "saved_files",
+            Some(defined("ON", on)),
+        ) {
+            SnapshotCapture::Ready(snapshot) => *snapshot,
+            SnapshotCapture::Failure(failure) => panic!("{}: {}", failure.code, failure.message),
+            _ => panic!("unexpected deferred Working source"),
+        }
+    };
+    let old = capture("before", "false", None);
+    let new = capture("after", "true", Some(&old));
+    validate_working_pair(&old, &new, None).unwrap();
+    std::fs::write(&helper, "y=2;\n").unwrap();
+    assert_eq!(
+        validate_working_pair(&old, &new, None).unwrap_err().code,
+        "INPUT_CHANGED"
+    );
+    let old = capture("before", "false", None);
+    let new = capture("after", "true", Some(&old));
+    std::fs::write(directory.join("chosen.inc"), "y=3;\n").unwrap();
+    assert_eq!(
+        validate_working_pair(&old, &new, None).unwrap_err().code,
+        "INPUT_CHANGED"
+    );
+    std::fs::remove_dir_all(directory).unwrap();
 }
 
 fn changed_row(result: &Value) -> &Value {

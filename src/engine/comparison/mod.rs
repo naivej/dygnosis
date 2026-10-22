@@ -208,6 +208,8 @@ pub struct CompareSource<'a> {
 /// Structural diff. JSON has no computed steady-state keys.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ModelDiff {
+    #[serde(skip)]
+    pub(crate) input_counts: (ComparisonCounts, ComparisonCounts),
     pub added_endogenous: Vec<String>,
     pub removed_endogenous: Vec<String>,
     pub common_endogenous: Vec<String>,
@@ -233,6 +235,42 @@ pub struct ModelDiff {
     pub semantic: SemanticDiff,
     pub source_changes: SourceChanges,
     pub coverage: ComparisonCoverage,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub(crate) struct ComparisonDimensionCounts {
+    dimension: String,
+    n_endogenous: usize,
+    n_equations: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub(crate) struct ComparisonCounts {
+    n_endogenous: usize,
+    n_equations: usize,
+    heterogeneity_dimensions: Vec<ComparisonDimensionCounts>,
+}
+
+fn declaration_counts(model: &Model, final_variables: &[&Decl]) -> ComparisonCounts {
+    ComparisonCounts {
+        n_endogenous: final_variables
+            .iter()
+            .filter(|decl| model.final_heterogeneity(decl).is_none())
+            .count(),
+        n_equations: 0,
+        heterogeneity_dimensions:
+            crate::engine::analysis::model_info::heterogeneous_dimension_names(model)
+                .into_iter()
+                .map(|dimension| ComparisonDimensionCounts {
+                    dimension: model.name(dimension).to_owned(),
+                    n_endogenous: final_variables
+                        .iter()
+                        .filter(|decl| model.final_heterogeneity(decl) == Some(dimension))
+                        .count(),
+                    n_equations: 0,
+                })
+                .collect(),
+    }
 }
 
 impl ModelDiff {
@@ -381,8 +419,10 @@ pub fn compare_models_with_budgets(
     source_b: Option<CompareSource<'_>>,
     budgets: ComparisonBudgets,
 ) -> ModelDiff {
-    let end_a = names(model_a, &model_a.final_decls(&["var"]));
-    let end_b = names(model_b, &model_b.final_decls(&["var"]));
+    let variables_a = model_a.final_decls(&["var"]);
+    let variables_b = model_b.final_decls(&["var"]);
+    let end_a = names(model_a, &variables_a);
+    let end_b = names(model_b, &variables_b);
     let exo_a = names(model_a, &model_a.final_decls(&["varexo", "varexo_det"]));
     let exo_b = names(model_b, &model_b.final_decls(&["varexo", "varexo_det"]));
     let par_a = names(model_a, &model_a.final_decls(&["parameters"]));
@@ -391,14 +431,20 @@ pub fn compare_models_with_budgets(
     let common_params: HashSet<String> = par_a.intersection(&par_b).cloned().collect();
     let changed_parameter_values = changed_params(model_a, model_b, &common_params);
 
-    let (added_eq, removed_eq, changed_eq, unmatched_same_name) = diff_equations(
-        &counted_equations(model_a),
-        &counted_equations(model_b),
-        AGGREGATE_DOMAIN,
-        None,
+    let (old_equations, old_count) = counted_equations(model_a);
+    let (new_equations, new_count) = counted_equations(model_b);
+    let mut input_counts = (
+        declaration_counts(model_a, &variables_a),
+        declaration_counts(model_b, &variables_b),
     );
+    input_counts.0.n_equations = old_count;
+    input_counts.1.n_equations = new_count;
+    let (added_eq, removed_eq, changed_eq, unmatched_same_name) =
+        diff_equations(&old_equations, &new_equations, AGGREGATE_DOMAIN, None);
 
+    let heterogeneous_equations = diff_heterogeneous_equations(model_a, model_b, &mut input_counts);
     let mut diff = ModelDiff {
+        input_counts,
         added_endogenous: sorted_diff(&end_b, &end_a),
         removed_endogenous: sorted_diff(&end_a, &end_b),
         common_endogenous: sorted_intersect(&end_a, &end_b),
@@ -414,7 +460,7 @@ pub fn compare_models_with_budgets(
         removed_equations: removed_eq,
         changed_equations: changed_eq,
         unmatched_same_name,
-        heterogeneous_equations: diff_heterogeneous_equations(model_a, model_b),
+        heterogeneous_equations,
         shock_setup_changes: diff_shock_setup(model_a, model_b, source_a, source_b),
         comparison_versions: ComparisonVersions::default(),
         semantic: SemanticDiff::new(budgets),
@@ -2239,11 +2285,15 @@ pub(crate) fn normalize_equation(text: &str) -> String {
 const AGGREGATE_DOMAIN: &str = "aggregate";
 const HETEROGENEOUS_DOMAIN: &str = "heterogeneous";
 
-fn counted_equations(model: &Model) -> Vec<EquationRow> {
-    equations(model)
-        .into_iter()
-        .filter(|row| !normalize_equation(&row.text).is_empty())
-        .collect()
+fn counted_equations(model: &Model) -> (Vec<EquationRow>, usize) {
+    let rows = equations(model);
+    let count = crate::engine::analysis::equations::collapsed_counted_rows(&rows);
+    (
+        rows.into_iter()
+            .filter(|row| !normalize_equation(&row.text).is_empty())
+            .collect(),
+        count,
+    )
 }
 
 /// Counted rows of one dimension, concatenated in source order. Indexes already
@@ -2261,9 +2311,18 @@ fn counted_heterogeneous(model: &Model) -> BTreeMap<String, Vec<EquationRow>> {
     by_dimension
 }
 
-fn diff_heterogeneous_equations(before: &Model, after: &Model) -> Vec<HeterogeneousEquationDiff> {
+fn diff_heterogeneous_equations(
+    before: &Model,
+    after: &Model,
+    counts: &mut (ComparisonCounts, ComparisonCounts),
+) -> Vec<HeterogeneousEquationDiff> {
     let old = counted_heterogeneous(before);
     let new = counted_heterogeneous(after);
+    for (counts, rows) in [(&mut counts.0, &old), (&mut counts.1, &new)] {
+        for dimension in &mut counts.heterogeneity_dimensions {
+            dimension.n_equations = rows.get(&dimension.dimension).map_or(0, Vec::len);
+        }
+    }
     let mut names = BTreeSet::new();
     names.extend(old.keys().cloned());
     names.extend(new.keys().cloned());

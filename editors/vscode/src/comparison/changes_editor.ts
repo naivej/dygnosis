@@ -9,7 +9,8 @@ import { createGitSources } from "./git_source_host";
 import { GitRepository, GitSources, HistoryCursor, PinnedCommit } from "./git_source";
 import { decodeGitDocument, normalizeGitText } from "./git_provenance";
 import { HistoricalSources, historicalSource } from "./history_sources";
-import { captureComparison, CapturedComparison, ComparisonFailure } from "./snapshot_compare";
+import { AnalysisSummary, captureComparison, CapturedComparison, ComparisonFailure, freezeWorkingSelector, prepareAnalysisSide, validateCapturedInputs } from "./snapshot_compare";
+import type { CompareAnalysis } from "../editor/analysis_configuration";
 import { record } from "../client/protocol";
 import { CapturedTextSources } from "./captured_text";
 import { SourceFile } from "./semantic_view";
@@ -50,6 +51,7 @@ class ChangesDocument implements vscode.CustomDocument {
   status: ViewStatus = "loading"; message = "Loading comparison…";
   result?: CapturedComparison; capture?: vscode.CancellationTokenSource; loading?: Promise<void>;
   failureSide?: DiffSide;
+  analysisSummaries?: Record<DiffSide, AnalysisSummary>;
   constructor(readonly uri: vscode.Uri, readonly resource: ComparisonResource, readonly close: (document: ChangesDocument) => void) {}
   dispose(): void {
     if (this.disposed) return;
@@ -61,7 +63,7 @@ class ChangesDocument implements vscode.CustomDocument {
 }
 
 /** A custom document owns capture state; each split owns its display choices. */
-export function registerChanges(service: DygnosisClient, extensionUri: vscode.Uri): vscode.Disposable {
+export function registerChanges(service: DygnosisClient, extensionUri: vscode.Uri): vscode.Disposable & { compareAnalysis: CompareAnalysis } {
   let gitSources: Promise<GitSources> | undefined, disposed = false, opening = 0;
   let invocation: vscode.CancellationTokenSource | undefined;
   const documents = new Map<string, ChangesDocument>(), remembered = new Map<string, DiffChoices>();
@@ -94,7 +96,8 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       before: inputLabel(doc.resource.before), after: inputLabel(doc.resource.after), status: doc.status, message: doc.message,
       rows: doc.result?.snapshot.rows.map(row => ({ ...row, sourceFiles: { before: cardSourceFiles(doc.result!, row, "before"), after: cardSourceFiles(doc.result!, row, "after") } })) ?? [], choices: view.choices,
       defaults: diffPreferences(vscode.Uri.parse(doc.resource.context_uri), service.log), semantic: doc.result?.snapshot.semantic,
-      sourceChanges: doc.result?.snapshot.sourceChanges, coverage: doc.result?.snapshot.coverage, references: doc.result?.snapshot.references, semanticMessage: doc.result?.snapshot.semanticMessage });
+      sourceChanges: doc.result?.snapshot.sourceChanges, coverage: doc.result?.snapshot.coverage, references: doc.result?.snapshot.references, semanticMessage: doc.result?.snapshot.semanticMessage,
+      analysisSummaries: doc.result ? Object.fromEntries((["before", "after"] as const).map(side => [side, { analysis: doc.result!.inputs[side].analysis, complete: doc.result!.inputs[side].complete, counts: doc.result!.inputs[side].counts ?? null, search_paths: doc.result!.inputs[side].search_paths }])) : doc.analysisSummaries });
   };
   const release = (doc: ChangesDocument): void => { if (doc.result) { history.release(doc.result.holder); capturedText.release(doc.result.holder); } doc.result = undefined; };
   const stale = (doc: ChangesDocument, message = "Out of date. Refresh to compare current files and open source links."): void => {
@@ -122,7 +125,7 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     doc.capture?.cancel(); doc.capture?.dispose();
     const token = new vscode.CancellationTokenSource(); doc.capture = token;
     const generation = ++doc.generation; doc.instance = service.currentInstance;
-    release(doc); doc.status = "loading"; doc.message = "Loading comparison…"; doc.failureSide = undefined; send(doc);
+    release(doc); doc.analysisSummaries = undefined; doc.status = "loading"; doc.message = "Loading comparison…"; doc.failureSide = undefined; send(doc);
     try {
       const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: "Comparing model sources", cancellable: true }, async (_progress, cancelled) => {
         const cancel = cancelled.onCancellationRequested(() => token.cancel());
@@ -138,11 +141,20 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       if (token.token.isCancellationRequested) { doc.status = "failure"; doc.message = "Comparison cancelled. Refresh to try again."; release(doc); send(doc); return; }
       doc.status = error instanceof ComparisonFailure && error.code === "INCOMPLETE_INPUT" ? "incomplete" : "failure";
       doc.message = String(error); if (error instanceof ComparisonFailure) doc.failureSide = error.side;
-      release(doc); service.log(doc.message); send(doc);
+      release(doc); doc.analysisSummaries = error instanceof ComparisonFailure ? error.summaries : undefined; service.log(doc.message); send(doc);
     } finally { if (doc.capture === token) { token.dispose(); doc.capture = undefined; } }
   };
   const modelUri = (input: ModelSelector): vscode.Uri => input.kind === "working" ? vscode.Uri.parse(input.root_uri) : vscode.Uri.joinPath(vscode.Uri.parse(input.repository_uri), input.root_file);
   const openResource = async (resource: ComparisonResource, column?: vscode.ViewColumn, choices?: DiffChoices): Promise<void> => {
+    const generation = opening, cancellation = new vscode.CancellationTokenSource();
+    const cancel = invocation?.token.onCancellationRequested(() => cancellation.cancel());
+    try {
+      const before = await freezeWorkingSelector(service, resource.before, cancellation.token);
+      const after = await freezeWorkingSelector(service, resource.after, cancellation.token);
+      if (disposed || opening !== generation) return;
+      const anchor = resource.anchor === resource.after ? after : resource.anchor === resource.before ? before : resource.anchor;
+      resource = { ...resource, before, after, anchor };
+    } finally { cancel?.dispose(); cancellation.dispose(); }
     const uri = vscode.Uri.from({ scheme: changesScheme, path: `/${resourceName(resource)}`, query: resourceQuery(resource) });
     if (choices) remembered.set(uri.toString(), { ...choices });
     await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: column ?? vscode.ViewColumn.Active, preview: false });
@@ -352,8 +364,8 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     const generation = doc.generation, result = doc.result, instance = doc.instance;
     const expired = (): never => refuse("Comparison inputs changed. Refresh the comparison before opening source.");
     if (!result || doc.status !== "ready" || !current(doc, generation, instance)) return expired();
-    const verified = await Promise.all(result.working.map(input => service.revalidate(input.root, input.expected, instance)));
-    if (!current(doc, generation, instance) || verified.some(info => !info)) expired();
+    const verified = await validateCapturedInputs(service, result);
+    if (!current(doc, generation, instance) || !verified) expired();
     if (row && result.legacy) {
       const fresh = parseDiff(await service.execute("dynare/compareModels", [modelUri(doc.resource.before).toString(), modelUri(doc.resource.after).toString()]), modelUri(doc.resource.before).toString(), modelUri(doc.resource.after).toString());
       const matched = fresh.rows.find(candidate => candidate.id === row.id);
@@ -503,19 +515,38 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       const workingSides = (["before", "after"] as const).filter(side => doc.resource[side].kind === "working");
       const matches = workingSides.some(side => event.root ? modelUri(doc.resource[side]).toString() === event.root && event.modelRevision !== doc.result!.working.find(input => input.root.toString() === event.root)?.expected :
         event.uri ? [...doc.result!.sourceUris[side].values()].some(uri => uri.toString() === event.uri) || doc.result!.inputs[side].dependency_candidates.includes(event.uri) : false);
-      if (matches) stale(doc);
+      if (matches) {
+        const result = doc.result, generation = doc.generation;
+        if (result && result.working.length && (["before", "after"] as const).filter(side => doc.resource[side].kind === "working").every(side => Array.isArray(result.inputs[side].guards))) {
+          // A live selection change does not change an already captured side.
+          // Check its frozen source union instead of comparing live model IDs.
+          void validateCapturedInputs(service, result).then(valid => {
+            if (current(doc, generation, result.instance) && !valid) stale(doc);
+          }).catch(error => { if (current(doc, generation, result.instance)) stale(doc, String(error)); });
+        } else stale(doc);
+      }
     }
   });
   const settings = vscode.workspace.onDidChangeConfiguration(event => {
     for (const doc of documents.values()) {
       const context = vscode.Uri.parse(doc.resource.context_uri);
       if (event.affectsConfiguration("dynare.serverPath")) stale(doc, "The engine selection changed. Refresh this comparison.");
-      else if (event.affectsConfiguration("dynare.searchPaths", context) || (["before", "after"] as const).some(side => doc.resource[side].kind === "working" && event.affectsConfiguration("dynare.searchPaths", modelUri(doc.resource[side])))) stale(doc);
+      else if ((["before", "after"] as const).some(side => doc.resource[side].search_paths === undefined && (event.affectsConfiguration("dynare.searchPaths", context) || doc.resource[side].kind === "working" && event.affectsConfiguration("dynare.searchPaths", modelUri(doc.resource[side]))))) stale(doc);
     }
   });
-  return vscode.Disposable.from(history, capturedText, invalidated, settings,
+  const registration = vscode.Disposable.from(history, capturedText, invalidated, settings,
     vscode.window.registerCustomEditorProvider(changesViewType, provider, { supportsMultipleEditorsPerDocument: true, webviewOptions: { retainContextWhenHidden: false } }),
     vscode.commands.registerCommand("dygnosis.openChanges", (argument?: unknown) => start(argument)),
     vscode.commands.registerCommand("dygnosis.diffWith", (argument?: unknown) => start(argument, true)),
     new vscode.Disposable(() => { disposed = true; ++opening; invocation?.cancel(); invocation?.dispose(); for (const doc of [...documents.values()]) doc.dispose(); remembered.clear(); void gitSources?.then(sources => sources.clear()); }));
+  const compareAnalysis: CompareAnalysis = async (root, left, right) => {
+    const selection = beginSelection(), request = opening;
+    try {
+      const before = await prepareAnalysisSide(service, root, left, selection.token);
+      const after = await prepareAnalysisSide(service, root, right, selection.token);
+      if (disposed || opening !== request || selection.token.isCancellationRequested) return;
+      await openResource({ schema_version: 1, before, after, anchor: after, context_uri: root.toString() });
+    } finally { selection.dispose(); }
+  };
+  return Object.assign(registration, { compareAnalysis });
 }

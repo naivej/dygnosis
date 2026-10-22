@@ -1,9 +1,9 @@
 {
-  "version": "0.11.32",
+  "version": "0.11.33",
   "tools": [
     {
       "name": "dynare_syntax",
-      "description": "Look up pinned Dynare syntax: commands, blocks, instructions, functions, operators, macros and options. Select name or search; kind, context and parent distinguish forms with the same spelling. Exact forms include signatures, value rules and bounded options. Omit filters for a bounded index. No model source is needed. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Look up pinned Dynare syntax: commands, blocks, instructions, functions, operators, macros and options. Select name or search; kind, context and parent distinguish forms with the same spelling. Exact forms include signatures, value rules and bounded options. Omit filters for a bounded index. No model source is needed. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -88,7 +88,7 @@
     },
     {
       "name": "dynare_diagnostic_info",
-      "description": "Look up diagnostic meaning and correction guidance. An exact code returns its explanation; kind, severity and search return bounded catalog summaries. This catalog does not report problems in a model. No model source is needed. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Look up diagnostic meaning and correction guidance. An exact code returns its explanation; kind, severity and search return bounded catalog summaries. This catalog does not report problems in a model. No model source is needed. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -165,13 +165,126 @@
     },
     {
       "name": "dynare_diagnose",
-      "description": "Check one source or an explicit batch of model roots. Returns aggregate summary, per-root reports and revisions, and paged diagnostics in the same shape. Batch map roots are exact keys; paths read saved server-host files; sources can mix explicit text/map/disk inputs. Each partial, failed or unfinished root explains its cause; an incomplete zero count is not a clean-model claim. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Check one source with optional analysis choices, or an explicit batch. configured_sources.jobs contains source and analysis for each job and permits repeated roots. job:1, job:2 and later identities key expected_revisions; each job spends the finite root-job allowance. Other batches cannot share analysis. Results distinguish jobs from distinct roots, and retain each partial, failed or unfinished cause. An incomplete zero count is not a clean-model claim. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "definitions": {
+          "AnalysisConfiguration": {
+            "additionalProperties": false,
+            "description": "Request-local macro choices. Source acquisition still owns include paths.",
+            "properties": {
+              "defines": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/InitialDefinition"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "overrides": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/AnalysisOverride"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "AnalysisOverride": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expression": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target",
+                  "expression"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "skip_definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "branch_id": {
+                    "description": "Null selects no arm of this chain.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "const": "branch",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              }
+            ]
+          },
           "BatchInput": {
             "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "jobs": {
+                    "items": {
+                      "$ref": "#/definitions/ConfiguredSource"
+                    },
+                    "type": "array"
+                  },
+                  "kind": {
+                    "const": "configured_sources",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "jobs"
+                ],
+                "type": "object"
+              },
               {
                 "additionalProperties": false,
                 "properties": {
@@ -269,12 +382,67 @@
               }
             ]
           },
+          "ConfiguredSource": {
+            "additionalProperties": false,
+            "properties": {
+              "analysis": {
+                "$ref": "#/definitions/AnalysisConfiguration"
+              },
+              "source": {
+                "$ref": "#/definitions/SourceInput"
+              }
+            },
+            "required": [
+              "source",
+              "analysis"
+            ],
+            "type": "object"
+          },
           "Detail": {
             "enum": [
               "full",
               "compact"
             ],
             "type": "string"
+          },
+          "GuardedTarget": {
+            "additionalProperties": false,
+            "description": "`file: null` denotes unnamed root text, never a filesystem lookup.",
+            "properties": {
+              "file": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "site_id": {
+                "type": "string"
+              },
+              "source_revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "site_id",
+              "source_revision"
+            ],
+            "type": "object"
+          },
+          "InitialDefinition": {
+            "additionalProperties": false,
+            "properties": {
+              "expression": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "expression"
+            ],
+            "type": "object"
           },
           "MacroWorkLimit": {
             "maximum": 100000000,
@@ -419,6 +587,17 @@
           }
         ],
         "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AnalysisConfiguration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit request-local macro choices; saved editor presets are not inputs."
+          },
           "batch": {
             "anyOf": [
               {
@@ -524,17 +703,149 @@
     },
     {
       "name": "dynare_model_info",
-      "description": "Give a model overview and its source relationships. Default summary has scalar counts and model kind. Select structure for timing lists and block flags, or declarations, assignments, model_locals, statements, blocks, sources, includes or scope for detail. sources includes resolved/missing includes and companion lookup causes. Unnamed text cannot discover file relationships. Counts describe written source before transformations. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Give a configured model overview or inspect written source. Default summary has effective counts and model kind before transformations. Select analysis for explicit choices and override receipts; source_structure returns written items, guarded directive targets and branch IDs, availability and separate source coverage. Optional file selects one source under the same input policy, without making it an executed include. Other sections are structure, declarations, assignments, model_locals, statements, blocks, sources, includes and scope. Written source-item counts are not effective equation counts. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "definitions": {
+          "AnalysisConfiguration": {
+            "additionalProperties": false,
+            "description": "Request-local macro choices. Source acquisition still owns include paths.",
+            "properties": {
+              "defines": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/InitialDefinition"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "overrides": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/AnalysisOverride"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "AnalysisOverride": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expression": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target",
+                  "expression"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "skip_definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "branch_id": {
+                    "description": "Null selects no arm of this chain.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "const": "branch",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              }
+            ]
+          },
           "Detail": {
             "enum": [
               "full",
               "compact"
             ],
             "type": "string"
+          },
+          "GuardedTarget": {
+            "additionalProperties": false,
+            "description": "`file: null` denotes unnamed root text, never a filesystem lookup.",
+            "properties": {
+              "file": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "site_id": {
+                "type": "string"
+              },
+              "source_revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "site_id",
+              "source_revision"
+            ],
+            "type": "object"
+          },
+          "InitialDefinition": {
+            "additionalProperties": false,
+            "properties": {
+              "expression": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "expression"
+            ],
+            "type": "object"
           },
           "MacroWorkLimit": {
             "maximum": 100000000,
@@ -643,6 +954,17 @@
           }
         },
         "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AnalysisConfiguration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit request-local macro choices; saved editor presets are not inputs."
+          },
           "continuation": {
             "type": [
               "string",
@@ -662,6 +984,12 @@
           },
           "expected_revision": {
             "description": "Original revision, required for reused identities and continuations.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "file": {
             "type": [
               "string",
               "null"
@@ -727,17 +1055,196 @@
     },
     {
       "name": "dynare_symbol_info",
-      "description": "Inspect one resolved binding and its accepted uses in one call. Select a unique name, written target or returned binding identity. Default sections are definition, metadata and references; assignments and expanded occurrences are optional. References-only works directly without an earlier lookup. Ambiguous names return candidates; lookalike text is excluded. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Inspect a resolved binding with view=effective (default), using a unique name, written target or returned binding identity. Default sections are definition, metadata and references; assignments and expanded occurrences are optional. References-only works directly. view=source instead accepts a literal name or written target and returns labelled source candidates with availability and coverage, without binding identities or accepted references. An inactive written target need not have an effective binding. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "view": {
+                  "const": "source"
+                }
+              },
+              "required": [
+                "view"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "occurrences"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "include_declaration"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "symbol": {
+                        "required": [
+                          "binding_id"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "symbol"
+                    ]
+                  }
+                ]
+              },
+              "properties": {
+                "sections": {
+                  "maxItems": 0
+                }
+              }
+            }
+          }
+        ],
         "definitions": {
+          "AnalysisConfiguration": {
+            "additionalProperties": false,
+            "description": "Request-local macro choices. Source acquisition still owns include paths.",
+            "properties": {
+              "defines": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/InitialDefinition"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "overrides": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/AnalysisOverride"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "AnalysisOverride": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expression": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target",
+                  "expression"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "skip_definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "branch_id": {
+                    "description": "Null selects no arm of this chain.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "const": "branch",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              }
+            ]
+          },
           "Detail": {
             "enum": [
               "full",
               "compact"
             ],
             "type": "string"
+          },
+          "GuardedTarget": {
+            "additionalProperties": false,
+            "description": "`file: null` denotes unnamed root text, never a filesystem lookup.",
+            "properties": {
+              "file": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "site_id": {
+                "type": "string"
+              },
+              "source_revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "site_id",
+              "source_revision"
+            ],
+            "type": "object"
+          },
+          "InitialDefinition": {
+            "additionalProperties": false,
+            "properties": {
+              "expression": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "expression"
+            ],
+            "type": "object"
           },
           "MacroWorkLimit": {
             "maximum": 100000000,
@@ -915,9 +1422,27 @@
                 "type": "object"
               }
             ]
+          },
+          "View": {
+            "enum": [
+              "effective",
+              "source"
+            ],
+            "type": "string"
           }
         },
         "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AnalysisConfiguration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit request-local macro choices; saved editor presets are not inputs."
+          },
           "continuation": {
             "type": [
               "string",
@@ -1017,6 +1542,17 @@
                 }
               }
             ]
+          },
+          "view": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/View"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Effective model facts (default) or labelled written source candidates/templates."
           }
         },
         "required": [
@@ -1034,11 +1570,144 @@
     },
     {
       "name": "dynare_equations",
-      "description": "Find and inspect equations, tags, identifiers, timing and verified source locations. Name, tag, scope/dimension and resolved-symbol filters combine with AND. A symbol name works directly. Index selectors are zero-based within aggregate or dimension scope; identities select one expanded row. Incomplete analysis withholds authoritative counts. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Inspect view=effective equations (default), tags, timing and verified locations under the requested analysis. Name, tag, scope/dimension and resolved-symbol filters combine with AND; scoped indices are zero-based. Incomplete analysis withholds authoritative counts. view=source returns written equation templates filtered by name, tags or file, with source_id, conditions, availability and separate coverage. Source-item counts are not equation counts; source IDs cannot select expansion or extraction. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "view": {
+                  "const": "source"
+                }
+              },
+              "required": [
+                "view"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "symbol"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "equation"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "scope"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "dimension"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ],
         "definitions": {
+          "AnalysisConfiguration": {
+            "additionalProperties": false,
+            "description": "Request-local macro choices. Source acquisition still owns include paths.",
+            "properties": {
+              "defines": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/InitialDefinition"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "overrides": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/AnalysisOverride"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "AnalysisOverride": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expression": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target",
+                  "expression"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "skip_definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "branch_id": {
+                    "description": "Null selects no arm of this chain.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "const": "branch",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              }
+            ]
+          },
           "Detail": {
             "enum": [
               "full",
@@ -1095,6 +1764,45 @@
                 "type": "object"
               }
             ]
+          },
+          "GuardedTarget": {
+            "additionalProperties": false,
+            "description": "`file: null` denotes unnamed root text, never a filesystem lookup.",
+            "properties": {
+              "file": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "site_id": {
+                "type": "string"
+              },
+              "source_revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "site_id",
+              "source_revision"
+            ],
+            "type": "object"
+          },
+          "InitialDefinition": {
+            "additionalProperties": false,
+            "properties": {
+              "expression": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "expression"
+            ],
+            "type": "object"
           },
           "MacroWorkLimit": {
             "maximum": 100000000,
@@ -1272,9 +1980,27 @@
                 "type": "object"
               }
             ]
+          },
+          "View": {
+            "enum": [
+              "effective",
+              "source"
+            ],
+            "type": "string"
           }
         },
         "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AnalysisConfiguration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit request-local macro choices; saved editor presets are not inputs."
+          },
           "continuation": {
             "type": [
               "string",
@@ -1310,6 +2036,12 @@
           },
           "expected_revision": {
             "description": "Original revision, required for reused identities and continuations.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "file": {
             "type": [
               "string",
               "null"
@@ -1380,6 +2112,17 @@
             },
             "default": {},
             "type": "object"
+          },
+          "view": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/View"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Effective model facts (default) or labelled written source candidates/templates."
           }
         },
         "required": [
@@ -1396,11 +2139,104 @@
     },
     {
       "name": "dynare_expand",
-      "description": "Show include/macro-expanded text with verified written origins. Focus with inclusive line_range, exclusive-end expanded_range or an equation identity. A range cutting a row omits its origin and states why. Partial expansion retains available text and its causes. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Show include/macro-expanded text with verified written origins. Focus with inclusive line_range, exclusive-end expanded_range or an equation identity. A range cutting a row omits its origin and states why. Partial expansion retains available text and its causes. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "definitions": {
+          "AnalysisConfiguration": {
+            "additionalProperties": false,
+            "description": "Request-local macro choices. Source acquisition still owns include paths.",
+            "properties": {
+              "defines": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/InitialDefinition"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "overrides": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/AnalysisOverride"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "AnalysisOverride": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expression": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target",
+                  "expression"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "skip_definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "branch_id": {
+                    "description": "Null selects no arm of this chain.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "const": "branch",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              }
+            ]
+          },
           "Detail": {
             "enum": [
               "full",
@@ -1486,6 +2322,45 @@
               "column",
               "end_line",
               "end_column"
+            ],
+            "type": "object"
+          },
+          "GuardedTarget": {
+            "additionalProperties": false,
+            "description": "`file: null` denotes unnamed root text, never a filesystem lookup.",
+            "properties": {
+              "file": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "site_id": {
+                "type": "string"
+              },
+              "source_revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "site_id",
+              "source_revision"
+            ],
+            "type": "object"
+          },
+          "InitialDefinition": {
+            "additionalProperties": false,
+            "properties": {
+              "expression": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "expression"
             ],
             "type": "object"
           },
@@ -1617,6 +2492,17 @@
           }
         },
         "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AnalysisConfiguration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit request-local macro choices; saved editor presets are not inputs."
+          },
           "continuation": {
             "type": [
               "string",
@@ -1723,17 +2609,149 @@
     },
     {
       "name": "dynare_actions",
-      "description": "Discover source action summaries or request a complete verified proposal. Select action_id with its expected_revision for one alternative. Set fixes=true to propose compatible proven diagnostic fixes, optionally by code, target or diagnostic_ids, without a discovery call. Alternatives are never combined automatically. Skipped and remaining work is explained. No file is written. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Discover source action summaries or request a complete verified proposal. Select action_id with its expected_revision for one alternative. Set fixes=true to propose compatible proven diagnostic fixes, optionally by code, target or diagnostic_ids, without a discovery call. Alternatives are never combined automatically. Skipped and remaining work is explained. No file is written. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "definitions": {
+          "AnalysisConfiguration": {
+            "additionalProperties": false,
+            "description": "Request-local macro choices. Source acquisition still owns include paths.",
+            "properties": {
+              "defines": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/InitialDefinition"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "overrides": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/AnalysisOverride"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "AnalysisOverride": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expression": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target",
+                  "expression"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "skip_definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "branch_id": {
+                    "description": "Null selects no arm of this chain.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "const": "branch",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              }
+            ]
+          },
           "Detail": {
             "enum": [
               "full",
               "compact"
             ],
             "type": "string"
+          },
+          "GuardedTarget": {
+            "additionalProperties": false,
+            "description": "`file: null` denotes unnamed root text, never a filesystem lookup.",
+            "properties": {
+              "file": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "site_id": {
+                "type": "string"
+              },
+              "source_revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "site_id",
+              "source_revision"
+            ],
+            "type": "object"
+          },
+          "InitialDefinition": {
+            "additionalProperties": false,
+            "properties": {
+              "expression": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "expression"
+            ],
+            "type": "object"
           },
           "MacroWorkLimit": {
             "maximum": 100000000,
@@ -1882,6 +2900,17 @@
               "null"
             ]
           },
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AnalysisConfiguration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit request-local macro choices; saved editor presets are not inputs."
+          },
           "code": {
             "type": [
               "string",
@@ -1987,17 +3016,149 @@
     },
     {
       "name": "dynare_rename",
-      "description": "Propose a complete rename of one resolved binding. A unique name works directly; a target or binding identity can disambiguate. Incomplete sources, collisions, generated names or incompatible checked owners withhold the complete proposal with a cause. No file is written. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Propose a complete rename of one resolved binding. A unique name works directly; a target or binding identity can disambiguate. Incomplete sources, collisions, generated names or incompatible checked owners withhold the complete proposal with a cause. No file is written. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "definitions": {
+          "AnalysisConfiguration": {
+            "additionalProperties": false,
+            "description": "Request-local macro choices. Source acquisition still owns include paths.",
+            "properties": {
+              "defines": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/InitialDefinition"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "overrides": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/AnalysisOverride"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "AnalysisOverride": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expression": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target",
+                  "expression"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "skip_definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "branch_id": {
+                    "description": "Null selects no arm of this chain.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "const": "branch",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              }
+            ]
+          },
           "Detail": {
             "enum": [
               "full",
               "compact"
             ],
             "type": "string"
+          },
+          "GuardedTarget": {
+            "additionalProperties": false,
+            "description": "`file: null` denotes unnamed root text, never a filesystem lookup.",
+            "properties": {
+              "file": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "site_id": {
+                "type": "string"
+              },
+              "source_revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "site_id",
+              "source_revision"
+            ],
+            "type": "object"
+          },
+          "InitialDefinition": {
+            "additionalProperties": false,
+            "properties": {
+              "expression": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "expression"
+            ],
+            "type": "object"
           },
           "MacroWorkLimit": {
             "maximum": 100000000,
@@ -2178,6 +3339,17 @@
           }
         },
         "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AnalysisConfiguration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit request-local macro choices; saved editor presets are not inputs."
+          },
           "continuation": {
             "type": [
               "string",
@@ -2290,17 +3462,149 @@
     },
     {
       "name": "dynare_format",
-      "description": "Propose whitespace formatting for the root or selected source file. Optional whole-line line_range is one-based and inclusive. formatIndent is tab or one to eight spaces. Native text and source outside the selected lines retain their layout. No file is written. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Propose whitespace formatting for the root or selected source file. Optional whole-line line_range is one-based and inclusive. formatIndent is tab or one to eight spaces. Native text and source outside the selected lines retain their layout. No file is written. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "definitions": {
+          "AnalysisConfiguration": {
+            "additionalProperties": false,
+            "description": "Request-local macro choices. Source acquisition still owns include paths.",
+            "properties": {
+              "defines": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/InitialDefinition"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "overrides": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/AnalysisOverride"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "AnalysisOverride": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expression": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target",
+                  "expression"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "skip_definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "branch_id": {
+                    "description": "Null selects no arm of this chain.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "const": "branch",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              }
+            ]
+          },
           "Detail": {
             "enum": [
               "full",
               "compact"
             ],
             "type": "string"
+          },
+          "GuardedTarget": {
+            "additionalProperties": false,
+            "description": "`file: null` denotes unnamed root text, never a filesystem lookup.",
+            "properties": {
+              "file": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "site_id": {
+                "type": "string"
+              },
+              "source_revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "site_id",
+              "source_revision"
+            ],
+            "type": "object"
+          },
+          "InitialDefinition": {
+            "additionalProperties": false,
+            "properties": {
+              "expression": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "expression"
+            ],
+            "type": "object"
           },
           "LineRange": {
             "properties": {
@@ -2430,6 +3734,17 @@
           }
         },
         "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AnalysisConfiguration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit request-local macro choices; saved editor presets are not inputs."
+          },
           "continuation": {
             "type": [
               "string",
@@ -2523,11 +3838,104 @@
     },
     {
       "name": "dynare_extract",
-      "description": "Produce a selected equation fragment with required declarations, local definitions and model context. Names combine with OR; tags combine with AND. Select a returned identity or scoped zero-based index for unnamed equations. Omitted setup is explicit; no numerical or runnable-model claim is inferred. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Produce a selected equation fragment with required declarations, local definitions and model context. Names combine with OR; tags combine with AND. Select a returned identity or scoped zero-based index for unnamed equations. Omitted setup is explicit; no numerical or runnable-model claim is inferred. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "definitions": {
+          "AnalysisConfiguration": {
+            "additionalProperties": false,
+            "description": "Request-local macro choices. Source acquisition still owns include paths.",
+            "properties": {
+              "defines": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/InitialDefinition"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "overrides": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/AnalysisOverride"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "AnalysisOverride": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expression": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target",
+                  "expression"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "skip_definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "branch_id": {
+                    "description": "Null selects no arm of this chain.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "const": "branch",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              }
+            ]
+          },
           "Detail": {
             "enum": [
               "full",
@@ -2584,6 +3992,45 @@
                 "type": "object"
               }
             ]
+          },
+          "GuardedTarget": {
+            "additionalProperties": false,
+            "description": "`file: null` denotes unnamed root text, never a filesystem lookup.",
+            "properties": {
+              "file": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "site_id": {
+                "type": "string"
+              },
+              "source_revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "site_id",
+              "source_revision"
+            ],
+            "type": "object"
+          },
+          "InitialDefinition": {
+            "additionalProperties": false,
+            "properties": {
+              "expression": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "expression"
+            ],
+            "type": "object"
           },
           "MacroWorkLimit": {
             "maximum": 100000000,
@@ -2692,6 +4139,17 @@
           }
         },
         "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AnalysisConfiguration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit request-local macro choices; saved editor presets are not inputs."
+          },
           "continuation": {
             "type": [
               "string",
@@ -2798,11 +4256,104 @@
     },
     {
       "name": "dynare_compare_models",
-      "description": "Compare two model snapshots and captured source. Sources use explicit text/map/disk inputs. Repository input selects local Git or saved Working versions on this server host; no fetch or editor-buffer read occurs. Filters select semantic families and change kinds. Coverage and source navigation retain each side's identity; no algebraic or numerical equivalence is inferred. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Compare two model snapshots with independent analysis_a and analysis_b choices. Same source text can produce different model facts; both choices and revisions remain explicit. Sources use text/map/disk inputs; current disk inputs share validated positive and negative file facts. Repository input selects local Git or saved Working versions on the server host; no fetch or editor-buffer read occurs. Historical targets use that side's source revisions, not current target identities. Filters select semantic families and change kinds; coverage and navigation retain both captured identities. No numerical equivalence is inferred. Optional analysis_a and analysis_b supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "definitions": {
+          "AnalysisConfiguration": {
+            "additionalProperties": false,
+            "description": "Request-local macro choices. Source acquisition still owns include paths.",
+            "properties": {
+              "defines": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/InitialDefinition"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "overrides": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/AnalysisOverride"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "AnalysisOverride": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expression": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target",
+                  "expression"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "skip_definition",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "branch_id": {
+                    "description": "Null selects no arm of this chain.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "const": "branch",
+                    "type": "string"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/GuardedTarget"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "type": "object"
+              }
+            ]
+          },
           "ComparisonInput": {
             "oneOf": [
               {
@@ -2866,6 +4417,45 @@
               "compact"
             ],
             "type": "string"
+          },
+          "GuardedTarget": {
+            "additionalProperties": false,
+            "description": "`file: null` denotes unnamed root text, never a filesystem lookup.",
+            "properties": {
+              "file": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "site_id": {
+                "type": "string"
+              },
+              "source_revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "site_id",
+              "source_revision"
+            ],
+            "type": "object"
+          },
+          "InitialDefinition": {
+            "additionalProperties": false,
+            "properties": {
+              "expression": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "expression"
+            ],
+            "type": "object"
           },
           "MacroWorkLimit": {
             "maximum": 100000000,
@@ -3019,6 +4609,28 @@
           }
         },
         "properties": {
+          "analysis_a": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AnalysisConfiguration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Independent choices for the Before side of comparison."
+          },
+          "analysis_b": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AnalysisConfiguration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Independent choices for the After side of comparison."
+          },
           "comparison": {
             "allOf": [
               {

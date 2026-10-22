@@ -1,7 +1,9 @@
-import { record } from "../client/protocol";
+import { analysisConfiguration, record } from "../client/protocol";
+import type { AnalysisConfiguration } from "../client/protocol";
 
-export interface WorkingSelector { kind: "working"; root_uri: string }
-export interface GitSelector {
+interface AnalysisSelector { analysis?: AnalysisConfiguration; search_paths?: string[] }
+export interface WorkingSelector extends AnalysisSelector { kind: "working"; root_uri: string }
+export interface GitSelector extends AnalysisSelector {
   kind: "git"; repository_uri: string; commit: string; root_file: string; requested_ref: string;
 }
 export type ModelSelector = WorkingSelector | GitSelector;
@@ -22,6 +24,8 @@ function sourceUri(value: unknown, untitled = false): value is string {
 }
 export function selector(value: unknown): value is ModelSelector {
   if (!record(value)) return false;
+  if (value.analysis !== undefined && !analysisConfiguration(value.analysis) || value.search_paths !== undefined &&
+      (!Array.isArray(value.search_paths) || value.search_paths.some(path => typeof path !== "string" || path.includes("\0")))) return false;
   if (value.kind === "working") return sourceUri(value.root_uri, true) && /\.(mod|dyn)$/i.test(new URL(value.root_uri).pathname);
   return value.kind === "git" && sourceUri(value.repository_uri) && typeof value.commit === "string" &&
     /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value.commit) && treeKey(value.root_file) && /\.(mod|dyn)$/i.test(value.root_file) &&
@@ -36,11 +40,17 @@ export function resourceData(value: unknown): ComparisonResource {
 export function resourceQuery(resource: ComparisonResource): string { return JSON.stringify(resourceData(resource)); }
 export function resourceName(resource: ComparisonResource): string {
   const base = resource.after.kind === "git" ? resource.after.root_file.split("/").at(-1)! : decodeURIComponent(new URL(resource.after.root_uri).pathname.split("/").at(-1)!);
-  const version = (input: ModelSelector): string => input.kind === "git" ? input.commit.slice(0, 7) : "Working";
+  const version = (input: ModelSelector): string => `${input.kind === "git" ? input.commit.slice(0, 7) : "Working"}${input.analysis ? ` (${configurationLabel(input.analysis)})` : ""}`;
   return `${base} · ${version(resource.before)} → ${version(resource.after)}.dygnosis-changes`;
 }
+export function configurationLabel(analysis: AnalysisConfiguration): string {
+  const preview = !!analysis.overrides?.length;
+  const name = analysis.name ?? (preview ? "Analysis preview" : analysis.defines?.length ? "Macro inputs" : "Source");
+  return `${name}${preview ? " (preview)" : ""}`;
+}
 export function inputLabel(input: ModelSelector): string {
-  if (input.kind === "working") return `${decodeURIComponent(new URL(input.root_uri).pathname)} · Working`;
+  const analysis = input.analysis ? ` · ${configurationLabel(input.analysis)}` : "";
+  if (input.kind === "working") return `${decodeURIComponent(new URL(input.root_uri).pathname)} · Working${analysis}`;
   const commit = input.commit.slice(0, 7), ref = input.requested_ref.replace(/^[0-9a-f]{40,64}(?=$|[~^])/, value => value.slice(0, 7));
-  return `${input.root_file}${ref && ref !== commit ? ` @ ${ref}` : ""} · ${commit}`;
+  return `${input.root_file}${ref && ref !== commit ? ` @ ${ref}` : ""} · ${commit}${analysis}`;
 }
