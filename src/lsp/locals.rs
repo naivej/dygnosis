@@ -586,15 +586,10 @@ pub(super) fn completions(
 
 pub(super) fn info_origins(
     view: &WrittenView<'_>,
-    model: &Model,
+    facts: &ModelLocals,
     map: &crate::engine::workspace::model_map::WrittenModelMap,
     result: &mut Value,
 ) {
-    let facts = ModelLocals::collect_before(
-        model,
-        crate::engine::diagnostics::parse_preflight::first_refusal(model)
-            .map(|refusal| refusal.order),
-    );
     let Some(locals) = result.get_mut("model_locals") else {
         return;
     };
@@ -635,6 +630,72 @@ pub(super) fn info_origins(
 #[cfg(test)]
 mod snapshot_tests {
     use super::*;
+
+    #[test]
+    fn model_information_shares_accepted_locals_and_keeps_origins_current() {
+        // Guards a second accepted-local analysis while adding source origins,
+        // and keeps its rows aligned after an included source changes.
+        use crate::engine::analysis::model_info::MODEL_INFO_LOCAL_FACT_BUILDS;
+        let root = Url::parse("file:///model-info-reuse/main.mod").unwrap();
+        let helper = Url::parse("file:///model-info-reuse/locals.inc").unwrap();
+        let text = "var y;\r\npredetermined_variables y;\r\nparameters p;\r\nmodel_local_variable first $F$;\r\nmodel;\r\n@#include \"locals.inc\"\r\ny=second;\r\nend;\r\n";
+        let local_text = "/* 😀 */ #first=p+y(-1);\r\n#second=first+1;\r\n";
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(root.clone(), text.into(), 1);
+        for (version, prefix) in [(1, ""), (2, "// moved\r\n")] {
+            let source = format!("{prefix}{local_text}");
+            server.upsert(helper.clone(), source.clone(), version);
+            MODEL_INFO_LOCAL_FACT_BUILDS.with(|builds| builds.set(0));
+            let result = server.model_info_command(&[json!({"root_uri":root})]);
+            assert_eq!(result["complete"], true);
+            assert_eq!(MODEL_INFO_LOCAL_FACT_BUILDS.with(|builds| builds.get()), 1);
+            let locals = &result["model_locals"];
+            assert_eq!(locals["declarations"][0]["name"], "first");
+            assert_eq!(locals["declarations"][0]["origin"]["uri"], root.as_str());
+            let definitions = locals["definitions"].as_array().unwrap();
+            assert_eq!(definitions.len(), 2);
+            for (row, name) in definitions.iter().zip(["first", "second"]) {
+                assert_eq!(row["name"], name);
+                assert_eq!(row["origin"]["uri"], helper.as_str());
+                let start = source.find(&format!("#{name}=")).unwrap() as u32;
+                let expected = LineIndex::new(&source).position_utf16(&source, start);
+                assert_eq!(
+                    row["origin"]["range"]["start"],
+                    json!({"line":expected.line,"character":expected.character})
+                );
+            }
+            let y = definitions[0]["idents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["name"] == "y")
+                .unwrap();
+            assert_eq!(y["class"], "endogenous");
+            assert_eq!(y["dynare_timing"], -2);
+            assert_eq!(definitions[1]["idents"][0]["class"], "model_local");
+        }
+        server.upsert(
+            root.clone(),
+            "var y;model;#a=1;#a=2;#late=3;y=a;end;".into(),
+            2,
+        );
+        MODEL_INFO_LOCAL_FACT_BUILDS.with(|builds| builds.set(0));
+        let result = server.model_info_command(&[json!({"root_uri":root})]);
+        assert_eq!(result["complete"], false);
+        assert!(result.get("model_locals").is_none());
+        assert_eq!(MODEL_INFO_LOCAL_FACT_BUILDS.with(|builds| builds.get()), 0);
+        server.upsert(
+            root.clone(),
+            "var y;\n@#include \"missing.inc\"\nmodel;y=0;end;".into(),
+            3,
+        );
+        MODEL_INFO_LOCAL_FACT_BUILDS.with(|builds| builds.set(0));
+        let result = server.model_info_command(&[json!({"root_uri":root})]);
+        assert_eq!(result["complete"], false);
+        assert!(result.get("model_locals").is_none());
+        assert_eq!(MODEL_INFO_LOCAL_FACT_BUILDS.with(|builds| builds.get()), 0);
+    }
 
     #[test]
     fn many_local_completions_share_source_conversion_and_refresh_documentation() {

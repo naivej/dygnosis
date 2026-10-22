@@ -99,6 +99,24 @@ struct ValueHintSite {
     statement_id: usize,
 }
 
+#[cfg(test)]
+thread_local! {
+    static VALUE_HINT_SOURCE_INDEXES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn value_hint_source_index(text: &str) -> LineIndex {
+    #[cfg(test)]
+    VALUE_HINT_SOURCE_INDEXES.with(|indexes| indexes.set(indexes.get() + 1));
+    let normalized = crate::engine::language::parser::normalize_newlines(text);
+    debug_assert_eq!(normalized.len(), text.len());
+    LineIndex::new(&normalized)
+}
+
+fn value_hint_range(index: &LineIndex, text: &str, span: Span) -> Option<Range> {
+    text.get(span.start as usize..span.end as usize)?;
+    Some(span_range(index, text, span))
+}
+
 /// Source URI is the outer grouping key. An occurrence ordinal keeps repeated
 /// diagnostics from one compilation unit while merging identical other roots.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -881,6 +899,7 @@ impl Backend {
         let Some(text) = inner.workspace.get_source(uri.as_str()) else {
             return Vec::new();
         };
+        let index = value_hint_source_index(text);
         // All executions at an anchor take part, including unknown values.
         let mut sites: std::collections::BTreeMap<(u32, u32), ValueHintSite> =
             std::collections::BTreeMap::new();
@@ -896,7 +915,7 @@ impl Backend {
             let range = if source.segments.len() == 1
                 && source.segments[0].file.as_deref() == Some(key.as_str())
             {
-                crate::lsp::model_map::written_range(text, source.segments[0].span)
+                value_hint_range(&index, text, source.segments[0].span)
             } else {
                 None
             };
@@ -1795,8 +1814,10 @@ impl Backend {
             .include_records(root.as_str())
             .cloned()
             .unwrap_or_default();
-        let mut result = if complete {
-            crate::engine::analysis::model_info::model_info_json(&model)
+        let local_facts =
+            complete.then(|| crate::engine::analysis::model_info::accepted_model_locals(&model));
+        let mut result = if let Some(local_facts) = &local_facts {
+            crate::engine::analysis::model_info::model_info_json_with_locals(&model, local_facts)
         } else {
             let reasons = self.model_info_reasons(&mut inner, &root);
             crate::engine::analysis::model_info::model_incomplete_status_with_reasons(
@@ -1817,8 +1838,8 @@ impl Backend {
         )
         .with_known_uris(inner.docs.keys().chain(std::iter::once(&root)));
         let facts = view.facts_json();
-        if complete {
-            locals::info_origins(&view, &model, &report.model_map, &mut result);
+        if let Some(local_facts) = &local_facts {
+            locals::info_origins(&view, local_facts, &report.model_map, &mut result);
         }
         result
             .as_object_mut()
@@ -4553,5 +4574,88 @@ mod diagnostic_revision_tests {
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0]["input_revision"], input_revision);
         assert_eq!(changes[0]["revision"], inner.root_revision(&root).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod value_hint_projection_tests {
+    use super::*;
+
+    fn position(text: &str, byte: usize) -> Position {
+        let prefix = &text[..byte];
+        Position::new(
+            prefix.bytes().filter(|byte| *byte == b'\n').count() as u32,
+            prefix.rsplit('\n').next().unwrap().encode_utf16().count() as u32,
+        )
+    }
+
+    #[tokio::test]
+    async fn inlay_hints_share_one_source_index_without_changing_native_values_or_ranges() {
+        // Guards indexing the whole document for every calibration assignment,
+        // while preserving written UTF-16 positions, ordering and native shadows.
+        let mut text = String::from("parameters p q r;\r\n");
+        for value in 1..=300 {
+            text.push_str(&format!("p={value};\r\n"));
+        }
+        text.push_str("/* 🚀 */ q=p+1;\r\nhelper=2;\r\n/* 😀 */ r=q+helper;\r\nexp=2;\r\nq=exp(p);\r\nr=p+1;\r\np=2;\r\nq=p+1;\r\n");
+        let expected = [
+            (
+                position(
+                    &text,
+                    text.find("/* 🚀 */ q=p+1;").unwrap() + "/* 🚀 */ q=p+1;".len(),
+                ),
+                "= 301",
+            ),
+            (
+                position(
+                    &text,
+                    text.find("/* 😀 */ r=q+helper;").unwrap() + "/* 😀 */ r=q+helper;".len(),
+                ),
+                "= 303",
+            ),
+            (
+                position(&text, text.rfind("q=p+1;").unwrap() + "q=p+1;".len()),
+                "= 3",
+            ),
+        ];
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        let uri = Url::parse("file:///inlay-projection.mod").unwrap();
+        server.upsert(uri.clone(), text, 1);
+        for range in [
+            Range::new(Position::new(0, 0), Position::new(u32::MAX, u32::MAX)),
+            Range::new(Position::new(expected[2].0.line, 0), expected[2].0),
+        ] {
+            VALUE_HINT_SOURCE_INDEXES.with(|indexes| indexes.set(0));
+            let rows = server
+                .inlay_hint(InlayHintParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    range,
+                    work_done_progress_params: Default::default(),
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            let actual: Vec<_> = rows
+                .iter()
+                .map(|row| {
+                    let InlayHintLabel::String(label) = &row.label else {
+                        panic!("string hint required")
+                    };
+                    (row.position, label.as_str())
+                })
+                .collect();
+            let expected: Vec<_> = expected
+                .iter()
+                .copied()
+                .filter(|(position, _)| range.start <= *position && *position <= range.end)
+                .collect();
+            assert_eq!(actual, expected);
+            assert_eq!(
+                VALUE_HINT_SOURCE_INDEXES.with(std::cell::Cell::get),
+                1,
+                "inlay hints must index their written source once per request"
+            );
+        }
     }
 }

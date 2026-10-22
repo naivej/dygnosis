@@ -6,6 +6,8 @@
 - Go to Definition, Find References, occurrence highlights and Outline respond
   faster in large models.
 - Large models are checked faster after edits.
+- Parameter value hints respond faster in files with many assignments.
+- Equation navigation and model counts take less time to prepare in large models.
 
 ## v0.11.31
 

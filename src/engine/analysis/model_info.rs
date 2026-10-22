@@ -11,7 +11,6 @@ use crate::engine::language::span::Span;
 use serde_json::{Value, json};
 
 use crate::engine::analysis::timing::TimingAnalysis;
-use crate::engine::analysis::timing::classify_aggregate_variable_timing;
 pub use crate::engine::analysis::timing::{
     StructureSummary, TimingClass, TimingInfo, classify_variable_timing, structure_summary,
 };
@@ -121,6 +120,11 @@ pub fn assigned_number(model: &Model, name: &str) -> Option<f64> {
 
 /// Shared count fields for MCP and LSP. Locations are added by each transport.
 pub fn model_info_json(model: &Model) -> Value {
+    model_info_json_with_locals(model, &accepted_model_locals(model))
+}
+
+/// Complete model facts with the same accepted locals used for source origins.
+pub(crate) fn model_info_json_with_locals(model: &Model, locals: &ModelLocals) -> Value {
     let endogenous: Vec<String> = model
         .final_endogenous()
         .into_iter()
@@ -138,7 +142,7 @@ pub fn model_info_json(model: &Model) -> Value {
         .filter(|decl| model.final_heterogeneity(decl).is_none())
         .map(|d| model.name(d.name).to_string())
         .collect();
-    let timing = classify_aggregate_variable_timing(model);
+    let timing = TimingAnalysis::new(model);
     let mut static_vars = Vec::new();
     let mut predetermined = Vec::new();
     let mut forward_looking = Vec::new();
@@ -147,7 +151,7 @@ pub fn model_info_json(model: &Model) -> Value {
         if crate::engine::control::cancelled() {
             break;
         }
-        match timing.get(name).map(|t| t.class) {
+        match timing.aggregate.get(name).map(|t| t.class) {
             Some(TimingClass::Mixed) => mixed.push(name.clone()),
             Some(TimingClass::ForwardLooking) => forward_looking.push(name.clone()),
             Some(TimingClass::Predetermined) => predetermined.push(name.clone()),
@@ -155,8 +159,7 @@ pub fn model_info_json(model: &Model) -> Value {
         }
     }
     let summary = model.summary();
-    let model_locals = model_locals_json(model);
-    let heterogeneous_timing = classify_variable_timing(model);
+    let model_locals = model_locals_json_with_facts(model, locals, &timing);
     let heterogeneous_dimensions: Vec<Value> = heterogeneous_dimension_names(model)
         .into_iter()
         .map(|dimension| {
@@ -186,7 +189,7 @@ pub fn model_info_json(model: &Model) -> Value {
                 if crate::engine::control::cancelled() {
                     break;
                 }
-                match heterogeneous_timing.get(name).map(|info| info.class) {
+                match timing.all.get(name).map(|info| info.class) {
                     Some(TimingClass::Mixed) => mixed.push(name.clone()),
                     Some(TimingClass::ForwardLooking) => forward_looking.push(name.clone()),
                     Some(TimingClass::Predetermined) => predetermined.push(name.clone()),
@@ -247,14 +250,29 @@ pub fn model_info_json(model: &Model) -> Value {
     })
 }
 
-/// Parsed model-local declarations and definitions shared by MCP and LSP.
-/// Source origins are attached by the transport that owns the source map.
-pub(crate) fn model_locals_json(model: &Model) -> Value {
-    let facts = ModelLocals::collect_before(
+#[cfg(test)]
+thread_local! {
+    pub(crate) static MODEL_INFO_LOCAL_FACT_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Accepted locals for a model-information response and its source origins.
+pub(crate) fn accepted_model_locals(model: &Model) -> ModelLocals {
+    #[cfg(test)]
+    MODEL_INFO_LOCAL_FACT_BUILDS.with(|builds| builds.set(builds.get() + 1));
+    ModelLocals::collect_before(
         model,
         crate::engine::diagnostics::parse_preflight::first_refusal(model)
             .map(|refusal| refusal.order),
-    );
+    )
+}
+
+/// Parsed model-local declarations and definitions shared by MCP and LSP.
+/// Source origins are attached by the transport that owns the source map.
+fn model_locals_json_with_facts(
+    model: &Model,
+    facts: &ModelLocals,
+    timing: &TimingAnalysis,
+) -> Value {
     let declarations: Vec<Value> = facts
         .declarations
         .iter()
@@ -266,7 +284,6 @@ pub(crate) fn model_locals_json(model: &Model) -> Value {
             row
         })
         .collect();
-    let timing = TimingAnalysis::new(model);
     let definitions: Vec<Value> = facts
         .definitions
         .iter()
