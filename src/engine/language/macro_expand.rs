@@ -1,6 +1,12 @@
 //! Pinned Dynare macro scanning, syntax checks, and bounded text expansion.
 
+use crate::engine::analysis_configuration::{
+    AnalysisOverride, MacroAvailabilityRegion, MacroExecutionInputs, ResolvedAnalysis,
+    SourceLoopOccurrence,
+};
+use crate::engine::language::macro_source::MacroSource;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::engine::language::lexer::{Token, TokenKind};
 use crate::engine::language::macro_expr::MacroBudget;
@@ -8,8 +14,29 @@ use crate::engine::language::span::Span;
 
 const RANGE_CAP: usize = 10_000;
 pub(crate) const FOR_INPUT_PREFIX: &str = "\0for-input:";
+pub(crate) const FOR_ORIGIN_PREFIX: &str = "\0for-origin:";
+pub(crate) const FOR_INPUT_ORIGIN_PREFIX: &str = "\0for-origin-input:";
+pub(crate) const FOR_END_ORIGIN_PREFIX: &str = "\0for-origin-end:";
 
 type MacroTypeError = (Span, &'static str, String);
+type SubstitutionOrigins = Vec<(Span, Arc<[usize]>)>;
+type Interpolation = (String, Vec<Token>, Option<Arc<[usize]>>);
+type ConfiguredStatus = (
+    Vec<Token>,
+    Vec<MacroTypeError>,
+    Option<Span>,
+    Vec<IncompleteReason>,
+    Vec<Span>,
+);
+type ConfiguredTrace = (
+    Vec<Token>,
+    Vec<TokenTrace>,
+    Vec<FrameRec>,
+    bool,
+    bool,
+    Vec<MacroMessage>,
+    Vec<Span>,
+);
 type ExpandTracedFull = (
     Vec<Token>,
     Vec<TokenTrace>,
@@ -246,6 +273,7 @@ enum Dir {
 }
 
 struct IfFrame {
+    parent_active: bool,
     /// This branch of the chain is the one being emitted.
     active: bool,
     /// An earlier branch in this chain was selected, so later clauses stay inactive.
@@ -254,6 +282,8 @@ struct IfFrame {
     body_start: u32,
     /// First byte of this branch, just after the directive that opened it.
     branch_start: u32,
+    forced: Option<Option<usize>>,
+    arm: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -500,6 +530,7 @@ pub(crate) fn directive_line_extent(src: &str, dir: Span) -> Span {
 
 struct ExpandState<'src, 'w> {
     src: &'src str,
+    inputs: Option<Arc<MacroExecutionInputs>>,
     defines: &'w mut HashMap<String, MacroVal>,
     origin_stack: Vec<usize>,
     arena: &'w mut Vec<FrameRec>,
@@ -519,7 +550,8 @@ struct ExpandState<'src, 'w> {
     source: Option<&'w mut SourceRecorder<'src>>,
     messages: &'w mut Vec<MacroMessage>,
     message_bytes: usize,
-    next_for_input: Option<MacroVal>,
+    next_for_input: Option<(MacroVal, Option<Arc<[usize]>>)>,
+    replay_for_origins: HashMap<usize, Arc<[usize]>>,
     /// Spliced-buffer span and the 1-based written line where that span starts.
     line_segments: &'w [(Span, u32)],
     /// One counter for this root, shared with included files and expressions.
@@ -531,6 +563,8 @@ struct MacroIncludeExecution<'a> {
     filename: &'a str,
     certain: bool,
     iterations: &'a [(Span, usize)],
+    frames: &'a [usize],
+    arena: &'a [FrameRec],
 }
 
 /// Evaluate a replaced macro header once at a zero-width spliced position.
@@ -542,6 +576,16 @@ pub(crate) struct MacroReplay {
 }
 
 trait MacroFileVisitor {
+    fn applied(&mut self, index: usize);
+    fn failed_application(&mut self, index: usize, cause: String);
+    fn region(
+        &mut self,
+        span: Span,
+        active: bool,
+        frames: &[usize],
+        arena: &[FrameRec],
+        budget: &mut MacroBudget,
+    ) -> Result<(), MacroEvalError>;
     fn visit(
         &mut self,
         execution: MacroIncludeExecution<'_>,
@@ -587,7 +631,7 @@ pub(crate) enum MacroFileDirective<'a> {
 pub(crate) enum MacroFileLoad {
     Source {
         file: String,
-        source: std::sync::Arc<String>,
+        source: Arc<MacroSource>,
     },
     Path,
     Limit(&'static str),
@@ -625,6 +669,11 @@ struct MacroFiles<'a> {
     messages: Vec<MacroMessage>,
     message_bytes: usize,
     loop_occurrences: Vec<MacroLoopOccurrence>,
+    analysis: Option<Arc<ResolvedAnalysis>>,
+    applications: Vec<u64>,
+    application_failures: HashMap<usize, String>,
+    availability: Vec<MacroAvailabilityRegion>,
+    caller_loops: Vec<SourceLoopOccurrence>,
 }
 
 pub(crate) struct MacroFileProof {
@@ -637,6 +686,9 @@ pub(crate) struct MacroFileProof {
     pub output: String,
     pub messages: Vec<MacroMessage>,
     pub loop_occurrences: Vec<MacroLoopOccurrence>,
+    pub applications: Vec<u64>,
+    pub application_failures: HashMap<usize, String>,
+    pub availability: Vec<MacroAvailabilityRegion>,
 }
 
 /// One body actually entered, including bodies that execute no include.
@@ -675,6 +727,70 @@ impl MacroFiles<'_> {
 }
 
 impl MacroFileVisitor for MacroFiles<'_> {
+    fn applied(&mut self, index: usize) {
+        self.applications[index] = self.applications[index].saturating_add(1);
+    }
+    fn failed_application(&mut self, index: usize, cause: String) {
+        self.application_failures.entry(index).or_insert(cause);
+    }
+    fn region(
+        &mut self,
+        span: Span,
+        active: bool,
+        frames: &[usize],
+        arena: &[FrameRec],
+        budget: &mut MacroBudget,
+    ) -> Result<(), MacroEvalError> {
+        let file = self.files.last().expect("macro root");
+        let bytes = frames
+            .iter()
+            .filter_map(|id| arena.get(*id))
+            .filter(|frame| frame.kind == "for")
+            .fold(
+                self.caller_loops.iter().fold(
+                    file.len().saturating_add(frames.len()).saturating_add(1),
+                    |bytes, frame| {
+                        bytes
+                            .saturating_add(frame.variable.as_ref().map_or(0, String::len))
+                            .saturating_add(frame.value.as_ref().map_or(0, String::len))
+                            .saturating_add(1)
+                    },
+                ),
+                |bytes, frame| {
+                    bytes
+                        .saturating_add(frame.variable.as_ref().map_or(0, String::len))
+                        .saturating_add(frame.value.as_ref().map_or(0, String::len))
+                },
+            );
+        budget.spend_work(bytes)?;
+        self.availability.push(MacroAvailabilityRegion {
+            file: file.clone(),
+            span,
+            active,
+            include_call: self.calls.last().copied().unwrap_or(0) as u64,
+            parent_include_call: self
+                .calls
+                .last()
+                .map(|_| self.calls.iter().rev().nth(1).copied().unwrap_or(0) as u64),
+            loops: self
+                .caller_loops
+                .iter()
+                .cloned()
+                .chain(frames.iter().filter_map(|id| {
+                    arena
+                        .get(*id)
+                        .filter(|frame| frame.kind == "for")
+                        .map(|frame| SourceLoopOccurrence {
+                            frame_id: *id as u64,
+                            directive_span: frame.directive_span,
+                            variable: frame.variable.clone(),
+                            value: frame.value.clone(),
+                        })
+                }))
+                .collect(),
+        });
+        Ok(())
+    }
     fn visit(
         &mut self,
         execution: MacroIncludeExecution<'_>,
@@ -686,6 +802,8 @@ impl MacroFileVisitor for MacroFiles<'_> {
             filename,
             certain,
             iterations,
+            frames,
+            arena,
         } = execution;
         let file = self.files.last().expect("macro root").clone();
         if let Err(MacroEvalError::Limit(name)) = budget.spend_work(
@@ -723,9 +841,47 @@ impl MacroFileVisitor for MacroFiles<'_> {
         self.parents.push((file, span));
         self.files.push(target.clone());
         self.calls.push(call);
+        let caller_count = self.caller_loops.len();
+        let inherited: Vec<_> = frames
+            .iter()
+            .filter_map(|id| {
+                arena
+                    .get(*id)
+                    .filter(|frame| frame.kind == "for")
+                    .map(|frame| (*id, frame))
+            })
+            .collect();
+        if let Err(MacroEvalError::Limit(name)) =
+            budget.spend_work(inherited.iter().fold(1usize, |bytes, (_, frame)| {
+                bytes
+                    .saturating_add(frame.variable.as_ref().map_or(0, String::len))
+                    .saturating_add(frame.value.as_ref().map_or(0, String::len))
+                    .saturating_add(1)
+            }))
+        {
+            self.note_limit(target, span, name);
+            self.files.pop();
+            self.parents.pop();
+            self.calls.pop();
+            return MacroFileVisit::Aborted;
+        }
+        self.caller_loops.extend(
+            inherited
+                .into_iter()
+                .map(|(id, frame)| SourceLoopOccurrence {
+                    frame_id: id as u64,
+                    directive_span: frame.directive_span,
+                    variable: frame.variable.clone(),
+                    value: frame.value.clone(),
+                }),
+        );
         // Nested sites are recorded while the child runs. A loaded file is not
         // a missing include when its own blocks or later directives fail.
-        let child = macro_file_complete(&source, defines, self, budget);
+        let inputs = self
+            .analysis
+            .as_ref()
+            .map(|analysis| analysis.for_file(&target));
+        let child = macro_file_complete(&source, defines, self, budget, inputs);
         if let Some((span, name)) = child.limit {
             self.note_limit(target.clone(), span, name);
         }
@@ -735,6 +891,7 @@ impl MacroFileVisitor for MacroFiles<'_> {
         self.files.pop();
         self.parents.pop();
         self.calls.pop();
+        self.caller_loops.truncate(caller_count);
         if child.stopped {
             MacroFileVisit::Aborted
         } else {
@@ -844,8 +1001,60 @@ pub(crate) fn walk_macro_files_with_budget(
     root: &str,
     source: &str,
     mut budget: MacroBudget,
+    load: impl FnMut(MacroFileEvent<'_>) -> Option<MacroFileLoad>,
+) -> MacroFileProof {
+    let source = match MacroSource::build(Arc::new(source.to_owned()), &mut budget) {
+        Ok(source) => source,
+        Err(error) => return failed_macro_file_proof(root, error, budget),
+    };
+    walk_macro_source_with_budget(root, &source, budget, None, load)
+}
+
+pub(crate) fn failed_macro_file_proof(
+    root: &str,
+    error: MacroEvalError,
+    budget: MacroBudget,
+) -> MacroFileProof {
+    let limit = match error {
+        MacroEvalError::Limit(name) => Some((root.to_owned(), Span::default(), name)),
+        _ => None,
+    };
+    let refusal = error
+        .diagnostic()
+        .map(|(code, message)| (root.to_owned(), Span::default(), code, message));
+    MacroFileProof {
+        complete: false,
+        sites: HashSet::new(),
+        budget,
+        limit,
+        refusal,
+        stop_chain: Vec::new(),
+        output: String::new(),
+        messages: Vec::new(),
+        loop_occurrences: Vec::new(),
+        applications: Vec::new(),
+        application_failures: HashMap::new(),
+        availability: Vec::new(),
+    }
+}
+
+pub(crate) fn walk_macro_source_with_budget(
+    root: &str,
+    source: &MacroSource,
+    mut budget: MacroBudget,
+    analysis: Option<Arc<ResolvedAnalysis>>,
     mut load: impl FnMut(MacroFileEvent<'_>) -> Option<MacroFileLoad>,
 ) -> MacroFileProof {
+    let inputs = analysis.as_ref().map(|analysis| analysis.for_file(root));
+    let mut defines = match inputs
+        .as_ref()
+        .map(|inputs| inputs.initial_environment(&mut budget))
+        .transpose()
+    {
+        Ok(Some(defines)) => defines,
+        Ok(None) => HashMap::new(),
+        Err(error) => return failed_macro_file_proof(root, error, budget),
+    };
     let mut includes = MacroFiles {
         load: &mut load,
         files: vec![root.to_string()],
@@ -860,8 +1069,18 @@ pub(crate) fn walk_macro_files_with_budget(
         messages: Vec::new(),
         message_bytes: 0,
         loop_occurrences: Vec::new(),
+        applications: vec![
+            0;
+            analysis
+                .as_ref()
+                .map_or(0, |analysis| analysis.overrides.len())
+        ],
+        analysis,
+        application_failures: HashMap::new(),
+        availability: Vec::new(),
+        caller_loops: Vec::new(),
     };
-    let run = macro_file_complete(source, &mut HashMap::new(), &mut includes, &mut budget);
+    let run = macro_file_complete(source, &mut defines, &mut includes, &mut budget, inputs);
     if let Some((span, name)) = run.limit {
         includes.limit.get_or_insert((root.to_string(), span, name));
     }
@@ -880,25 +1099,21 @@ pub(crate) fn walk_macro_files_with_budget(
         output: includes.output,
         messages: includes.messages,
         loop_occurrences: includes.loop_occurrences,
+        applications: includes.applications,
+        application_failures: includes.application_failures,
+        availability: includes.availability,
     }
 }
 
 fn macro_file_complete(
-    text: &str,
+    source: &MacroSource,
     defines: &mut HashMap<String, MacroVal>,
     includes: &mut dyn MacroFileVisitor,
     budget: &mut MacroBudget,
+    inputs: Option<Arc<MacroExecutionInputs>>,
 ) -> MacroFileRun {
-    if let Err(MacroEvalError::Limit(name)) = budget.spend_work(text.len().max(1)) {
-        return MacroFileRun {
-            complete: false,
-            stopped: true,
-            limit: Some((Span::new(0, text.len()), name)),
-            refusal: None,
-        };
-    }
-    let source = crate::engine::language::parser::normalize_newlines(text);
-    let tokens = scan_macro_tokens(&source);
+    let tokens = &source.tokens;
+    let source_text = &source.normalized;
     let mut arena = Vec::new();
     let mut errors = Vec::new();
     let mut discarded = Vec::new();
@@ -906,7 +1121,8 @@ fn macro_file_complete(
     let mut incomplete_reasons = Vec::new();
     let mut messages = Vec::new();
     let mut state = ExpandState {
-        src: &source,
+        src: source_text,
+        inputs,
         defines,
         origin_stack: Vec::new(),
         arena: &mut arena,
@@ -923,11 +1139,19 @@ fn macro_file_complete(
         messages: &mut messages,
         message_bytes: 0,
         next_for_input: None,
+        replay_for_origins: HashMap::new(),
         line_segments: &[],
         budget,
     };
-    prepare_macro_execution(&mut state, &tokens);
-    expand_seq(&mut state, &tokens);
+    if let Some(refusal) = &source.syntax_refusal {
+        push_type_error(
+            &mut state,
+            refusal.span,
+            refusal.code,
+            refusal.message.clone(),
+        );
+    }
+    expand_seq(&mut state, tokens);
     let stopped = state.stopped;
     let limit = state.limit;
     let complete = incomplete.is_none() && errors.is_empty();
@@ -951,6 +1175,7 @@ pub fn expand_macros_full(
     (out, errors)
 }
 
+#[cfg(test)]
 pub(crate) fn expand_macros_with_status_lines_and_evaluations_budget(
     src: &str,
     tokens: Vec<Token>,
@@ -974,6 +1199,169 @@ pub(crate) fn expand_macros_with_status_lines_and_evaluations_budget(
     (out, errors, incomplete, reasons)
 }
 
+pub(crate) fn expand_macros_with_status_configured(
+    src: &str,
+    tokens: Vec<Token>,
+    lines: &[(Span, u32)],
+    evaluations: &[MacroReplay],
+    budget: &mut MacroBudget,
+    inputs: Option<Arc<MacroExecutionInputs>>,
+    cached: Option<&MacroSource>,
+) -> ConfiguredStatus {
+    let (out, _, _, errors, discarded, incomplete, reasons, _, _) =
+        expand_macros_traced_full_configured(
+            src,
+            tokens,
+            lines,
+            evaluations,
+            budget,
+            inputs,
+            cached,
+        );
+    (out, errors, incomplete, reasons, discarded)
+}
+
+pub(crate) fn expand_macros_traced_configured(
+    src: &str,
+    tokens: Vec<Token>,
+    lines: &[(Span, u32)],
+    evaluations: &[MacroReplay],
+    budget: &mut MacroBudget,
+    inputs: Option<Arc<MacroExecutionInputs>>,
+    cached: Option<&MacroSource>,
+) -> ConfiguredTrace {
+    let (out, traces, arena, errors, discarded, incomplete, _, _, messages) =
+        expand_macros_traced_full_configured(
+            src,
+            tokens,
+            lines,
+            evaluations,
+            budget,
+            inputs,
+            cached,
+        );
+    (
+        out,
+        traces,
+        arena,
+        incomplete.is_some(),
+        incomplete.is_none() && errors.is_empty(),
+        messages,
+        discarded,
+    )
+}
+
+fn initialize_macro_inputs(state: &mut ExpandState<'_, '_>) {
+    let enabled = state.inputs.as_ref().is_some_and(|inputs| {
+        inputs
+            .analysis
+            .overrides
+            .iter()
+            .any(|choice| matches!(choice.operation, AnalysisOverride::Definition { .. }))
+    });
+    if let Err(error) = state.budget.reset_provenance(enabled) {
+        note_eval_failure(state, Span::default(), error, "override provenance");
+        return;
+    }
+    let Some(inputs) = state.inputs.clone() else {
+        return;
+    };
+    match inputs.initial_environment(state.budget) {
+        Ok(initial) => *state.defines = initial,
+        Err(error) => note_eval_failure(state, Span::default(), error, "initial macro definitions"),
+    }
+}
+
+fn execute_definition(
+    state: &mut ExpandState<'_, '_>,
+    tok: &Token,
+) -> Result<Option<(String, MacroVal)>, MacroEvalError> {
+    state.budget.begin_expression();
+    let inputs = state.inputs.clone();
+    let selected = inputs.as_ref().and_then(|inputs| {
+        inputs
+            .sites
+            .get(&tok.span)
+            .map(|index| (*index, &inputs.analysis.overrides[*index]))
+    });
+    let Some((index, selected)) = selected else {
+        let result = parse_define_eval(tok.text(state.src), state.defines, state.budget)?;
+        if let Some((name, _)) = &result {
+            state.budget.bind_expression(name, None)?;
+        }
+        return Ok(result);
+    };
+    state.budget.spend_work(1)?;
+    let result = match &selected.operation {
+        AnalysisOverride::SkipDefinition { .. } => Ok(None),
+        AnalysisOverride::Definition { expression, .. } => {
+            let name = selected.name.as_deref().expect("validated variable target");
+            if matches!(state.defines.get(name), Some(MacroVal::Function { .. })) {
+                Err(MacroEvalError::Official {
+                    code: "E285",
+                    message: format!("Variable {name} was previously defined as a function"),
+                })
+            } else {
+                state.budget.spend_work(name.len().max(1))?;
+                eval_macro_expr(expression, state.defines, state.budget)
+                    .map(|value| Some((name.to_owned(), value)))
+            }
+        }
+        _ => return parse_define_eval(tok.text(state.src), state.defines, state.budget),
+    };
+    if let Ok(Some((name, _))) = &result {
+        let added = if matches!(&selected.operation, AnalysisOverride::Definition { .. })
+            && state.budget.has_provenance()
+        {
+            state.budget.spend_work(std::mem::size_of::<FrameRec>())?;
+            let id = state.arena.len();
+            state.arena.push(FrameRec {
+                kind: "override_definition",
+                directive_span: tok.span,
+                body_span: tok.span,
+                variable: None,
+                value: None,
+            });
+            Some(id)
+        } else {
+            None
+        };
+        state.budget.bind_expression(name, added)?;
+    }
+    if let Some(visitor) = state.file_visitor.as_deref_mut() {
+        match &result {
+            Ok(_)=>visitor.applied(index),
+            Err(error)=>visitor.failed_application(index,error.diagnostic().map(|(_,message)|message).unwrap_or_else(||"The replacement expression could not be evaluated; no assignment was applied.".into())),
+        }
+    }
+    result
+}
+
+fn selected_condition(state: &mut ExpandState<'_, '_>, tok: &Token, kind: &str) -> Option<bool> {
+    let inputs = state.inputs.clone();
+    if let Some((index, selected)) = inputs.as_ref().and_then(|inputs| {
+        inputs
+            .sites
+            .get(&tok.span)
+            .map(|index| (*index, &inputs.analysis.overrides[*index]))
+    }) && matches!(selected.operation, AnalysisOverride::Branch { .. })
+    {
+        if let Err(error) = state.budget.spend_work(1) {
+            note_eval_failure(state, tok.span, error, "");
+            return None;
+        }
+        if let Some(visitor) = state.file_visitor.as_deref_mut() {
+            visitor.applied(index)
+        }
+        return Some(selected.branch_index == Some(0));
+    }
+    match kind {
+        "ifdef" | "ifndef" => eval_defined_condition(state, tok, kind),
+        _ => eval_condition(state, tok, kind),
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn expand_macros_traced_with_lines_and_evaluations_budget(
     src: &str,
     tokens: Vec<Token>,
@@ -1013,13 +1401,17 @@ pub(crate) fn expand_macros_traced_with_lines_and_evaluations_budget(
 ///
 /// `gaps` marks leftover include-directive indent and line endings in an
 /// already spliced `src`. Pass an empty slice when there are no active includes.
-pub(crate) fn expand_macros_with_source_layout_and_evaluations(
+// Keep the source-layout entry point aligned with traced expansion inputs.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn expand_macros_with_source_layout_configured(
     src: &str,
     _tokens: Vec<Token>,
     gaps: &[SourceLayoutGap],
     line_segments: &[(Span, u32)],
     evaluations: &[MacroReplay],
     budget: &mut MacroBudget,
+    inputs: Option<Arc<MacroExecutionInputs>>,
+    cached_tokens: Option<&MacroSource>,
 ) -> (
     Vec<Token>,
     Vec<MacroTypeError>,
@@ -1038,6 +1430,7 @@ pub(crate) fn expand_macros_with_source_layout_and_evaluations(
         let mut messages = Vec::new();
         let mut state = ExpandState {
             src,
+            inputs: inputs.clone(),
             defines: &mut defines,
             origin_stack: Vec::new(),
             arena: &mut arena,
@@ -1054,11 +1447,17 @@ pub(crate) fn expand_macros_with_source_layout_and_evaluations(
             messages: &mut messages,
             message_bytes: 0,
             next_for_input: None,
+            replay_for_origins: HashMap::new(),
             line_segments,
             budget,
         };
         let scanned = match state.budget.spend_work(src.len().max(1)) {
-            Ok(()) => match scan_macro_tokens_and_evaluations(src, evaluations, state.budget) {
+            Ok(()) => match scan_macro_tokens_and_evaluations_cached(
+                src,
+                evaluations,
+                state.budget,
+                cached_tokens.map(|source| source.tokens.as_ref()),
+            ) {
                 Ok(tokens) => tokens,
                 Err(error) => {
                     note_eval_failure(&mut state, Span::new(0, src.len()), error, "");
@@ -1070,8 +1469,20 @@ pub(crate) fn expand_macros_with_source_layout_and_evaluations(
                 Vec::new()
             }
         };
+        initialize_macro_inputs(&mut state);
         if !state.stopped {
-            prepare_macro_execution(&mut state, &scanned);
+            if let Some(source) = cached_tokens {
+                if let Some(refusal) = &source.syntax_refusal {
+                    push_type_error(
+                        &mut state,
+                        refusal.span,
+                        refusal.code,
+                        refusal.message.clone(),
+                    );
+                }
+            } else {
+                prepare_macro_execution(&mut state, &scanned);
+            }
         }
         let (provisional, traces) = expand_seq(&mut state, &scanned);
         let out = match realize_model_tokens(src, &provisional, &traces, state.budget) {
@@ -1126,14 +1537,6 @@ pub(crate) fn for_body_is_empty(source: &str, opener: Span, closer: Span) -> boo
             .unwrap_or(gap)
     };
     body.chars().all(|ch| matches!(ch, ' ' | '\t' | '\r'))
-}
-
-/// Source ranges of `@#if` / `@#ifndef` branches that expansion discarded.
-pub(crate) fn inactive_macro_spans(src: &str, budget: &mut MacroBudget) -> Vec<Span> {
-    let tokens = crate::engine::language::lexer::tokenize(src);
-    let (_, _, _, _, discarded, _, _, _, _) =
-        expand_macros_traced_full_and_evaluations_budget(src, tokens, &[], &[], budget);
-    discarded
 }
 
 /// Executed path directives in an already joined source. This uses the same
@@ -1215,6 +1618,26 @@ fn expand_macros_traced_full_and_evaluations_budget(
     evaluations: &[MacroReplay],
     budget: &mut MacroBudget,
 ) -> ExpandTracedFull {
+    expand_macros_traced_full_configured(
+        src,
+        tokens,
+        line_segments,
+        evaluations,
+        budget,
+        None,
+        None,
+    )
+}
+
+fn expand_macros_traced_full_configured(
+    src: &str,
+    tokens: Vec<Token>,
+    line_segments: &[(Span, u32)],
+    evaluations: &[MacroReplay],
+    budget: &mut MacroBudget,
+    inputs: Option<Arc<MacroExecutionInputs>>,
+    cached_tokens: Option<&MacroSource>,
+) -> ExpandTracedFull {
     let _ = tokens;
     let mut defines = HashMap::new();
     let mut arena = Vec::new();
@@ -1226,6 +1649,7 @@ fn expand_macros_traced_full_and_evaluations_budget(
     let (out, traces, include_seen) = {
         let mut state = ExpandState {
             src,
+            inputs: inputs.clone(),
             defines: &mut defines,
             origin_stack: Vec::new(),
             arena: &mut arena,
@@ -1242,11 +1666,17 @@ fn expand_macros_traced_full_and_evaluations_budget(
             messages: &mut messages,
             message_bytes: 0,
             next_for_input: None,
+            replay_for_origins: HashMap::new(),
             line_segments,
             budget,
         };
         let scanned = match state.budget.spend_work(src.len().max(1)) {
-            Ok(()) => match scan_macro_tokens_and_evaluations(src, evaluations, state.budget) {
+            Ok(()) => match scan_macro_tokens_and_evaluations_cached(
+                src,
+                evaluations,
+                state.budget,
+                cached_tokens.map(|source| source.tokens.as_ref()),
+            ) {
                 Ok(tokens) => tokens,
                 Err(error) => {
                     note_eval_failure(&mut state, Span::new(0, src.len()), error, "");
@@ -1258,8 +1688,20 @@ fn expand_macros_traced_full_and_evaluations_budget(
                 Vec::new()
             }
         };
+        initialize_macro_inputs(&mut state);
         if !state.stopped {
-            prepare_macro_execution(&mut state, &scanned);
+            if let Some(source) = cached_tokens {
+                if let Some(refusal) = &source.syntax_refusal {
+                    push_type_error(
+                        &mut state,
+                        refusal.span,
+                        refusal.code,
+                        refusal.message.clone(),
+                    );
+                }
+            } else {
+                prepare_macro_execution(&mut state, &scanned);
+            }
         }
         let (provisional, provisional_traces) = expand_seq(&mut state, &scanned);
         let realized = realize_model_tokens(src, &provisional, &provisional_traces, state.budget);
@@ -1351,12 +1793,29 @@ pub(crate) fn scan_macro_tokens(src: &str) -> Vec<Token> {
     tokens
 }
 
-fn scan_macro_tokens_and_evaluations(
+fn scan_macro_tokens_and_evaluations_cached(
     src: &str,
     evaluations: &[MacroReplay],
     budget: &mut MacroBudget,
+    cached: Option<&[Token]>,
 ) -> Result<Vec<Token>, MacroEvalError> {
-    let tokens = scan_macro_tokens(src);
+    let tokens = if let Some(tokens) = cached {
+        budget.spend_work(
+            tokens
+                .iter()
+                .map(|token| {
+                    token
+                        .lexeme
+                        .as_ref()
+                        .map_or(0, String::len)
+                        .saturating_add(1)
+                })
+                .sum(),
+        )?;
+        tokens.to_vec()
+    } else {
+        scan_macro_tokens(src)
+    };
     if evaluations.is_empty() {
         return Ok(tokens);
     }
@@ -1694,8 +2153,9 @@ fn realize_model_tokens(
             |contrib| crate::engine::language::native_line::EmittedOrigin {
                 emitted: Span::new(contrib.emit_start, contrib.emit_end),
                 written: contrib.span,
-                copied: emitted.get(contrib.emit_start..contrib.emit_end)
-                    == src.get(contrib.span.start as usize..contrib.span.end as usize),
+                copied: !contrib.exact
+                    && emitted.get(contrib.emit_start..contrib.emit_end)
+                        == src.get(contrib.span.start as usize..contrib.span.end as usize),
                 frames: contrib.frames,
             },
         )
@@ -1750,6 +2210,7 @@ pub(crate) fn discover_directive_sites(
 
 /// The file inventory has already computed this exact original-text digest.
 /// Share it with target discovery instead of hashing the source a second time.
+#[cfg(test)]
 pub(crate) fn discover_directive_sites_with_revision(
     file: Option<&str>,
     source: &str,
@@ -1771,6 +2232,44 @@ pub(crate) fn discover_directive_sites_with_revision(
     validate_macro_syntax_and_sites(source, tokens, budget, Some(&mut sites))
         .map_err(|(_, error)| expression_error(error))?;
     Ok(sites.sites)
+}
+
+pub(crate) fn source_syntax_sites(
+    source: &str,
+    revision: &str,
+    tokens: &[Token],
+    budget: &mut MacroBudget,
+) -> Result<
+    (
+        Vec<crate::engine::analysis_configuration::DirectiveSite>,
+        Option<crate::engine::language::macro_source::MacroSyntaxRefusal>,
+    ),
+    MacroEvalError,
+> {
+    budget.spend_work(revision.len().saturating_add(tokens.len()).max(1))?;
+    let mut sites = DirectiveSites {
+        file: None,
+        revision: revision.to_owned(),
+        sites: Vec::new(),
+        chains: Vec::new(),
+    };
+    match validate_macro_syntax_and_sites(source, tokens, budget, Some(&mut sites)) {
+        Ok(()) => Ok((sites.sites, None)),
+        Err((_, error @ MacroEvalError::Limit(_))) => Err(error),
+        Err((span, error)) => {
+            let (code, message) = error
+                .diagnostic()
+                .unwrap_or(("I211", "Macro syntax could not be established.".into()));
+            Ok((
+                Vec::new(),
+                Some(crate::engine::language::macro_source::MacroSyntaxRefusal {
+                    span,
+                    code,
+                    message,
+                }),
+            ))
+        }
+    }
 }
 
 struct DirectiveSites<'a> {
@@ -2210,6 +2709,9 @@ fn copy_subspan(
     emit_from: usize,
     emit_to: usize,
 ) -> Option<Span> {
+    if contrib.exact {
+        return None;
+    }
     let slice = src.get(contrib.span.start as usize..contrib.span.end as usize)?;
     let contributed = emitted.get(contrib.emit_start..contrib.emit_end)?;
     // Same length is not enough: `@{a}` and `beta` are both four bytes.
@@ -2282,7 +2784,7 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                     let em = emitting(&stack);
                     let mut kept = false;
                     if em {
-                        match parse_define_eval(tok.text(state.src), state.defines, state.budget) {
+                        match execute_definition(state, tok) {
                             Ok(Some((name, val))) => {
                                 state.defines.insert(name, val);
                             }
@@ -2306,7 +2808,7 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                 Dir::Ifdef => {
                     let em = emitting(&stack);
                     let cond = if em {
-                        eval_defined_condition(state, tok, "ifdef")
+                        selected_condition(state, tok, "ifdef")
                     } else {
                         Some(false)
                     };
@@ -2321,7 +2823,7 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                 Dir::Ifndef => {
                     let em = emitting(&stack);
                     let cond = if em {
-                        eval_defined_condition(state, tok, "ifndef")
+                        selected_condition(state, tok, "ifndef")
                     } else {
                         Some(false)
                     };
@@ -2336,7 +2838,7 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                 Dir::If => {
                     let em = emitting(&stack);
                     let cond = if em {
-                        eval_condition(state, tok, "if")
+                        selected_condition(state, tok, "if")
                     } else {
                         Some(false)
                     };
@@ -2356,7 +2858,11 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                     let outer_emitting = stack
                         .get(..stack.len().saturating_sub(1))
                         .is_some_and(|outer| outer.iter().all(|frame| frame.active));
-                    let active = match stack.last() {
+                    let active = match stack.last_mut() {
+                        Some(frame) if frame.forced.is_some() => {
+                            frame.arm += 1;
+                            Some(outer_emitting && frame.forced == Some(Some(frame.arm)))
+                        }
                         Some(frame) if !frame.taken && outer_emitting => {
                             eval_condition(state, tok, "elseif")
                         }
@@ -2401,7 +2907,12 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                     let em = emitting(&stack);
                     i += 1;
                     if let Some(frame) = stack.last_mut() {
-                        let active = !frame.taken;
+                        frame.arm += 1;
+                        let active = if let Some(forced) = frame.forced {
+                            forced == Some(frame.arm)
+                        } else {
+                            !frame.taken
+                        };
                         frame.taken = true;
                         open_next_branch(state, frame, tokens, i, boundary, "else", active);
                     }
@@ -2412,7 +2923,7 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                     let em = emitting(&stack);
                     i += 1;
                     if let Some(frame) = stack.pop() {
-                        if !frame.active {
+                        if !frame.active && frame.parent_active {
                             push_discarded(state, frame.branch_start, end_span.start);
                         }
                         backpatch(
@@ -2516,6 +3027,8 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                                             filename: &path,
                                             certain,
                                             iterations: &iterations,
+                                            frames: &state.origin_stack,
+                                            arena: state.arena,
                                         },
                                         state.defines,
                                         state.budget,
@@ -2608,16 +3121,23 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
         {
             if emitting(&stack) {
                 let replacements = if tok.kind == TokenKind::String {
-                    subst_quoted(state.src, tok, state.defines, state.budget)
-                        .map(|expansion| (expansion.tokens, expansion.substitutions))
+                    subst_quoted(state.src, tok, state.defines, state.budget).map(|expansion| {
+                        (expansion.tokens, expansion.substitutions, expansion.origins)
+                    })
                 } else {
                     subst_interp(state.src, tok, state.defines, state.budget)
                         .map_err(|error| (tok.span, error))
-                        .map(|(display, tokens)| (tokens, vec![(tok.span, display)]))
+                        .map(|(display, tokens, origins)| {
+                            (
+                                tokens,
+                                vec![(tok.span, display)],
+                                origins.map_or_else(Vec::new, |origins| vec![(tok.span, origins)]),
+                            )
+                        })
                 };
                 match replacements {
-                    Ok((replacements, substitutions)) => {
-                        let macro_active = !state.origin_stack.is_empty();
+                    Ok((replacements, substitutions, origins)) => {
+                        let macro_active = !state.origin_stack.is_empty() || !origins.is_empty();
                         if let Some(recorder) = state.source.as_deref_mut() {
                             for (span, display) in substitutions {
                                 recorder.substitute(span, &display, macro_active);
@@ -2627,9 +3147,30 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                         if let Some(recorder) = state.source.as_deref_mut() {
                             recorder.suppress = true;
                         }
+                        let depth = state.origin_stack.len();
+                        if let Err(error) = push_substitution_origins(state, &origins) {
+                            note_eval_failure(state, tok.span, error, "");
+                        }
+                        // An empty value still proves that this written
+                        // substitution executed. No emitted token can retain
+                        // that fact for the shared availability trace.
+                        if replacements.is_empty()
+                            && !state.stopped
+                            && let Some(visitor) = state.file_visitor.as_deref_mut()
+                            && let Err(error) = visitor.region(
+                                tok.span,
+                                true,
+                                &state.origin_stack,
+                                state.arena,
+                                state.budget,
+                            )
+                        {
+                            note_eval_failure(state, tok.span, error, "");
+                        }
                         for replacement in replacements {
                             emit(state, &mut out, &mut traces, replacement);
                         }
+                        state.origin_stack.truncate(depth);
                         if let Some(recorder) = state.source.as_deref_mut() {
                             recorder.suppress = false;
                         }
@@ -2663,7 +3204,7 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
         i += 1;
     }
     while let Some(frame) = stack.pop() {
-        if !frame.active {
+        if !frame.active && frame.parent_active {
             let end = tokens
                 .last()
                 .map(|tok| tok.span.end)
@@ -2677,6 +3218,20 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
 }
 
 fn push_discarded(state: &mut ExpandState<'_, '_>, start: u32, end: u32) {
+    if !state.stopped
+        && end > start
+        && let Some(visitor) = state.file_visitor.as_deref_mut()
+        && let Err(error) = visitor.region(
+            Span { start, end },
+            false,
+            &state.origin_stack,
+            state.arena,
+            state.budget,
+        )
+    {
+        note_eval_failure(state, Span { start, end }, error, "");
+        return;
+    }
     if end > start {
         state.discarded.push(Span { start, end });
     }
@@ -2699,6 +3254,39 @@ fn emit_generated(
     token.glue_left = true;
     token.output_prepaid = prepaid;
     emit(state, out, traces, token);
+}
+
+fn push_substitution_origins(
+    state: &mut ExpandState<'_, '_>,
+    origins: &SubstitutionOrigins,
+) -> Result<(), MacroEvalError> {
+    let count = origins
+        .iter()
+        .map(|(_, origins)| origins.len())
+        .sum::<usize>();
+    if count == 0 {
+        return Ok(());
+    }
+    state.budget.spend_work(
+        count
+            .saturating_mul(std::mem::size_of::<FrameRec>())
+            .saturating_add(1),
+    )?;
+    for (span, definitions) in origins {
+        for &definition in definitions.iter() {
+            let directive_span = state.arena[definition].directive_span;
+            let id = state.arena.len();
+            state.arena.push(FrameRec {
+                kind: "override_definition",
+                directive_span,
+                body_span: *span,
+                variable: None,
+                value: None,
+            });
+            state.origin_stack.push(id);
+        }
+    }
+    Ok(())
 }
 
 /// `@{...}` and `@#echo` use pinned `to_string`. Strings are copied raw.
@@ -2763,6 +3351,13 @@ fn record_source_emit(state: &mut ExpandState<'_, '_>, tok: &Token) -> Result<()
         && tok.kind != TokenKind::Eof
         && let Some(visitor) = state.file_visitor.as_deref_mut()
     {
+        visitor.region(
+            tok.span,
+            true,
+            &state.origin_stack,
+            state.arena,
+            state.budget,
+        )?;
         visitor.emit_text(tok.text(state.src), state.budget)?;
     }
     if state.source.is_none() {
@@ -2801,6 +3396,19 @@ fn record_source_emit(state: &mut ExpandState<'_, '_>, tok: &Token) -> Result<()
 }
 
 fn record_source_directive(state: &mut ExpandState<'_, '_>, dir: Span, copy_leading_gap: bool) {
+    if !state.stopped
+        && let Some(visitor) = state.file_visitor.as_deref_mut()
+        && let Err(error) = visitor.region(
+            dir,
+            copy_leading_gap,
+            &state.origin_stack,
+            state.arena,
+            state.budget,
+        )
+    {
+        note_eval_failure(state, dir, error, "");
+        return;
+    }
     let macro_active = !state.origin_stack.is_empty();
     if let Some(recorder) = state.source.as_deref_mut() {
         recorder.skip_directive(dir, copy_leading_gap, macro_active);
@@ -2845,13 +3453,31 @@ fn push_if_frame(
     active: bool,
 ) {
     let body_start = next_body_start(tokens, next_i, dir_span.end);
-    let frame_id = alloc_frame(state.arena, kind, body_start, dir_span);
+    let forced = state.inputs.as_ref().and_then(|inputs| {
+        inputs
+            .sites
+            .get(&dir_span)
+            .map(|index| inputs.analysis.overrides[*index].branch_index)
+    });
+    let frame_id = alloc_frame(
+        state.arena,
+        if forced.is_some() {
+            "override_branch"
+        } else {
+            kind
+        },
+        body_start,
+        dir_span,
+    );
     stack.push(IfFrame {
+        parent_active: emitting(stack),
         active,
         taken: active,
         frame_id,
         body_start,
         branch_start: dir_span.end,
+        forced,
+        arm: 0,
     });
     state.origin_stack.push(frame_id);
 }
@@ -2925,15 +3551,21 @@ fn unroll_for(
             return false;
         }
     };
-    let values = if let Some(input) = state.next_for_input.take() {
+    let (values, value_origins) = if let Some((input, origins)) = state.next_for_input.take() {
         if let Err(error) = state.budget.spend_work(1) {
             note_eval_failure(state, for_tok.span, error, &collection_expr);
             return false;
         }
-        MacroVal::Array(vec![input])
+        (MacroVal::Array(vec![input]), origins)
     } else {
         match eval_macro_expr(&collection_expr, state.defines, state.budget) {
-            Ok(values) => values,
+            Ok(values) => match state.budget.expression_origins() {
+                Ok(origins) => (values, origins),
+                Err(error) => {
+                    note_eval_failure(state, for_tok.span, error, "");
+                    return false;
+                }
+            },
             Err(error) => {
                 note_eval_failure(state, for_tok.span, error, &collection_expr);
                 return false;
@@ -3046,7 +3678,14 @@ fn unroll_for(
             break;
         }
         for (name, member) in vars.iter().zip(members) {
+            if let Err(error) = state.budget.bind_origins(name, value_origins.clone()) {
+                note_eval_failure(state, for_tok.span, error, "");
+                break;
+            }
             state.defines.insert(name.clone(), member);
+        }
+        if state.stopped {
+            break;
         }
         let frame_id = state.arena.len();
         state.arena.push(FrameRec {
@@ -3158,7 +3797,7 @@ fn subst_interp(
     tok: &Token,
     defines: &mut HashMap<String, MacroVal>,
     budget: &mut MacroBudget,
-) -> Result<(String, Vec<Token>), MacroEvalError> {
+) -> Result<Interpolation, MacroEvalError> {
     let text = tok.text(src);
     let inner = text
         .strip_prefix("@{")
@@ -3168,17 +3807,21 @@ fn subst_interp(
         inner, defines, budget,
     )?;
     let repl = interpolation_text(&val, budget)?;
+    let origins = budget.expression_origins()?;
+    if origins.is_some() {
+        budget.spend_work(std::mem::size_of::<(Span, Arc<[usize]>)>())?;
+    }
     // The replacement is text. The model lexer reads the whole emitted stream
     // later, so a value may open a comment, close a quote, or join a name.
     // Generated `@#` and `@{` stay characters; that later lexer does not run
     // the macro processor again. Rendering already charged these bytes.
     if repl.is_empty() {
-        return Ok((repl, Vec::new()));
+        return Ok((repl, Vec::new(), origins));
     }
     let mut token = Token::with_lexeme(TokenKind::Ident, tok.span, repl.clone());
     token.glue_left = true;
     token.output_prepaid = repl.len();
-    Ok((repl, vec![token]))
+    Ok((repl, vec![token], origins))
 }
 
 /// Substitute inside a quoted .mod value without changing its string boundary.
@@ -3187,6 +3830,7 @@ fn subst_interp(
 struct QuotedExpansion {
     tokens: Vec<Token>,
     substitutions: Vec<(Span, String)>,
+    origins: SubstitutionOrigins,
 }
 
 fn subst_quoted(
@@ -3205,6 +3849,7 @@ fn subst_quoted(
     }
     let mut output = String::new();
     let mut substitutions = Vec::new();
+    let mut origins = Vec::new();
     let mut prepaid = 0usize;
     let mut cursor = 0;
     while let Some(relative) = text[cursor..].find("@{") {
@@ -3236,6 +3881,14 @@ fn subst_quoted(
                 prepaid = prepaid.saturating_add(replacement.len());
                 output.push_str(&replacement);
                 substitutions.push((span, replacement));
+                if let Some(definitions) =
+                    budget.expression_origins().map_err(|error| (span, error))?
+                {
+                    budget
+                        .spend_work(std::mem::size_of::<(Span, Arc<[usize]>)>())
+                        .map_err(|error| (span, error))?;
+                    origins.push((span, definitions));
+                }
             }
             Err(error) => return Err((span, error)),
         }
@@ -3259,6 +3912,7 @@ fn subst_quoted(
     Ok(QuotedExpansion {
         tokens,
         substitutions,
+        origins,
     })
 }
 
@@ -3313,10 +3967,55 @@ pub(crate) fn loops_containing(
 }
 
 fn execute_replay(state: &mut ExpandState<'_, '_>, token: &Token) {
-    let directive = token.text(state.src);
+    let mut directive = token.text(state.src);
+    if let Some(id) = directive.strip_prefix(FOR_END_ORIGIN_PREFIX) {
+        if let Ok(id) = id.parse::<usize>() {
+            state.replay_for_origins.remove(&id);
+        }
+        return;
+    }
+    if let Some(packet) = directive.strip_prefix(FOR_INPUT_ORIGIN_PREFIX) {
+        let Some((id, encoded)) = packet
+            .split_once(':')
+            .and_then(|(id, value)| id.parse::<usize>().ok().map(|id| (id, value)))
+        else {
+            note_eval_failure(
+                state,
+                token.span,
+                MacroEvalError::Limit("source mapping"),
+                "",
+            );
+            return;
+        };
+        match crate::engine::language::macro_expr::decode_replay_value(encoded, state.budget) {
+            Ok(value) => {
+                state.next_for_input = Some((value, state.replay_for_origins.get(&id).cloned()))
+            }
+            Err(error) => note_eval_failure(state, token.span, error, directive),
+        }
+        return;
+    }
+    let origin_key = if let Some(packet) = directive.strip_prefix(FOR_ORIGIN_PREFIX) {
+        let Some((id, original)) = packet
+            .split_once(':')
+            .and_then(|(id, original)| id.parse::<usize>().ok().map(|id| (id, original)))
+        else {
+            note_eval_failure(
+                state,
+                token.span,
+                MacroEvalError::Limit("source mapping"),
+                "",
+            );
+            return;
+        };
+        directive = original;
+        Some(id)
+    } else {
+        None
+    };
     if let Some(encoded) = directive.strip_prefix(FOR_INPUT_PREFIX) {
         match crate::engine::language::macro_expr::decode_replay_value(encoded, state.budget) {
-            Ok(value) => state.next_for_input = Some(value),
+            Ok(value) => state.next_for_input = Some((value, None)),
             Err(error) => note_eval_failure(state, token.span, error, directive),
         }
         return;
@@ -3330,7 +4029,7 @@ fn execute_replay(state: &mut ExpandState<'_, '_>, token: &Token) {
         );
         return;
     }
-    let result = match directive_name(directive).to_ascii_lowercase().as_str() {
+    let mut result = match directive_name(directive).to_ascii_lowercase().as_str() {
         "include" => eval_include_argument(state, token).map(|_| ()),
         "for" => parse_for(directive, state.budget).and_then(|(_, collection, condition)| {
             let expression = for_collection_expression(
@@ -3349,6 +4048,21 @@ fn execute_replay(state: &mut ExpandState<'_, '_>, token: &Token) {
         }),
         _ => Err(MacroEvalError::Limit("source mapping")),
     };
+    if result.is_ok()
+        && let Some(id) = origin_key
+    {
+        match state.budget.expression_origins() {
+            Ok(Some(origins)) => {
+                if let Err(error) = state.budget.spend_work(1) {
+                    result = Err(error);
+                } else {
+                    state.replay_for_origins.insert(id, origins);
+                }
+            }
+            Ok(None) => {}
+            Err(error) => result = Err(error),
+        }
+    }
     if let Err(error) = result {
         note_eval_failure(state, token.span, error, directive);
     }
@@ -3436,7 +4150,7 @@ fn open_next_branch(
     kind: &'static str,
     active: bool,
 ) {
-    if !frame.active {
+    if !frame.active && frame.parent_active {
         push_discarded(state, frame.branch_start, boundary.start);
     }
     backpatch(
@@ -3447,7 +4161,21 @@ fn open_next_branch(
     );
     frame.active = active;
     let body_start = next_body_start(tokens, next_i, boundary.end);
-    let frame_id = alloc_frame(state.arena, kind, body_start, boundary);
+    let directive = if frame.forced.is_some() {
+        state.arena[frame.frame_id].directive_span
+    } else {
+        boundary
+    };
+    let frame_id = alloc_frame(
+        state.arena,
+        if frame.forced.is_some() {
+            "override_branch"
+        } else {
+            kind
+        },
+        body_start,
+        directive,
+    );
     frame.frame_id = frame_id;
     frame.body_start = body_start;
     frame.branch_start = boundary.end;

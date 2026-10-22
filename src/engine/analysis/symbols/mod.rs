@@ -1,15 +1,17 @@
 //! Accepted symbol bindings and complete source edits, independent of transports.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::{Arc, OnceLock};
 
 use super::model_locals::ModelLocals;
+use super::source_inventory::SourceInventory;
+use crate::engine::analysis_configuration::SourceAvailability;
 use crate::engine::editing::refs::{ident_at, is_legal_ident};
 use crate::engine::language::intern::Name;
-use crate::engine::language::lexer::{TokenKind, tokenize};
+use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::model::Model;
 use crate::engine::language::span::Span;
-use crate::engine::workspace::Workspace;
+use crate::engine::workspace::{SourceDocument, Workspace};
 
 mod named;
 mod ordinary;
@@ -42,6 +44,26 @@ pub(crate) const IDENTIFIER: Refusal = Refusal::new(
 pub(crate) const BINDING_CAPTURE: Refusal = Refusal::new(
     "BINDING_CAPTURE",
     "The new name would bind existing unresolved uses in an affected scope. Choose a name that has no unresolved uses there.",
+);
+pub(crate) const ANALYSIS_PREVIEW: Refusal = Refusal::new(
+    "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED",
+    "Rename is unavailable while a written macro definition or branch is overridden. Select Source or an initial-definition configuration before renaming. No edits were proposed.",
+);
+pub(crate) const CONDITIONAL_EDIT: Refusal = Refusal::new(
+    "CONDITIONAL_EDIT_UNPROVEN",
+    "Rename cannot verify whether an inactive or uncertain source occurrence is the same symbol or a conflict with the new name. No edits were proposed.",
+);
+const CONDITIONAL_INCLUDE: Refusal = Refusal::new(
+    "CONDITIONAL_EDIT_UNPROVEN",
+    "Rename cannot verify uses or name conflicts inside an include skipped by the selected macro conditions. That file was not read for this edit. No edits were proposed.",
+);
+const CONDITIONAL_GENERATED: Refusal = Refusal::new(
+    "CONDITIONAL_EDIT_UNPROVEN",
+    "Rename cannot verify the names produced by an inactive or uncertain macro substitution. No edits were proposed.",
+);
+const CONDITIONAL_SOURCE: Refusal = Refusal::new(
+    "CONDITIONAL_EDIT_UNPROVEN",
+    "Rename cannot verify conditional source because written-source inspection is incomplete. No edits were proposed.",
 );
 
 const CANCELLED: Refusal = Refusal::new(
@@ -154,6 +176,8 @@ pub(crate) struct SemanticModel {
     pub model: Model,
     pub complete: bool,
     pub sources: HashMap<String, String>,
+    source_documents: BTreeMap<String, SourceDocument>,
+    source_tokens: HashMap<String, OnceLock<SourceTokens>>,
     facts: ModelLocals,
     named: Vec<named::Fact>,
     mappings: HashMap<Span, (String, Span)>,
@@ -162,6 +186,22 @@ pub(crate) struct SemanticModel {
     ordinary_sites: OnceLock<HashMap<Name, Vec<Reference>>>,
     parse_stop: Option<usize>,
     accepted_events: HashSet<usize>,
+}
+
+enum SourceTokens {
+    Inventory(Arc<SourceInventory>),
+    Lexed(Vec<Token>),
+}
+
+impl SourceTokens {
+    fn tokens(&self) -> Option<&[Token]> {
+        match self {
+            Self::Inventory(inventory) => inventory
+                .structure_complete()
+                .then_some(inventory.lexical_tokens.as_slice()),
+            Self::Lexed(tokens) => Some(tokens),
+        }
+    }
 }
 
 impl SemanticModel {
@@ -216,7 +256,16 @@ impl SemanticModel {
             .collect();
         let mut files: HashSet<_> = mappings.values().map(|(file, _)| file.clone()).collect();
         files.extend(workspace.input_stamps(root).into_keys());
-        let sources = files
+        let source_documents = files
+            .iter()
+            .take_while(|_| !crate::engine::control::cancelled())
+            .filter_map(|file| {
+                workspace
+                    .source_document(root, file)
+                    .map(|document| (file.clone(), document))
+            })
+            .collect();
+        let sources: HashMap<_, _> = files
             .into_iter()
             .take_while(|_| !crate::engine::control::cancelled())
             .filter_map(|file| {
@@ -224,6 +273,10 @@ impl SemanticModel {
                     .source_for_normalized_key(&file)
                     .map(|text| (file, text.to_owned()))
             })
+            .collect();
+        let source_tokens = sources
+            .keys()
+            .map(|file| (file.clone(), OnceLock::new()))
             .collect();
         let accepted_events =
             crate::engine::diagnostics::parse_preflight::accepted_symbol_events(&model, parse_stop);
@@ -233,6 +286,8 @@ impl SemanticModel {
             model,
             complete,
             sources,
+            source_documents,
+            source_tokens,
             facts,
             named,
             mappings,
@@ -970,14 +1025,105 @@ impl SemanticModel {
 
     fn literal_identifier(&self, target: &(String, Span), name: &str) -> Result<(), Refusal> {
         let source = self.sources.get(&target.0).ok_or(SOURCE)?;
+        let tokens = self.written_tokens(&target.0).ok_or(MAPPING)?;
+        let index = tokens.partition_point(|token| token.span.start < target.1.start);
         if source.get(target.1.start as usize..target.1.end as usize) != Some(name)
-            || !tokenize(source)
-                .iter()
-                .any(|token| token.kind == TokenKind::Ident && token.span == target.1)
+            || !tokens
+                .get(index)
+                .is_some_and(|token| token.kind == TokenKind::Ident && token.span == target.1)
         {
             return Err(MAPPING);
         }
         Ok(())
+    }
+
+    /// Reuse source syntax if a source feature already built it. Ordinary
+    /// symbol reads and edits do not request an inert parse just for this proof.
+    fn written_tokens(&self, file: &str) -> Option<&[Token]> {
+        let source = self.sources.get(file)?;
+        let cached = self.source_tokens.get(file)?;
+        if let Some(tokens) = cached.get() {
+            return tokens.tokens();
+        }
+        let tokens = self
+            .source_documents
+            .get(file)
+            .and_then(SourceDocument::cached_inventory)
+            .map(SourceTokens::Inventory)
+            .unwrap_or_else(|| SourceTokens::Lexed(tokenize(source)));
+        if crate::engine::control::cancelled() {
+            return None;
+        }
+        let _ = cached.set(tokens);
+        cached.get()?.tokens()
+    }
+
+    fn prove_conditional_edit(&self, name: &str, replacement: &str) -> Result<(), Refusal> {
+        if !self.complete {
+            // The binding-specific proof reports the existing incomplete cause.
+            return Ok(());
+        }
+        for document in self.source_documents.values() {
+            check_cancelled()?;
+            if !document.has_conditional_source() {
+                continue;
+            }
+            let inventory = document.inventory().ok_or(CONDITIONAL_SOURCE)?;
+            check_cancelled()?;
+            if !inventory.structure_complete() {
+                return Err(CONDITIONAL_SOURCE);
+            }
+            for token in inventory.literal_identifiers() {
+                check_cancelled()?;
+                let written = token.text(document.source());
+                if (written == name || written == replacement)
+                    && document.availability(token.span) != SourceAvailability::Active
+                {
+                    return Err(CONDITIONAL_EDIT);
+                }
+            }
+            // A dormant include or substitution can hide any name. Do not
+            // acquire dormant files or execute alternatives to guess its uses.
+            for token in inventory.macro_tokens.iter() {
+                check_cancelled()?;
+                let possible_names = token.kind == TokenKind::MacroInterp && !token.comment_context
+                    || token.kind == TokenKind::MacroDir
+                        && crate::engine::language::macro_expand::directive_name(
+                            token.text(document.source()),
+                        ) == "include";
+                if possible_names
+                    && !inventory.is_proven_native(token.span)
+                    && document.availability(token.span) != SourceAvailability::Active
+                {
+                    return Err(if token.kind == TokenKind::MacroDir {
+                        CONDITIONAL_INCLUDE
+                    } else {
+                        CONDITIONAL_GENERATED
+                    });
+                }
+            }
+            // These two quoted operands have a symbol role. Other strings,
+            // including equation labels, do not become possible name uses.
+            for tokens in inventory.lexical_tokens.windows(3) {
+                check_cancelled()?;
+                if tokens[0].kind != TokenKind::Ident
+                    || tokens[1].kind != TokenKind::Eq
+                    || tokens[2].kind != TokenKind::String
+                    || inventory.is_proven_native(tokens[2].span)
+                {
+                    continue;
+                }
+                let key = tokens[0].text(document.source()).to_ascii_lowercase();
+                if let Some(value) = tags::content(tokens[2].text(document.source()))
+                    && let Some((_, written)) = tags::semantic_name(&key, value)
+                    && (written == name || written == replacement)
+                    && document.availability(tokens[2].span) != SourceAvailability::Active
+                {
+                    return Err(CONDITIONAL_EDIT);
+                }
+            }
+        }
+        check_cancelled()
     }
 }
 
@@ -1005,6 +1151,12 @@ pub(crate) fn rename(
             "INPUT_CHANGED",
             "The selected binding does not belong to the current source snapshot.",
         ));
+    }
+    if selected.model.is_analysis_preview() {
+        return Err(ANALYSIS_PREVIEW);
+    }
+    if binding.identity != Identity::Builtin {
+        selected.prove_conditional_edit(&binding.name, replacement)?;
     }
     let (mut targets, declaration, kind) = match binding.identity {
         Identity::Local(_) => (
@@ -1050,6 +1202,10 @@ pub(crate) fn rename(
             {
                 continue;
             }
+            if owner.model.is_analysis_preview() {
+                return Err(ANALYSIS_PREVIEW);
+            }
+            owner.prove_conditional_edit(&binding.name, replacement)?;
             let owner_targets = if binding.is_local() {
                 let compatible: Vec<_> = owner
                     .bindings()

@@ -6,8 +6,13 @@
 
 pub mod check_walk;
 pub mod companion;
+#[cfg(test)]
+mod configuration_refresh_tests;
+#[cfg(test)]
+mod configuration_tests;
 pub mod include_resolver;
 pub mod model_map;
+mod source_structure;
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -21,13 +26,25 @@ static INPUT_GENERATION: AtomicU64 = AtomicU64::new(1);
 /// Input provenance keeps this fixed byte bound when macro work is increased.
 const INPUT_FILE_BYTE_CAP: usize = 1_000_000;
 
+fn source_selection() -> AnalysisSelection {
+    static SOURCE: OnceLock<AnalysisSelection> = OnceLock::new();
+    SOURCE
+        .get_or_init(|| AnalysisSelection {
+            configuration_id: AnalysisConfiguration::default().configuration_id(),
+            name: None,
+            preview: false,
+            invocation_scope: "explicit_macro_inputs",
+        })
+        .clone()
+}
+
 use self::companion::{CompanionKind, CompanionRecord};
 use crate::engine::analysis::source_inventory::SourceInventory;
-use crate::engine::language::expand::{
-    ExpandReport, NavigationSource, SpliceSegment, expand_report_from_spliced_model_controlled,
-};
+use crate::engine::analysis_configuration::*;
+use crate::engine::language::expand::{ExpandReport, NavigationSource, SpliceSegment};
 use crate::engine::language::macro_expand::{IncompleteReason, MacroEvalError};
 use crate::engine::language::macro_expr::MacroBudget;
+use crate::engine::language::macro_source::MacroSource;
 use crate::engine::language::model::Model;
 use crate::engine::language::span::Span;
 use crate::engine::macro_work::MacroWorkLimit;
@@ -75,18 +92,49 @@ pub struct IncludeRecords {
 struct Doc {
     source: Arc<String>,
     model: OnceLock<Arc<Model>>,
-    source_inventory: Mutex<Option<Arc<SourceInventory>>>,
+    source_inventory: Mutex<Vec<(MacroWorkLimit, Arc<SourceInventory>)>>,
+    macro_source: Mutex<Option<Arc<MacroSource>>>,
     work_limit: MacroWorkLimit,
     overlay: bool,
     input_generation: u64,
 }
 
 impl Doc {
+    fn macro_source(&self, budget: &mut MacroBudget) -> Result<Arc<MacroSource>, MacroEvalError> {
+        budget.spend_work(1)?;
+        let mut cached = self
+            .macro_source
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(source) = cached.as_ref() {
+            return Ok(Arc::clone(source));
+        }
+        if let Some(source) = self
+            .model
+            .get()
+            .and_then(|model| model.macro_source.as_ref())
+        {
+            *cached = Some(Arc::clone(source));
+            return Ok(Arc::clone(source));
+        }
+        let source = MacroSource::build(Arc::clone(&self.source), budget)?;
+        debug_assert!(source.work_used <= budget.work_limit().get());
+        *cached = Some(Arc::clone(&source));
+        Ok(source)
+    }
     /// Folding and source intelligence share one bounded written-source pass.
     /// Snapshot readers also share this lock, so concurrent requests do not
     /// build the same inventory twice. A cancelled build is never published.
     fn source_inventory(
         &self,
+        cancellation: Option<Arc<AtomicBool>>,
+    ) -> Option<Arc<SourceInventory>> {
+        self.source_inventory_with_limit(self.work_limit, cancellation)
+    }
+
+    fn source_inventory_with_limit(
+        &self,
+        work_limit: MacroWorkLimit,
         cancellation: Option<Arc<AtomicBool>>,
     ) -> Option<Arc<SourceInventory>> {
         if crate::engine::control::flag_cancelled(cancellation.as_deref()) {
@@ -99,18 +147,35 @@ impl Doc {
         if crate::engine::control::flag_cancelled(cancellation.as_deref()) {
             return None;
         }
-        if let Some(inventory) = cached.as_ref() {
+        if let Some((_, inventory)) = cached.iter().find(|(limit, _)| *limit == work_limit) {
             return Some(Arc::clone(inventory));
         }
-        let inventory = Arc::new(SourceInventory::build(
-            &self.source,
-            self.work_limit,
+        let source = self.macro_source(&mut MacroBudget::with_limit(
+            work_limit,
             cancellation.clone(),
-        )?);
+        ));
+        let inventory = Arc::new(match source {
+            Ok(source) => {
+                SourceInventory::build_from_macro_source(source, work_limit, cancellation.clone())?
+            }
+            Err(error) => {
+                if crate::engine::control::flag_cancelled(cancellation.as_deref()) {
+                    return None;
+                }
+                SourceInventory::unavailable(match error {
+                    MacroEvalError::Limit("iteration work")=>"Written source inspection reached the work allowance; source rows and guarded macro targets are unavailable.".into(),
+                    MacroEvalError::Limit(limit)=>format!("Written source inspection stopped at the {limit} limit; source rows and guarded macro targets are unavailable."),
+                    _=>format!("Written source inspection is unavailable: {error:?}"),
+                })
+            }
+        });
         if crate::engine::control::flag_cancelled(cancellation.as_deref()) {
             return None;
         }
-        *cached = Some(Arc::clone(&inventory));
+        if cached.len() >= 2 {
+            cached.remove(0);
+        }
+        cached.push((work_limit, Arc::clone(&inventory)));
         Some(inventory)
     }
 
@@ -125,7 +190,15 @@ impl Doc {
         if let Some(model) = self.model.get() {
             return Some(model);
         }
-        let model = crate::engine::language::parser::parse_with_budget(&self.source, &mut budget);
+        let source = self.macro_source(&mut budget).ok()?;
+        let model = crate::engine::language::parser::parse_configured_with_budget(
+            &self.source,
+            &[],
+            &[],
+            &mut budget,
+            None,
+            Some(source),
+        );
         // A canceled parser can retain unfinished facts without a macro reason.
         // Shared document caches must publish only an uninterrupted parse.
         if crate::engine::control::flag_cancelled(flag.as_deref()) {
@@ -136,14 +209,84 @@ impl Doc {
     }
 
     fn with_work_limit(&self, work_limit: MacroWorkLimit) -> Self {
+        let source = self
+            .macro_source
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+            .or_else(|| {
+                self.model
+                    .get()
+                    .and_then(|model| model.macro_source.clone())
+            });
         Self {
             source: Arc::clone(&self.source),
             model: OnceLock::new(),
-            source_inventory: Mutex::new(None),
+            source_inventory: Mutex::new(
+                self.source_inventory
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .clone(),
+            ),
+            macro_source: Mutex::new(source),
             work_limit,
             overlay: self.overlay,
             input_generation: self.input_generation,
         }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct SourceDocument {
+    doc: Arc<Doc>,
+    work_limit: MacroWorkLimit,
+    cancellation: Option<Arc<AtomicBool>>,
+    file: String,
+    availability_index: Arc<MacroAvailabilityIndex>,
+    complete: bool,
+}
+
+impl SourceDocument {
+    pub(crate) fn source(&self) -> &str {
+        &self.doc.source
+    }
+    pub(crate) fn inventory(&self) -> Option<Arc<SourceInventory>> {
+        self.doc
+            .source_inventory_with_limit(self.work_limit, self.cancellation.clone())
+    }
+    pub(crate) fn cached_inventory(&self) -> Option<Arc<SourceInventory>> {
+        self.doc
+            .source_inventory
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+            .find(|(limit, _)| *limit == self.work_limit)
+            .map(|(_, inventory)| Arc::clone(inventory))
+    }
+    pub(crate) fn macro_source(&self) -> Option<Arc<MacroSource>> {
+        self.doc
+            .macro_source(&mut MacroBudget::with_limit(
+                self.work_limit,
+                self.cancellation.clone(),
+            ))
+            .ok()
+    }
+    pub(crate) fn has_conditional_source(&self) -> bool {
+        self.macro_source().is_none_or(|source| {
+            source.tokens.iter().any(|token| {
+                token.kind == crate::engine::language::lexer::TokenKind::MacroDir
+                    && matches!(
+                        crate::engine::language::macro_expand::directive_name(
+                            token.text(&source.normalized)
+                        ),
+                        "if" | "ifdef" | "ifndef" | "for"
+                    )
+            })
+        })
+    }
+    pub(crate) fn availability(&self, span: Span) -> SourceAvailability {
+        self.availability_index
+            .summary(&self.file, span, self.complete)
     }
 }
 
@@ -167,6 +310,18 @@ struct SplicedSource {
     /// Actual text and debug messages emitted before an incomplete execution.
     emitted_prefix: Option<String>,
     macro_messages: Vec<crate::engine::language::macro_expand::MacroMessage>,
+    execution_inputs: Option<Arc<MacroExecutionInputs>>,
+    macro_source: Option<Arc<MacroSource>>,
+    #[cfg(test)]
+    macro_source_preparation_work: usize,
+    macro_complete: bool,
+    applications: Vec<u64>,
+    application_failures: HashMap<usize, String>,
+    availability_index: Arc<MacroAvailabilityIndex>,
+    availability_cause: Option<String>,
+    acquired_include_sites: HashSet<(String, Span)>,
+    #[cfg(test)]
+    work_used: usize,
 }
 
 /// Immutable written origins for a batch of locations in one analyzed input.
@@ -232,6 +387,8 @@ struct SitePlan {
 #[derive(Default)]
 struct IncludeTargets {
     sites: HashMap<(String, Span), SitePlan>,
+    acquired_sites: HashSet<(String, Span)>,
+    override_provenance: bool,
     loop_occurrences: Vec<crate::engine::language::macro_expand::MacroLoopOccurrence>,
     /// First failed splice occurrence, retained while errors unwind to the root.
     splice_failure: RefCell<Option<(IncludeSite, Option<usize>)>>,
@@ -271,6 +428,22 @@ struct IncludeWalk {
     search: Vec<PathBuf>,
 }
 
+struct RetainedRoot {
+    root: String,
+    configuration_id: String,
+    paths: Vec<PathBuf>,
+    work_limit: MacroWorkLimit,
+    guards: BTreeMap<String, InputFile>,
+    model: Arc<Model>,
+    source: Arc<SplicedSource>,
+    expansion: Option<Arc<ExpandReport>>,
+    records: IncludeRecords,
+    companions: Option<Vec<CompanionRecord>>,
+    candidates: HashSet<String>,
+    owners: HashSet<String>,
+    retained_bytes: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct InputFile {
     overlay: bool,
@@ -283,10 +456,15 @@ struct InputFile {
     overlay_generation: Option<u64>,
 }
 
+struct SourceLookup {
+    known: HashSet<String>,
+    aliases: HashMap<String, Option<String>>,
+}
+
 /// Checked source and lookup fact. Missing candidates and directories have no
 /// text digest; regular source files have a digest of their original UTF-8 text.
 #[derive(Clone, Debug, serde::Serialize)]
-pub(crate) struct InputGuard {
+pub struct InputGuard {
     pub file: String,
     pub exists: bool,
     pub directory: bool,
@@ -319,11 +497,14 @@ impl InputStamps {
 /// URI/path-keyed document index plus include graph walks.
 #[derive(Default)]
 pub struct Workspace {
+    source_projections: Vec<source_structure::SourceProjection>,
+    retained_roots: Vec<RetainedRoot>,
     docs: HashMap<String, Arc<Doc>>,
     search_paths: Vec<PathBuf>,
     root_search_paths: HashMap<String, Vec<PathBuf>>,
     default_macro_work_limit: MacroWorkLimit,
     root_macro_work_limits: HashMap<String, MacroWorkLimit>,
+    root_analyses: HashMap<String, Arc<ResolvedAnalysis>>,
     virtual_roots: HashSet<String>,
     unnamed_roots: HashSet<String>,
     // Retain input provenance when model/source caches are cleared.
@@ -346,6 +527,382 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    fn retain_root_result(&mut self, key: &str) -> Option<RetainedRoot> {
+        if !self.effective.contains_key(key) || !self.spliced.contains_key(key) || self.cancelled()
+        {
+            return None;
+        }
+        self.input_revision(key)?;
+        let model = self.effective.get(key)?.clone();
+        let source = self.spliced.get(key)?.clone();
+        let guards = self.input_snapshots.get(key)?.clone();
+        let retained_bytes = source
+            .text
+            .len()
+            .saturating_add(model.source.len())
+            .saturating_add(
+                model
+                    .expanded_tokens
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<crate::engine::language::lexer::Token>()),
+            )
+            .saturating_add(
+                model
+                    .expanded_tokens
+                    .iter()
+                    .map(|token| token.lexeme.as_ref().map_or(0, String::len))
+                    .sum::<usize>(),
+            )
+            .saturating_add(
+                guards
+                    .values()
+                    .map(|guard| guard.bytes.as_ref().map_or(0, Vec::len))
+                    .sum::<usize>(),
+            );
+        // Count and retained text/token/input payload have independent ceilings.
+        // Oversized models remain usable as the active result without retention.
+        if retained_bytes > 16 * 1024 * 1024 {
+            return None;
+        }
+        Some(RetainedRoot {
+            root: key.to_owned(),
+            configuration_id: model.analysis_selection().configuration_id.clone(),
+            paths: self.root_paths(key).to_vec(),
+            work_limit: self.root_macro_work_limit(key),
+            guards,
+            model,
+            source,
+            expansion: self.expand.get(key).cloned(),
+            records: self.records.get(key).cloned().unwrap_or_default(),
+            companions: self.companions.get(key).cloned(),
+            candidates: self
+                .dependency_candidates
+                .get(key)
+                .cloned()
+                .unwrap_or_default(),
+            owners: self.include_owners.get(key).cloned().unwrap_or_default(),
+            retained_bytes,
+        })
+    }
+
+    fn restore_root_result(&mut self, key: &str, configuration_id: &str) {
+        let Some(index) = self.retained_roots.iter().position(|entry| {
+            entry.root == key
+                && entry.configuration_id == configuration_id
+                && entry.paths == self.root_paths(key)
+                && entry.work_limit == self.root_macro_work_limit(key)
+        }) else {
+            return;
+        };
+        let retained = self.retained_roots.remove(index);
+        if self.cancelled()
+            || retained
+                .guards
+                .iter()
+                .any(|(file, state)| self.input_file(file) != *state)
+        {
+            return;
+        }
+        self.effective.insert(key.to_owned(), retained.model);
+        self.spliced.insert(key.to_owned(), retained.source);
+        if let Some(expansion) = retained.expansion {
+            self.expand.insert(key.to_owned(), expansion);
+        }
+        self.records.insert(key.to_owned(), retained.records);
+        if let Some(companions) = retained.companions {
+            self.companions.insert(key.to_owned(), companions);
+        }
+        self.input_snapshots.insert(key.to_owned(), retained.guards);
+        self.dependency_candidates
+            .insert(key.to_owned(), retained.candidates);
+        self.include_owners.insert(key.to_owned(), retained.owners);
+    }
+    pub(crate) fn source_document(
+        &self,
+        root: &str,
+        normalized_file: &str,
+    ) -> Option<SourceDocument> {
+        let key = if self.overlay_only {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
+        let source = self.spliced.get(&key);
+        Some(SourceDocument {
+            doc: Arc::clone(self.docs.get(normalized_file)?),
+            work_limit: self.root_macro_work_limit(root),
+            cancellation: self.cancellation.clone(),
+            file: normalized_file.to_owned(),
+            availability_index: source
+                .map(|source| Arc::clone(&source.availability_index))
+                .unwrap_or_default(),
+            complete: source.is_some_and(|source| source.macro_complete),
+        })
+    }
+
+    pub fn root_analysis_configuration(&self, root: &str) -> Arc<AnalysisConfiguration> {
+        let key = if self.overlay_only {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
+        self.root_analyses
+            .get(&key)
+            .map(|analysis| Arc::new(analysis.choices.clone()))
+            .unwrap_or_default()
+    }
+
+    fn checked_analysis(
+        &mut self,
+        key: &str,
+    ) -> Result<Option<Arc<ResolvedAnalysis>>, ConfigurationError> {
+        let Some(analysis) = self.root_analyses.get(key).cloned() else {
+            return Ok(None);
+        };
+        let mut budget = self.macro_budget(key);
+        for selected in &analysis.overrides {
+            let target = selected.operation.target();
+            // Root choices outlive the bounded document cache. Reacquire only
+            // a missing explicit target, using the same source policy and
+            // limits as the original acquisition; a changed digest stays stale.
+            if !self.docs.contains_key(&selected.file) {
+                self.source_for_key(&selected.file, &mut budget)
+                    .map_err(expression_error)?;
+            }
+            let doc = self.docs.get(&selected.file).ok_or_else(|| {
+                ConfigurationError::new(
+                    "ANALYSIS_TARGET_MISSING",
+                    "The override's source file is no longer available.",
+                )
+                .at(target)
+            })?;
+            let source = doc.macro_source(&mut budget).map_err(expression_error)?;
+            if source.source_revision != target.source_revision {
+                return Err(ConfigurationError::new("ANALYSIS_TARGET_STALE","The override's source changed. Select the written directive again or reset the analysis configuration.").at(target));
+            }
+        }
+        Ok(Some(analysis))
+    }
+
+    pub fn analysis_selection(&mut self, root: &str) -> AnalysisSelectionState {
+        let key = if self.overlay_only {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
+        let selection = self
+            .root_analyses
+            .get(&key)
+            .map(|analysis| analysis.selection.clone())
+            .unwrap_or_else(source_selection);
+        match self.checked_analysis(&key) {
+            Ok(_) => AnalysisSelectionState::Selected(selection),
+            Err(cause) => AnalysisSelectionState::Stale { selection, cause },
+        }
+    }
+
+    pub fn set_root_analysis_configuration(
+        &mut self,
+        root: &str,
+        choices: AnalysisConfiguration,
+    ) -> Result<AnalysisSelection, ConfigurationError> {
+        let key = self.ensure_loaded(root).ok_or_else(|| {
+            ConfigurationError::new("ROOT_NOT_FOUND", "The model root is unavailable.")
+        })?;
+        if let Some(current) = self
+            .root_analyses
+            .get(&key)
+            .filter(|current| current.choices == choices)
+            .cloned()
+        {
+            self.checked_analysis(&key)?;
+            return Ok(current.selection.clone());
+        }
+        let previous_result = self.retain_root_result(&key);
+        let mut budget = self.macro_budget(&key);
+        charge(&mut budget, 1)?;
+        let initial = choices.validate_initial(&mut budget)?;
+        let mut overrides = Vec::new();
+        let mut by_file: HashMap<String, HashMap<Span, usize>> = HashMap::new();
+        for operation in &choices.overrides {
+            let target = operation.target();
+            let file = match &target.file {
+                None if self.unnamed_roots.contains(&key) => key.clone(),
+                Some(file) if !self.unnamed_roots.contains(&key) => {
+                    self.include_key(&uri_to_path(file))
+                }
+                _ => {
+                    return Err(ConfigurationError::new(
+                        "ANALYSIS_TARGET_MISSING",
+                        "The target file identity does not match this named or unnamed source.",
+                    )
+                    .at(target));
+                }
+            };
+            self.source_for_inspection(&key, &file, &mut budget)?
+                .0
+                .ok_or_else(|| {
+                    ConfigurationError::new(
+                        "ANALYSIS_TARGET_MISSING",
+                        "The override source file is unavailable under this source policy.",
+                    )
+                    .at(target)
+                })?;
+            let source = self
+                .docs
+                .get(&file)
+                .expect("acquired target")
+                .macro_source(&mut budget)
+                .map_err(expression_error)?;
+            let selected = resolve_override(operation, file.clone(), &source, &mut budget)?;
+            if by_file
+                .entry(file)
+                .or_default()
+                .insert(selected.directive_span, overrides.len())
+                .is_some()
+            {
+                return Err(ConfigurationError::new(
+                    "ANALYSIS_TARGET_CONFLICT",
+                    "More than one override selects the same written directive.",
+                )
+                .at(target));
+            }
+            overrides.push(selected);
+        }
+        // All target reads and expression checks complete before selection changes.
+        charge(&mut budget, 1)?;
+        let selection = AnalysisSelection {
+            configuration_id: choices.configuration_id(),
+            name: choices.name.clone(),
+            preview: choices.is_preview(),
+            invocation_scope: "explicit_macro_inputs",
+        };
+        let previous = self
+            .root_analyses
+            .get(&key)
+            .map(|analysis| analysis.selection.configuration_id.as_str());
+        let unchanged = previous == Some(selection.configuration_id.as_str())
+            || previous.is_none() && choices.is_source();
+        if choices.is_source() && choices.name.is_none() {
+            self.root_analyses.remove(&key);
+        } else {
+            self.root_analyses.insert(
+                key.clone(),
+                Arc::new(ResolvedAnalysis {
+                    choices,
+                    selection: selection.clone(),
+                    initial,
+                    overrides,
+                    by_file: by_file
+                        .into_iter()
+                        .map(|(file, sites)| (file, Arc::new(sites)))
+                        .collect(),
+                }),
+            );
+        }
+        if !unchanged {
+            self.invalidate_root(&key);
+            self.restore_root_result(&key, &selection.configuration_id);
+            if let Some(previous) = previous_result {
+                self.retained_roots.retain(|entry| {
+                    entry.root != key || entry.configuration_id != previous.configuration_id
+                });
+                while self.retained_roots.len() >= 2
+                    || self
+                        .retained_roots
+                        .iter()
+                        .map(|entry| entry.retained_bytes)
+                        .sum::<usize>()
+                        .saturating_add(previous.retained_bytes)
+                        > 16 * 1024 * 1024
+                {
+                    if self.retained_roots.is_empty() {
+                        break;
+                    }
+                    self.retained_roots.remove(0);
+                }
+                self.retained_roots.push(previous);
+            }
+        } else {
+            self.refresh_model_analysis_label(&key);
+        }
+        Ok(selection)
+    }
+
+    // A display-name change does not invalidate parser facts. The replacement
+    // snapshot leaves previous Arc<Model> captures unchanged.
+    fn refresh_model_analysis_label(&mut self, key: &str) {
+        let Some(model) = self.effective.get(key) else {
+            return;
+        };
+        let desired = self.root_analyses.get(key);
+        let selection = desired.map(|analysis| &analysis.selection);
+        if selection == Some(model.analysis_selection())
+            || selection.is_none() && model.analysis_context.is_none()
+        {
+            return;
+        }
+        let context = desired.map(|analysis| {
+            Arc::new(MacroExecutionInputs {
+                analysis: Arc::clone(analysis),
+                sites: model
+                    .analysis_context
+                    .as_ref()
+                    .map(|context| Arc::clone(&context.sites))
+                    .unwrap_or_default(),
+            })
+        });
+        Arc::make_mut(self.effective.get_mut(key).expect("captured model")).analysis_context =
+            context;
+    }
+
+    pub fn analysis_metadata(
+        &mut self,
+        root: &str,
+    ) -> Result<Arc<AnalysisMetadata>, ConfigurationError> {
+        let key = self.ensure_loaded(root).ok_or_else(|| {
+            ConfigurationError::new("ROOT_NOT_FOUND", "The model root is unavailable.")
+        })?;
+        // Refresh closed inputs before capturing receipts or completeness.
+        // Otherwise a newly rebuilt revision can label an old execution trace.
+        let revision = self.input_revision(root).ok_or_else(|| {
+            self.checked_analysis(&key).err().unwrap_or_else(|| {
+                ConfigurationError::new("ROOT_NOT_FOUND", "The model inputs are unavailable.")
+            })
+        })?;
+        let analysis = self.checked_analysis(&key)?;
+        let complete = self
+            .get_effective_model(root)
+            .map(|model| {
+                model.macro_incomplete_span.is_none()
+                    && crate::engine::workspace::model_map::parser_complete(model)
+            })
+            .unwrap_or(false);
+        let source = self.spliced_source(&key);
+        let configuration = analysis
+            .as_ref()
+            .map(|analysis| analysis.choices.clone())
+            .unwrap_or_default();
+        let selection = analysis
+            .as_ref()
+            .map(|analysis| analysis.selection.clone())
+            .unwrap_or_else(source_selection);
+        let overrides=configuration.overrides.iter().enumerate().map(|(index,operation)| {
+            let count=source.applications.get(index).copied().unwrap_or(0);
+            let failure=source.application_failures.get(&index);
+            let application=if count>0 {OverrideApplication::Applied}else if source.macro_complete {OverrideApplication::NotReached}else{OverrideApplication::Unknown};
+            let cause=failure.cloned().or_else(|| match application {OverrideApplication::NotReached=>Some("The written directive was not reached under this configuration; its requested body was not analyzed.".into()),OverrideApplication::Unknown=>Some("Macro execution stopped before this override could be proven; later applications are unknown.".into()),_ if !source.macro_complete=>Some("The successful prefix is retained; later applications are unknown because macro execution stopped.".into()),_=>None});
+            OverrideReceipt {operation:operation.clone(),application,known_execution_count:count,execution_count:source.macro_complete.then_some(count),cause}
+        }).collect();
+        Ok(Arc::new(AnalysisMetadata {
+            selection,
+            configuration,
+            revision,
+            macro_complete: source.macro_complete,
+            model_complete: complete,
+            overrides,
+        }))
+    }
     /// Isolated editor snapshot that preserves this root's include settings.
     pub(crate) fn snapshot_with_root_settings(&self, uri: &str) -> Self {
         let key = if self.overlay_only {
@@ -376,9 +933,14 @@ impl Workspace {
         let reuse_joined = self.root_paths(&key) == search_paths.as_slice()
             && self.root_macro_work_limit(uri) == work_limit;
         let candidates = self.input_snapshots.get(&key);
+        let selected_targets = self
+            .root_analyses
+            .get(&key)
+            .map(|analysis| &analysis.by_file);
         let mut snapshot = Self::with_search_paths(search_paths);
         snapshot.default_macro_work_limit = self.default_macro_work_limit;
         snapshot.root_macro_work_limits = self.root_macro_work_limits.clone();
+        snapshot.root_analyses = self.root_analyses.clone();
         snapshot.overlay_only = self.overlay_only;
         snapshot.virtual_roots = self.virtual_roots.clone();
         snapshot.unnamed_roots = self.unnamed_roots.clone();
@@ -391,6 +953,7 @@ impl Workspace {
                 doc.overlay
                     || path.as_str() == key
                     || candidates.is_some_and(|files| files.contains_key(*path))
+                    || selected_targets.is_some_and(|files| files.contains_key(*path))
             })
             .map(|(path, doc)| (path.clone(), Arc::clone(doc)))
             .collect();
@@ -439,6 +1002,9 @@ impl Workspace {
         for root in roots {
             if let Some(inputs) = self.input_snapshots.get(root) {
                 files.extend(inputs.keys().cloned());
+            }
+            if let Some(analysis) = self.root_analyses.get(root) {
+                files.extend(analysis.by_file.keys().cloned());
             }
         }
         self.docs
@@ -632,7 +1198,8 @@ impl Workspace {
             Arc::new(Doc {
                 source: Arc::new(source),
                 model: OnceLock::from(Arc::new(model)),
-                source_inventory: Mutex::new(None),
+                source_inventory: Mutex::new(Vec::new()),
+                macro_source: Mutex::new(None),
                 work_limit: self.root_macro_work_limit(key),
                 overlay: true,
                 input_generation,
@@ -670,7 +1237,8 @@ impl Workspace {
             Arc::new(Doc {
                 source: Arc::new(source),
                 model: OnceLock::from(Arc::new(model)),
-                source_inventory: Mutex::new(None),
+                source_inventory: Mutex::new(Vec::new()),
+                macro_source: Mutex::new(None),
                 work_limit: self.root_macro_work_limit(&key),
                 overlay: true,
                 input_generation,
@@ -756,7 +1324,8 @@ impl Workspace {
             Arc::new(Doc {
                 source: Arc::new(source),
                 model: OnceLock::from(Arc::new(model)),
-                source_inventory: Mutex::new(None),
+                source_inventory: Mutex::new(Vec::new()),
+                macro_source: Mutex::new(None),
                 work_limit: self.root_macro_work_limit(&key),
                 overlay: false,
                 input_generation: 0,
@@ -898,26 +1467,52 @@ impl Workspace {
         } else {
             normalize_uri(uri)
         };
-        if let Some(previous) = self.input_snapshots.get(&key).cloned() {
-            let changed: Vec<_> = previous
-                .iter()
-                .filter_map(|(path, state)| {
-                    (self.input_file(path) != *state).then_some(path.clone())
-                })
-                .collect();
-            if !changed.is_empty() {
-                for path in changed {
-                    if self.docs.get(&path).is_some_and(|doc| !doc.overlay) {
-                        self.docs.remove(&path);
+        let previous = self.input_snapshots.get(&key);
+        let mut changed: Vec<_> = previous
+            .into_iter()
+            .flat_map(|inputs| inputs.iter())
+            .filter_map(|(path, state)| (self.input_file(path) != *state).then_some(path.clone()))
+            .collect();
+        // Another retained root can still own a target document after this
+        // root's input snapshot was evicted. Validate that cached text before
+        // capturing a new guard; fresh disk bytes must not label old text.
+        if !self.overlay_only
+            && let Some(analysis) = self.root_analyses.get(&key)
+        {
+            for path in analysis.by_file.keys() {
+                if self.cancelled() {
+                    return None;
+                }
+                if previous.is_some_and(|inputs| inputs.contains_key(path)) {
+                    continue;
+                }
+                if let Some(doc) = self.docs.get(path).filter(|doc| !doc.overlay) {
+                    let current = self.input_file(path);
+                    let matches = current.bytes.as_deref().is_some_and(|bytes| {
+                        match std::str::from_utf8(bytes) {
+                            Ok(text) => text == doc.source.as_str(),
+                            Err(_) => bytes.iter().copied().map(char::from).eq(doc.source.chars()),
+                        }
+                    });
+                    if !matches {
+                        changed.push(path.clone());
                     }
                 }
-                self.invalidate_root(&key);
             }
+        }
+        if !changed.is_empty() {
+            for path in changed {
+                if self.docs.get(&path).is_some_and(|doc| !doc.overlay) {
+                    self.docs.remove(&path);
+                }
+            }
+            self.invalidate_root(&key);
         }
         let Some(key) = self.ensure_loaded(uri) else {
             self.include_owners.remove(&key);
             return None;
         };
+        self.checked_analysis(&key).ok()?;
         self.include_records(uri)?;
         self.companion_records(uri)?;
         let resolved_inputs: Vec<_> =
@@ -982,6 +1577,14 @@ impl Workspace {
             .get(&key)
             .cloned()
             .unwrap_or_default();
+        if let Some(analysis) = self.root_analyses.get(&key) {
+            files.extend(
+                analysis
+                    .overrides
+                    .iter()
+                    .map(|selected| selected.file.clone()),
+            );
+        }
         files.insert(key.clone());
         if let Some((file_limit, total_limit, file_count)) = self.source_limits {
             if files.len() > file_count {
@@ -1022,6 +1625,10 @@ impl Workspace {
         key.hash(&mut hash);
         self.root_paths(&key).hash(&mut hash);
         self.root_macro_work_limit(&key).hash(&mut hash);
+        self.root_analyses
+            .get(&key)
+            .map(|analysis| &analysis.selection.configuration_id)
+            .hash(&mut hash);
         // Revisions describe analysis inputs, not whether identical text came
         // from disk or an editor overlay. Keep that mode in snapshot equality
         // so cache invalidation and source ownership still observe transitions.
@@ -1318,7 +1925,9 @@ impl Workspace {
             .source_inventory
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .clone()
+            .iter()
+            .find(|(limit, _)| *limit == self.root_macro_work_limit(uri))
+            .map(|(_, inventory)| Arc::clone(inventory))
     }
 
     /// Source-map keys are already normalized; no repeat path lookup is needed.
@@ -1372,23 +1981,32 @@ impl Workspace {
     /// the ordinary macro branch/loop expansion to skip.
     pub fn get_effective_model(&mut self, uri: &str) -> Option<&Model> {
         let key = self.ensure_loaded(uri)?;
+        self.checked_analysis(&key).ok()?;
         if !self.effective.contains_key(&key) {
             let spliced = self.spliced_source(&key);
             let fatal = self.records.get(&key).and_then(|records| {
                 let span = records.unresolved.first().map(|item| item.span)?;
                 Some(span)
             });
-            let same_root_doc = self.docs.get(&key).filter(|_| {
-                let [segment] = spliced.segments.as_slice() else {
-                    return false;
-                };
-                spliced.gaps.is_empty()
-                    && segment.file.as_deref() == Some(key.as_str())
-                    && segment.spliced == Span::new(0, spliced.text.len())
-                    && segment.origin == segment.spliced
-                    && segment.line == 1
-                    && segment.evaluation.is_none()
-            });
+            let same_root_doc = self
+                .docs
+                .get(&key)
+                .filter(|_| {
+                    self.root_analyses
+                        .get(&key)
+                        .is_none_or(|analysis| analysis.choices.is_source())
+                })
+                .filter(|_| {
+                    let [segment] = spliced.segments.as_slice() else {
+                        return false;
+                    };
+                    spliced.gaps.is_empty()
+                        && segment.file.as_deref() == Some(key.as_str())
+                        && segment.spliced == Span::new(0, spliced.text.len())
+                        && segment.origin == segment.spliced
+                        && segment.line == 1
+                        && segment.evaluation.is_none()
+                });
             let same_root = if let Some(doc) = same_root_doc {
                 let model = doc.model(self.cancellation.clone())?;
                 (model.source == spliced.text).then_some(model)
@@ -1401,6 +2019,7 @@ impl Workspace {
                 && let Some(model) = same_root
             {
                 self.effective.insert(key.clone(), Arc::clone(model));
+                self.refresh_model_analysis_label(&key);
                 return self.effective.get(&key).map(Arc::as_ref);
             }
             // A one-segment unchanged root already has the same parser input,
@@ -1413,13 +2032,20 @@ impl Workspace {
                     .iter()
                     .map(|segment| (segment.spliced, segment.line))
                     .collect();
-                let evaluations =
-                    crate::engine::language::expand::splice_evaluations(&spliced.segments);
-                crate::engine::language::parser::parse_with_lines_and_evaluations_budget(
+                let evaluations = crate::engine::language::expand::splice_evaluations_configured(
+                    &spliced.segments,
+                    spliced
+                        .execution_inputs
+                        .as_ref()
+                        .is_some_and(|inputs| inputs.analysis.selection.preview),
+                );
+                crate::engine::language::parser::parse_configured_with_budget(
                     &spliced.text,
                     &lines,
                     &evaluations,
                     &mut self.macro_budget(&key),
+                    spliced.execution_inputs.clone(),
+                    spliced.macro_source.clone(),
                 )
             };
             if let Some(span) = fatal {
@@ -1465,6 +2091,7 @@ impl Workspace {
             }
             self.effective.insert(key.clone(), Arc::new(model));
         }
+        self.refresh_model_analysis_label(&key);
         self.effective.get(&key).map(Arc::as_ref)
     }
 
@@ -1534,6 +2161,7 @@ impl Workspace {
 
     pub fn expand_report(&mut self, uri: &str) -> Option<&ExpandReport> {
         let key = self.ensure_loaded(uri)?;
+        self.checked_analysis(&key).ok()?;
         if !self.expand.contains_key(&key) {
             let spliced = self.spliced_source(&key);
             let incomplete = self
@@ -1541,15 +2169,18 @@ impl Workspace {
                 .get(&key)
                 .map(|records| !records.unresolved.is_empty())
                 .unwrap_or(false);
-            let mut report = expand_report_from_spliced_model_controlled(
-                &spliced.text,
-                &spliced.segments,
-                Some(&spliced.navigation),
-                self.cancellation.clone(),
-                self.root_macro_work_limit(&key),
-                self.effective.get(&key).map(Arc::as_ref),
-            )
-            .ok()?;
+            let mut report =
+                crate::engine::language::expand::expand_report_from_spliced_configured(
+                    &spliced.text,
+                    &spliced.segments,
+                    Some(&spliced.navigation),
+                    self.cancellation.clone(),
+                    self.root_macro_work_limit(&key),
+                    self.effective.get(&key).map(Arc::as_ref),
+                    spliced.execution_inputs.clone(),
+                    spliced.macro_source.clone(),
+                )
+                .ok()?;
             if spliced.limit.is_some() || spliced.refusal.is_some() {
                 report.complete = false;
                 report.navigation_complete = false;
@@ -1691,25 +2322,109 @@ impl Workspace {
             .and_then(|d| d.model(self.cancellation.clone()).map(Arc::as_ref))
     }
 
-    fn source_for_key(
+    /// Refresh an explicitly inspected closed file without making it an
+    /// executed input. Editor overlays and snapshot source policies still win.
+    fn source_for_inspection(
         &mut self,
+        root: &str,
         key: &str,
         budget: &mut MacroBudget,
-    ) -> Result<Option<Arc<String>>, MacroEvalError> {
-        if self.cancelled() {
-            return Err(MacroEvalError::Limit("request cancelled"));
+    ) -> Result<(Option<Arc<String>>, InputGuard), ConfigurationError> {
+        use crate::engine::analysis_configuration::expression_error;
+        if self.overlay_only || self.docs.get(key).is_some_and(|doc| doc.overlay) {
+            let text = self.source_for_key(key, budget).map_err(expression_error)?;
+            let state = self.input_file(key);
+            let guard = InputGuard {
+                file: key.to_owned(),
+                exists: state.exists,
+                directory: state.directory,
+                identity: state.identity,
+                text_sha256: None,
+                byte_sha256: None,
+                length: state.length,
+            };
+            return Ok((text, guard));
         }
+        let length = std::fs::metadata(key)
+            .ok()
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        self.check_source_size(key, length)
+            .map_err(expression_error)?;
+        let acquired =
+            read_include_text_inner(&PathBuf::from(key), budget, true).map_err(expression_error)?;
+        let (current, guard) = match acquired {
+            Some((text, guard)) => (Some(text), guard.expect("inspection guard")),
+            None => {
+                let state = self.input_file(key);
+                (
+                    None,
+                    InputGuard {
+                        file: key.to_owned(),
+                        exists: state.exists,
+                        directory: state.directory,
+                        identity: state.identity,
+                        text_sha256: None,
+                        byte_sha256: None,
+                        length: state.length,
+                    },
+                )
+            }
+        };
+        let changed = match (&current, self.docs.get(key)) {
+            (Some(text), Some(doc)) => text != doc.source.as_str(),
+            (None, None) => false,
+            _ => true,
+        };
+        if !changed {
+            return Ok((self.docs.get(key).map(|doc| Arc::clone(&doc.source)), guard));
+        }
+        let affected: HashSet<String> = self
+            .input_snapshots
+            .iter()
+            .filter(|(_, inputs)| inputs.contains_key(key))
+            .map(|(owner, _)| owner.clone())
+            .chain(
+                self.root_analyses
+                    .iter()
+                    .filter(|(_, analysis)| {
+                        analysis.overrides.iter().any(|choice| choice.file == key)
+                    })
+                    .map(|(owner, _)| owner.clone()),
+            )
+            .chain(self.include_owners.get(key).into_iter().flatten().cloned())
+            .collect();
+        self.docs.remove(key);
+        let source = current.map(|text| {
+            let source = Arc::new(text);
+            self.docs.insert(
+                key.to_owned(),
+                Arc::new(Doc {
+                    source: Arc::clone(&source),
+                    model: OnceLock::new(),
+                    source_inventory: Mutex::new(Vec::new()),
+                    macro_source: Mutex::new(None),
+                    work_limit: self.root_macro_work_limit(root),
+                    overlay: false,
+                    input_generation: 0,
+                }),
+            );
+            source
+        });
+        for owner in &affected {
+            self.invalidate_root(owner);
+        }
+        if affected.contains(root) {
+            return Err(ConfigurationError::new(
+                "SOURCE_INPUT_CHANGED",
+                "An inspected source file changed after the analysis was captured. Retry the source request to use the current files.",
+            ));
+        }
+        Ok((source, guard))
+    }
+
+    fn check_source_size(&mut self, key: &str, length: u64) -> Result<(), MacroEvalError> {
         if let Some((file_limit, total_limit, file_count)) = self.source_limits {
-            let length = self
-                .docs
-                .get(key)
-                .map(|doc| doc.source.len() as u64)
-                .or_else(|| {
-                    (!self.overlay_only)
-                        .then(|| std::fs::metadata(key).ok().map(|metadata| metadata.len()))
-                        .flatten()
-                })
-                .unwrap_or(0);
             let used: usize = self
                 .docs
                 .iter()
@@ -1725,6 +2440,28 @@ impl Workspace {
                 return Err(MacroEvalError::Limit("source acquisition"));
             }
         }
+        Ok(())
+    }
+
+    fn source_for_key(
+        &mut self,
+        key: &str,
+        budget: &mut MacroBudget,
+    ) -> Result<Option<Arc<String>>, MacroEvalError> {
+        if self.cancelled() {
+            return Err(MacroEvalError::Limit("request cancelled"));
+        }
+        let length = self
+            .docs
+            .get(key)
+            .map(|doc| doc.source.len() as u64)
+            .or_else(|| {
+                (!self.overlay_only)
+                    .then(|| std::fs::metadata(key).ok().map(|metadata| metadata.len()))
+                    .flatten()
+            })
+            .unwrap_or(0);
+        self.check_source_size(key, length)?;
         if let Some(doc) = self.docs.get(key) {
             budget.spend_work(1)?;
             return Ok(Some(Arc::clone(&doc.source)));
@@ -1747,18 +2484,15 @@ impl Workspace {
             Arc::new(Doc {
                 source,
                 model: OnceLock::new(),
-                source_inventory: Mutex::new(None),
+                source_inventory: Mutex::new(Vec::new()),
+                macro_source: Mutex::new(None),
                 work_limit: self.root_macro_work_limit(key),
                 overlay: false,
                 input_generation: 0,
             }),
         );
-        // Loading this written input can invalidate other cached roots.
-        self.effective.clear();
-        self.spliced.clear();
-        self.expand.clear();
-        self.records.clear();
-        self.companions.clear();
+        // Acquiring immutable text alone does not change any root's executed
+        // inputs. Existing negative lookup guards still detect external edits.
         Ok(Some(returned))
     }
 
@@ -1768,6 +2502,54 @@ impl Workspace {
 
     fn configured_search(&self, root: &str, extra: &[PathBuf]) -> Vec<PathBuf> {
         append_unique(self.root_paths(root), extra)
+    }
+
+    /// Inspect a literal source edge with the existing lookup policy, without
+    /// adding executed dependencies, owners, or negative execution candidates.
+    fn source_lookup(&self, budget: &mut MacroBudget) -> Result<SourceLookup, MacroEvalError> {
+        budget.spend_work(self.docs.keys().fold(1usize, |bytes, key| {
+            bytes
+                .saturating_add(key.len().saturating_mul(3))
+                .saturating_add(1)
+        }))?;
+        let known = self.known_keys();
+        let mut aliases: HashMap<String, Option<String>> = HashMap::new();
+        for key in &known {
+            aliases
+                .entry(overlay_key(key))
+                .and_modify(|entry| *entry = None)
+                .or_insert_with(|| Some(key.clone()));
+        }
+        Ok(SourceLookup { known, aliases })
+    }
+
+    fn resolve_source_target(
+        &mut self,
+        root: &str,
+        including: &str,
+        name: &str,
+        extra_paths: &[PathBuf],
+        lookup: &SourceLookup,
+    ) -> Option<String> {
+        let paths = self.configured_search(root, extra_paths);
+        if self.snapshot_lookup.is_some() {
+            return self.snapshot_include_key(including, name, &paths);
+        }
+        if self.virtual_roots.contains(root) {
+            return None;
+        }
+        if self.overlay_only {
+            return self
+                .overlay_candidates(including, name, &paths)
+                .into_iter()
+                .find_map(|candidate| lookup.aliases.get(&candidate).cloned().flatten());
+        }
+        let resolved = if self.root_search_paths.contains_key(root) {
+            resolve_scoped_include_path(name, including, &paths, Some(&lookup.known))
+        } else {
+            resolve_include_path(name, including, &paths, Some(&lookup.known))
+        };
+        resolved.map(|path| self.include_key(&path))
     }
 
     fn resolve_filename(
@@ -1971,7 +2753,12 @@ impl Workspace {
             return Vec::new();
         };
         let cut = self.records.get(root_key).and_then(fatal_include_cut);
-        let (source, model) = if let Some(cut) = cut {
+        let (source, model) = if self.root_analyses.contains_key(root_key) {
+            let Some(model) = self.effective_model_snapshot(root_key) else {
+                return Vec::new();
+            };
+            (model.source.clone(), model)
+        } else if let Some(cut) = cut {
             let text = root[..(cut as usize).min(root.len())].to_string();
             let model = Arc::new(crate::engine::language::parser::parse_with_budget(
                 &text,
@@ -2019,11 +2806,37 @@ impl Workspace {
         let mut targets = IncludeTargets::default();
         let mut active_search = Vec::new();
         let mut seen_sites = HashSet::new();
-        let source = self.docs.get(root_key).expect("loaded root").source.clone();
-        let mut proof = crate::engine::language::macro_expand::walk_macro_files_with_budget(
+        let mut budget = self.macro_budget(root_key);
+        let source = match self
+            .docs
+            .get(root_key)
+            .expect("loaded root")
+            .macro_source(&mut budget)
+        {
+            Ok(source) => source,
+            Err(error) => {
+                return IncludeWalk {
+                    records,
+                    proof: crate::engine::language::macro_expand::failed_macro_file_proof(
+                        root_key, error, budget,
+                    ),
+                    targets,
+                    search: active_search,
+                };
+            }
+        };
+        let analysis = self.root_analyses.get(root_key).cloned();
+        targets.override_provenance = analysis.as_ref().is_some_and(|analysis| {
+            analysis
+                .overrides
+                .iter()
+                .any(|choice| matches!(choice.operation, AnalysisOverride::Definition { .. }))
+        });
+        let mut proof = crate::engine::language::macro_expand::walk_macro_source_with_budget(
             root_key,
             &source,
-            self.macro_budget(root_key),
+            budget,
+            analysis,
             |event| {
                 if !event.certain {
                     if matches!(
@@ -2135,7 +2948,7 @@ impl Workspace {
                     return None;
                 };
                 let target = self.include_key(&path);
-                note_resolved(&mut targets, site, target.clone(), &event, true);
+                note_resolved(&mut targets, site.clone(), target.clone(), &event, true);
                 if !records.resolved.iter().any(|record| record.path == path) {
                     records.resolved.push(ResolvedInclude {
                         filename,
@@ -2143,7 +2956,7 @@ impl Workspace {
                         path,
                     });
                 }
-                let source = match self.source_for_key(&target, event.budget) {
+                let _source = match self.source_for_key(&target, event.budget) {
                     Ok(Some(source)) => source,
                     Ok(None) => return None,
                     Err(MacroEvalError::Limit(limit)) => {
@@ -2156,6 +2969,21 @@ impl Workspace {
                             "iteration work",
                         ));
                     }
+                };
+                targets.acquired_sites.insert(site);
+                let source = match self
+                    .docs
+                    .get(&target)
+                    .expect("acquired include")
+                    .macro_source(event.budget)
+                {
+                    Ok(source) => source,
+                    Err(MacroEvalError::Limit(name)) => {
+                        return Some(crate::engine::language::macro_expand::MacroFileLoad::Limit(
+                            name,
+                        ));
+                    }
+                    Err(_) => return None,
                 };
                 Some(
                     crate::engine::language::macro_expand::MacroFileLoad::Source {
@@ -2201,7 +3029,7 @@ impl Workspace {
             None,
             &mut proof.budget,
         );
-        let (pieces, splice_limit) = match result {
+        let (pieces, mut splice_limit) = match result {
             Ok(pieces) => (pieces, None),
             Err(MacroEvalError::Limit(limit)) => {
                 let span = proof
@@ -2218,7 +3046,58 @@ impl Workspace {
             ),
         };
         let (text, segments, gaps) = pieces;
-        // Execution errors precede the work needed to join their retained text.
+        let mut preparation_budget = self.macro_budget(key);
+        let macro_source = if self
+            .docs
+            .get(key)
+            .is_some_and(|doc| doc.source.as_str() == text)
+        {
+            self.docs
+                .get(key)
+                .expect("loaded root")
+                .macro_source(&mut proof.budget)
+        } else {
+            preparation_budget
+                .spend_work(text.len().max(1))
+                .and_then(|()| {
+                    let source = Arc::new(text.clone());
+                    if proof.complete && splice_limit.is_none() && records.unresolved.is_empty() {
+                        MacroSource::from_completed_splice(source, &mut preparation_budget)
+                    } else {
+                        MacroSource::build(source, &mut preparation_budget)
+                    }
+                })
+        };
+        #[cfg(test)]
+        let macro_source_preparation_work =
+            preparation_budget.work_limit().get() - preparation_budget.remaining_work();
+        let macro_source = match macro_source {
+            Ok(source) => Some(source),
+            Err(MacroEvalError::Limit(name)) => {
+                splice_limit.get_or_insert((Span::default(), name));
+                None
+            }
+            Err(_) => None,
+        };
+        let execution_inputs = match self
+            .root_analyses
+            .get(key)
+            .map(|analysis| {
+                crate::engine::language::expand::map_execution_inputs(
+                    Arc::clone(analysis),
+                    &segments,
+                    &mut proof.budget,
+                )
+            })
+            .transpose()
+        {
+            Ok(inputs) => inputs,
+            Err(MacroEvalError::Limit(name)) => {
+                splice_limit.get_or_insert((Span::default(), name));
+                None
+            }
+            Err(_) => None,
+        }; // Execution errors precede the work needed to join their retained text.
         // A later splice stop must not replace an earlier refusal or miss.
         let actual_limit = proof
             .limit
@@ -2314,9 +3193,34 @@ impl Workspace {
             && targets_complete
             && limit.is_none()
             && (proof.complete
-                || !crate::engine::language::macro_expand::has_include_directives(&text));
+                || macro_source.as_ref().is_some_and(|source| {
+                    !source.tokens.iter().any(|token| {
+                        token.kind == crate::engine::language::lexer::TokenKind::MacroDir
+                            && crate::engine::language::macro_expand::directive_name(
+                                token.text(&source.normalized),
+                            )
+                            .eq_ignore_ascii_case("include")
+                    })
+                }));
         let incomplete_execution = !proof.complete || !includes_complete || limit.is_some();
+        let availability: Arc<[MacroAvailabilityRegion]> = proof.availability.into();
+        let (availability_index, availability_cause) =
+            match MacroAvailabilityIndex::build(Arc::clone(&availability), &mut proof.budget) {
+                Ok(index) => (index, None),
+                Err(error) => (
+                    Arc::default(),
+                    Some(match error {
+                        MacroEvalError::Limit("request cancelled")=>"Source availability indexing was cancelled. Written source rows remain available, but configured availability is unknown.".into(),
+                        MacroEvalError::Limit("iteration work")=>format!("Source availability indexing reached its work allowance of {} work units. Written source rows remain available, but configured availability is unknown.",proof.budget.work_limit().get()),
+                        MacroEvalError::Limit(limit)=>format!("Source availability indexing reached the {limit} limit. Written source rows remain available, but configured availability is unknown."),
+                        _=>"Source availability could not be indexed. Written source rows remain available, but configured availability is unknown.".into(),
+                    }),
+                ),
+            };
+        let acquired_include_sites = targets.acquired_sites;
         let source = Arc::new(SplicedSource {
+            #[cfg(test)]
+            work_used: proof.budget.work_limit().get() - proof.budget.remaining_work(),
             text,
             segments,
             gaps,
@@ -2329,6 +3233,16 @@ impl Workspace {
             refusal: proof.refusal,
             emitted_prefix: incomplete_execution.then_some(proof.output),
             macro_messages: proof.messages,
+            execution_inputs,
+            macro_source,
+            #[cfg(test)]
+            macro_source_preparation_work,
+            macro_complete: proof.complete,
+            applications: proof.applications,
+            application_failures: proof.application_failures,
+            availability_index,
+            availability_cause,
+            acquired_include_sites,
         });
         self.records.insert(key.to_string(), records);
         self.spliced.insert(key.to_string(), Arc::clone(&source));
@@ -2541,7 +3455,14 @@ impl Workspace {
         let Some(key) = self.ensure_loaded(uri) else {
             return Vec::new();
         };
-        crate::engine::language::expand::splice_evaluations(&self.spliced_source(&key).segments)
+        let source = self.spliced_source(&key);
+        crate::engine::language::expand::splice_evaluations_configured(
+            &source.segments,
+            source
+                .execution_inputs
+                .as_ref()
+                .is_some_and(|inputs| inputs.analysis.selection.preview),
+        )
     }
 
     fn splice_call_chain(targets: &IncludeTargets, call: Option<usize>) -> Vec<IncludeSite> {
@@ -2615,6 +3536,24 @@ impl Workspace {
         let Some(source) = self.docs.get(key).map(|document| document.source.as_str()) else {
             return Ok((String::new(), Vec::new(), Vec::new()));
         };
+        budget.spend_work(sites.len().saturating_add(1))?;
+        if !sites.iter().any(|(file, _)| file == key) {
+            // No executed include can change this file's text. Copy the
+            // immutable leaf once instead of running replacement assembly.
+            budget.spend_work(source.len().saturating_add(key.len()).saturating_add(1))?;
+            let span = Span::new(0, source.len());
+            return Ok((
+                source.to_owned(),
+                vec![SpliceSegment {
+                    spliced: span,
+                    file: Some(key.to_owned()),
+                    origin: span,
+                    line: 1,
+                    evaluation: None,
+                }],
+                Vec::new(),
+            ));
+        }
         if stack.len() > crate::engine::language::macro_expr::EXEC_DEPTH_CAP {
             return Err(MacroEvalError::Limit("execution depth"));
         }
@@ -2835,6 +3774,19 @@ impl Workspace {
                 source,
                 budget,
             )?;
+        }
+        if targets.override_provenance {
+            // Close the private provenance scope for this original loop. The
+            // replay key stack also distinguishes recursive include visits.
+            let marker = crate::engine::language::macro_expand::FOR_END_ORIGIN_PREFIX;
+            budget.spend_work(key.len().saturating_add(marker.len()).saturating_add(1))?;
+            segments.push(SpliceSegment {
+                spliced: Span::new(text.len(), text.len()),
+                file: Some(key.to_owned()),
+                origin: outer.header,
+                line: segments.first().map_or(1, |segment| segment.line),
+                evaluation: Some(marker.to_owned()),
+            });
         }
         budget.exec_depth -= 1;
         Ok((text, segments, gaps))
@@ -3486,6 +4438,14 @@ fn read_include_text(
     path: &Path,
     budget: &mut MacroBudget,
 ) -> Result<Option<String>, MacroEvalError> {
+    read_include_text_inner(path, budget, false).map(|value| value.map(|(text, _)| text))
+}
+
+fn read_include_text_inner(
+    path: &Path,
+    budget: &mut MacroBudget,
+    guarded: bool,
+) -> Result<Option<(String, Option<InputGuard>)>, MacroEvalError> {
     let Ok(file) = std::fs::File::open(path) else {
         return Ok(None);
     };
@@ -3506,13 +4466,28 @@ fn read_include_text(
     if input.len() > bytes {
         return Err(MacroEvalError::Limit("iteration work"));
     }
+    let guard = if guarded {
+        use sha2::{Digest, Sha256};
+        budget.spend_work(input.len().max(1))?;
+        Some(InputGuard {
+            file: path_key(path),
+            exists: true,
+            directory: metadata.is_dir(),
+            identity: std::fs::canonicalize(path).ok().map(|path| path_key(&path)),
+            text_sha256: None,
+            byte_sha256: Some(format!("{:x}", Sha256::digest(&input))),
+            length: Some(metadata.len()),
+        })
+    } else {
+        None
+    };
     match String::from_utf8(input) {
-        Ok(source) => Ok(Some(source)),
+        Ok(source) => Ok(Some((source, guard))),
         Err(error) => {
             let bytes = error.into_bytes();
             let length = bytes.len() + bytes.iter().filter(|byte| **byte >= 128).count();
             budget.spend_work(length.max(1))?;
-            Ok(Some(bytes.into_iter().map(char::from).collect()))
+            Ok(Some((bytes.into_iter().map(char::from).collect(), guard)))
         }
     }
 }
@@ -3663,6 +4638,13 @@ mod include_load_budget_tests {
                 proof.complete && proof.limit.is_none(),
                 "execution must complete before the splice stop"
             );
+            // Isolate the copy failure from variable validation/acquisition
+            // costs. The residual fits root scaffolding but not one child.
+            let copy_allowance = table.len() / 2;
+            proof
+                .budget
+                .spend_work(proof.budget.remaining_work() - copy_allowance)
+                .unwrap();
             let remaining = proof.budget.remaining_work();
             assert!(matches!(
                 workspace.splice_with_map(
@@ -3818,10 +4800,22 @@ mod include_load_budget_tests {
         let root = path_key(&root);
         let mut workspace = Workspace::new();
         workspace.set_root_macro_work_limit(&root, MacroWorkLimit::new(1_000_000).unwrap());
-        let model = workspace.get_effective_model(&root).unwrap();
+        let model = workspace.effective_model_snapshot(&root).unwrap();
         assert!(!model.macro_incomplete(), "{:?}", model.incomplete_reasons);
         assert!(model.macro_type_errors.is_empty());
         assert_eq!(model.equations.len(), 1);
+        for number in 0..3 {
+            let child = path_key(&folder.join(format!("table{number}.inc")));
+            assert!(
+                workspace.docs[&child].model.get().is_none(),
+                "parent analysis must not parse an unused standalone child"
+            );
+        }
+        let prepared = &workspace.spliced[&root];
+        println!(
+            "tables4097x3: original_walk_and_splice_work={} joined_preparation_work={}",
+            prepared.work_used, prepared.macro_source_preparation_work
+        );
         let expanded = workspace.expand_report(&root).unwrap();
         assert!(expanded.complete);
         assert!(

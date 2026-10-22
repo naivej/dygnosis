@@ -3,6 +3,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::engine::language::macro_expr::MacroBudget;
 use crate::engine::language::span::Span;
@@ -112,6 +114,10 @@ pub struct ConfigurationError {
 }
 
 impl ConfigurationError {
+    pub(crate) fn at(mut self, target: &GuardedTarget) -> Self {
+        self.target = Some(target.clone());
+        self
+    }
     pub(crate) fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             code,
@@ -152,6 +158,548 @@ impl AnalysisConfiguration {
             .expect("typed macro choices are serializable");
         source_revision(std::str::from_utf8(&bytes).expect("JSON is UTF-8"))
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AnalysisSelection {
+    pub configuration_id: String,
+    pub name: Option<String>,
+    pub preview: bool,
+    pub invocation_scope: &'static str,
+}
+
+#[derive(Clone, Debug)]
+pub enum AnalysisSelectionState {
+    Selected(AnalysisSelection),
+    Stale {
+        selection: AnalysisSelection,
+        cause: ConfigurationError,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OverrideApplication {
+    Applied,
+    NotReached,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct OverrideReceipt {
+    pub operation: AnalysisOverride,
+    pub application: OverrideApplication,
+    /// Successful applications in the reached prefix, never failed attempts.
+    pub known_execution_count: u64,
+    pub execution_count: Option<u64>,
+    pub cause: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AnalysisMetadata {
+    pub selection: AnalysisSelection,
+    pub configuration: AnalysisConfiguration,
+    pub revision: String,
+    pub macro_complete: bool,
+    pub model_complete: bool,
+    pub overrides: Vec<OverrideReceipt>,
+}
+
+#[derive(Clone, Debug)]
+pub struct AvailabilityCause {
+    pub code: &'static str,
+    pub message: String,
+    pub file: Option<String>,
+    pub span: Option<Span>,
+    pub site: Option<GuardedTarget>,
+    pub branch_id: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SourceLoopOccurrence {
+    pub frame_id: u64,
+    pub directive_span: Span,
+    pub variable: Option<String>,
+    pub value: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub enum SourceFileSelection {
+    Root,
+    File(String),
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SourceStructureQuery {
+    pub files: Vec<SourceFileSelection>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SourceItemOccurrence {
+    pub occurrence_id: String,
+    pub include_call: u64,
+    pub parent_include_call: Option<u64>,
+    pub loops: Vec<SourceLoopOccurrence>,
+    pub availability: SourceAvailability,
+    pub cause: Option<Arc<AvailabilityCause>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SourceItemAvailability {
+    pub source_id: String,
+    pub availability: SourceAvailability,
+    pub cause: Option<Arc<AvailabilityCause>>,
+    pub occurrences: Vec<SourceItemOccurrence>,
+}
+
+pub struct SourceFileStructure {
+    pub file: Option<String>,
+    pub source_revision: String,
+    pub text: Arc<String>,
+    pub(crate) inventory: Arc<crate::engine::analysis::source_inventory::SourceInventory>,
+    pub sites: Arc<[DirectiveSite]>,
+    pub availability: Arc<[SourceItemAvailability]>,
+}
+
+impl SourceFileStructure {
+    pub fn source_item_count(&self) -> usize {
+        self.inventory.items.len()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct IndexedSourceCoverage {
+    pub file: Option<String>,
+    pub source_revision: Option<String>,
+    pub acquired: bool,
+    pub executed: bool,
+    pub explicitly_selected: bool,
+    pub complete: bool,
+    pub cause: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct UnresolvedSourceTarget {
+    pub file: Option<String>,
+    pub span: Span,
+    pub expression: String,
+    pub literal_target: Option<String>,
+    pub cause: String,
+    pub lookup_context: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SourceCoverage {
+    pub indexed_files: Vec<IndexedSourceCoverage>,
+    pub unresolved_targets: Vec<UnresolvedSourceTarget>,
+    pub complete: bool,
+}
+
+pub struct SourceStructure {
+    pub selection_state: AnalysisSelectionState,
+    pub revision: String,
+    pub analysis_revision: Option<String>,
+    pub files: Vec<SourceFileStructure>,
+    pub coverage: SourceCoverage,
+    pub input_guards: Vec<crate::engine::workspace::InputGuard>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct MacroAvailabilityRegion {
+    pub file: String,
+    pub span: Span,
+    pub active: bool,
+    pub include_call: u64,
+    pub parent_include_call: Option<u64>,
+    pub loops: Vec<SourceLoopOccurrence>,
+}
+
+#[derive(Debug, Default)]
+struct FileAvailabilityIndex {
+    entries: Vec<usize>,
+    max_end: Vec<u32>,
+    summary: Vec<(Span, SourceAvailability)>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct MacroAvailabilityIndex {
+    regions: Arc<[MacroAvailabilityRegion]>,
+    files: HashMap<String, FileAvailabilityIndex>,
+}
+
+impl MacroAvailabilityIndex {
+    pub(crate) fn build(
+        regions: Arc<[MacroAvailabilityRegion]>,
+        budget: &mut MacroBudget,
+    ) -> Result<Arc<Self>, crate::engine::language::macro_expand::MacroEvalError> {
+        let sort = regions
+            .len()
+            .saturating_mul(regions.len().checked_ilog2().unwrap_or(0) as usize + 1);
+        budget.spend_work(
+            sort.saturating_mul(3)
+                .saturating_add(
+                    regions
+                        .iter()
+                        .map(|region| region.file.len().saturating_add(8))
+                        .sum::<usize>(),
+                )
+                .max(1),
+        )?;
+        let mut files: HashMap<String, FileAvailabilityIndex> = HashMap::new();
+        for (index, region) in regions.iter().enumerate() {
+            files
+                .entry(region.file.clone())
+                .or_default()
+                .entries
+                .push(index);
+        }
+        for file in files.values_mut() {
+            file.entries
+                .sort_by_key(|index| (regions[*index].span.start, regions[*index].span.end));
+            let mut maximum = 0;
+            let mut events = Vec::with_capacity(file.entries.len().saturating_mul(2));
+            for &index in &file.entries {
+                let region = &regions[index];
+                maximum = maximum.max(region.span.end);
+                file.max_end.push(maximum);
+                if region.span.end > region.span.start {
+                    events.push((
+                        region.span.start,
+                        if region.active { 1i64 } else { 0 },
+                        if region.active { 0 } else { 1i64 },
+                    ));
+                    events.push((
+                        region.span.end,
+                        if region.active { -1i64 } else { 0 },
+                        if region.active { 0 } else { -1i64 },
+                    ));
+                }
+            }
+            events.sort_by_key(|event| event.0);
+            let (mut active, mut inactive, mut last) = (0i64, 0i64, 0u32);
+            for (at, add_active, add_inactive) in events {
+                if last < at {
+                    let state = match (active > 0, inactive > 0) {
+                        (true, true) => SourceAvailability::Mixed,
+                        (true, false) => SourceAvailability::Active,
+                        (false, true) => SourceAvailability::Inactive,
+                        _ => SourceAvailability::Unknown,
+                    };
+                    if let Some((span, previous)) = file.summary.last_mut()
+                        && *previous == state
+                        && span.end == last
+                    {
+                        span.end = at;
+                    } else {
+                        file.summary.push((
+                            Span {
+                                start: last,
+                                end: at,
+                            },
+                            state,
+                        ));
+                    }
+                }
+                active += add_active;
+                inactive += add_inactive;
+                last = at;
+            }
+        }
+        Ok(Arc::new(Self { regions, files }))
+    }
+
+    pub(crate) fn summary(&self, file: &str, span: Span, complete: bool) -> SourceAvailability {
+        if !complete {
+            return SourceAvailability::Unknown;
+        }
+        let Some(file) = self.files.get(file) else {
+            return SourceAvailability::Unknown;
+        };
+        let start = file
+            .summary
+            .partition_point(|(region, _)| region.end <= span.start);
+        let mut cursor = span.start;
+        let (mut active, mut inactive) = (false, false);
+        for &(region, state) in file
+            .summary
+            .iter()
+            .skip(start)
+            .take_while(|(region, _)| region.start < span.end)
+        {
+            if region.start > cursor || state == SourceAvailability::Unknown {
+                return SourceAvailability::Unknown;
+            }
+            active |= matches!(
+                state,
+                SourceAvailability::Active | SourceAvailability::Mixed
+            );
+            inactive |= matches!(
+                state,
+                SourceAvailability::Inactive | SourceAvailability::Mixed
+            );
+            cursor = cursor.max(region.end);
+        }
+        if cursor < span.end {
+            return SourceAvailability::Unknown;
+        }
+        match (active, inactive) {
+            (true, true) => SourceAvailability::Mixed,
+            (true, false) => SourceAvailability::Active,
+            (false, true) => SourceAvailability::Inactive,
+            _ => SourceAvailability::Unknown,
+        }
+    }
+
+    pub(crate) fn matching<'a>(
+        &'a self,
+        file: &str,
+        span: Span,
+    ) -> impl Iterator<Item = &'a MacroAvailabilityRegion> + 'a {
+        let file = self.files.get(file);
+        let end = file.map_or(0, |file| {
+            file.entries
+                .partition_point(|index| self.regions[*index].span.start <= span.start)
+        });
+        (0..end)
+            .rev()
+            .take_while(move |index| file.is_some_and(|file| file.max_end[*index] >= span.end))
+            .filter_map(move |index| {
+                let region = &self.regions[file.expect("bounded file index").entries[index]];
+                (region.span.start <= span.start && span.end <= region.span.end).then_some(region)
+            })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ResolvedOverride {
+    pub file: String,
+    pub operation: AnalysisOverride,
+    pub directive_span: Span,
+    pub name: Option<String>,
+    pub branch_index: Option<usize>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ResolvedAnalysis {
+    pub choices: AnalysisConfiguration,
+    pub selection: AnalysisSelection,
+    pub initial: HashMap<String, crate::engine::language::macro_expand::MacroVal>,
+    pub overrides: Vec<ResolvedOverride>,
+    pub by_file: HashMap<String, Arc<HashMap<Span, usize>>>,
+}
+
+/// One original file or reconstructed buffer's lookup into the same choices.
+#[derive(Clone, Debug)]
+pub(crate) struct MacroExecutionInputs {
+    pub analysis: Arc<ResolvedAnalysis>,
+    pub sites: Arc<HashMap<Span, usize>>,
+}
+
+impl MacroExecutionInputs {
+    pub(crate) fn initial_environment(
+        &self,
+        budget: &mut MacroBudget,
+    ) -> Result<
+        HashMap<String, crate::engine::language::macro_expand::MacroVal>,
+        crate::engine::language::macro_expand::MacroEvalError,
+    > {
+        let mut initial = HashMap::new();
+        for (name, value) in &self.analysis.initial {
+            budget.spend_work(name.len().saturating_add(1))?;
+            initial.insert(
+                name.clone(),
+                crate::engine::language::macro_expr::clone_macro_val(value, budget)?,
+            );
+        }
+        Ok(initial)
+    }
+}
+
+impl ResolvedAnalysis {
+    pub(crate) fn for_file(self: &Arc<Self>, file: &str) -> Arc<MacroExecutionInputs> {
+        Arc::new(MacroExecutionInputs {
+            analysis: Arc::clone(self),
+            sites: self.by_file.get(file).cloned().unwrap_or_default(),
+        })
+    }
+}
+
+impl AnalysisConfiguration {
+    pub(crate) fn validate_initial(
+        &self,
+        budget: &mut MacroBudget,
+    ) -> Result<HashMap<String, crate::engine::language::macro_expand::MacroVal>, ConfigurationError>
+    {
+        charge(
+            budget,
+            self.name
+                .as_ref()
+                .map_or(1, |name| name.len().saturating_add(1)),
+        )?;
+        let mut names = HashSet::new();
+        let mut targets = HashSet::new();
+        let mut initial = HashMap::new();
+        for define in &self.defines {
+            charge(
+                budget,
+                define
+                    .name
+                    .len()
+                    .saturating_add(define.expression.len())
+                    .saturating_add(4),
+            )?;
+            let mut bytes = define.name.bytes();
+            if !bytes
+                .next()
+                .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+                || !bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+            {
+                return Err(ConfigurationError::new(
+                    "ANALYSIS_INVALID_DEFINE",
+                    format!("Initial macro name '{}' is not a valid name.", define.name),
+                ));
+            }
+            if !names.insert(define.name.as_str()) {
+                return Err(ConfigurationError::new(
+                    "ANALYSIS_DUPLICATE_DEFINE",
+                    format!(
+                        "Initial macro name '{}' occurs more than once.",
+                        define.name
+                    ),
+                ));
+            }
+            crate::engine::language::macro_expr::check_macro_definition_budget(
+                &format!("{} = {}", define.name, define.expression),
+                budget,
+            )
+            .map_err(expression_error)?;
+            let value = crate::engine::language::macro_expr::eval_macro_expr_budget(
+                &define.expression,
+                &mut initial,
+                budget,
+            )
+            .map_err(expression_error)?;
+            initial.insert(define.name.clone(), value);
+        }
+        for operation in &self.overrides {
+            let target = operation.target();
+            charge(
+                budget,
+                target
+                    .file
+                    .as_ref()
+                    .map_or(0, String::len)
+                    .saturating_add(target.site_id.len())
+                    .saturating_add(target.source_revision.len())
+                    .saturating_add(1),
+            )?;
+            if let AnalysisOverride::Branch {
+                branch_id: Some(branch),
+                ..
+            } = operation
+            {
+                charge(budget, branch.len().saturating_add(1))?;
+            }
+            if !targets.insert((&target.file, &target.site_id)) {
+                return Err(ConfigurationError::new(
+                    "ANALYSIS_TARGET_CONFLICT",
+                    "More than one override selects the same written directive.",
+                )
+                .at(target));
+            }
+            if let AnalysisOverride::Definition { expression, .. } = operation {
+                crate::engine::language::macro_expr::check_macro_syntax_budget(expression, budget)
+                    .map_err(|error| expression_error(error).at(target))?;
+            }
+        }
+        Ok(initial)
+    }
+}
+
+pub(crate) fn resolve_override(
+    operation: &AnalysisOverride,
+    file: String,
+    source: &crate::engine::language::macro_source::MacroSource,
+    budget: &mut MacroBudget,
+) -> Result<ResolvedOverride, ConfigurationError> {
+    let target = operation.target();
+    if source.source_revision != target.source_revision {
+        return Err(ConfigurationError::new(
+            "ANALYSIS_TARGET_STALE",
+            "The override's source file changed. Select the written directive again.",
+        )
+        .at(target));
+    }
+    charge(budget, source.sites.len().saturating_add(1))?;
+    let site = source
+        .sites
+        .iter()
+        .find(|site| site.target.site_id == target.site_id)
+        .ok_or_else(|| {
+            ConfigurationError::new(
+                "ANALYSIS_TARGET_MISSING",
+                "The written directive is missing or has incomplete macro syntax.",
+            )
+            .at(target)
+        })?;
+    let branch_index = match operation {
+        AnalysisOverride::Definition { .. } | AnalysisOverride::SkipDefinition { .. } => {
+            if site.kind == DirectiveKind::FunctionDefinition {
+                return Err(ConfigurationError::new("ANALYSIS_TARGET_UNSUPPORTED", "Macro function definitions cannot be overridden. Select a variable definition.").at(target));
+            }
+            if site.kind != DirectiveKind::Definition {
+                return Err(ConfigurationError::new(
+                    "ANALYSIS_TARGET_WRONG_KIND",
+                    "This override requires a written variable definition.",
+                )
+                .at(target));
+            }
+            None
+        }
+        AnalysisOverride::Branch { branch_id, .. } => {
+            if site.kind != DirectiveKind::Conditional {
+                return Err(ConfigurationError::new(
+                    "ANALYSIS_TARGET_WRONG_KIND",
+                    "This override requires a written conditional chain.",
+                )
+                .at(target));
+            }
+            match branch_id {
+                Some(id) => Some(
+                    site.branches
+                        .iter()
+                        .position(|branch| branch.branch_id == *id)
+                        .ok_or_else(|| {
+                            ConfigurationError::new(
+                                "ANALYSIS_BRANCH_MISSING",
+                                "The selected branch does not belong to this conditional chain.",
+                            )
+                            .at(target)
+                        })?,
+                ),
+                None => None,
+            }
+        }
+    };
+    charge(
+        budget,
+        file.len()
+            .saturating_add(site.expected_text.len())
+            .saturating_add(target.site_id.len())
+            .saturating_add(target.source_revision.len())
+            .saturating_add(match operation {
+                AnalysisOverride::Definition { expression, .. } => expression.len(),
+                _ => 0,
+            })
+            .saturating_add(1),
+    )?;
+    Ok(ResolvedOverride {
+        file,
+        operation: operation.clone(),
+        directive_span: site.directive_span,
+        name: site.name.clone(),
+        branch_index,
+    })
 }
 
 pub(crate) fn expression_error(

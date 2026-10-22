@@ -8,6 +8,7 @@ pub mod intern;
 pub mod lexer;
 pub mod macro_expand;
 pub(crate) mod macro_expr;
+pub(crate) mod macro_source;
 pub mod model;
 pub(crate) mod native_line;
 pub mod parser;

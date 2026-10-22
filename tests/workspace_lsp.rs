@@ -581,6 +581,9 @@ async fn configured_work_reaches_inactive_checks_and_formatting_over_stdio() {
 async fn scoped_macro_work_limits_recheck_open_and_saved_models_over_stdio() {
     // Guards workspace workers using a default or another root's setting, cached
     // facts surviving a work-limit change, and invalid editor values going quiet.
+    // The complete case includes retained availability for 200 interpolations;
+    // leave room for the absolute temporary path in each recorded occurrence.
+    const HIGH_WORK_LIMIT: u64 = 250_000;
     let files = Files::new();
     let text = "@#for i in 1:100\nvar y@{i};\n@#endfor\nmodel;\n@#for i in 1:100\ny@{i}=0;\n@#endfor\nend;\n";
     files.write("a/root.mod", text);
@@ -597,7 +600,7 @@ async fn scoped_macro_work_limits_recheck_open_and_saved_models_over_stdio() {
     wire.start(
         vec![files.folder("a"), files.folder("b")],
         json!({}),
-        scoped(json!(1000), json!(100000)),
+        scoped(json!(1000), json!(HIGH_WORK_LIMIT)),
         true,
     )
     .await;
@@ -629,7 +632,7 @@ async fn scoped_macro_work_limits_recheck_open_and_saved_models_over_stdio() {
     let snapshot = |folders: Vec<Value>| json!({"settings":{"dynare":{"configuration":{"schemaVersion":1,"loose":{},"folders":folders}}}});
     wire.notify(
         "workspace/didChangeConfiguration",
-        snapshot(scoped(json!(100000), json!(1000))),
+        snapshot(scoped(json!(HIGH_WORK_LIMIT), json!(1000))),
     );
     let after = wire
         .request("workspace/executeCommand", info_args(&a))
@@ -645,7 +648,7 @@ async fn scoped_macro_work_limits_recheck_open_and_saved_models_over_stdio() {
     assert_eq!(root(&status, &b)["state"], "incomplete", "{status}");
     wire.notify(
         "workspace/didChangeConfiguration",
-        snapshot(scoped(json!(0), json!(100000))),
+        snapshot(scoped(json!(0), json!(HIGH_WORK_LIMIT))),
     );
     let fallback = wire
         .request("workspace/executeCommand", info_args(&a))

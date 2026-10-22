@@ -1010,15 +1010,16 @@ async fn rename_refuses_tag_literal_with_incompatible_macro_roles() {
         let (control_service, _control_socket) = new_service();
         open(control_service.inner(), &control_uri, &control, 1).await;
         assert!(
-            rename(
-                control_service.inner(),
-                &control_uri,
-                &control,
-                selected,
-                "z"
-            )
-            .await
-            .is_some()
+            control_service
+                .inner()
+                .rename(RenameParams {
+                    text_document_position: position(&control_uri, &control, selected),
+                    new_name: "z".into(),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await
+                .unwrap_or_else(|error| panic!("Safe tag control was refused: {error}\n{control}"))
+                .is_some()
         );
         let root = fixture.write("tag_roles.mod", text);
         let (service, _socket) = new_service();

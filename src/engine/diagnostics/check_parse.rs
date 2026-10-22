@@ -950,13 +950,7 @@ fn invalid_ident_diags(model: &Model, tokens: &[Token], index: &LineIndex) -> Ve
     let mut out = Vec::new();
     // Decl-overlap refuses to guess: emit E001 only when a run overlaps an
     // active Decl. Incomplete expansion must not hide those decidable errors.
-    let inactive = crate::engine::language::macro_expand::inactive_macro_spans(
-        src,
-        &mut crate::engine::language::macro_expr::MacroBudget::with_limit(
-            model.macro_work_limit,
-            None,
-        ),
-    );
+    let inactive = model.inactive_macro_spans();
     let active_decls = active_decl_spans(model);
     let declared = declared_spellings(model);
     let mut blocks = complete_block_ranges(tokens, src, &declared);
@@ -970,7 +964,7 @@ fn invalid_ident_diags(model: &Model, tokens: &[Token], index: &LineIndex) -> Ve
         }
         let tok = &tokens[i];
         if inside_span(tok.span.start, &blocks)
-            || inside_span(tok.span.start, &inactive)
+            || inside_span(tok.span.start, inactive)
             || !ident_in(tok, src, DECL_KEYWORDS)
         {
             i += 1;
@@ -1013,7 +1007,7 @@ fn invalid_ident_diags(model: &Model, tokens: &[Token], index: &LineIndex) -> Ve
             }
             if tokens[t].kind == TokenKind::Latex
                 || tokens[t].kind == TokenKind::MacroDir
-                || inside_span(tokens[t].span.start, &inactive)
+                || inside_span(tokens[t].span.start, inactive)
             {
                 t += 1;
                 continue;
@@ -1054,13 +1048,7 @@ fn active_decl_spans(model: &Model) -> Vec<Span> {
 /// non-ASCII there, and Dynare accepts it.
 fn excluded_character_spans(model: &Model) -> Vec<Span> {
     let src = &model.source;
-    let mut spans = crate::engine::language::macro_expand::inactive_macro_spans(
-        src,
-        &mut crate::engine::language::macro_expr::MacroBudget::with_limit(
-            model.macro_work_limit,
-            None,
-        ),
-    );
+    let mut spans = model.inactive_macro_spans().to_vec();
     spans.extend(
         model
             .expanded_tokens

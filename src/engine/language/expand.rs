@@ -5,13 +5,12 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 use crate::engine::analysis::equations::equations;
 use crate::engine::language::lexer::{Token, tokenize};
-use crate::engine::language::macro_expand::{
-    FrameRec, MacroMessage, MacroReplay, TokenTrace,
-    expand_macros_traced_with_lines_and_evaluations_budget,
-};
-use crate::engine::language::parser::{
-    join_lexemes_recorded, normalize_newlines, parse_expanded_controlled,
-};
+#[cfg(test)]
+use crate::engine::language::macro_expand::expand_macros_traced_with_lines_and_evaluations_budget;
+use crate::engine::language::macro_expand::{FrameRec, MacroMessage, MacroReplay, TokenTrace};
+#[cfg(test)]
+use crate::engine::language::parser::parse_expanded_controlled;
+use crate::engine::language::parser::{join_lexemes_recorded, normalize_newlines};
 use crate::engine::language::span::Span;
 use crate::engine::workspace::model_map::{
     EquationOccurrence, SourceFrame, SourceOccurrence, WrittenModelMap, WrittenSegment,
@@ -113,7 +112,60 @@ pub(crate) struct SpliceSegment {
     pub evaluation: Option<String>,
 }
 
-pub(crate) fn splice_evaluations(map: &[SpliceSegment]) -> Vec<MacroReplay> {
+pub(crate) fn map_execution_inputs(
+    analysis: Arc<crate::engine::analysis_configuration::ResolvedAnalysis>,
+    map: &[SpliceSegment],
+    budget: &mut crate::engine::language::macro_expr::MacroBudget,
+) -> Result<
+    Arc<crate::engine::analysis_configuration::MacroExecutionInputs>,
+    crate::engine::language::macro_expand::MacroEvalError,
+> {
+    budget.spend_work(map.len().max(1))?;
+    let mut sites = HashMap::new();
+    for segment in map {
+        if segment.spliced.is_empty()
+            || segment.spliced.end - segment.spliced.start
+                != segment.origin.end - segment.origin.start
+        {
+            continue;
+        }
+        if let Some(original) = segment
+            .file
+            .as_ref()
+            .and_then(|file| analysis.by_file.get(file))
+        {
+            budget.spend_work(original.len().max(1))?;
+            for (span, index) in original.iter() {
+                if segment.origin.start <= span.start && span.end <= segment.origin.end {
+                    sites.insert(
+                        Span {
+                            start: segment.spliced.start + span.start - segment.origin.start,
+                            end: segment.spliced.start + span.end - segment.origin.start,
+                        },
+                        *index,
+                    );
+                }
+            }
+        }
+    }
+    Ok(Arc::new(
+        crate::engine::analysis_configuration::MacroExecutionInputs {
+            analysis,
+            sites: Arc::new(sites),
+        },
+    ))
+}
+
+pub(crate) fn splice_evaluations_configured(
+    map: &[SpliceSegment],
+    retain_overrides: bool,
+) -> Vec<MacroReplay> {
+    use crate::engine::language::macro_expand::{
+        FOR_END_ORIGIN_PREFIX, FOR_INPUT_ORIGIN_PREFIX, FOR_INPUT_PREFIX, FOR_ORIGIN_PREFIX,
+        directive_name,
+    };
+    let mut keys: HashMap<(Option<&str>, Span), Vec<usize>> = HashMap::new();
+    let mut next = 0usize;
     map.iter()
         .filter_map(|segment| {
             segment.evaluation.as_ref().map(|directive| MacroReplay {
@@ -121,7 +173,29 @@ pub(crate) fn splice_evaluations(map: &[SpliceSegment]) -> Vec<MacroReplay> {
                     segment.spliced.start as usize,
                     segment.spliced.start as usize,
                 ),
-                directive: directive.clone(),
+                directive: if retain_overrides {
+                    let identity = (segment.file.as_deref(), segment.origin);
+                    if directive_name(directive).eq_ignore_ascii_case("for") {
+                        let id = next;
+                        next += 1;
+                        keys.entry(identity).or_default().push(id);
+                        format!("{FOR_ORIGIN_PREFIX}{id}:{directive}")
+                    } else if let Some(value) = directive.strip_prefix(FOR_INPUT_PREFIX) {
+                        keys.get(&identity).and_then(|ids| ids.last()).map_or_else(
+                            || directive.clone(),
+                            |id| format!("{FOR_INPUT_ORIGIN_PREFIX}{id}:{value}"),
+                        )
+                    } else if directive == FOR_END_ORIGIN_PREFIX {
+                        keys.get_mut(&identity).and_then(Vec::pop).map_or_else(
+                            || directive.clone(),
+                            |id| format!("{FOR_END_ORIGIN_PREFIX}{id}"),
+                        )
+                    } else {
+                        directive.clone()
+                    }
+                } else {
+                    directive.clone()
+                },
             })
         })
         .collect()
@@ -220,6 +294,30 @@ pub(crate) fn expand_report_from_spliced_model_controlled(
     work_limit: crate::engine::macro_work::MacroWorkLimit,
     parsed_model: Option<&crate::engine::language::model::Model>,
 ) -> Result<ExpandReport, crate::engine::control::Cancelled> {
+    expand_report_from_spliced_configured(
+        spliced,
+        map,
+        written_navigation,
+        cancellation,
+        work_limit,
+        parsed_model,
+        None,
+        None,
+    )
+}
+
+// This adapter passes the same explicit replay inputs to the traced renderer.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn expand_report_from_spliced_configured(
+    spliced: &str,
+    map: &[SpliceSegment],
+    written_navigation: Option<&NavigationSource>,
+    cancellation: Option<Arc<AtomicBool>>,
+    work_limit: crate::engine::macro_work::MacroWorkLimit,
+    parsed_model: Option<&crate::engine::language::model::Model>,
+    inputs: Option<Arc<crate::engine::analysis_configuration::MacroExecutionInputs>>,
+    cached: Option<Arc<crate::engine::language::macro_source::MacroSource>>,
+) -> Result<ExpandReport, crate::engine::control::Cancelled> {
     crate::engine::control::run(cancellation.clone(), || {
         expand_spliced(
             spliced,
@@ -228,10 +326,13 @@ pub(crate) fn expand_report_from_spliced_model_controlled(
             cancellation,
             work_limit,
             parsed_model,
+            inputs,
+            cached,
         )
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn expand_spliced(
     spliced: &str,
     map: &[SpliceSegment],
@@ -239,6 +340,8 @@ fn expand_spliced(
     cancellation: Option<Arc<AtomicBool>>,
     work_limit: crate::engine::macro_work::MacroWorkLimit,
     parsed_model: Option<&crate::engine::language::model::Model>,
+    inputs: Option<Arc<crate::engine::analysis_configuration::MacroExecutionInputs>>,
+    cached: Option<Arc<crate::engine::language::macro_source::MacroSource>>,
 ) -> ExpandReport {
     let source = normalize_newlines(spliced);
     let raw = tokenize(&source);
@@ -247,9 +350,12 @@ fn expand_spliced(
         .filter(|segment| !segment.spliced.is_empty())
         .map(|segment| (segment.spliced, segment.line))
         .collect();
-    let evaluations = splice_evaluations(map);
-    let (tokens, traces, arena, incomplete, macro_navigation_complete, messages) =
-        expand_macros_traced_with_lines_and_evaluations_budget(
+    let retain_overrides = inputs
+        .as_ref()
+        .is_some_and(|inputs| inputs.analysis.selection.preview);
+    let evaluations = splice_evaluations_configured(map, retain_overrides);
+    let (tokens, traces, arena, incomplete, macro_navigation_complete, messages, discarded) =
+        crate::engine::language::macro_expand::expand_macros_traced_configured(
             &source,
             raw,
             &line_segments,
@@ -258,6 +364,8 @@ fn expand_spliced(
                 work_limit,
                 cancellation.clone(),
             ),
+            inputs.clone(),
+            cached.as_deref(),
         );
     if crate::engine::control::cancelled() {
         return ExpandReport::default();
@@ -270,7 +378,14 @@ fn expand_spliced(
             && same_completed_parser_input(model, &source, &tokens, work_limit)
     });
     let owned_parse = reusable.is_none().then(|| {
-        parse_expanded_controlled(&source, tokens.clone(), cancellation.clone(), work_limit)
+        crate::engine::language::parser::parse_expanded_context_controlled(
+            &source,
+            tokens.clone(),
+            cancellation.clone(),
+            work_limit,
+            inputs.clone(),
+            (!discarded.is_empty()).then(|| Arc::from(discarded)),
+        )
     });
     let reused_ranges;
     let (model, ranges) = if let Some((model, ranges)) = &owned_parse {
@@ -306,7 +421,8 @@ fn expand_spliced(
     let map_complete = reusable.is_some()
         || (!incomplete && crate::engine::workspace::model_map::parser_complete(model));
     let parsed_tokens = &model.expanded_tokens;
-    let parsed_traces = project_token_traces(parsed_tokens, ranges, &traces);
+    let parsed_traces =
+        project_token_traces(parsed_tokens, ranges, &traces, &arena, retain_overrides);
     let render_tokens = if map_complete {
         parsed_tokens.as_slice()
     } else {
@@ -331,65 +447,98 @@ fn expand_spliced(
     // Identical text and every source segment imply the same traced tokens and
     // parser proof. A different projection retains its independent check.
     let identical_navigation = matches!(written_navigation, Some(NavigationSource::Mapped {text,segments}) if text == &source && segments.as_slice() == map);
-    let verified = if identical_navigation {
-        None
-    } else if let Some(NavigationSource::Mapped { text, segments }) = written_navigation {
-        let text = normalize_newlines(text);
-        let navigation_lines: Vec<(Span, u32)> = segments
-            .iter()
-            .filter(|segment| !segment.spliced.is_empty())
-            .map(|segment| (segment.spliced, segment.line))
-            .collect();
-        let navigation_evaluations = splice_evaluations(segments);
-        let (actual, actual_traces, actual_arena, incomplete, macro_navigation_complete, _) =
-            expand_macros_traced_with_lines_and_evaluations_budget(
+    let verified = (|| {
+        if identical_navigation {
+            None
+        } else if let Some(NavigationSource::Mapped { text, segments }) = written_navigation {
+            let text = normalize_newlines(text);
+            let navigation_lines: Vec<(Span, u32)> = segments
+                .iter()
+                .filter(|segment| !segment.spliced.is_empty())
+                .map(|segment| (segment.spliced, segment.line))
+                .collect();
+            let navigation_evaluations = splice_evaluations_configured(segments, retain_overrides);
+            let mut navigation_budget =
+                crate::engine::language::macro_expr::MacroBudget::with_limit(
+                    work_limit,
+                    cancellation.clone(),
+                );
+            let navigation_inputs = inputs
+                .as_ref()
+                .map(|inputs| {
+                    map_execution_inputs(
+                        Arc::clone(&inputs.analysis),
+                        segments,
+                        &mut navigation_budget,
+                    )
+                })
+                .transpose()
+                .ok()?;
+            let (
+                actual,
+                actual_traces,
+                actual_arena,
+                incomplete,
+                macro_navigation_complete,
+                _,
+                discarded,
+            ) = crate::engine::language::macro_expand::expand_macros_traced_configured(
                 &text,
                 tokenize(&text),
                 &navigation_lines,
                 &navigation_evaluations,
-                &mut crate::engine::language::macro_expr::MacroBudget::with_limit(
-                    work_limit,
-                    cancellation.clone(),
-                ),
+                &mut navigation_budget,
+                navigation_inputs.clone(),
+                None,
             );
-        let matches = !incomplete
-            && macro_navigation_complete
-            && actual.len() == tokens.len()
-            && actual.iter().zip(&tokens).all(|(actual, legacy)| {
-                actual.kind == legacy.kind && actual.text(&text) == legacy.text(&source)
-            });
-        if matches {
-            // Raw terminators and Dynare strings can split or join ordinary
-            // lexer tokens. Compare completed parser streams, then use the
-            // independently parsed projection's exact written positions.
-            let (actual_model, actual_ranges) =
-                parse_expanded_controlled(&text, actual, cancellation, work_limit);
-            if crate::engine::control::cancelled() {
-                return ExpandReport::default();
-            }
-            let parsed_matches = actual_model.expanded_tokens.len() == parsed_tokens.len()
-                && actual_model.expanded_tokens.iter().zip(parsed_tokens).all(
-                    |(actual, legacy)| {
-                        actual.kind == legacy.kind && actual.text(&text) == legacy.text(&source)
-                    },
+            let matches = !incomplete
+                && macro_navigation_complete
+                && actual.len() == tokens.len()
+                && actual.iter().zip(&tokens).all(|(actual, legacy)| {
+                    actual.kind == legacy.kind && actual.text(&text) == legacy.text(&source)
+                });
+            if matches {
+                // Raw terminators and Dynare strings can split or join ordinary
+                // lexer tokens. Compare completed parser streams, then use the
+                // independently parsed projection's exact written positions.
+                let (actual_model, actual_ranges) =
+                    crate::engine::language::parser::parse_expanded_context_controlled(
+                        &text,
+                        actual,
+                        cancellation,
+                        work_limit,
+                        navigation_inputs,
+                        (!discarded.is_empty()).then(|| Arc::from(discarded)),
+                    );
+                if crate::engine::control::cancelled() {
+                    return None;
+                }
+                let parsed_matches = actual_model.expanded_tokens.len() == parsed_tokens.len()
+                    && actual_model.expanded_tokens.iter().zip(parsed_tokens).all(
+                        |(actual, legacy)| {
+                            actual.kind == legacy.kind && actual.text(&text) == legacy.text(&source)
+                        },
+                    );
+                let actual_traces = project_token_traces(
+                    &actual_model.expanded_tokens,
+                    &actual_ranges,
+                    &actual_traces,
+                    &actual_arena,
+                    retain_overrides,
                 );
-            let actual_traces = project_token_traces(
-                &actual_model.expanded_tokens,
-                &actual_ranges,
-                &actual_traces,
-            );
-            parsed_matches.then_some((
-                actual_model.expanded_tokens,
-                actual_traces,
-                actual_arena,
-                segments.as_slice(),
-            ))
+                parsed_matches.then_some((
+                    actual_model.expanded_tokens,
+                    actual_traces,
+                    actual_arena,
+                    segments.as_slice(),
+                ))
+            } else {
+                None
+            }
         } else {
             None
         }
-    } else {
-        None
-    };
+    })();
     let navigation_complete = map_complete
         && if identical_navigation {
             macro_navigation_complete
@@ -442,10 +591,11 @@ fn expand_spliced(
                         .into_iter()
                         .map(|id| {
                             let frame = &navigation_arena[id];
+                            let origin = frame;
                             PreviewMacroFrame {
                                 kind: frame.kind.to_string(),
-                                variable: frame.variable.clone(),
-                                value: frame.value.clone(),
+                                variable: origin.variable.clone(),
+                                value: origin.value.clone(),
                                 directive_segments: map_written_segments(
                                     navigation_map,
                                     frame.directive_span,
@@ -492,6 +642,7 @@ fn expand_spliced(
             &parsed_traces[range.start..range.end],
             &arena,
             map,
+            retain_overrides,
         );
         pending.push((
             range.start,
@@ -521,6 +672,7 @@ fn expand_spliced(
                 &parsed_traces[range.start..range.end],
                 &arena,
                 map,
+                retain_overrides,
             );
             origin.dimension = Some(model.name(block.dimension).to_string());
             origin.block_index = Some(block_index);
@@ -674,25 +826,55 @@ fn project_token_traces(
     tokens: &[Token],
     ranges: &crate::engine::language::parser::EquationTokenRanges,
     traces: &[TokenTrace],
+    arena: &[FrameRec],
+    retain_overrides: bool,
 ) -> Vec<TokenTrace> {
     ranges
         .original_tokens
         .iter()
         .zip(tokens)
         .map(|(range, token)| {
-            if let Some(emitted) = &token.emitted {
-                return TokenTrace {
-                    frames: emitted.source.common_frames(emitted.span),
+            let mut frames = if let Some(emitted) = &token.emitted {
+                emitted.source.common_frames(emitted.span)
+            } else {
+                let mut frames = traces[range.start].frames.clone();
+                for trace in &traces[range.start + 1..range.end] {
+                    let shared = frames
+                        .iter()
+                        .zip(&trace.frames)
+                        .take_while(|(a, b)| a == b)
+                        .count();
+                    frames.truncate(shared);
+                }
+                frames
+            };
+            if retain_overrides {
+                let mut append = |ids: &[usize]| {
+                    for &id in ids {
+                        if arena[id].kind.starts_with("override_") && !frames.contains(&id) {
+                            frames.push(id);
+                        }
+                    }
                 };
-            }
-            let mut frames = traces[range.start].frames.clone();
-            for trace in &traces[range.start + 1..range.end] {
-                let shared = frames
-                    .iter()
-                    .zip(&trace.frames)
-                    .take_while(|(a, b)| a == b)
-                    .count();
-                frames.truncate(shared);
+                if let Some(emitted) = &token.emitted {
+                    let start = emitted
+                        .source
+                        .origins
+                        .partition_point(|origin| origin.emitted.end <= emitted.span.start);
+                    for origin in emitted
+                        .source
+                        .origins
+                        .iter()
+                        .skip(start)
+                        .take_while(|origin| origin.emitted.start < emitted.span.end)
+                    {
+                        append(&origin.frames);
+                    }
+                } else {
+                    for trace in &traces[range.clone()] {
+                        append(&trace.frames);
+                    }
+                }
             }
             TokenTrace { frames }
         })
@@ -753,6 +935,19 @@ fn build_model_map(
             .max_by_key(|trace| trace.frames.len())
             .map(|trace| trace.frames.as_slice())
             .unwrap_or_default();
+        let mut override_frames = Vec::new();
+        if model.is_analysis_preview() {
+            for trace in &traces[range.clone()] {
+                for &id in &trace.frames {
+                    if arena[id].kind.starts_with("override_")
+                        && !frames.contains(&id)
+                        && !override_frames.contains(&id)
+                    {
+                        override_frames.push(id);
+                    }
+                }
+            }
+        }
         let anchors = map_token_segments(map, &tokens[anchor.clone()]);
         SourceOccurrence {
             segments: map_token_segments(map, &tokens[range.clone()]),
@@ -763,13 +958,21 @@ fn build_model_map(
             },
             origin_frames: frames
                 .iter()
-                .map(|&id| {
+                .copied()
+                .chain(override_frames)
+                .map(|id| {
                     let frame = &arena[id];
+                    let origin = frame;
+                    let segments = if frame.kind.starts_with("override_") {
+                        map_written_segments(map, frame.directive_span)
+                    } else {
+                        map_written_segments(map, frame.body_span)
+                    };
                     SourceFrame {
                         kind: frame.kind.to_string(),
-                        variable: frame.variable.clone(),
-                        value: frame.value.clone(),
-                        segments: map_written_segments(map, frame.body_span),
+                        variable: origin.variable.clone(),
+                        value: origin.value.clone(),
+                        segments,
                     }
                 })
                 .collect(),
@@ -900,6 +1103,7 @@ fn origin_for_row(
     traces: &[TokenTrace],
     arena: &[FrameRec],
     map: &[SpliceSegment],
+    retain_overrides: bool,
 ) -> EquationOrigin {
     debug_assert_eq!(tokens.len(), traces.len());
     let mapped: Vec<(Option<String>, Span)> =
@@ -919,9 +1123,25 @@ fn origin_for_row(
     let ambiguous = files.len() > 1 || (saw_missing && !files.is_empty());
 
     let mut best: &[usize] = &[];
+    let mut override_frames = Vec::new();
     for tr in traces {
-        if tr.frames.len() > best.len() {
-            best = &tr.frames;
+        let control = if retain_overrides {
+            tr.frames
+                .iter()
+                .position(|&id| arena[id].kind == "override_definition")
+                .unwrap_or(tr.frames.len())
+        } else {
+            tr.frames.len()
+        };
+        if control > best.len() {
+            best = &tr.frames[..control];
+        }
+        if retain_overrides {
+            for &id in &tr.frames {
+                if arena[id].kind == "override_definition" && !override_frames.contains(&id) {
+                    override_frames.push(id);
+                }
+            }
         }
     }
 
@@ -937,7 +1157,7 @@ fn origin_for_row(
         None
     };
 
-    let has_shorter = traces.iter().any(|t| t.frames.len() < best.len());
+    let has_shorter = traces.iter().any(|t| if retain_overrides {t.frames.iter().take_while(|&&id|arena[id].kind!="override_definition").count()}else{t.frames.len()} < best.len());
     // Every token sits in a loop, including a one-iteration loop and a loop
     // that also contains an `@#if`. A loop around only part of the equation
     // does not.
@@ -945,24 +1165,34 @@ fn origin_for_row(
         && traces
             .iter()
             .all(|trace| trace.frames.iter().any(|&id| arena[id].kind == "for"));
-    let keep_frames = best.len() > 1 || loop_instance;
-    let origin_frames = if keep_frames {
-        best.iter()
-            .map(|&id| {
-                let rec = &arena[id];
-                let (uri, span) = map_span(map, rec.body_span);
-                OriginFrame {
-                    origin_span: span,
-                    origin_uri: uri,
-                    kind: rec.kind.to_string(),
-                    variable: rec.variable.clone(),
-                    value: rec.value.clone(),
-                }
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let keep_frames = best.len() > 1
+        || loop_instance
+        || best.iter().any(|&id| arena[id].kind == "override_branch");
+    let control_frames = if keep_frames { best } else { &[] };
+    let origin_frames = control_frames
+        .iter()
+        .copied()
+        .chain(override_frames)
+        .map(|id| {
+            let rec = &arena[id];
+            let origin = rec;
+            let (uri, span) = map_span(
+                map,
+                if rec.kind.starts_with("override_") {
+                    rec.directive_span
+                } else {
+                    rec.body_span
+                },
+            );
+            OriginFrame {
+                origin_span: span,
+                origin_uri: uri,
+                kind: rec.kind.to_string(),
+                variable: origin.variable.clone(),
+                value: origin.value.clone(),
+            }
+        })
+        .collect();
 
     let written_span = covering(&mapped, origin_uri.as_deref());
     let origin_span = match best.last() {

@@ -339,10 +339,7 @@ fn source_lines(
                 .copied()
                 .filter(|_| !model.macro_incomplete()),
         )
-        .chain(crate::engine::language::macro_expand::inactive_macro_spans(
-            text,
-            &mut crate::engine::language::macro_expr::MacroBudget::with_limit(work_limit, None),
-        ))
+        .chain(model.inactive_macro_spans().iter().copied())
         .collect();
     if model.macro_incomplete() {
         // Failed expansion cannot prove block ownership. Preserve possible

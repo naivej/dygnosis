@@ -148,12 +148,13 @@ fn resolve_include_path_inner(
     if directive_filename.is_empty() {
         return None;
     }
-    let known = known_paths.cloned().unwrap_or_default();
+    let empty = HashSet::new();
+    let known = known_paths.unwrap_or(&empty);
     let normalized = normalize_separators(directive_filename);
     let candidate_rel = PathBuf::from(&normalized);
 
     if is_abs_path(&candidate_rel) {
-        return if matches_candidate(&candidate_rel, &known) {
+        return if matches_candidate(&candidate_rel, known) {
             Some(resolve_or_abs(&candidate_rel))
         } else {
             None
@@ -171,13 +172,13 @@ fn resolve_include_path_inner(
     };
 
     let sibling = including_dir.join(&candidate_rel);
-    if matches_candidate(&sibling, &known) {
+    if matches_candidate(&sibling, known) {
         return Some(resolve_or_abs(&sibling));
     }
 
     for sp in search_paths {
         let candidate = sp.join(&candidate_rel);
-        if matches_candidate(&candidate, &known) {
+        if matches_candidate(&candidate, known) {
             return Some(resolve_or_abs(&candidate));
         }
     }
@@ -185,10 +186,10 @@ fn resolve_include_path_inner(
     if !virtual_fallback {
         return None;
     }
-    if matches_known(&candidate_rel, &known) {
+    if matches_known(&candidate_rel, known) {
         return Some(resolve_or_abs(&candidate_rel));
     }
-    match_unique_known_relative_path(&candidate_rel, &known)
+    match_unique_known_relative_path(&candidate_rel, known)
 }
 
 /// Resolve a companion name as written, then `name + extra_suffixes` when it has no extension.

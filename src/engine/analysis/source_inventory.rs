@@ -3,12 +3,11 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, atomic::AtomicBool};
 
-use crate::engine::analysis_configuration::{DirectiveSite, source_revision};
+use crate::engine::analysis_configuration::DirectiveSite;
 use crate::engine::language::lexer::{Token, TokenKind, tokenize};
-use crate::engine::language::macro_expand::{
-    discover_directive_sites_with_revision, scan_macro_tokens,
-};
+use crate::engine::language::macro_expand::MacroEvalError;
 use crate::engine::language::macro_expr::MacroBudget;
+use crate::engine::language::macro_source::MacroSource;
 use crate::engine::language::model::{ExecutionStep, MacroDirective, Model, StatementKind};
 use crate::engine::language::parser::parse_expanded_controlled;
 use crate::engine::language::span::Span;
@@ -72,16 +71,22 @@ pub(crate) struct SourceInventory {
     pub source_revision: String,
     pub items: Vec<SourceItem>,
     pub folds: Vec<SourceFold>,
-    pub sites: Vec<DirectiveSite>,
-    pub macro_tokens: Vec<Token>,
+    pub sites: Arc<[DirectiveSite]>,
+    pub macro_tokens: Arc<[Token]>,
     /// Inert written lexical tokens, shared with syntax presentation filters.
     pub lexical_tokens: Vec<Token>,
     pub coverage_cause: Option<String>,
+    /// Target discovery can fail while written structure remains complete.
+    pub target_coverage_cause: Option<String>,
     pub work_used: usize,
     pub parse_passes: usize,
     /// Written syntax can be complete even when guarded target discovery fails.
     structure_complete: bool,
+    targets_complete: bool,
     opaque: Vec<Span>,
+    /// Binding-independent written verbatim boundaries. Generic opaque/native
+    /// recovery and assignments are not proof for a source edit decision.
+    native_proof: Vec<Span>,
     contexts: Vec<(u32, Vec<SourcePathStep>)>,
     interpolations: Vec<Span>,
     directive_spans: Vec<Span>,
@@ -95,8 +100,8 @@ struct MacroFrame<'a> {
 }
 
 impl SourceInventory {
-    /// Reserve source work before scanning or parsing. A canceled build must
-    /// not enter the document cache; a bounded result keeps its coverage cause.
+    /// Standalone compatibility entry point. Workspace consumers acquire one
+    /// MacroSource and call build_from_macro_source without scanning it again.
     pub(crate) fn build(
         text: &str,
         work_limit: MacroWorkLimit,
@@ -106,23 +111,84 @@ impl SourceInventory {
         if crate::engine::control::flag_cancelled(budget.cancellation().as_deref()) {
             return None;
         }
-        let mut result = Self {
+        // The borrowed input needs one owned handle only in this compatibility
+        // path. Production documents already supply their immutable handle.
+        let shared = budget
+            .spend_work(text.len().max(1))
+            .and_then(|()| MacroSource::build(Arc::new(text.to_owned()), &mut budget));
+        if crate::engine::control::flag_cancelled(budget.cancellation().as_deref()) {
+            return None;
+        }
+        match shared {
+            Ok(source) => Self::build_from_macro_source(source, work_limit, budget.cancellation()),
+            Err(error) => {
+                let cause = match error {
+                    MacroEvalError::Limit("iteration work") => "Written source inspection reached the work allowance; source rows and guarded macro targets are unavailable.".into(),
+                    MacroEvalError::Limit(limit) => format!("Written source inspection stopped at the {limit} limit; source rows and guarded macro targets are unavailable."),
+                    _ => "Written source inspection could not acquire the macro source facts; source rows and guarded macro targets are unavailable.".into(),
+                };
+                let mut result = Self::unavailable(cause);
+                result.work_used = work_limit.get() - budget.remaining_work();
+                Some(result)
+            }
+        }
+    }
+
+    fn empty() -> Self {
+        Self {
             source_revision: String::new(),
             items: Vec::new(),
             folds: Vec::new(),
-            sites: Vec::new(),
-            macro_tokens: Vec::new(),
+            sites: Arc::from([]),
+            macro_tokens: Arc::from([]),
             lexical_tokens: Vec::new(),
             coverage_cause: None,
+            target_coverage_cause: None,
             work_used: 0,
             parse_passes: 0,
             structure_complete: false,
+            targets_complete: false,
             opaque: Vec::new(),
+            native_proof: Vec::new(),
             contexts: vec![(0, Vec::new())],
             interpolations: Vec::new(),
             directive_spans: Vec::new(),
-        };
-        result.build_inner(text, &mut budget);
+        }
+    }
+
+    /// A resource stop in MacroSource acquisition has no reusable scan. Keep
+    /// its outcome without retrying acquisition or presenting empty success.
+    pub(crate) fn unavailable(cause: String) -> Self {
+        let mut result = Self::empty();
+        result.coverage_cause = Some(cause);
+        result
+    }
+
+    /// Retain the same macro scan and guarded sites used by execution. Only
+    /// the written folding/structure pass consumes this method's work budget.
+    pub(crate) fn build_from_macro_source(
+        source: Arc<MacroSource>,
+        work_limit: MacroWorkLimit,
+        cancellation: Option<Arc<AtomicBool>>,
+    ) -> Option<Self> {
+        let mut budget = MacroBudget::with_limit(work_limit, cancellation);
+        if crate::engine::control::flag_cancelled(budget.cancellation().as_deref()) {
+            return None;
+        }
+        let mut result = Self::empty();
+        result.macro_tokens = Arc::clone(&source.tokens);
+        result.sites = Arc::clone(&source.sites);
+        result.targets_complete = source.syntax_refusal.is_none();
+        result.target_coverage_cause = source.syntax_refusal.as_ref().map(|refusal| {
+            format!(
+                "Macro directive targets are unavailable: {}",
+                refusal.message,
+            )
+        });
+        if result.reserve(&mut budget, source.source_revision.len()) {
+            result.source_revision.clone_from(&source.source_revision);
+            result.build_inner(&source, &mut budget);
+        }
         if crate::engine::control::flag_cancelled(budget.cancellation().as_deref()) {
             return None;
         }
@@ -142,15 +208,14 @@ impl SourceInventory {
         }
     }
 
-    fn build_inner(&mut self, text: &str, budget: &mut MacroBudget) {
-        // The parser's newline normalization preserves byte offsets: CRLF stays
-        // CRLF, and each lone CR becomes one LF. Identity guards the raw text.
-        if !self.reserve(budget, text.len().saturating_mul(3)) {
+    fn build_inner(&mut self, source: &MacroSource, budget: &mut MacroBudget) {
+        let text = source.original.as_str();
+        let normalized = source.normalized.as_str();
+        // Alias retained facts; do not repeat macro scanning, normalization,
+        // hashing or target validation in a source presentation request.
+        if !self.reserve(budget, self.macro_tokens.len()) {
             return;
         }
-        self.source_revision = source_revision(text);
-        let normalized = crate::engine::language::parser::normalize_newlines(text);
-        self.macro_tokens = scan_macro_tokens(&normalized);
         self.interpolations = self
             .macro_tokens
             .iter()
@@ -168,31 +233,24 @@ impl SourceInventory {
             .iter()
             .filter(|token| token.kind == TokenKind::MacroDir)
             .map(|token| {
-                let raw = token.text(&normalized);
+                let raw = token.text(normalized);
                 let kind =
                     crate::engine::language::macro_expand::directive_name(raw).to_ascii_lowercase();
                 MacroDirective {
-                    argument: raw
-                        .get(
-                            raw.find(&kind)
-                                .map_or(raw.len(), |start| start + kind.len())..,
-                        )
-                        .map(str::trim)
-                        .filter(|argument| !argument.is_empty())
-                        .map(str::to_owned),
+                    argument: None,
                     kind,
                     span: token.span,
                 }
             })
             .collect();
-        self.macro_structure(&normalized, &directives, budget);
+        self.macro_structure(normalized, &directives, budget);
         if self.coverage_cause.is_some() {
             return;
         }
         if !self.reserve(budget, text.len().saturating_mul(3)) {
             return;
         }
-        let inert = inert_source_from_tokens(&normalized, &self.macro_tokens);
+        let inert = inert_source_from_tokens(normalized, &self.macro_tokens);
         self.lexical_tokens = tokenize(&inert);
         let (model, _) = parse_expanded_controlled(
             &inert,
@@ -259,21 +317,24 @@ impl SourceInventory {
             .extend(comment_folds(&inert, &self.lexical_tokens));
         self.finish_items();
         self.structure_complete = true;
-        match discover_directive_sites_with_revision(
-            None,
-            text,
-            &self.source_revision,
-            &self.macro_tokens,
-            budget,
-        ) {
-            Ok(sites) => self.sites = sites,
-            Err(error) => {
-                self.coverage_cause = Some(format!(
-                    "Macro directive targets are unavailable: {} Written source rows remain available.",
-                    error.message,
-                ));
-            }
-        }
+        self.coverage_cause = self
+            .target_coverage_cause
+            .as_ref()
+            .map(|cause| format!("{cause} Written source rows remain available."));
+    }
+
+    pub(crate) fn structure_complete(&self) -> bool {
+        self.structure_complete
+    }
+
+    pub(crate) fn structure_cause(&self) -> Option<&str> {
+        (!self.structure_complete)
+            .then_some(self.coverage_cause.as_deref())
+            .flatten()
+    }
+
+    pub(crate) fn targets_complete(&self) -> bool {
+        self.targets_complete
     }
 
     fn item(
@@ -487,6 +548,9 @@ impl SourceInventory {
             }
             if statement.name == "verbatim" {
                 self.opaque.push(span);
+                if complete && !intersects(&self.interpolations, span) {
+                    self.native_proof.push(span);
+                }
             }
             self.items.push(row);
         }
@@ -595,6 +659,8 @@ impl SourceInventory {
         self.folds
             .sort_by_key(|fold| (fold.span.start, fold.span.end, fold.comment));
         self.folds.dedup();
+        self.native_proof.sort_by_key(|span| (span.start, span.end));
+        self.native_proof.dedup();
     }
 
     /// Context uses literal, complete source boundaries. Fragments withhold a
@@ -659,6 +725,35 @@ impl SourceInventory {
                         current.opener == candidate.opener && current.branch != candidate.branch
                     })
                 })
+        })
+    }
+
+    /// Only literal, locally paired verbatim text is certified here. The pin's
+    /// INITIAL identifier/native choice depends on symbol state, so the inert
+    /// parser's native rows cannot certify it across sibling branches.
+    pub(crate) fn is_proven_native(&self, span: Span) -> bool {
+        if !self.structure_complete {
+            return false;
+        }
+        let after = self
+            .native_proof
+            .partition_point(|native| native.start <= span.start);
+        after.checked_sub(1).is_some_and(|index| {
+            let native = self.native_proof[index];
+            span.start >= native.start && span.end <= native.end
+        })
+    }
+
+    /// Written identifiers for conservative source edit proofs. The retained
+    /// lexer excludes comments and quoted text. Interpolation placeholders,
+    /// macro directives and proven verbatim bodies are not literal name sites.
+    /// Unknown fragments and all assignments remain potentially relevant.
+    pub(crate) fn literal_identifiers(&self) -> impl Iterator<Item = &Token> {
+        self.lexical_tokens.iter().filter(|token| {
+            token.kind == TokenKind::Ident
+                && !intersects(&self.interpolations, token.span)
+                && !intersects(&self.directive_spans, token.span)
+                && !self.is_proven_native(token.span)
         })
     }
 }
@@ -778,9 +873,117 @@ fn comment_folds(text: &str, tokens: &[Token]) -> Vec<SourceFold> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::analysis_configuration::source_revision;
 
     fn inventory(text: &str) -> SourceInventory {
         SourceInventory::build(text, Default::default(), None).unwrap()
+    }
+
+    #[test]
+    fn written_inventory_reuses_one_macro_source_scan_and_guarded_sites() {
+        // Guards source intelligence rebuilding token/site arrays instead of
+        // sharing the macro source already used by configured execution.
+        let text = Arc::new("@#define FLAG = 0\r\nvar y;\rmodel;\r\ny=0;\rend;\n".to_owned());
+        let shared = MacroSource::build(text, &mut MacroBudget::new()).unwrap();
+        assert!(!shared.sites.is_empty());
+        let first =
+            SourceInventory::build_from_macro_source(Arc::clone(&shared), Default::default(), None)
+                .unwrap();
+        let second =
+            SourceInventory::build_from_macro_source(Arc::clone(&shared), Default::default(), None)
+                .unwrap();
+        assert!(Arc::ptr_eq(&first.macro_tokens, &shared.tokens));
+        assert!(Arc::ptr_eq(&first.sites, &shared.sites));
+        assert!(Arc::ptr_eq(&first.macro_tokens, &second.macro_tokens));
+        assert!(Arc::ptr_eq(&first.sites, &second.sites));
+        assert_eq!(first.source_revision, shared.source_revision);
+        assert!(first.structure_complete());
+        assert!(first.targets_complete());
+        assert!(first.structure_cause().is_none());
+        assert!(first.target_coverage_cause.is_none());
+        assert_eq!(first.parse_passes, 1);
+    }
+
+    #[test]
+    fn macro_target_failure_and_written_structure_failure_remain_independent() {
+        // Guards a cached macro syntax refusal hiding complete written syntax,
+        // and a later source work stop erasing the known target refusal.
+        let text = Arc::new("@#define FLAG =\nvar y;\nmodel; y=log(y); end;\n".to_owned());
+        let byte = text.find("log(y)").unwrap() as u32;
+        let shared = MacroSource::build(text, &mut MacroBudget::new()).unwrap();
+        assert!(shared.syntax_refusal.is_some());
+        let complete =
+            SourceInventory::build_from_macro_source(Arc::clone(&shared), Default::default(), None)
+                .unwrap();
+        assert!(complete.structure_complete());
+        assert!(!complete.targets_complete());
+        assert!(complete.structure_cause().is_none());
+        assert!(complete.target_coverage_cause.is_some());
+        assert_eq!(complete.context(byte).unwrap().language, "model_expression");
+        let partial =
+            SourceInventory::build_from_macro_source(shared, MacroWorkLimit::new(1).unwrap(), None)
+                .unwrap();
+        assert!(!partial.structure_complete());
+        assert!(!partial.targets_complete());
+        assert!(
+            partial
+                .structure_cause()
+                .unwrap()
+                .contains("work allowance")
+        );
+        assert_eq!(
+            partial.target_coverage_cause,
+            complete.target_coverage_cause
+        );
+        assert!(partial.context(byte).is_none());
+    }
+
+    #[test]
+    fn edit_proof_keeps_assignments_and_unknown_fragments_from_sibling_source() {
+        // Guards using the inert parser's generic opaque/native classification
+        // to omit a possible name after a declaration from another macro arm.
+        let text = "@#if FLAG\nparameters p; p=1;\n@#else\nhelper=p;\nmodel;\np=;\n@#endif\n";
+        let source = inventory(text);
+        let identifiers: HashSet<_> = source
+            .literal_identifiers()
+            .map(|token| token.span)
+            .collect();
+        for needle in ["p=1", "p;\nmodel", "p=;"] {
+            let at = text.find(needle).unwrap();
+            let span = Span::new(at, at + 1);
+            assert!(identifiers.contains(&span), "missing literal {needle}");
+            assert!(!source.is_proven_native(span));
+        }
+        assert!(source.context(text.find("p=;").unwrap() as u32).is_none());
+    }
+
+    #[test]
+    fn edit_proof_excludes_only_literal_lexical_and_verbatim_boundaries() {
+        // Guards treating strings/comments/interpolation masks as identifier
+        // edit sites, or expanding verbatim proof to native-looking calls.
+        let text = "parameters p;\n// p\ndisp('p');\nhelper=p;\nverbatim;\nhelper=p;\nend;\nvar p_@{region};\nmodel; p=0; end;\n";
+        let source = inventory(text);
+        let identifiers: HashSet<_> = source
+            .literal_identifiers()
+            .map(|token| token.span)
+            .collect();
+        let native_looking = text.find("helper=p;").unwrap() + "helper=".len();
+        assert!(identifiers.contains(&Span::new(native_looking, native_looking + 1)));
+        let verbatim = text.rfind("helper=p;").unwrap() + "helper=".len();
+        let verbatim_span = Span::new(verbatim, verbatim + 1);
+        assert!(source.is_proven_native(verbatim_span));
+        assert!(!identifiers.contains(&verbatim_span));
+        let comment = text.find("// p").unwrap() + 3;
+        assert!(!identifiers.contains(&Span::new(comment, comment + 1)));
+        let string = text.find("'p'").unwrap() + 1;
+        assert!(!identifiers.contains(&Span::new(string, string + 1)));
+        assert!(
+            !source.literal_identifiers().any(|token| text
+                [token.span.start as usize..token.span.end as usize]
+                .contains("@{"))
+        );
+        let equation = text.find("p=0").unwrap();
+        assert!(identifiers.contains(&Span::new(equation, equation + 1)));
     }
 
     #[test]

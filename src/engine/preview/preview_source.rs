@@ -4,7 +4,7 @@ use crate::engine::language::expand::ExpandReport;
 use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::macro_expand::{
     IncompleteReason, MacroReplay, SourceFragment, SourceLayoutGap,
-    expand_macros_with_source_layout_and_evaluations,
+    expand_macros_with_source_layout_configured,
 };
 use crate::engine::language::model::Model;
 use crate::engine::language::parser::{join_lexemes_recorded, parse_expanded_controlled};
@@ -54,18 +54,27 @@ pub(crate) fn source_with_evaluations(
     macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
 ) -> Result<Option<SourcePreview>, Vec<IncompleteReason>> {
     let original = &report.effective_text;
-    let (tokens, _, _, layout, reasons) = expand_macros_with_source_layout_and_evaluations(
+    let (tokens, _, _, layout, reasons) = expand_macros_with_source_layout_configured(
         &model.source,
         tokenize(&model.source),
         gaps,
         line_segments,
         evaluations,
         &mut crate::engine::language::macro_expr::MacroBudget::with_limit(macro_work_limit, None),
+        model.analysis_context.clone(),
+        model.macro_source.as_deref(),
     );
     if !reasons.is_empty() {
         return Err(reasons);
     }
-    let (copy_model, _) = parse_expanded_controlled(&model.source, tokens, None, macro_work_limit);
+    let (copy_model, _) = crate::engine::language::parser::parse_expanded_context_controlled(
+        &model.source,
+        tokens,
+        None,
+        macro_work_limit,
+        model.analysis_context.clone(),
+        model.macro_discarded.clone(),
+    );
     let tokens = &copy_model.expanded_tokens;
     let copy = join_lexemes_recorded(&model.source, tokens, |_, _| {});
     if copy != *original {

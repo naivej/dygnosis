@@ -66,6 +66,15 @@ pub(crate) struct MacroBudget {
     cancellation: Option<Arc<AtomicBool>>,
     /// Nested `@#for` bodies and `@#include` files on this root.
     pub(crate) exec_depth: usize,
+    provenance: Option<Box<MacroProvenance>>,
+}
+
+/// One replay's value dependencies. IDs refer to immutable definition frames
+/// in that replay's arena; independent budgets never share this ledger.
+#[derive(Debug, Default)]
+struct MacroProvenance {
+    bindings: HashMap<String, Arc<[usize]>>,
+    reads: Vec<usize>,
 }
 
 impl MacroBudget {
@@ -83,6 +92,7 @@ impl MacroBudget {
             output_left: MACRO_OUTPUT_CAP,
             cancellation: cancellation.or_else(crate::engine::control::current),
             exec_depth: 0,
+            provenance: None,
         }
     }
 
@@ -105,6 +115,144 @@ impl MacroBudget {
 
     pub(crate) fn work_limit(&self) -> MacroWorkLimit {
         self.work_limit
+    }
+
+    pub(crate) fn reset_provenance(&mut self, enabled: bool) -> Result<(), MacroEvalError> {
+        if enabled {
+            self.spend_work(1)?;
+        }
+        self.provenance = enabled.then(|| Box::new(MacroProvenance::default()));
+        Ok(())
+    }
+
+    pub(crate) fn has_provenance(&self) -> bool {
+        self.provenance.is_some()
+    }
+
+    pub(crate) fn begin_expression(&mut self) {
+        if let Some(provenance) = &mut self.provenance {
+            provenance.reads.clear();
+        }
+    }
+
+    fn pause_expression(&mut self) -> Option<Vec<usize>> {
+        self.provenance
+            .as_mut()
+            .map(|provenance| std::mem::take(&mut provenance.reads))
+    }
+
+    fn resume_expression(&mut self, previous: Option<Vec<usize>>) -> Result<(), MacroEvalError> {
+        let Some(previous) = previous else {
+            return Ok(());
+        };
+        let count = self
+            .provenance
+            .as_ref()
+            .expect("enabled provenance")
+            .reads
+            .len();
+        self.spend_work(
+            previous
+                .len()
+                .saturating_mul(count.saturating_add(previous.len()).saturating_add(1)),
+        )?;
+        let reads = &mut self.provenance.as_mut().expect("enabled provenance").reads;
+        for origin in previous {
+            if !reads.contains(&origin) {
+                reads.push(origin);
+            }
+        }
+        Ok(())
+    }
+
+    fn read_global(&mut self, name: &str) -> Result<(), MacroEvalError> {
+        let Some(origins) = self
+            .provenance
+            .as_ref()
+            .and_then(|provenance| provenance.bindings.get(name))
+            .cloned()
+        else {
+            return Ok(());
+        };
+        let used = self
+            .provenance
+            .as_ref()
+            .expect("enabled provenance")
+            .reads
+            .len();
+        self.spend_work(
+            origins
+                .len()
+                .saturating_mul(used.saturating_add(origins.len()).saturating_add(1)),
+        )?;
+        let reads = &mut self.provenance.as_mut().expect("enabled provenance").reads;
+        for &origin in origins.iter() {
+            if !reads.contains(&origin) {
+                reads.push(origin);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn expression_origins(&mut self) -> Result<Option<Arc<[usize]>>, MacroEvalError> {
+        let count = self
+            .provenance
+            .as_ref()
+            .map_or(0, |provenance| provenance.reads.len());
+        if count == 0 {
+            return Ok(None);
+        }
+        self.spend_work(count)?;
+        Ok(Some(
+            self.provenance
+                .as_ref()
+                .expect("enabled provenance")
+                .reads
+                .clone()
+                .into(),
+        ))
+    }
+
+    pub(crate) fn bind_origins(
+        &mut self,
+        name: &str,
+        origins: Option<Arc<[usize]>>,
+    ) -> Result<(), MacroEvalError> {
+        if self.provenance.is_none() {
+            return Ok(());
+        }
+        self.spend_work(name.len().saturating_add(1))?;
+        let bindings = &mut self
+            .provenance
+            .as_mut()
+            .expect("enabled provenance")
+            .bindings;
+        if let Some(origins) = origins {
+            bindings.insert(name.to_owned(), origins);
+        } else {
+            bindings.remove(name);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn bind_expression(
+        &mut self,
+        name: &str,
+        added: Option<usize>,
+    ) -> Result<(), MacroEvalError> {
+        if self.provenance.is_none() {
+            return Ok(());
+        }
+        if let Some(added) = added {
+            self.spend_work(1)?;
+            self.provenance
+                .as_mut()
+                .expect("enabled provenance")
+                .reads
+                .push(added);
+        }
+        let origins = self.expression_origins()?;
+        self.bind_origins(name, origins)
     }
 
     /// Count an operation. `amount` is the work about to be done.
@@ -698,6 +846,7 @@ pub(crate) fn eval_macro_expr_budget(
     defines: &mut HashMap<String, MacroVal>,
     budget: &mut MacroBudget,
 ) -> Result<MacroVal, MacroEvalError> {
+    budget.begin_expression();
     let source = prepare_source(source, budget)?;
     let expr = parse_expr(&source)?;
     eval_expr(&expr, defines, None, 0, 0, budget)
@@ -710,6 +859,7 @@ pub(crate) fn eval_macro_expr_interpolation_budget(
     defines: &mut HashMap<String, MacroVal>,
     budget: &mut MacroBudget,
 ) -> Result<MacroVal, MacroEvalError> {
+    budget.begin_expression();
     charge_source(budget, source)?;
     let expr = parse_expr_context(source, ExprContext::Interpolation)?;
     eval_expr(&expr, defines, None, 0, 0, budget)
@@ -2018,6 +2168,12 @@ fn eval_expr(
                 )?;
                 flatten_index(value, &mut flat)?;
             }
+            if local
+                .as_deref()
+                .is_none_or(|local| !local.contains_key(name))
+            {
+                budget.read_global(name)?;
+            }
             let target = lookup_var_ref(global, local.as_deref(), name)?;
             if indexes.is_empty() {
                 return clone_macro_val(target, budget);
@@ -2135,6 +2291,10 @@ fn eval_comprehension(
     expr_depth: usize,
     budget: &mut MacroBudget,
 ) -> Result<MacroVal, MacroEvalError> {
+    // A comprehension index receives the iterable value's origins. Predicate
+    // and mapping reads still belong to the whole expression, but must not
+    // change the index that remains in the pinned global macro environment.
+    let previous_origins = budget.pause_expression();
     let input = eval_expr(
         set,
         global,
@@ -2143,6 +2303,8 @@ fn eval_comprehension(
         expr_depth,
         budget,
     )?;
+    let input_origins = budget.expression_origins()?;
+    budget.resume_expression(previous_origins)?;
     let MacroVal::Array(items) = input else {
         return Err(official("E285", "The input set must evaluate to an array"));
     };
@@ -2158,7 +2320,14 @@ fn eval_comprehension(
     let mut values = Vec::new();
     for item in items {
         budget.spend_work(1)?;
-        bind_comprehension(vars, &item, global, local.as_deref_mut(), budget)?;
+        bind_comprehension(
+            vars,
+            &item,
+            global,
+            local.as_deref_mut(),
+            &input_origins,
+            budget,
+        )?;
         if let Some(when) = when {
             let cond = eval_expr(
                 when,
@@ -2197,12 +2366,13 @@ fn bind_comprehension(
     item: &MacroVal,
     global: &mut HashMap<String, MacroVal>,
     mut local: Option<&mut HashMap<String, MacroVal>>,
+    input_origins: &Option<Arc<[usize]>>,
     budget: &mut MacroBudget,
 ) -> Result<(), MacroEvalError> {
     match vars {
         Expr::Var(name) | Expr::Index { name, .. } => {
             let owned = clone_macro_val(item, budget)?;
-            bind_name(global, local, name.clone(), owned)?;
+            bind_name(global, local, name.clone(), owned, input_origins, budget)?;
             Ok(())
         }
         Expr::Tuple(names) => {
@@ -2226,7 +2396,14 @@ fn bind_comprehension(
                     ));
                 };
                 let owned = clone_macro_val(value, budget)?;
-                bind_name(global, local.as_deref_mut(), name.to_owned(), owned)?;
+                bind_name(
+                    global,
+                    local.as_deref_mut(),
+                    name.to_owned(),
+                    owned,
+                    input_origins,
+                    budget,
+                )?;
             }
             Ok(())
         }
@@ -2242,6 +2419,8 @@ fn bind_name(
     local: Option<&mut HashMap<String, MacroVal>>,
     name: String,
     value: MacroVal,
+    input_origins: &Option<Arc<[usize]>>,
+    budget: &mut MacroBudget,
 ) -> Result<(), MacroEvalError> {
     if let Some(local) = local {
         local.insert(name, value);
@@ -2252,6 +2431,7 @@ fn bind_name(
                 format!("Variable {name} was previously defined as a function"),
             ));
         }
+        budget.bind_origins(&name, input_origins.clone())?;
         global.insert(name, value);
     }
     Ok(())
@@ -2263,6 +2443,9 @@ fn lookup_var(
     name: &str,
     budget: &mut MacroBudget,
 ) -> Result<MacroVal, MacroEvalError> {
+    if local.is_none_or(|local| !local.contains_key(name)) {
+        budget.read_global(name)?;
+    }
     clone_macro_val(lookup_var_ref(global, local, name)?, budget)
 }
 
@@ -4954,5 +5137,45 @@ mod tests {
                 Err(_) => return None,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod override_provenance_tests {
+    use super::*;
+
+    #[test]
+    fn preview_provenance_is_bounded_cancelable_and_reset_per_execution() {
+        // Guards publishing a provenance binding before its budget/cancel
+        // checkpoint, and sharing preview dependencies with a later Source pass.
+        let mut small = MacroBudget::with_limit(MacroWorkLimit::new(1).unwrap(), None);
+        small.reset_provenance(true).unwrap();
+        assert!(matches!(
+            small.bind_origins("N", Some(Arc::from([3usize]))),
+            Err(MacroEvalError::Limit("iteration work"))
+        ));
+        assert!(small.provenance.as_ref().unwrap().bindings.is_empty());
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut budget =
+            MacroBudget::with_limit(MacroWorkLimit::new(100).unwrap(), Some(Arc::clone(&flag)));
+        budget.reset_provenance(true).unwrap();
+        flag.store(true, Ordering::Relaxed);
+        assert!(matches!(
+            budget.bind_origins("N", Some(Arc::from([3usize]))),
+            Err(MacroEvalError::Limit("request cancelled"))
+        ));
+        assert!(budget.provenance.as_ref().unwrap().bindings.is_empty());
+        flag.store(false, Ordering::Relaxed);
+        budget.bind_origins("N", Some(Arc::from([3usize]))).unwrap();
+        let mut defines = HashMap::from([("N".into(), MacroVal::Real(2.0))]);
+        eval_macro_expr_budget("N", &mut defines, &mut budget).unwrap();
+        assert_eq!(
+            budget.expression_origins().unwrap().unwrap().as_ref(),
+            [3usize]
+        );
+        budget.reset_provenance(false).unwrap();
+        eval_macro_expr_budget("N", &mut defines, &mut budget).unwrap();
+        assert!(budget.expression_origins().unwrap().is_none());
+        assert!(budget.provenance.is_none());
     }
 }

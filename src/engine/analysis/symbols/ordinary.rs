@@ -526,7 +526,6 @@ pub(super) fn decision(
     }
     let mut targets = Vec::new();
     let mut target_set = HashSet::new();
-    let mut written_tokens: HashMap<String, HashSet<Span>> = HashMap::new();
     let mut mappings = HashMap::new();
     let binding_sites = binding_sites(model, name);
     let native = native_orders(model);
@@ -593,20 +592,7 @@ pub(super) fn decision(
             .or_insert_with(|| view.written(token.span))
             .clone()
             .ok_or(MAPPING)?;
-        let source = view.sources.get(&target.0).ok_or(MAPPING)?;
-        let literal_tokens = written_tokens.entry(target.0.clone()).or_insert_with(|| {
-            tokenize(source)
-                .into_iter()
-                .filter(|written| written.kind == TokenKind::Ident)
-                .map(|written| written.span)
-                .collect()
-        });
-        if source.get(target.1.start as usize..target.1.end as usize) != Some(name)
-            || !literal_tokens.contains(&target.1)
-        {
-            // An interpolation is not an editable literal identifier.
-            return Err(MAPPING);
-        }
+        view.literal_identifier(&target, name)?;
         if target_set.insert(target.clone()) {
             targets.push(target);
         }
@@ -653,11 +639,13 @@ pub(super) fn decision(
     }
     if name != replacement {
         check_cancelled()?;
-        let (renamed, _) = crate::engine::language::parser::parse_expanded_controlled(
+        let (renamed, _) = crate::engine::language::parser::parse_expanded_context_controlled(
             &model.source,
             renamed_tokens,
             None,
             model.macro_work_limit,
+            model.analysis_context.clone(),
+            model.macro_discarded.clone(),
         );
         check_cancelled()?;
         if !crate::engine::workspace::model_map::parser_complete(&renamed)

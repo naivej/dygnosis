@@ -3,12 +3,8 @@
 use super::SemanticModel;
 use crate::engine::editing::refs::is_legal_ident;
 use crate::engine::language::lexer::Token;
-use crate::engine::language::{
-    lexer::{TokenKind, tokenize},
-    model::Model,
-    span::Span,
-};
-use std::collections::{HashMap, HashSet};
+use crate::engine::language::{lexer::TokenKind, model::Model, span::Span};
+use std::collections::HashSet;
 
 #[derive(Clone)]
 pub(super) struct Reference {
@@ -20,7 +16,7 @@ pub(super) struct Reference {
     pub written: Option<(String, Span)>,
 }
 
-fn semantic_name<'a>(key: &str, value: &'a str) -> Option<(usize, &'a str)> {
+pub(super) fn semantic_name<'a>(key: &str, value: &'a str) -> Option<(usize, &'a str)> {
     let name = match key {
         "endogenous" => value,
         "mcp" => {
@@ -32,7 +28,7 @@ fn semantic_name<'a>(key: &str, value: &'a str) -> Option<(usize, &'a str)> {
     is_legal_ident(name).then(|| (value.find(name).unwrap_or(0), name))
 }
 
-fn content(raw: &str) -> Option<&str> {
+pub(super) fn content(raw: &str) -> Option<&str> {
     let quote = *raw.as_bytes().first()?;
     if !matches!(quote, b'\'' | b'"') || raw.len() < 2 || raw.as_bytes().last() != Some(&quote) {
         return None;
@@ -48,7 +44,6 @@ fn literal(
     token: &Token,
     within: Span,
     name: &str,
-    lexers: &mut HashMap<String, Vec<Token>>,
 ) -> Option<(String, Span)> {
     if crate::engine::control::cancelled() {
         return None;
@@ -117,9 +112,7 @@ fn literal(
     if source.get(span.start as usize..span.end as usize) != Some(name) {
         return None;
     }
-    let tokens = lexers
-        .entry(file.clone())
-        .or_insert_with(|| tokenize(source));
+    let tokens = view.written_tokens(&file)?;
     let index = tokens.partition_point(|written| written.span.end <= span.start);
     if !tokens.get(index).is_some_and(|written| {
         (written.kind == TokenKind::Ident && written.span == span)
@@ -134,7 +127,6 @@ fn literal(
 
 pub(super) fn collect(view: &SemanticModel, model: &Model) -> Vec<Reference> {
     let mut result = Vec::new();
-    let mut lexers = HashMap::new();
     for row in &model.written_equations {
         if crate::engine::control::cancelled() {
             break;
@@ -184,7 +176,7 @@ pub(super) fn collect(view: &SemanticModel, model: &Model) -> Vec<Reference> {
                             order: Some(value_order),
                             declaration_order: row.token_range.end,
                             within_token,
-                            written: literal(view, model, token, within_token, name, &mut lexers),
+                            written: literal(view, model, token, within_token, name),
                         });
                         found.insert(key);
                     }
@@ -228,7 +220,6 @@ pub(super) fn compatible(
     targets: &HashSet<(String, Span)>,
     name: &str,
 ) -> bool {
-    let mut lexers = HashMap::new();
     for (order, token) in model
         .expanded_tokens
         .iter()
@@ -252,7 +243,7 @@ pub(super) fn compatible(
                 start: span.start + 1,
                 end: span.end + 1,
             };
-            let Some(target) = literal(view, model, token, within, name, &mut lexers) else {
+            let Some(target) = literal(view, model, token, within, name) else {
                 continue;
             };
             if targets.contains(&target)

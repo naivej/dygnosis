@@ -756,10 +756,18 @@ fn batch_and_comparison_apply_work_per_root_and_per_side_over_stdio() {
             .all(|row| row["code"] == "INPUT_CHANGED"),
         "{stale}"
     );
-    let compare_args = json!({"comparison":{"kind":"sources","before":{"kind":"text","text":source},"after":{"kind":"text","text":source}},"macro_work_limit":50000,"detail":"compact"});
+    // Each comparison side needs more than 50,000 units with retained
+    // occurrence availability; 100,000 per side must not become one pool.
+    let compare_args = json!({"comparison":{"kind":"sources","before":{"kind":"text","text":source},"after":{"kind":"text","text":source}},"macro_work_limit":100000,"detail":"compact"});
     let large = canonical(wire.call("dynare_compare_models", compare_args.clone()));
-    assert_eq!(large["coverage"]["inputs"]["before"]["complete"], true);
-    assert_eq!(large["coverage"]["inputs"]["after"]["complete"], true);
+    assert_eq!(
+        large["coverage"]["inputs"]["before"]["complete"], true,
+        "{large}"
+    );
+    assert_eq!(
+        large["coverage"]["inputs"]["after"]["complete"], true,
+        "{large}"
+    );
     assert!(
         !large["limits"]
             .as_array()
@@ -772,7 +780,7 @@ fn batch_and_comparison_apply_work_per_root_and_per_side_over_stdio() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|input| input["macro_work_limit"] == 50000)
+            .all(|input| input["macro_work_limit"] == 100000)
     );
     let mut small_args = compare_args.clone();
     small_args["macro_work_limit"] = json!(1000);
@@ -904,9 +912,12 @@ fn configured_work_reaches_auxiliary_checks_and_edit_reparses_over_stdio() {
 }
 
 #[test]
-fn repeated_partial_splices_keep_the_actual_first_written_cause_over_stdio() {
-    // Guards identical requests spending shared splice work in hash order and
-    // attaching a different included source/caller to the same actual stop.
+fn repeated_partial_inputs_keep_the_actual_first_written_cause_over_stdio() {
+    // Guards transport losing or changing the actual cause, child or caller
+    // for identical partial requests. The core splice-order test separately
+    // forces a copy failure after proving that macro execution completed.
+    // Reused source preparation makes 250,000 complete; 175,000 still stops
+    // inside the first written child.
     let table = (0..4097)
         .map(|n| format!("\"{n}\""))
         .collect::<Vec<_>>()
@@ -916,7 +927,7 @@ fn repeated_partial_splices_keep_the_actual_first_written_cause_over_stdio() {
             "/root.mod":"@#include \"table0.inc\"\n@#include \"table1.inc\"\nvar y; model; y=0; end;\n",
             "/table0.inc":format!("@#define a0=[{table}]\n// @{{a0[1]}}\n"),
             "/table1.inc":format!("@#define a1=[{table}]\n// @{{a1[1]}}\n")}},
-        "macro_work_limit":250000,"detail":"compact"
+        "macro_work_limit":175000,"detail":"compact"
     });
     let canonical = |reply: Value| -> Value {
         assert!(reply.get("error").is_none(), "{reply}");
@@ -924,12 +935,12 @@ fn repeated_partial_splices_keep_the_actual_first_written_cause_over_stdio() {
     };
     let mut wire = McpWire::new();
     let first = canonical(wire.call("dynare_model_info", args.clone()));
-    assert_eq!(first["coverage"][0]["complete"], false);
+    assert_eq!(first["coverage"][0]["complete"], false, "{first}");
     let reason = &first["coverage"][0]["reasons"][0];
     assert_eq!(reason["code"], "I211");
     assert_eq!(reason["source"]["file"], "/table0.inc");
     assert_eq!(reason["include_chain"][0]["range"]["line"], 1);
-    assert_eq!(reason["limit"]["ceiling"], 250000);
+    assert_eq!(reason["limit"]["ceiling"], 175000);
     for _ in 0..15 {
         let current = canonical(wire.call("dynare_model_info", args.clone()));
         assert_eq!(current, first, "same inputs must retain the actual stop");

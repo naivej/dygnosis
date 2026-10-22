@@ -1243,6 +1243,11 @@ pub struct AssignmentSyntax {
 
 #[derive(Clone, Debug, Default)]
 pub struct Model {
+    pub(crate) analysis_context:
+        Option<std::sync::Arc<crate::engine::analysis_configuration::MacroExecutionInputs>>,
+    pub(crate) macro_source:
+        Option<std::sync::Arc<crate::engine::language::macro_source::MacroSource>>,
+    pub(crate) macro_discarded: Option<std::sync::Arc<[Span]>>,
     pub(crate) named_slots: Vec<NamedSlot>,
     pub(crate) subsample_uses: Vec<SubsampleUse>,
     /// Complete written callees, including qualified external function names.
@@ -2432,6 +2437,49 @@ pub enum ShocksSemiFamily {
 }
 
 impl Model {
+    /// Written ranges discarded by this model's selected macro execution.
+    pub fn inactive_macro_spans(&self) -> &[Span] {
+        self.macro_discarded.as_deref().unwrap_or(&[])
+    }
+
+    pub fn analysis_configuration(
+        &self,
+    ) -> &crate::engine::analysis_configuration::AnalysisConfiguration {
+        static SOURCE: std::sync::OnceLock<
+            crate::engine::analysis_configuration::AnalysisConfiguration,
+        > = std::sync::OnceLock::new();
+        self.analysis_context
+            .as_ref()
+            .map(|context| &context.analysis.choices)
+            .unwrap_or_else(|| SOURCE.get_or_init(Default::default))
+    }
+
+    pub fn analysis_selection(&self) -> &crate::engine::analysis_configuration::AnalysisSelection {
+        static SOURCE: std::sync::OnceLock<
+            crate::engine::analysis_configuration::AnalysisSelection,
+        > = std::sync::OnceLock::new();
+        self.analysis_context
+            .as_ref()
+            .map(|context| &context.analysis.selection)
+            .unwrap_or_else(|| {
+                SOURCE.get_or_init(
+                    || crate::engine::analysis_configuration::AnalysisSelection {
+                        configuration_id:
+                            crate::engine::analysis_configuration::AnalysisConfiguration::default()
+                                .configuration_id(),
+                        name: None,
+                        preview: false,
+                        invocation_scope: "explicit_macro_inputs",
+                    },
+                )
+            })
+    }
+
+    pub fn is_analysis_preview(&self) -> bool {
+        self.analysis_context
+            .as_ref()
+            .is_some_and(|context| context.analysis.choices.is_preview())
+    }
     pub(crate) fn model_local_action_attempted(&self, equation: &Equation) -> bool {
         !equation
             .lhs_expr

@@ -84,6 +84,17 @@ pub(crate) fn parse_with_lines_and_evaluations_budget(
     evaluations: &[crate::engine::language::macro_expand::MacroReplay],
     budget: &mut crate::engine::language::macro_expr::MacroBudget,
 ) -> Model {
+    parse_configured_with_budget(text, line_segments, evaluations, budget, None, None)
+}
+
+pub(crate) fn parse_configured_with_budget(
+    text: &str,
+    line_segments: &[(crate::engine::language::span::Span, u32)],
+    evaluations: &[crate::engine::language::macro_expand::MacroReplay],
+    budget: &mut crate::engine::language::macro_expr::MacroBudget,
+    context: Option<Arc<crate::engine::analysis_configuration::MacroExecutionInputs>>,
+    cached_source: Option<Arc<crate::engine::language::macro_source::MacroSource>>,
+) -> Model {
     // Reserve source work before normalization, raw token allocation, or the
     // independent written-macro scan. A refused guard copies no source text.
     if let Err(crate::engine::language::macro_expand::MacroEvalError::Limit(limit)) =
@@ -91,6 +102,7 @@ pub(crate) fn parse_with_lines_and_evaluations_budget(
     {
         let span = Span::new(0, 0);
         return Model {
+            analysis_context: context,
             macro_work_limit: budget.work_limit(),
             macro_incomplete_span: Some(span),
             incomplete_reasons: vec![crate::engine::language::macro_expand::IncompleteReason {
@@ -106,22 +118,63 @@ pub(crate) fn parse_with_lines_and_evaluations_budget(
             ..Model::default()
         };
     }
-    let source = normalize_newlines(text);
-    let raw_tokens = tokenize(&source);
-    let (includes, includepaths, macro_directives, macro_interps) = collect_include_dirs(
-        &source,
-        &crate::engine::language::macro_expand::scan_macro_tokens(&source),
-    );
-    let (tokens, macro_type_errors, macro_incomplete_span, incomplete_reasons) =
-        crate::engine::language::macro_expand::expand_macros_with_status_lines_and_evaluations_budget(
-            &source,
-            raw_tokens,
+    let macro_source = match cached_source {
+        Some(source) => source,
+        None => match crate::engine::language::macro_source::MacroSource::build(
+            Arc::new(text.to_owned()),
+            budget,
+        ) {
+            Ok(source) => source,
+            Err(crate::engine::language::macro_expand::MacroEvalError::Limit(limit)) => {
+                return Model {
+                    analysis_context: context,
+                    macro_work_limit: budget.work_limit(),
+                    macro_incomplete_span: Some(Span::default()),
+                    incomplete_reasons: vec![
+                        crate::engine::language::macro_expand::IncompleteReason {
+                            span: Span::default(),
+                            code: "I211",
+                            message: crate::engine::language::macro_expand::i211_limit_message(
+                                limit,
+                                budget.work_limit(),
+                            ),
+                            limit_name: Some(limit),
+                            limit_ceiling: budget.limit_ceiling(limit),
+                        },
+                    ],
+                    ..Model::default()
+                };
+            }
+            Err(_) => {
+                return Model {
+                    analysis_context: context,
+                    ..Model::default()
+                };
+            }
+        },
+    };
+    let source = macro_source.normalized.as_str();
+    let (includes, includepaths, macro_directives, macro_interps) =
+        collect_include_dirs(source, &macro_source.tokens);
+    let (tokens, macro_type_errors, macro_incomplete_span, incomplete_reasons, discarded) =
+        crate::engine::language::macro_expand::expand_macros_with_status_configured(
+            source,
+            Vec::new(),
             line_segments,
             evaluations,
             budget,
+            context.clone(),
+            Some(&macro_source),
         );
-    let (mut model, _ranges) =
-        parse_expanded_controlled(&source, tokens, budget.cancellation(), budget.work_limit());
+    let (mut model, _ranges) = parse_expanded_context_controlled(
+        source,
+        tokens,
+        budget.cancellation(),
+        budget.work_limit(),
+        context,
+        (!discarded.is_empty()).then(|| Arc::from(discarded)),
+    );
+    model.macro_source = Some(macro_source);
     model.includes = includes;
     model.includepaths = includepaths;
     model.macro_directives = macro_directives;
@@ -151,6 +204,17 @@ pub(crate) fn parse_expanded_controlled(
     cancellation: Option<Arc<AtomicBool>>,
     macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
 ) -> (Model, EquationTokenRanges) {
+    parse_expanded_context_controlled(src, tokens, cancellation, macro_work_limit, None, None)
+}
+
+pub(crate) fn parse_expanded_context_controlled(
+    src: &str,
+    tokens: Vec<Token>,
+    cancellation: Option<Arc<AtomicBool>>,
+    macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
+    context: Option<Arc<crate::engine::analysis_configuration::MacroExecutionInputs>>,
+    discarded: Option<Arc<[Span]>>,
+) -> (Model, EquationTokenRanges) {
     #[cfg(test)]
     PARSE_EXPANDED_BUILDS.with(|builds| builds.set(builds.get() + 1));
     let cancellation = cancellation.or_else(crate::engine::control::current);
@@ -162,6 +226,8 @@ pub(crate) fn parse_expanded_controlled(
         i: 0,
         intern: Interner::default(),
         model: Model {
+            analysis_context: context,
+            macro_discarded: discarded,
             macro_work_limit,
             ..Model::default()
         },
@@ -931,7 +997,7 @@ fn strip_word_ci<'a>(text: &'a str, word: &str) -> Option<&'a str> {
     Some(after)
 }
 
-fn literal_include_filename(text: &str) -> Option<String> {
+pub(crate) fn literal_include_filename(text: &str) -> Option<String> {
     let rest = directive_arg(text, "include")?;
     let argument = rest.trim();
     if argument.is_empty() {
@@ -11455,13 +11521,7 @@ impl Parser<'_> {
         family_spans.extend(cmd_spans);
         family_spans.sort_by_key(|span| (span.start, span.end));
         let trailing = trailing_code_line(&self.tokens, src);
-        let inactive = crate::engine::language::macro_expand::inactive_macro_spans(
-            src,
-            &mut crate::engine::language::macro_expr::MacroBudget::with_limit(
-                self.model.macro_work_limit,
-                self.cancellation.clone(),
-            ),
-        );
+        let inactive = self.model.macro_discarded.clone();
         let lines: Vec<&str> = src.split('\n').collect();
         for (i, line) in lines.iter().enumerate() {
             if self.cancelled() {
@@ -11481,7 +11541,7 @@ impl Parser<'_> {
             };
             if inside_span(line_start, &blocks)
                 || inside_span(line_start, &family_spans)
-                || inside_span(line_start, &inactive)
+                || inside_span(line_start, inactive.as_deref().unwrap_or(&[]))
             {
                 continue;
             }

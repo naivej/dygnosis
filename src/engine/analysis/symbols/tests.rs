@@ -20,6 +20,216 @@ fn choose(view: &SemanticModel, name: &str) -> Binding {
     view.select(Selector::Name(name)).unwrap().unwrap()
 }
 
+// Source intelligence must not make Rename omit dormant uses or introduce a
+// collision in a skipped branch, even when the selected model is complete.
+#[test]
+fn conditional_source_names_withhold_complete_rename() {
+    for dormant in [
+        "p=2;",
+        "parameters rho;",
+        "unknown(p);",
+        "p + missing_fragment",
+    ] {
+        let view = model(&format!(
+            "var y;parameters p;model;y=p;end;\n@#if 0\n{dormant}\n@#endif\n"
+        ));
+        assert!(view.complete, "{dormant}");
+        assert_eq!(
+            rename(std::slice::from_ref(&view), 0, &choose(&view, "p"), "rho").unwrap_err(),
+            CONDITIONAL_EDIT,
+            "{dormant}"
+        );
+    }
+}
+
+// Neither comments nor certified verbatim text are alternate Dynare bindings;
+// unrelated inactive names must not disable a proven ordinary Rename.
+#[test]
+fn unrelated_conditional_source_keeps_rename_available() {
+    let view = model(
+        "var y;parameters p;model;y=p;end;\n@#if 0\n// p rho\nparameters other;\nverbatim;\np=rho;\nend;\n@#endif\n",
+    );
+    assert!(view.complete);
+    assert!(rename(std::slice::from_ref(&view), 0, &choose(&view, "p"), "rho").is_ok());
+}
+
+// A skipped include or interpolation may contain any symbol. Proving a rename
+// must not open that include or execute it with invented macro values.
+#[test]
+fn dormant_generated_source_keeps_edit_uncertainty() {
+    for (dormant, refusal) in [
+        ("@#include \"unavailable.inc\"", CONDITIONAL_INCLUDE),
+        ("@{unknown}", CONDITIONAL_GENERATED),
+    ] {
+        let view = model(&format!(
+            "var y;parameters p;model;y=p;end;\n@#if 0\n{dormant}\n@#endif\n"
+        ));
+        assert!(view.complete);
+        assert_eq!(view.sources.len(), 1, "dormant acquisition: {dormant}");
+        assert_eq!(
+            rename(std::slice::from_ref(&view), 0, &choose(&view, "p"), "rho").unwrap_err(),
+            refusal
+        );
+    }
+}
+
+// Quoted semantic tag operands can hide a use or declaration. Display labels
+// with the same spelling still have no symbol role.
+#[test]
+fn conditional_semantic_tags_participate_in_edit_proof() {
+    for (tag, allowed) in [
+        ("mcp='p>0'", false),
+        ("endogenous='p'", false),
+        ("name='p'", true),
+    ] {
+        let view = model(&format!(
+            "var y;parameters p;model;y=p;\n@#if 0\n[{tag}] y=0;\n@#endif\nend;"
+        ));
+        let result = rename(std::slice::from_ref(&view), 0, &choose(&view, "p"), "rho");
+        if allowed {
+            assert!(result.is_ok(), "{tag}: {result:?}");
+        } else {
+            assert_eq!(result.unwrap_err(), CONDITIONAL_EDIT, "{tag}");
+        }
+    }
+}
+
+// One active occurrence does not prove the same written site in another visit.
+#[test]
+fn mixed_include_occurrences_refuse_conditional_rename() {
+    let view = capture(
+        "root.mod",
+        &[
+            (
+                "root.mod",
+                "var y;parameters p;model;\n@#for mode in [0,1]\n@#include \"body.inc\"\n@#endfor\nend;",
+            ),
+            ("body.inc", "@#if mode\ny=p;\n@#endif\n"),
+        ],
+        "mixed",
+    );
+    assert!(view.complete);
+    assert_eq!(
+        rename(std::slice::from_ref(&view), 0, &choose(&view, "p"), "rho").unwrap_err(),
+        CONDITIONAL_EDIT
+    );
+}
+
+// Initial definitions are real invocation inputs. Written-site overrides are
+// previews and cannot issue source edits, even when they produce a valid model.
+#[test]
+fn preview_refuses_rename_while_initial_inputs_keep_source_proof() {
+    use crate::engine::analysis_configuration::{
+        AnalysisConfiguration, AnalysisOverride, InitialDefinition,
+    };
+    let text = "@#define flag=1\nvar y;parameters p;model;y=p;end;\n@#if flag\nparameters unrelated;\n@#endif\n";
+    let mut workspace =
+        Workspace::overlay_documents(&BTreeMap::from([("root.mod".into(), text.into())]));
+    workspace
+        .set_root_analysis_configuration(
+            "root.mod",
+            AnalysisConfiguration {
+                defines: vec![InitialDefinition {
+                    name: "flag".into(),
+                    expression: "0".into(),
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let initial = SemanticModel::capture(&mut workspace, "root.mod", "initial".into()).unwrap();
+    assert!(!initial.model.is_analysis_preview());
+    assert!(
+        rename(
+            std::slice::from_ref(&initial),
+            0,
+            &choose(&initial, "p"),
+            "rho"
+        )
+        .is_ok()
+    );
+    let inventory = workspace.source_inventory("root.mod").unwrap();
+    let mut target = inventory
+        .sites
+        .iter()
+        .find(|site| site.name.as_deref() == Some("flag"))
+        .unwrap()
+        .target
+        .clone();
+    target.file = Some("root.mod".into());
+    workspace
+        .set_root_analysis_configuration(
+            "root.mod",
+            AnalysisConfiguration {
+                overrides: vec![AnalysisOverride::Definition {
+                    target,
+                    expression: "0".into(),
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let preview = SemanticModel::capture(&mut workspace, "root.mod", "preview".into()).unwrap();
+    assert!(preview.complete);
+    assert_eq!(
+        rename(
+            std::slice::from_ref(&preview),
+            0,
+            &choose(&preview, "p"),
+            "rho"
+        )
+        .unwrap_err(),
+        ANALYSIS_PREVIEW
+    );
+}
+
+// Literal proof is lazy and shares existing syntax tokens. A plain Rename must
+// not introduce an inert source parse or tokenize once for every occurrence.
+#[test]
+fn rename_reuses_written_tokens_without_eager_source_inventory() {
+    let mut workspace = Workspace::overlay_documents(&BTreeMap::from([(
+        "root.mod".into(),
+        "var y;parameters p;model;y=p;end;".into(),
+    )]));
+    let view = SemanticModel::capture(&mut workspace, "root.mod", "plain".into()).unwrap();
+    assert!(workspace.cached_source_inventory("root.mod").is_none());
+    assert!(view.source_tokens["root.mod"].get().is_none());
+    assert!(rename(std::slice::from_ref(&view), 0, &choose(&view, "p"), "rho").is_ok());
+    assert!(workspace.cached_source_inventory("root.mod").is_none());
+    let first = view.written_tokens("root.mod").unwrap().as_ptr();
+    assert_eq!(view.written_tokens("root.mod").unwrap().as_ptr(), first);
+
+    let inventory = workspace.source_inventory("root.mod").unwrap();
+    let cached = SemanticModel::capture(&mut workspace, "root.mod", "cached".into()).unwrap();
+    assert!(
+        rename(
+            std::slice::from_ref(&cached),
+            0,
+            &choose(&cached, "p"),
+            "rho"
+        )
+        .is_ok()
+    );
+    let SourceTokens::Inventory(reused) = cached.source_tokens["root.mod"].get().unwrap() else {
+        panic!("an available lexical inventory must be reused")
+    };
+    assert!(Arc::ptr_eq(reused, &inventory));
+}
+
+// A stopped literal proof must not publish a cache entry into a captured view
+// that can be queried again after cancellation is cleared.
+#[test]
+fn cancelled_written_proof_does_not_publish_its_cache() {
+    use std::sync::atomic::AtomicBool;
+    let view = model("var y;parameters p;model;y=p;end;");
+    let flag = Arc::new(AtomicBool::new(false));
+    // The first check enters the controlled call; stop at the publication check.
+    crate::engine::control::cancel_after(&flag, 1);
+    assert!(crate::engine::control::run(Some(flag), || view.written_tokens("root.mod")).is_err());
+    assert!(view.source_tokens["root.mod"].get().is_none());
+    assert!(view.written_tokens("root.mod").is_some());
+}
+
 // Every accepted row slot and value must participate in the shared binding;
 // otherwise navigation loses uses and complete Rename is refused.
 #[test]
