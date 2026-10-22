@@ -7,6 +7,18 @@ fn source_index(text: &str) -> LineIndex {
     LineIndex::new(&crate::engine::language::parser::normalize_newlines(text))
 }
 
+#[cfg(test)]
+thread_local! {
+    static CAPTURE_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static REFERENCE_SOURCE_INDEXES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn reference_source_index(text: &str) -> LineIndex {
+    #[cfg(test)]
+    REFERENCE_SOURCE_INDEXES.with(|indexes| indexes.set(indexes.get() + 1));
+    source_index(text)
+}
+
 pub(super) const SOURCE: &str = symbols::SOURCE.message;
 pub(super) const MAPPING: &str = symbols::MAPPING.message;
 pub(super) const STALE: &str =
@@ -24,6 +36,8 @@ pub(super) fn capture(
     inner: &mut Inner,
     root: &Url,
 ) -> std::result::Result<SemanticModel, &'static str> {
+    #[cfg(test)]
+    CAPTURE_COUNT.with(|captures| captures.set(captures.get() + 1));
     let revision = inner.root_revision(root).ok_or(SOURCE)?;
     SemanticModel::capture(&mut inner.workspace, root.as_str(), revision)
         .map_err(|reason| reason.message)
@@ -197,7 +211,7 @@ pub(super) fn definition(inner: &mut Inner, pos: &TextDocumentPositionParams) ->
     let roots = inner.context_roots(uri);
     let mut agreed = None;
     for root in roots {
-        let view = capture(inner, &root).ok()?;
+        let view = typed_names::root_view(inner, &root)?;
         let binding = view.select(Selector::Target { file: &file, byte }).ok()??;
         let (file, span) = binding.declaration?;
         let target = naming_edit_url(inner, &root, &file)?;
@@ -230,22 +244,32 @@ pub(super) fn references(
     }
     let mut locations = Vec::new();
     for root in roots {
-        let view = capture(inner, &root).ok()?;
+        let view = typed_names::root_view(inner, &root)?;
         let binding = view.select(Selector::Target { file: &file, byte }).ok()??;
+        let mut sources = HashMap::new();
         for site in view.references(&binding, include_declaration) {
             let Some((file, span)) = site.written else {
                 continue;
             };
-            let Some(uri) = naming_edit_url(inner, &root, &file) else {
-                continue;
-            };
-            let Some(source) = view.sources.get(&file) else {
+            let Some((file, source)) = view.sources.get_key_value(&file) else {
                 continue;
             };
             if source.get(span.start as usize..span.end as usize).is_none() {
                 continue;
             }
-            let location = Location::new(uri, span_range(&source_index(source), source, span));
+            let Some((uri, index)) = sources
+                .entry(file.as_str())
+                .or_insert_with(|| {
+                    Some((
+                        naming_edit_url(inner, &root, file)?,
+                        reference_source_index(source),
+                    ))
+                })
+                .as_ref()
+            else {
+                continue;
+            };
+            let location = Location::new(uri.clone(), span_range(index, source, span));
             if !locations.contains(&location) {
                 locations.push(location);
             }
@@ -253,6 +277,7 @@ pub(super) fn references(
     }
     (!locations.is_empty()).then_some(locations)
 }
+
 /// Native Rename loads saved inputs before applying through workspace.applyEdit.
 /// A second capture after those loads proves the complete decision again.
 pub(super) fn capture_command(
@@ -313,4 +338,181 @@ pub(super) fn capture_command(
     }
     owners.sort_by(|left, right| left["root_uri"].as_str().cmp(&right["root_uri"].as_str()));
     Ok(json!({ "schema_version": 1, "edit": edit, "sources": sources, "owners": owners }))
+}
+
+#[cfg(test)]
+mod read_tests {
+    use super::*;
+
+    fn position(source: &str, byte: usize) -> Position {
+        let prefix = &source[..byte];
+        Position::new(
+            prefix.bytes().filter(|byte| *byte == b'\n').count() as u32,
+            prefix.rsplit('\n').next().unwrap().encode_utf16().count() as u32,
+        )
+    }
+
+    fn expected(uri: &Url, source: &str) -> Vec<Location> {
+        source
+            .match_indices("rho")
+            .map(|(byte, _)| {
+                Location::new(
+                    uri.clone(),
+                    Range::new(position(source, byte), position(source, byte + 3)),
+                )
+            })
+            .collect()
+    }
+
+    async fn check_references(
+        server: &Backend,
+        root: &Url,
+        source: &str,
+        helper: &Url,
+        helper_source: &str,
+    ) {
+        let pos = TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: root.clone() },
+            position: position(source, source.find("rho").unwrap() + 1),
+        };
+        REFERENCE_SOURCE_INDEXES.with(|indexes| indexes.set(0));
+        CAPTURE_COUNT.with(|captures| captures.set(0));
+        let result = server
+            .references(ReferenceParams {
+                text_document_position: pos.clone(),
+                context: ReferenceContext {
+                    include_declaration: true,
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let mut targets = expected(root, source);
+        targets.extend(expected(helper, helper_source));
+        assert_eq!(result.len(), targets.len());
+        assert!(
+            targets.iter().all(|target| result.contains(target)),
+            "references must preserve every exact written UTF-16 range"
+        );
+        assert_eq!(
+            REFERENCE_SOURCE_INDEXES.with(std::cell::Cell::get),
+            2,
+            "references must build one source index per captured written file"
+        );
+        assert_eq!(
+            CAPTURE_COUNT.with(std::cell::Cell::get),
+            0,
+            "read-only references must reuse the current semantic snapshot"
+        );
+        let before = typed_names::root_view(&mut server.lock_inner(), root).unwrap();
+        let Some(GotoDefinitionResponse::Scalar(definition)) = server.definition_at(&pos) else {
+            panic!("one ordinary declaration required")
+        };
+        let root_targets = expected(root, source);
+        assert_eq!(definition, root_targets[0]);
+        assert!(!server.doc_symbols(root).unwrap().is_empty());
+        let highlights = server.ident_highlights(&pos).unwrap();
+        assert_eq!(highlights.len(), root_targets.len());
+        for highlight in &highlights {
+            assert!(
+                root_targets
+                    .iter()
+                    .any(|target| target.range == highlight.range)
+            );
+            assert_eq!(
+                highlight.kind,
+                Some(if highlight.range == definition.range {
+                    DocumentHighlightKind::WRITE
+                } else {
+                    DocumentHighlightKind::READ
+                })
+            );
+        }
+        assert_eq!(
+            CAPTURE_COUNT.with(std::cell::Cell::get),
+            0,
+            "read-only navigation and Outline must share the same snapshot"
+        );
+        let after = typed_names::root_view(&mut server.lock_inner(), root).unwrap();
+        assert!(Arc::ptr_eq(&before, &after));
+    }
+
+    #[tokio::test]
+    async fn ordinary_reads_share_snapshots_and_project_each_current_source_once() {
+        // Guards repeated source indexing and semantic capture for high-fanout
+        // reads, stale included/settings facts, and shifted editor coordinates.
+        let directory = std::env::temp_dir().join(format!(
+            "dygnosis-read-sources-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let helper_path = directory.join("shared.inc");
+        let helper = Url::from_file_path(&helper_path).unwrap();
+        let root = Url::from_file_path(directory.join("main.mod")).unwrap();
+        let mut helper_source = String::from("/* 😀 */ rho=0.9;\r\n");
+        std::fs::write(&helper_path, &helper_source).unwrap();
+        let mut source = String::from("/* 😀 */ parameters rho;\r\nvar ");
+        for index in 1..=240 {
+            source.push_str(&format!("y{index} "));
+        }
+        source.push_str(";\r\n@#include \"shared.inc\"\r\nmodel;\r\n");
+        for index in 1..=240 {
+            source.push_str(&format!(
+                "#local{index}=rho*y{index}(-1);\r\ny{index}=local{index};\r\n"
+            ));
+        }
+        source.push_str("end;\r\n");
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(root.clone(), source.clone(), 1);
+        check_references(server, &root, &source, &helper, &helper_source).await;
+        source.insert_str(0, "// shifted source\r\n");
+        server.upsert(root.clone(), source.clone(), 2);
+        check_references(server, &root, &source, &helper, &helper_source).await;
+        helper_source.push_str("rho=rho+0.01;\r\n");
+        std::fs::write(&helper_path, &helper_source).unwrap();
+        check_references(server, &root, &source, &helper, &helper_source).await;
+        server
+            .lock_inner()
+            .settings
+            .apply(&json!({"macroWorkLimit": 1}));
+        let pos = TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: root.clone() },
+            position: position(&source, source.find("rho").unwrap() + 1),
+        };
+        assert!(
+            server
+                .references(ReferenceParams {
+                    text_document_position: pos,
+                    context: ReferenceContext {
+                        include_declaration: true
+                    },
+                    work_done_progress_params: Default::default(),
+                    partial_result_params: Default::default()
+                })
+                .await
+                .unwrap()
+                .is_none(),
+            "a work-limit change must not retain the previous accepted references"
+        );
+        server
+            .lock_inner()
+            .settings
+            .apply(&json!({"macroWorkLimit": 2_000_000}));
+        check_references(server, &root, &source, &helper, &helper_source).await;
+        let pos = TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: root.clone() },
+            position: position(&source, source.find("rho").unwrap() + 1),
+        };
+        CAPTURE_COUNT.with(|captures| captures.set(0));
+        assert!(server.prepare_rename(pos).await.unwrap().is_some());
+        assert!(
+            CAPTURE_COUNT.with(std::cell::Cell::get) > 0,
+            "Rename must retain its fresh current-source proof"
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }

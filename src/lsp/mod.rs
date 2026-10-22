@@ -818,7 +818,7 @@ impl Backend {
             )
             .with_known_uris(inner.docs.keys().chain(std::iter::once(root)));
             let mut rows = view.symbols(&preferences);
-            if let Ok(semantic) = rename::capture(&mut inner, root) {
+            if let Some(semantic) = typed_names::root_view(&mut inner, root) {
                 model_map::add_binding_symbols(&mut rows, &semantic, uri, &text, &preferences);
             }
             views.push(rows);
@@ -994,11 +994,21 @@ impl Backend {
         let file = crate::engine::workspace::include_resolver::normalize_uri(
             pos.text_document.uri.as_str(),
         );
+        let mut source_uris = HashMap::new();
         let hits = references
             .into_iter()
             .filter(|location| {
-                crate::engine::workspace::include_resolver::normalize_uri(location.uri.as_str())
-                    == file
+                if location.uri == pos.text_document.uri {
+                    return true;
+                }
+                if let Some(own) = source_uris.get(&location.uri) {
+                    return *own;
+                }
+                let own = crate::engine::workspace::include_resolver::normalize_uri(
+                    location.uri.as_str(),
+                ) == file;
+                source_uris.insert(location.uri.clone(), own);
+                own
             })
             .map(|location| {
                 let span = Span {

@@ -3,6 +3,8 @@
 ## v0.11.32
 
 - Hover and model-local completion respond faster in large models.
+- Go to Definition, Find References, occurrence highlights and Outline respond
+  faster in large models.
 - Large models are checked faster after edits.
 
 ## v0.11.31

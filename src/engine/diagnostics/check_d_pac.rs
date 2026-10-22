@@ -834,9 +834,19 @@ fn collect_refs(
 }
 
 fn resolved_operators(model: &Model, id: ExprId) -> Vec<ResolvedOperator> {
+    // Only retained parser operators can contribute a resolved operator.
+    // Ordinary equations and local definitions need no traversal without one.
+    if model.named_model_operators.is_empty() {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     collect_operators(model, id, None, &mut HashSet::new(), &mut out);
     out
+}
+
+#[cfg(test)]
+thread_local! {
+    static OPERATOR_NODE_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn collect_operators(
@@ -846,6 +856,8 @@ fn collect_operators(
     visiting: &mut HashSet<Name>,
     out: &mut Vec<ResolvedOperator>,
 ) {
+    #[cfg(test)]
+    OPERATOR_NODE_VISITS.with(|visits| visits.set(visits.get() + 1));
     let node = model.exprs.get(id);
     match &node.kind {
         ExprKind::Ident {
@@ -887,6 +899,49 @@ fn collect_operators(
             }
         }
         ExprKind::Number | ExprKind::String | ExprKind::Error | ExprKind::PathNamespace { .. } => {}
+    }
+}
+
+#[cfg(test)]
+mod operator_work_tests {
+    use super::*;
+    use crate::engine::language::parser::parse;
+
+    #[test]
+    fn operator_free_model_does_not_walk_local_expression_trees() {
+        // Guards every ordinary equation repeatedly expanding its model locals
+        // while looking for operators that the parser did not retain.
+        let model = parse("var y;model;# first=y(-1);# second=first+1;y=second;end;");
+        assert!(model.named_model_operators.is_empty());
+        OPERATOR_NODE_VISITS.with(|visits| visits.set(0));
+        assert!(check_transform(&model).is_empty());
+        assert_eq!(
+            OPERATOR_NODE_VISITS.with(std::cell::Cell::get),
+            0,
+            "operator-free input must not recurse through equation and local expressions"
+        );
+    }
+
+    #[test]
+    fn retained_operators_resolve_nested_local_uses_and_ignore_removed_uses() {
+        // Guards treating operator inventory presence as a resolved use: nested
+        // locals retain the outer written cause, while removed equations do not fire.
+        let model = parse("var y;model;# first=var_expectation(nope);# second=first;y=second;end;");
+        assert!(!model.named_model_operators.is_empty());
+        let diagnostics = check_transform(&model);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E447");
+        let span = diagnostics[0].span;
+        assert_eq!(
+            &model.source[span.start as usize..span.end as usize],
+            "second"
+        );
+
+        let model = parse(
+            "var y;model;# first=var_expectation(nope);[name='Y'] y=first;end;model_remove('Y');",
+        );
+        assert!(!model.named_model_operators.is_empty());
+        assert!(check_transform(&model).is_empty());
     }
 }
 
