@@ -642,6 +642,7 @@ fn declaration_edit(source: &str, symbol: Span, name: &str) -> Option<(Span, Str
 #[cfg(test)]
 thread_local! {
     static METADATA_LEXED_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static METADATA_PROOF_ATTEMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn metadata_tokens(source: &str) -> Vec<Token> {
@@ -791,7 +792,15 @@ pub(crate) fn metadata_completion(
     ws.input_revision(root)?;
     let file = crate::engine::workspace::include_resolver::normalize_uri(file);
     let source = ws.get_source(&file)?.to_string();
-    for site in completion_sites(&source, cursor as usize) {
+    let sites = completion_sites(&source, cursor as usize);
+    let expression_end = sites.iter().any(|site| site.group.is_none())
+        && copied_model_leaf_end(ws, root, &file, &source, cursor);
+    for site in sites {
+        if expression_end && site.group.is_none() {
+            continue;
+        }
+        #[cfg(test)]
+        METADATA_PROOF_ATTEMPTS.with(|attempts| attempts.set(attempts.get() + 1));
         let proof = site.completion(&file, COMPLETION_PROOF);
         let mut candidate = ws.snapshot_with_root_settings(root);
         apply_edits(&mut candidate, std::slice::from_ref(&proof.edit))?;
@@ -947,6 +956,133 @@ pub(crate) fn metadata_completion(
         }
     }
     None
+}
+
+/// Generic metadata cannot follow a literal identifier in a model expression.
+/// Uncertain, generated, repeated and incomplete sources keep the edited proof.
+fn copied_model_leaf_end(
+    ws: &mut Workspace,
+    root: &str,
+    file: &str,
+    source: &str,
+    cursor: u32,
+) -> bool {
+    let Some(raw) = metadata_tokens(source)
+        .into_iter()
+        .find(|token| token.kind == TokenKind::Ident && token.span.end == cursor)
+    else {
+        return false;
+    };
+    let positions = ws.effective_positions(root, file, raw.span.start);
+    let [start] = positions.as_slice() else {
+        return false;
+    };
+    let span = Span {
+        start: *start,
+        end: *start + raw.span.end - raw.span.start,
+    };
+    let mapped = ws.map_effective_segments(root, span);
+    if !matches!(mapped.as_slice(), [segment]
+        if segment.file.as_deref() == Some(file) && segment.span == raw.span)
+    {
+        return false;
+    }
+    let Some(model) = ws.effective_model_snapshot(root) else {
+        return false;
+    };
+    let Some(report) = ws.expand_report_snapshot(root) else {
+        return false;
+    };
+    if !report.complete || !report.model_map.complete {
+        return false;
+    }
+    let mut overlaps = model
+        .expanded_tokens
+        .iter()
+        .enumerate()
+        .filter(|(_, token)| token.span.start < span.end && span.start < token.span.end);
+    let Some((order, token)) = overlaps.next() else {
+        return false;
+    };
+    if overlaps.next().is_some()
+        || token.kind != TokenKind::Ident
+        || token.span != span
+        || token.text(&model.source) != raw.text(source)
+    {
+        return false;
+    }
+    use crate::engine::language::constructor::DataTreeScope;
+    let Some(usage) = model.model_expression_uses.iter().find(|usage| {
+        usage.parse_order == order
+            && usage.span == span
+            && matches!(
+                usage.scope,
+                DataTreeScope::Dynamic | DataTreeScope::Heterogeneous(_)
+            )
+    }) else {
+        return false;
+    };
+    if !model.written_equations.iter().any(|row| {
+        row.equation.active_tokens.contains(&order)
+            && [row.equation.lhs_expr, row.equation.rhs_expr]
+                .into_iter()
+                .flatten()
+                .flat_map(|expr| model.exprs.walk_idents(expr))
+                .any(|read| read.name == usage.name && read.span == usage.span)
+    }) {
+        return false;
+    }
+    let Some(emitted) = &token.emitted else {
+        return token.lexeme.is_none();
+    };
+    if emitted
+        .source
+        .text
+        .get(emitted.span.start as usize..emitted.span.end as usize)
+        != Some(raw.text(source))
+    {
+        return false;
+    }
+    let mut next_emitted = emitted.span.start;
+    let mut next_written = raw.span.start;
+    let first = emitted
+        .source
+        .origins
+        .partition_point(|origin| origin.emitted.end <= emitted.span.start);
+    for origin in emitted.source.origins[first..]
+        .iter()
+        .take_while(|origin| origin.emitted.start < emitted.span.end)
+    {
+        if crate::engine::control::cancelled() {
+            return false;
+        }
+        let start = origin.emitted.start.max(emitted.span.start);
+        let end = origin.emitted.end.min(emitted.span.end);
+        if !origin.copied || start != next_emitted || end <= start {
+            return false;
+        }
+        let part = Span {
+            start: origin.written.start + start - origin.emitted.start,
+            end: origin.written.start + end - origin.emitted.start,
+        };
+        let mut mapped_bytes = 0;
+        for segment in ws.map_effective_segments(root, part) {
+            if segment.file.as_deref() != Some(file)
+                || segment.span.start != next_written
+                || segment.span.end <= segment.span.start
+                || segment.span.end > raw.span.end
+            {
+                return false;
+            }
+            mapped_bytes += segment.span.end - segment.span.start;
+            next_written = segment.span.end;
+        }
+        if mapped_bytes != end - start {
+            return false;
+        }
+        next_emitted = end;
+    }
+    next_emitted == emitted.span.end && next_written == raw.span.end
 }
 
 /// The marker alone is not a proof: a user can already have that literal
@@ -1273,6 +1409,92 @@ fn cursor_in_comment(source: &str, cursor: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn literal_model_leaf_completion_does_not_inject_metadata_proofs() {
+        // Guards a request at an ordinary model identifier's end reparsing two
+        // impossible metadata edits, including when the identifier is included.
+        let root = "C:/metadata/leaf/root.mod";
+        let child = "C:/metadata/leaf/shared.inc";
+        for (root_source, child_source, file, needle) in [
+            (
+                "@#define unrelated=1\n@#include \"shared.inc\"\nvar y;model;y=p+y(-1);end;",
+                "parameters p;p=0.9;",
+                root,
+                "y=p",
+            ),
+            (
+                "@#define unrelated=1\nvar y;parameters p;p=0.9;model;\n@#include \"shared.inc\"\nend;",
+                "y=p*y(-1);\n",
+                child,
+                "y=p",
+            ),
+        ] {
+            let mut workspace = Workspace::new();
+            workspace.update_document(child, child_source);
+            workspace.update_document(root, root_source);
+            let text = if file == root {
+                root_source
+            } else {
+                child_source
+            };
+            let cursor = (text.find(needle).unwrap() + needle.len()) as u32;
+            METADATA_PROOF_ATTEMPTS.with(|attempts| attempts.set(0));
+            assert!(metadata_completion(&mut workspace, root, file, cursor).is_none());
+            assert_eq!(
+                METADATA_PROOF_ATTEMPTS.with(std::cell::Cell::get),
+                0,
+                "literal model leaves cannot acquire equation or declaration metadata"
+            );
+        }
+    }
+
+    #[test]
+    fn uncertain_leaf_ends_and_valid_metadata_keep_the_edited_proof() {
+        // Guards the fast rejection accepting generated or mixed executions as
+        // one literal leaf, or suppressing valid and unfinished metadata sites.
+        let root = "C:/metadata/fallback/root.mod";
+        let child = "C:/metadata/fallback/shared.inc";
+        for (marked, expected) in [
+            ("@#define i=1\nvar y1;model;y|@{i}=0;end;", None),
+            ("@#define i=1\nvar y1;model;y@{i}|=0;end;", None),
+            ("var y;model;y|=0;", None),
+            ("var y;model;\n@#for i in 1:2\ny|=0;\n@#endfor\nend;", None),
+            (
+                "var y;\n@#for i in 1:2\n@#if i==1\n@#define HEAD=\"parameters\"\n@#else\n@#define HEAD=\"model; y=\"\n@#endif\n@{HEAD} p|;\n@#if i==2\nend;\n@#endif\n@#endfor\n",
+                None,
+            ),
+            ("var y|;model;y=0;end;", Some("long_name")),
+            ("var y;model;|y=0;end;", Some("name")),
+            ("var y(long_name=|);model;y=0;end;", Some("long_name")),
+            ("var y;model;[name=|]y=0;end;", Some("name")),
+        ] {
+            let cursor = marked.find('|').unwrap() as u32;
+            let source = marked.replacen('|', "", 1);
+            let mut workspace = Workspace::new();
+            workspace.update_document(root, source);
+            METADATA_PROOF_ATTEMPTS.with(|attempts| attempts.set(0));
+            let completion = metadata_completion(&mut workspace, root, root, cursor);
+            assert_eq!(
+                completion.as_ref().map(|item| item.label),
+                expected,
+                "{marked}"
+            );
+            assert!(
+                METADATA_PROOF_ATTEMPTS.with(std::cell::Cell::get) > 0,
+                "uncertain and valid sites need their existing proof: {marked}"
+            );
+        }
+        let mut workspace = Workspace::new();
+        workspace.update_document(child, "y=p;");
+        workspace.update_document(
+            root,
+            "var y;parameters p;model;\n@#include \"shared.inc\"\n@#include \"shared.inc\"\nend;",
+        );
+        METADATA_PROOF_ATTEMPTS.with(|attempts| attempts.set(0));
+        assert!(metadata_completion(&mut workspace, root, child, 1).is_none());
+        assert!(METADATA_PROOF_ATTEMPTS.with(std::cell::Cell::get) > 0);
+    }
 
     #[test]
     fn completion_group_index_keeps_nested_and_unfinished_group_boundaries() {
