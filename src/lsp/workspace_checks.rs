@@ -22,7 +22,7 @@ use crate::lsp::settings::SettingsStore;
 
 pub(super) const SCHEMA_VERSION: u32 = 1;
 const TYPING_PAUSE: Duration = Duration::from_millis(250);
-const RETAINED_REQUEST_ROOTS: usize = 8;
+pub(super) const RETAINED_REQUEST_ROOTS: usize = 8;
 
 #[derive(Default)]
 pub(super) struct WorkspaceCheckState {
@@ -371,6 +371,8 @@ impl Inner {
                 .map(|root| normalize_uri(root.as_str())),
         );
         self.workspace.retain_analysis_roots(&roots);
+        self.semantic_views
+            .retain(|root, _| roots.contains(&normalize_uri(root.as_str())));
         // Workspace dependency provenance lives in WorkspaceCheckState, independently
         // of this bounded cache and model-info subscription bookkeeping.
     }

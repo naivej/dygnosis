@@ -2,6 +2,7 @@
 
 ## v0.11.31
 
+- Hover, name colors and named-model completion respond faster in large models.
 - I211 now names the VS Code setting and MCP request option to increase the
   macro work limit when that limit stops analysis. Its **Configure macro work
   limit** quick fix opens the setting in VS Code.

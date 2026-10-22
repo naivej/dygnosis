@@ -33,7 +33,7 @@ fn label(kind: &str) -> &'static str {
     }
 }
 
-fn views(inner: &mut Inner, uri: &Url) -> Option<Vec<SemanticModel>> {
+fn views(inner: &mut Inner, uri: &Url) -> Option<Vec<Arc<SemanticModel>>> {
     if inner.context_ambiguous(uri) {
         return None;
     }
@@ -43,8 +43,162 @@ fn views(inner: &mut Inner, uri: &Url) -> Option<Vec<SemanticModel>> {
     }
     roots
         .into_iter()
-        .map(|root| rename::capture(inner, &root).ok())
+        .map(|root| {
+            let revision = inner.root_revision(&root)?;
+            if let Some(view) = inner.semantic_views.get(&root)
+                && view.revision == revision
+            {
+                return Some(Arc::clone(view));
+            }
+            inner.semantic_views.remove(&root);
+            let view = Arc::new(
+                SemanticModel::capture(&mut inner.workspace, root.as_str(), revision).ok()?,
+            );
+            inner.semantic_views.insert(root, Arc::clone(&view));
+            inner.bound_workspace_cache();
+            Some(view)
+        })
         .collect()
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    fn snapshot(inner: &mut Inner, uri: &Url) -> Arc<SemanticModel> {
+        views(inner, uri).unwrap().remove(0)
+    }
+
+    #[test]
+    fn semantic_cache_tracks_saved_includes_missing_inputs_and_settings() {
+        // Guards reusing a snapshot after a saved include is created, changed
+        // or removed, or after the root's macro allowance changes.
+        let directory = std::env::temp_dir().join(format!(
+            "dygnosis-semantic-cache-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let child = directory.join("decl.inc");
+        let root = Url::from_file_path(directory.join("root.mod")).unwrap();
+        let mut inner = Inner::default();
+        inner
+            .workspace
+            .update_document(root.as_str(), "@#include \"decl.inc\"\n");
+        let missing = snapshot(&mut inner, &root);
+        assert!(missing.select(Selector::Name("first")).unwrap().is_none());
+        std::fs::write(&child, "database first;").unwrap();
+        let first = snapshot(&mut inner, &root);
+        assert!(!Arc::ptr_eq(&missing, &first));
+        assert!(first.select(Selector::Name("first")).unwrap().is_some());
+        assert!(Arc::ptr_eq(&first, &snapshot(&mut inner, &root)));
+        std::fs::write(&child, "database second_name;").unwrap();
+        let second = snapshot(&mut inner, &root);
+        assert!(second.select(Selector::Name("first")).unwrap().is_none());
+        assert!(
+            second
+                .select(Selector::Name("second_name"))
+                .unwrap()
+                .is_some()
+        );
+        inner.settings.apply(&json!({"macroWorkLimit": 1}));
+        let limited = snapshot(&mut inner, &root);
+        assert!(!Arc::ptr_eq(&second, &limited));
+        assert!(
+            limited
+                .select(Selector::Name("second_name"))
+                .unwrap()
+                .is_none()
+        );
+        inner.settings.apply(&json!({"macroWorkLimit": 2_000_000}));
+        assert!(
+            snapshot(&mut inner, &root)
+                .select(Selector::Name("second_name"))
+                .unwrap()
+                .is_some()
+        );
+        std::fs::remove_file(child).unwrap();
+        assert!(
+            snapshot(&mut inner, &root)
+                .select(Selector::Name("second_name"))
+                .unwrap()
+                .is_none()
+        );
+        std::fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn semantic_cache_uses_the_workspace_retention_policy() {
+        // Guards keeping every closed model's captured source and bindings.
+        let mut inner = Inner::default();
+        let first = Url::parse("file:///semantic-cache-0.mod").unwrap();
+        inner
+            .workspace
+            .update_document(first.as_str(), "database first;");
+        let old = snapshot(&mut inner, &first);
+        for index in 1..=super::super::workspace_checks::RETAINED_REQUEST_ROOTS {
+            let root = Url::parse(&format!("file:///semantic-cache-{index}.mod")).unwrap();
+            inner
+                .workspace
+                .update_document(root.as_str(), "database later;");
+            snapshot(&mut inner, &root);
+        }
+        assert!(!inner.semantic_views.contains_key(&first));
+        assert_eq!(Arc::strong_count(&old), 1);
+    }
+
+    #[tokio::test]
+    async fn named_hover_reuses_current_semantics_and_refreshes_after_edit() {
+        // Guards rebuilding the same binding snapshot for each hover, and
+        // returning an obsolete named binding after an unsaved edit.
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        let uri = Url::parse("file:///semantic-cache.mod").unwrap();
+        let text = "var y;var_model(model_name=forecast,eqtags=['eq']);model;[name='eq']y=0;end;";
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "dynare".into(),
+                    version: 1,
+                    text: text.into(),
+                },
+            })
+            .await;
+        let pos = TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position::new(0, text.find("forecast").unwrap() as u32),
+        };
+        let before = views(&mut server.lock_inner(), &uri).unwrap().remove(0);
+        let result = server.hover_at(&pos).expect("named hover");
+        let after = views(&mut server.lock_inner(), &uri).unwrap().remove(0);
+        assert!(
+            Arc::ptr_eq(&before, &after),
+            "unchanged hover rebuilt the semantic snapshot"
+        );
+        assert!(
+            matches!(result.contents, HoverContents::Markup(ref text) if text.value.contains("forecast"))
+        );
+        server
+            .did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: text.replace("forecast", "new_forecast"),
+                }],
+            })
+            .await;
+        let result = server.hover_at(&pos).expect("updated named hover");
+        let updated = views(&mut server.lock_inner(), &uri).unwrap().remove(0);
+        assert!(!Arc::ptr_eq(&before, &updated));
+        assert!(
+            matches!(result.contents, HoverContents::Markup(ref text) if text.value.contains("new_forecast"))
+        );
+    }
 }
 
 pub(super) struct TypedSites {

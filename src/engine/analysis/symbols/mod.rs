@@ -208,14 +208,11 @@ impl SemanticModel {
         spans.extend(facts.declarations.iter().map(|row| row.span));
         spans.extend(facts.definitions.iter().map(|row| row.target_span));
         spans.extend(facts.uses.iter().map(|row| row.span));
+        let origins = workspace.effective_origins(root).ok_or(SOURCE)?;
         let mappings: HashMap<_, _> = spans
             .into_iter()
             .take_while(|_| !crate::engine::control::cancelled())
-            .filter_map(|span| {
-                workspace
-                    .map_effective_origin(root, span)
-                    .map(|written| (span, written))
-            })
+            .filter_map(|span| origins.map(span).map(|written| (span, written)))
             .collect();
         let mut files: HashSet<_> = mappings.values().map(|(file, _)| file.clone()).collect();
         files.extend(workspace.input_stamps(root).into_keys());
