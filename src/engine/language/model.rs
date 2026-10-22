@@ -1425,6 +1425,9 @@ pub struct Model {
     /// Exact refusing executions; unlike spans these distinguish macro copies.
     pub(crate) parse_issue_callbacks: Vec<(ParseIssue, usize)>,
     pub(crate) expanded_token_origins: Vec<Range<usize>>,
+    /// All core parser passes finished without cancellation. A recovered
+    /// model can otherwise contain partial facts without a macro stop reason.
+    pub(crate) parse_completed: bool,
     /// Reserved-symbol expression uses captured while reading Dynare blocks.
     pub reserved_block_symbol_uses: Vec<Span>,
     /// Names that were still trend variables when an ordinary expression used them.

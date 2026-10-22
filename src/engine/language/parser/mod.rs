@@ -41,6 +41,11 @@ mod resid_parser;
 mod shock_parser;
 mod statement_keywords;
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static PARSE_EXPANDED_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub fn parse(text: &str) -> Model {
     parse_with_lines(text, &[])
 }
@@ -145,6 +150,8 @@ pub(crate) fn parse_expanded_controlled(
     cancellation: Option<Arc<AtomicBool>>,
     macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
 ) -> (Model, EquationTokenRanges) {
+    #[cfg(test)]
+    PARSE_EXPANDED_BUILDS.with(|builds| builds.set(builds.get() + 1));
     let cancellation = cancellation.or_else(crate::engine::control::current);
     let mut p = Parser {
         cancellation,
@@ -205,6 +212,7 @@ pub(crate) fn parse_expanded_controlled(
     if !p.cancelled() {
         p.record_missing_assign_semis();
     }
+    p.model.parse_completed = !p.cancelled();
     let Parser {
         intern,
         mut model,

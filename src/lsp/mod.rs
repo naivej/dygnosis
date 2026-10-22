@@ -30,6 +30,9 @@ thread_local! {
 #[cfg(test)]
 mod ordering_tests;
 
+#[cfg(test)]
+mod edit_analysis_tests;
+
 use serde_json::{Value, json};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;

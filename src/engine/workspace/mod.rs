@@ -23,7 +23,7 @@ const INPUT_FILE_BYTE_CAP: usize = 1_000_000;
 
 use self::companion::{CompanionKind, CompanionRecord};
 use crate::engine::language::expand::{
-    ExpandReport, NavigationSource, SpliceSegment, expand_report_from_spliced_controlled,
+    ExpandReport, NavigationSource, SpliceSegment, expand_report_from_spliced_model_controlled,
 };
 use crate::engine::language::macro_expand::{IncompleteReason, MacroEvalError};
 use crate::engine::language::macro_expr::MacroBudget;
@@ -1472,12 +1472,13 @@ impl Workspace {
                 .get(&key)
                 .map(|records| !records.unresolved.is_empty())
                 .unwrap_or(false);
-            let mut report = expand_report_from_spliced_controlled(
+            let mut report = expand_report_from_spliced_model_controlled(
                 &spliced.text,
                 &spliced.segments,
                 Some(&spliced.navigation),
                 self.cancellation.clone(),
                 self.root_macro_work_limit(&key),
+                self.effective.get(&key).map(Arc::as_ref),
             )
             .ok()?;
             if spliced.limit.is_some() || spliced.refusal.is_some() {
@@ -3461,6 +3462,63 @@ fn read_text(path: &Path) -> Option<String> {
     match String::from_utf8(bytes.clone()) {
         Ok(s) => Some(s),
         Err(_) => Some(bytes.iter().map(|&b| b as char).collect()),
+    }
+}
+
+#[cfg(test)]
+mod report_parse_reuse_tests {
+    use super::*;
+    use crate::engine::language::expand::expand_report_from_spliced_controlled;
+    use crate::engine::language::parser::PARSE_EXPANDED_BUILDS;
+
+    #[test]
+    fn report_reuses_effective_parse_with_macro_includes_and_equation_surgery() {
+        // Guards a second core parse and wrong surviving-row origins after
+        // removal/replacement, repeated includes and heterogeneous blocks.
+        let root = "/reuse/main.mod";
+        let files = BTreeMap::from([
+            (
+                root.to_string(),
+                concat!(
+                    "// 😀 source positions\r\n",
+                    "@#for i in 1:2\r\nvar y@{i};\r\n@#endfor\r\n",
+                    "heterogeneity_dimension d; var(heterogeneity=d) h;\r\n",
+                    "model;\r\n@#for i in 1:2\r\n@#include \"body.inc\"\r\n@#endfor\r\nend;\r\n",
+                    "model_remove(name='keep1');\r\n",
+                    "model_replace(name='keep2'); [name='replacement'] y2=1; end;\r\n",
+                    "model(heterogeneity=d); #local_h=h(-1); [name='hetero'] h=local_h; end;\r\n",
+                    "model(heterogeneity=d); [static] h=0; [dynamic] h=h(-1); end;\r\n",
+                )
+                .to_string(),
+            ),
+            (
+                "/reuse/body.inc".to_string(),
+                "#m@{i}=y@{i}(-1); [name='keep@{i}'] y@{i}=m@{i};\n".to_string(),
+            ),
+        ]);
+        let mut workspace = Workspace::overlay_documents(&files);
+        let model = workspace.get_effective_model(root).unwrap();
+        assert!(!model.macro_incomplete());
+        assert!(model.macro_type_errors.is_empty());
+        assert!(
+            model_map::parser_complete(model),
+            "{:?}",
+            model.parse_issues
+        );
+        let spliced = workspace.spliced_source(root);
+        let expected = expand_report_from_spliced_controlled(
+            &spliced.text,
+            &spliced.segments,
+            Some(&spliced.navigation),
+            None,
+            MacroWorkLimit::default(),
+        )
+        .unwrap();
+        assert!(expected.complete && expected.model_map.complete);
+        PARSE_EXPANDED_BUILDS.with(|builds| builds.set(0));
+        let actual = workspace.expand_report(root).unwrap();
+        assert_eq!(actual, &expected);
+        assert_eq!(PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get), 0);
     }
 }
 

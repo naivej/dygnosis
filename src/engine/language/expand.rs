@@ -200,8 +200,35 @@ pub(crate) fn expand_report_from_spliced_controlled(
     cancellation: Option<Arc<AtomicBool>>,
     work_limit: crate::engine::macro_work::MacroWorkLimit,
 ) -> Result<ExpandReport, crate::engine::control::Cancelled> {
+    expand_report_from_spliced_model_controlled(
+        spliced,
+        map,
+        written_navigation,
+        cancellation,
+        work_limit,
+        None,
+    )
+}
+
+/// The workspace supplies facts from this same joined input. A fresh macro
+/// pass must still prove the exact parser input before those facts are reused.
+pub(crate) fn expand_report_from_spliced_model_controlled(
+    spliced: &str,
+    map: &[SpliceSegment],
+    written_navigation: Option<&NavigationSource>,
+    cancellation: Option<Arc<AtomicBool>>,
+    work_limit: crate::engine::macro_work::MacroWorkLimit,
+    parsed_model: Option<&crate::engine::language::model::Model>,
+) -> Result<ExpandReport, crate::engine::control::Cancelled> {
     crate::engine::control::run(cancellation.clone(), || {
-        expand_spliced(spliced, map, written_navigation, cancellation, work_limit)
+        expand_spliced(
+            spliced,
+            map,
+            written_navigation,
+            cancellation,
+            work_limit,
+            parsed_model,
+        )
     })
 }
 
@@ -211,6 +238,7 @@ fn expand_spliced(
     written_navigation: Option<&NavigationSource>,
     cancellation: Option<Arc<AtomicBool>>,
     work_limit: crate::engine::macro_work::MacroWorkLimit,
+    parsed_model: Option<&crate::engine::language::model::Model>,
 ) -> ExpandReport {
     let source = normalize_newlines(spliced);
     let raw = tokenize(&source);
@@ -236,14 +264,49 @@ fn expand_spliced(
     }
     let macro_messages = locate_macro_messages(map, messages);
     debug_assert_eq!(tokens.len(), traces.len());
-    let (model, ranges) =
-        parse_expanded_controlled(&source, tokens.clone(), cancellation.clone(), work_limit);
+    let reusable = parsed_model.filter(|model| {
+        !incomplete
+            && macro_navigation_complete
+            && same_completed_parser_input(model, &source, &tokens, work_limit)
+    });
+    let owned_parse = reusable.is_none().then(|| {
+        parse_expanded_controlled(&source, tokens.clone(), cancellation.clone(), work_limit)
+    });
+    let reused_ranges;
+    let (model, ranges) = if let Some((model, ranges)) = &owned_parse {
+        (model, ranges)
+    } else {
+        let model = reusable.expect("verified parser input");
+        // Each reader stores this exact range on its equation. Surgery keeps
+        // the equation and range vectors with the same removal predicate.
+        reused_ranges = crate::engine::language::parser::EquationTokenRanges {
+            aggregate: model
+                .equations
+                .iter()
+                .map(|eq| eq.active_tokens.clone())
+                .collect(),
+            heterogeneous: model
+                .heterogeneous_models
+                .iter()
+                .map(|block| {
+                    block
+                        .equations
+                        .iter()
+                        .map(|eq| eq.active_tokens.clone())
+                        .collect()
+                })
+                .collect(),
+            original_tokens: model.expanded_token_origins.clone(),
+        };
+        (model, &reused_ranges)
+    };
     if crate::engine::control::cancelled() {
         return ExpandReport::default();
     }
-    let map_complete = !incomplete && crate::engine::workspace::model_map::parser_complete(&model);
+    let map_complete = reusable.is_some()
+        || (!incomplete && crate::engine::workspace::model_map::parser_complete(model));
     let parsed_tokens = &model.expanded_tokens;
-    let parsed_traces = project_token_traces(parsed_tokens, &ranges, &traces);
+    let parsed_traces = project_token_traces(parsed_tokens, ranges, &traces);
     let render_tokens = if map_complete {
         parsed_tokens.as_slice()
     } else {
@@ -254,8 +317,8 @@ fn expand_spliced(
         emitted[index] = Some(span);
     });
     let model_map = build_model_map(
-        &model,
-        &ranges,
+        model,
+        ranges,
         parsed_tokens,
         &parsed_traces,
         &arena,
@@ -418,7 +481,7 @@ fn expand_spliced(
     }
     debug_assert_eq!(model.equations.len(), ranges.aggregate.len());
     debug_assert_eq!(model.heterogeneous_models.len(), ranges.heterogeneous.len());
-    let counted = equations(&model);
+    let counted = equations(model);
     let mut pending = Vec::new();
     let mut counted_i = 0usize;
     for (eq_index, eq) in model.equations.iter().enumerate() {
@@ -517,6 +580,92 @@ fn expand_spliced(
         heterogeneous_row_origins,
         macro_messages,
     }
+}
+
+/// Reuse only an unchanged parser stream. Rewritten streams, macro errors and
+/// interrupted parses use the existing parser path.
+fn same_completed_parser_input(
+    model: &crate::engine::language::model::Model,
+    source: &str,
+    tokens: &[Token],
+    work_limit: crate::engine::macro_work::MacroWorkLimit,
+) -> bool {
+    if !model.parse_completed
+        || model.macro_incomplete()
+        || !model.macro_type_errors.is_empty()
+        || !model.incomplete_reasons.is_empty()
+        || model.macro_work_limit != work_limit
+        || model.source != source
+        || model.expanded_tokens.len() != tokens.len()
+        || model.expanded_token_origins.len() != tokens.len()
+    {
+        return false;
+    }
+    // Expansion shares one immutable emitted source across its tokens. Compare
+    // that complete source once; another source handle takes the fallback.
+    let mut emitted_sources = None;
+    for (index, ((old, new), origin)) in model
+        .expanded_tokens
+        .iter()
+        .zip(tokens)
+        .zip(&model.expanded_token_origins)
+        .enumerate()
+    {
+        if index % 256 == 0 && crate::engine::control::cancelled() {
+            return false;
+        }
+        if *origin != (index..index + 1)
+            || old.kind != new.kind
+            || old.span != new.span
+            || old.lexeme != new.lexeme
+            || old.expanded_adjacent_next != new.expanded_adjacent_next
+            || old.glue_left != new.glue_left
+            || old.comment_context != new.comment_context
+            || old.output_prepaid != new.output_prepaid
+        {
+            return false;
+        }
+        match (&old.emitted, &new.emitted) {
+            (None, None) => {}
+            (Some(old), Some(new)) if old.span == new.span => {
+                if let Some((old_source, new_source)) = emitted_sources {
+                    if !Arc::ptr_eq(old_source, &old.source)
+                        || !Arc::ptr_eq(new_source, &new.source)
+                    {
+                        return false;
+                    }
+                } else {
+                    if !same_emitted_source(&old.source, &new.source) {
+                        return false;
+                    }
+                    emitted_sources = Some((&old.source, &new.source));
+                }
+            }
+            _ => return false,
+        }
+    }
+    crate::engine::workspace::model_map::parser_complete(model)
+}
+
+fn same_emitted_source(
+    old: &crate::engine::language::native_line::EmittedSource,
+    new: &crate::engine::language::native_line::EmittedSource,
+) -> bool {
+    old.text == new.text
+        && old.comment_checkpoints == new.comment_checkpoints
+        && old.origins.len() == new.origins.len()
+        && old
+            .origins
+            .iter()
+            .zip(&new.origins)
+            .enumerate()
+            .all(|(index, (old, new))| {
+                (index % 256 != 0 || !crate::engine::control::cancelled())
+                    && old.emitted == new.emitted
+                    && old.written == new.written
+                    && old.copied == new.copied
+                    && old.frames == new.frames
+            })
 }
 
 /// A joined token has only the macro context shared by all its source tokens.
@@ -878,6 +1027,235 @@ fn lookup(map: &[SpliceSegment], pos: u32) -> Option<&SpliceSegment> {
     map.iter()
         .find(|s| pos >= s.spliced.start && pos < s.spliced.end)
         .or_else(|| map.last().filter(|s| pos == s.spliced.end))
+}
+
+#[cfg(test)]
+mod parser_reuse_tests {
+    use super::*;
+    use crate::engine::language::macro_expr::MacroBudget;
+    use crate::engine::language::model::Model;
+    use crate::engine::language::parser::{PARSE_EXPANDED_BUILDS, parse, parse_with_budget};
+    use crate::engine::macro_work::MacroWorkLimit;
+    use std::sync::atomic::Ordering;
+
+    fn segments(source: &str) -> Vec<SpliceSegment> {
+        vec![SpliceSegment {
+            spliced: Span::new(0, source.len()),
+            file: Some("root.mod".to_string()),
+            origin: Span::new(0, source.len()),
+            line: 1,
+            evaluation: None,
+        }]
+    }
+
+    fn assert_fallback(source: &str, model: &Model, limit: MacroWorkLimit) -> ExpandReport {
+        let map = segments(source);
+        let expected =
+            expand_report_from_spliced_controlled(source, &map, None, None, limit).unwrap();
+        PARSE_EXPANDED_BUILDS.with(|builds| builds.set(0));
+        let actual = expand_report_from_spliced_model_controlled(
+            source,
+            &map,
+            None,
+            None,
+            limit,
+            Some(model),
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(
+            PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get),
+            1,
+            "{source}"
+        );
+        actual
+    }
+
+    #[test]
+    fn report_falls_back_for_refused_incomplete_and_rewritten_parser_inputs() {
+        // Guards reusing refused/recovered facts as a completed report and
+        // comparing post-parser tokens as if they were the original stream.
+        for source in [
+            "@#define bad=missing\nvar y; model; y=0; end;\n",
+            "var y; model; y=; end;\n",
+            "var y (long_name='line\nbreak'); model; y=0; end;\n",
+        ] {
+            let model = parse(source);
+            assert_fallback(source, &model, MacroWorkLimit::default());
+        }
+    }
+
+    #[test]
+    fn report_keeps_its_own_macro_budget_when_the_effective_pass_stops() {
+        // Guards the extra source reservation in the ordinary parse changing
+        // the report's independent work stop or complete emitted result.
+        let source = "@#for i in 1:3\nvar y@{i};\n@#endfor\nmodel;\n@#for i in 1:3\ny@{i}=0;\n@#endfor\nend;\n";
+        let mut budget = MacroBudget::new();
+        expand_macros_traced_with_lines_and_evaluations_budget(
+            source,
+            tokenize(source),
+            &[],
+            &[],
+            &mut budget,
+        );
+        let macro_work = budget.work_limit().get() - budget.remaining_work();
+        let limit = MacroWorkLimit::new((macro_work + source.len() - 1) as u64).unwrap();
+        let model = parse_with_budget(source, &mut MacroBudget::with_limit(limit, None));
+        assert!(model.macro_incomplete());
+        let report = assert_fallback(source, &model, limit);
+        assert!(report.complete);
+        assert_eq!(report.n_equations, 3);
+        let complete_model = parse(source);
+        assert_fallback(source, &complete_model, limit);
+    }
+
+    #[test]
+    fn equal_source_with_different_replay_context_takes_the_fallback() {
+        // Guards source equality bypassing changed macro input, including
+        // emitted comments that ordinary lexer tokens do not retain.
+        for source in [
+            "@#for value in [1]\nvar y; model; y=@{value}; end;\n@#endfor\n",
+            "@#for value in [1]\nvar y; model; y=0; end; // @{value}\n@#endfor\n",
+        ] {
+            let replay = |value| {
+                let input = crate::engine::language::macro_expr::encode_replay_value(
+                    &crate::engine::language::macro_expand::MacroVal::Array(vec![
+                        crate::engine::language::macro_expand::MacroVal::Real(value),
+                    ]),
+                    &mut MacroBudget::new(),
+                )
+                .unwrap();
+                format!(
+                    "{}{input}",
+                    crate::engine::language::macro_expand::FOR_INPUT_PREFIX
+                )
+            };
+            let evaluation = crate::engine::language::macro_expand::MacroReplay {
+                span: Span::new(0, 0),
+                directive: replay(1.0),
+            };
+            let model = crate::engine::language::parser::parse_with_lines_and_evaluations(
+                source,
+                &[],
+                &[evaluation],
+            );
+            assert!(model.parse_completed && !model.macro_incomplete());
+            let mut map = segments(source);
+            map.insert(
+                0,
+                SpliceSegment {
+                    spliced: Span::new(0, 0),
+                    file: Some("root.mod".to_string()),
+                    origin: Span::new(0, 0),
+                    line: 1,
+                    evaluation: Some(replay(2.0)),
+                },
+            );
+            let expected = expand_report_from_spliced_controlled(
+                source,
+                &map,
+                None,
+                None,
+                MacroWorkLimit::default(),
+            )
+            .unwrap();
+            assert!(expected.complete && expected.model_map.complete);
+            PARSE_EXPANDED_BUILDS.with(|builds| builds.set(0));
+            let actual = expand_report_from_spliced_model_controlled(
+                source,
+                &map,
+                None,
+                None,
+                MacroWorkLimit::default(),
+                Some(&model),
+            )
+            .unwrap();
+            assert_eq!(actual, expected);
+            assert_eq!(PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get), 1);
+        }
+    }
+
+    #[test]
+    fn report_rejects_an_interrupted_parse_and_still_obeys_cancellation() {
+        // Guards a canceled core parse with no macro stop reason poisoning
+        // later report reuse, and reuse bypassing the current stop signal.
+        let source = "var y; model; y=y(-1); end;\n";
+        let flag = Arc::new(AtomicBool::new(false));
+        crate::engine::control::cancel_after(&flag, 0);
+        let (interrupted, _) = parse_expanded_controlled(
+            source,
+            tokenize(source),
+            Some(flag.clone()),
+            MacroWorkLimit::default(),
+        );
+        assert!(!interrupted.parse_completed);
+        assert!(!interrupted.macro_incomplete());
+        flag.store(false, Ordering::Relaxed);
+        assert_fallback(source, &interrupted, MacroWorkLimit::default());
+        let model = parse(source);
+        let map = segments(source);
+        flag.store(true, Ordering::Relaxed);
+        assert!(
+            expand_report_from_spliced_model_controlled(
+                source,
+                &map,
+                None,
+                Some(flag.clone()),
+                MacroWorkLimit::default(),
+                Some(&model)
+            )
+            .is_err()
+        );
+        flag.store(false, Ordering::Relaxed);
+        let mut budget = MacroBudget::new();
+        let (tokens, ..) = expand_macros_traced_with_lines_and_evaluations_budget(
+            source,
+            tokenize(source),
+            &[],
+            &[],
+            &mut budget,
+        );
+        let result = crate::engine::control::run(Some(flag.clone()), || {
+            crate::engine::control::cancel_after(&flag, 0);
+            same_completed_parser_input(&model, source, &tokens, MacroWorkLimit::default())
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn report_keeps_the_independent_navigation_parse() {
+        // Guards a verified core stream skipping the separate navigation
+        // projection when its exact text and written segments differ.
+        let source = "var y; model; y=y(-1); end;\n";
+        let navigation = "var y;\nmodel;\ny = y(-1);\nend;\n";
+        let model = parse(source);
+        let map = segments(source);
+        let written = NavigationSource::Mapped {
+            text: navigation.to_string(),
+            segments: segments(navigation),
+        };
+        let expected = expand_report_from_spliced_controlled(
+            source,
+            &map,
+            Some(&written),
+            None,
+            MacroWorkLimit::default(),
+        )
+        .unwrap();
+        PARSE_EXPANDED_BUILDS.with(|builds| builds.set(0));
+        let actual = expand_report_from_spliced_model_controlled(
+            source,
+            &map,
+            Some(&written),
+            None,
+            MacroWorkLimit::default(),
+            Some(&model),
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+        assert!(actual.navigation_complete);
+        assert_eq!(PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get), 1);
+    }
 }
 
 #[cfg(test)]

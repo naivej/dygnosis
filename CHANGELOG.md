@@ -7,7 +7,8 @@
   faster in large models.
 - Large models are checked faster after edits.
 - Parameter value hints respond faster in files with many assignments.
-- Equation navigation and model counts take less time to prepare in large models.
+- Equation navigation and model counts update faster in large models, including
+  the first refresh after an edit.
 
 ## v0.11.31
 
