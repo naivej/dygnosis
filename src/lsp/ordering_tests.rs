@@ -37,16 +37,31 @@ impl Wire {
     }
 
     async fn response(&mut self, id: i64) -> Value {
+        if let Some(index) = self.received.iter().position(|message| {
+            message.get("id") == Some(&json!(id)) && message.get("method").is_none()
+        }) {
+            return self.received.remove(index);
+        }
+        loop {
+            let message = self.next().await;
+            if message.get("id") == Some(&json!(id)) && message.get("method").is_none() {
+                return message;
+            }
+            self.received.push(message);
+        }
+    }
+
+    async fn server_request(&mut self, method: &str) -> Value {
         if let Some(index) = self
             .received
             .iter()
-            .position(|message| message.get("id") == Some(&json!(id)))
+            .position(|message| message["method"] == method && message.get("id").is_some())
         {
             return self.received.remove(index);
         }
         loop {
             let message = self.next().await;
-            if message.get("id") == Some(&json!(id)) {
+            if message["method"] == method && message.get("id").is_some() {
                 return message;
             }
             self.received.push(message);
@@ -55,6 +70,16 @@ impl Wire {
 }
 
 async fn transport() -> (
+    Wire,
+    tokio::task::JoinHandle<()>,
+    Arc<tokio::sync::Mutex<()>>,
+) {
+    transport_with_capabilities(json!({})).await
+}
+
+async fn transport_with_capabilities(
+    capabilities: Value,
+) -> (
     Wire,
     tokio::task::JoinHandle<()>,
     Arc<tokio::sync::Mutex<()>>,
@@ -76,12 +101,115 @@ async fn transport() -> (
     };
     wire.send(&[
         json!({"jsonrpc":"2.0", "id":1, "method":"initialize", "params": {
-            "capabilities":{}, "initializationOptions":{"workspaceDiagnostics":false}
+            "capabilities":capabilities, "initializationOptions":{"workspaceDiagnostics":false}
         }}),
     ])
     .await;
     assert!(wire.response(1).await.get("result").is_some());
     (wire, task, gate)
+}
+
+#[tokio::test]
+async fn delayed_refresh_replies_do_not_freeze_incoming_edits_and_requests() {
+    // Guards the permanent stall when all four transport slots await refresh
+    // replies and a request burst fills the input queue ahead of those replies.
+    for (capability, method) in [
+        ("semanticTokens", "workspace/semanticTokens/refresh"),
+        ("inlayHint", "workspace/inlayHint/refresh"),
+    ] {
+        let (mut wire, task, _) = transport_with_capabilities(json!({
+            "workspace": {capability: {"refreshSupport": true}}
+        }))
+        .await;
+        let uri = "untitled:refresh-stall.mod";
+        wire.send(&[open(uri, 1, "before"), symbols(2, uri)]).await;
+        assert!(has_symbol(&wire.response(2).await["result"], "before"));
+
+        let mut burst = Vec::new();
+        for _ in 0..4 {
+            burst.push(json!({"jsonrpc":"2.0", "method":"workspace/didChangeConfiguration", "params":{"settings":{}}}));
+        }
+        // Exceed the transport's bounded input queue while replies are delayed.
+        for id in 3..131 {
+            burst.push(symbols(id, uri));
+        }
+        burst.push(json!({"jsonrpc":"2.0", "method":"textDocument/didChange", "params":{
+            "textDocument":{"uri":uri,"version":2}, "contentChanges":[{"text":"var after; model; after=0; end;"}]
+        }}));
+        burst.push(symbols(131, uri));
+        wire.send(&burst).await;
+        let result = timeout(Duration::from_secs(2), wire.response(131)).await;
+        task.abort();
+        let result = result.expect("delayed refresh replies froze incoming model work");
+        assert!(has_symbol(&result["result"], "after"), "{result}");
+        assert!(
+            wire.received
+                .iter()
+                .any(|message| message["method"] == method)
+        );
+    }
+}
+
+#[tokio::test]
+async fn refresh_bursts_keep_one_follow_up_and_shutdown_does_not_wait_for_a_reply() {
+    // Guards lost refreshes after an in-flight edit, unbounded refresh tasks,
+    // and a shutdown that waits for a client which has stopped answering.
+    let (mut wire, task, _) = transport_with_capabilities(json!({"workspace": {
+        "semanticTokens": {"refreshSupport": true},
+        "inlayHint": {"refreshSupport": true}
+    }}))
+    .await;
+    let change = json!({"jsonrpc":"2.0", "method":"workspace/didChangeConfiguration", "params":{"settings":{}}});
+    wire.send(std::slice::from_ref(&change)).await;
+    let tokens = timeout(
+        Duration::from_secs(2),
+        wire.server_request("workspace/semanticTokens/refresh"),
+    )
+    .await
+    .unwrap();
+
+    let uri = "untitled:refresh-follow-up.mod";
+    let mut burst = vec![change; 16];
+    burst.extend([open(uri, 1, "current"), symbols(100, uri)]);
+    wire.send(&burst).await;
+    let result = timeout(Duration::from_secs(2), wire.response(100))
+        .await
+        .unwrap();
+    assert!(has_symbol(&result["result"], "current"), "{result}");
+    assert!(
+        !wire
+            .received
+            .iter()
+            .any(|message| { message.get("method").is_some() && message.get("id").is_some() })
+    );
+
+    // A refused refresh must still release the worker to refresh hints and to
+    // consume changes which arrived while the first request was outstanding.
+    wire.send(&[json!({"jsonrpc":"2.0", "id":tokens["id"], "error":{
+        "code":-32603, "message":"test client refused refresh"
+    }})])
+    .await;
+    for method in [
+        "workspace/inlayHint/refresh",
+        "workspace/semanticTokens/refresh",
+    ] {
+        let request = timeout(Duration::from_secs(2), wire.server_request(method))
+            .await
+            .unwrap();
+        wire.send(&[json!({"jsonrpc":"2.0", "id":request["id"], "result":null})])
+            .await;
+    }
+    timeout(
+        Duration::from_secs(2),
+        wire.server_request("workspace/inlayHint/refresh"),
+    )
+    .await
+    .unwrap();
+    wire.send(&[json!({"jsonrpc":"2.0", "id":101, "method":"shutdown"})])
+        .await;
+    let stopped = timeout(Duration::from_secs(2), wire.response(101)).await;
+    task.abort();
+    assert_eq!(stopped.unwrap()["result"], Value::Null);
 }
 
 #[tokio::test]

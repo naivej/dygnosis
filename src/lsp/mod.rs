@@ -16,6 +16,7 @@ mod document_context;
 mod workspace_checks;
 
 mod ordering;
+mod presentation_refresh;
 
 mod locals;
 
@@ -591,6 +592,7 @@ pub struct Backend {
     inner: Arc<Mutex<Inner>>,
     workspace_wake: Arc<tokio::sync::Notify>,
     output_gate: Arc<tokio::sync::Mutex<()>>,
+    presentation_refresh: presentation_refresh::PresentationRefresh,
 }
 
 impl std::fmt::Debug for Backend {
@@ -606,6 +608,7 @@ impl Backend {
             inner: Arc::new(Mutex::new(Inner::default())),
             workspace_wake: Arc::new(tokio::sync::Notify::new()),
             output_gate: Arc::new(tokio::sync::Mutex::new(())),
+            presentation_refresh: presentation_refresh::PresentationRefresh::default(),
         }
     }
 
@@ -644,12 +647,8 @@ impl Backend {
                     .await;
             }
         }
-        if tokens {
-            let _ = self.client.semantic_tokens_refresh().await;
-        }
-        if hints {
-            let _ = self.client.inlay_hint_refresh().await;
-        }
+        self.presentation_refresh
+            .request(&self.client, tokens, hints);
     }
 
     fn upsert(
@@ -2590,6 +2589,7 @@ impl LanguageServer for Backend {
     async fn shutdown(&self) -> Result<()> {
         ordering::ready().await;
         let _output = self.output_gate.lock().await;
+        self.presentation_refresh.stop();
         let mut inner = self.lock_inner();
         inner.workspace_checks.shutdown = true;
         inner.workspace_checks.epoch += 1;
