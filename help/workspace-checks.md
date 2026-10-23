@@ -14,17 +14,11 @@ checks** from the Command Palette. Use **Show not fully checked models**
 Exclude folders with **Ignore this folder** on a folder row, or configure
 [Dynare: Workspace Exclude Paths](settings:dynare.workspaceExcludePaths).
 
-Patterns are relative to each workspace folder: `*` and `?` match within a folder
-or file name, `**` matches across subdirectories, and a trailing `/` matches
-everything inside that folder.
-
 Exclusions apply only to background model roots. Open files and dependencies of
 other models remain checked. Saved `.inc` files are not separate workspace
 checks and do not contribute to the model counts.
 
 Workspace checks use the selected analysis configuration for each model root.
-When a root uses a non-Source configuration, its row shows that
-configuration's name (and **preview** when applicable). The workspace status
-also reports how many roots use a non-Source configuration. Choose a root's
+Non-Source roots show that configuration's name on the row. Choose a root's
 configuration from its open source editor or macro expansion preview; see
 [Inspect macro expansion](effective-model.md#choose-the-analysis-configuration).

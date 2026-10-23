@@ -1,11 +1,10 @@
 # Review model changes
 
-Compare your model against Git history or another `.mod`/`.dyn` file from any
-of these places:
-
-- Click **Show mod changes** (`$(diff)`) in the editor title bar or editor right-click menu.
-- Right-click a `.mod`, `.dyn` or included `.inc` file in the **Source Control** view and choose **Show mod changes**.
-- Run **Dygnosis: Show mod changes** from the Command Palette (or **Dygnosis: Show mod changes with .mod file…** to pick a file directly).
+Compare your model against Git history or another `.mod`/`.dyn` file with
+**Dygnosis: Show mod changes** from the Command Palette, the editor title bar
+(`$(diff)`), or **Show mod changes** on a model file in **Source Control**. Use
+**Dygnosis: Show mod changes with .mod file…** to pick a comparison file
+directly.
 
 Your active model appears under **After** (`Working` includes saved files plus
 any open unsaved edits) and the baseline you select appears under **Before**.
@@ -19,11 +18,9 @@ any open unsaved edits) and the baseline you select appears under **Before**.
 
 ## Available views and actions
 
-The **Dygnosis Changes** tab organizes model differences by category on the
-left—such as **Symbols**, **Parameters**, **Equations**, **Model-local
-variables**, **Shock setup**, **State**, **Priors**, **Commands**, **Data**,
-**OccBin**, **Policy**, **Method of moments**, **Heterogeneity** and **Macro
-context**—and displays **Before** and **After** cards side by side.
+The **Dygnosis Changes** tab lists categories on the left (for example
+**Equations** or **Parameters**) and shows **Before** and **After** cards side
+by side.
 
 | Control | Result |
 |---|---|
@@ -34,19 +31,15 @@ context**—and displays **Before** and **After** cards side by side.
 | **Direct equation references** | Jumps to equations that use a changed symbol or parameter. |
 | **Text diff** / **Text diff…** | Opens VS Code's side-by-side text diff for the main model file, or lets you pick any changed model or included file (including comment and formatting edits). |
 | **Change comparison…** | Selects a different **Before** baseline. |
-| **Swap sides** | Exchanges **Before** and **After**. |
-| **Refresh** | Reloads the comparison when **Working** files or settings change. |
 | **Choose model path** | Appears when a model path was renamed or could not be found on one side. |
 
 ## Comparison scope
 
 To compare two macro configurations of the same model, run **Dynare: Compare
 Analysis Configurations** from the source editor or its macro expansion
-preview. Choose configuration **A** and configuration **B**. The comparison
-keeps both choices with their captured source, even if you later change the
-model's selected configuration. Model Diff can show changed model facts when
-the source text is the same. This compares structural model information; it
-does not run Dynare or compare numerical results.
+preview. Choose configuration **A** and configuration **B**. Model Diff can show
+changed model facts when the source text is the same. This compares structural
+model information; it does not run Dynare or compare numerical results.
 
 Comparisons report structural source changes rather than algebraic or numerical
 equivalence. Equations that cannot be paired appear as separate **Removed** and
