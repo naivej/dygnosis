@@ -11,6 +11,9 @@
   model analysis runs.
 - Hover skips model lookups for equation labels, comments and other positions
   that have no hover information.
+- Completion, syntax colors and parameter value hints respond faster in
+  large models. Automatic lightbulb requests skip shock templates;
+  choose **Refactor...** to request them.
 - Hover responds faster in models with many labelled declarations, and
   declaration labels no longer produce false helper-file links.
 - Recently used model information stays available for faster repeated use.

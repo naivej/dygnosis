@@ -1248,13 +1248,10 @@ impl Workspace {
         // set_root_search_paths invalidates the cache when the scope is first
         // registered; restore the immutable joined source after that operation.
         let reuse_parser_cache = reuse_joined
-            && self
-                .effective
-                .get(&key)
-                .is_some_and(|model| {
-                    model.analysis_selection().configuration_id
-                        == analysis_configuration_id(&self.root_analyses, &key)
-                });
+            && self.effective.get(&key).is_some_and(|model| {
+                model.analysis_selection().configuration_id
+                    == analysis_configuration_id(&self.root_analyses, &key)
+            });
         if reuse_parser_cache {
             if let Some(source) = self.spliced.get(&key) {
                 snapshot.spliced.insert(key.clone(), Arc::clone(source));
@@ -2264,6 +2261,18 @@ impl Workspace {
         self.docs
             .get(&key)
             .and_then(|d| d.model(self.cancellation.clone()).map(Arc::as_ref))
+    }
+
+    pub(crate) fn model_snapshot(&self, uri: &str) -> Option<Arc<Model>> {
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
+        self.docs
+            .get(&key)?
+            .model(self.cancellation.clone())
+            .cloned()
     }
 
     pub fn get_source(&self, uri: &str) -> Option<&str> {

@@ -720,3 +720,329 @@ async fn model_info_after_edits_reuses_the_checked_parse_and_keeps_current_origi
         assert_eq!(PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get), 0);
     }
 }
+
+fn highlight_at(uri: &Url, source: &str, byte: usize) -> DocumentHighlightParams {
+    let index = LineIndex::new(source);
+    DocumentHighlightParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: span_range(&index, source, Span::new(byte, byte)).start,
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    }
+}
+
+#[tokio::test]
+async fn presentation_requests_join_the_pending_document_check() {
+    // Guards refresh-capable clients calculating the edited model on the
+    // request thread while the document worker already owns that calculation.
+    for provider in ["hints", "tokens", "range", "highlights"] {
+        let uri = Url::parse("untitled:pending-presentation.mod").unwrap();
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        {
+            let mut inner = server.lock_inner();
+            inner.hint_refresh = true;
+            inner.token_refresh = true;
+        }
+        let source = "parameters p; p=1+2; var y; model; y=p; end;";
+        open_source(server, &uri, source.into(), 1).await;
+        let output = server.output_gate.lock().await;
+        // Isolate model construction from the separate written-inventory parse.
+        server
+            .lock_inner()
+            .workspace
+            .source_inventory(uri.as_str())
+            .unwrap();
+        PARSE_EXPANDED_BUILDS.with(|builds| builds.set(0));
+        let request = async {
+            let document = TextDocumentIdentifier { uri: uri.clone() };
+            let range = Range::new(Position::new(0, 0), Position::new(1, 0));
+            match provider {
+                "hints" => serde_json::to_value(
+                    server
+                        .inlay_hint(InlayHintParams {
+                            text_document: document,
+                            range,
+                            work_done_progress_params: Default::default(),
+                        })
+                        .await
+                        .unwrap(),
+                )
+                .unwrap(),
+                "tokens" => serde_json::to_value(
+                    server
+                        .semantic_tokens_full(SemanticTokensParams {
+                            text_document: document,
+                            work_done_progress_params: Default::default(),
+                            partial_result_params: Default::default(),
+                        })
+                        .await
+                        .unwrap(),
+                )
+                .unwrap(),
+                "range" => serde_json::to_value(
+                    server
+                        .semantic_tokens_range(SemanticTokensRangeParams {
+                            text_document: document,
+                            range,
+                            work_done_progress_params: Default::default(),
+                            partial_result_params: Default::default(),
+                        })
+                        .await
+                        .unwrap(),
+                )
+                .unwrap(),
+                _ => serde_json::to_value(
+                    server
+                        .document_highlight(highlight_at(&uri, source, source.find("y=p").unwrap()))
+                        .await
+                        .unwrap(),
+                )
+                .unwrap(),
+            }
+        };
+        tokio::pin!(request);
+        let early =
+            tokio::time::timeout(std::time::Duration::from_millis(25), request.as_mut()).await;
+        assert!(
+            early.is_err(),
+            "{provider} bypassed its pending worker: {early:?}"
+        );
+        assert_eq!(PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get), 0);
+        drop(output);
+        let result = request.await;
+        if provider == "hints" {
+            assert_eq!(result[0]["label"], "= 3");
+        } else if provider == "highlights" {
+            assert!(result.as_array().unwrap().len() >= 2);
+        } else {
+            assert!(
+                !result["data"].as_array().unwrap().is_empty(),
+                "{provider} lost its colors"
+            );
+        }
+        assert_eq!(
+            PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get),
+            0,
+            "{provider} reparsed the adopted worker result"
+        );
+    }
+}
+
+#[test]
+fn name_views_borrow_the_retained_effective_model() {
+    // Guards completion, colors and highlights making a full Model copy on
+    // each read instead of borrowing the model already held by Workspace.
+    let uri = Url::parse("untitled:shared-name-views.mod").unwrap();
+    let mut inner = Inner::default();
+    inner
+        .workspace
+        .update_document(uri.as_str(), "var y; model; y=0; end;");
+    let retained = inner
+        .workspace
+        .effective_model_snapshot(uri.as_str())
+        .unwrap();
+    let first = inner.name_views(&uri).unwrap();
+    let second = inner.name_views(&uri).unwrap();
+    let report = inner
+        .workspace
+        .expand_report_snapshot(uri.as_str())
+        .unwrap();
+    assert_eq!(
+        first[0].0.source.as_ptr(),
+        retained.source.as_ptr(),
+        "name view copied the model"
+    );
+    assert_eq!(second[0].0.source.as_ptr(), retained.source.as_ptr());
+    assert!(
+        Arc::ptr_eq(&first[0].1, &report),
+        "name view copied the written map"
+    );
+    inner
+        .workspace
+        .update_document(uri.as_str(), "var z; model; z=0; end;");
+    let edited = inner.name_views(&uri).unwrap();
+    assert_eq!(first[0].0.name(first[0].0.endogenous[0].name), "y");
+    assert_eq!(edited[0].0.name(edited[0].0.endogenous[0].name), "z");
+    assert!(!Arc::ptr_eq(&first[0].0, &edited[0].0));
+    assert!(!Arc::ptr_eq(&first[0].1, &edited[0].1));
+}
+
+#[tokio::test]
+async fn quick_fixes_outside_the_requested_range_do_not_validate_roots() {
+    // Guards a routine lightbulb request checking disk inputs for fixes that
+    // cannot be returned at the requested position.
+    let uri = Url::parse("untitled:unrelated-fix.mod").unwrap();
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    server.upsert(uri.clone(), "var y;\nmodel;\ny=0;\n".into(), 1);
+    assert!(
+        server.lock_inner().routed_library[&uri]
+            .iter()
+            .any(|row| row.diagnostic.fix.is_some())
+    );
+    crate::engine::workspace::INPUT_REVISION_CHECKS.with(|checks| checks.set(0));
+    let actions = server.quick_fixes(&CodeActionParams {
+        text_document: TextDocumentIdentifier { uri },
+        range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+        context: CodeActionContext {
+            diagnostics: Vec::new(),
+            only: None,
+            trigger_kind: Some(CodeActionTriggerKind::AUTOMATIC),
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    });
+    assert!(actions.is_none());
+    assert_eq!(
+        crate::engine::workspace::INPUT_REVISION_CHECKS.with(std::cell::Cell::get),
+        0,
+        "an out-of-range fix checked root inputs"
+    );
+}
+
+#[tokio::test]
+async fn automatic_stored_fixes_join_the_pending_document_check() {
+    // Guards an in-range stored fix rebuilding edited file-root analysis
+    // under the request lock before its obsolete revision can be rejected.
+    let uri =
+        Url::from_file_path(std::env::temp_dir().join("dygnosis-pending-stored-fix.mod")).unwrap();
+    let source = "var y;\nmodel;\ny=0;\n";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    server.upsert(uri.clone(), source.into(), 1);
+    let stored_fix = || {
+        server.lock_inner().routed_library[&uri]
+            .iter()
+            .find(|row| row.diagnostic.fix.is_some())
+            .unwrap()
+            .lsp_diagnostic
+            .clone()
+    };
+    let old = stored_fix();
+    change_source(server, &uri, format!("{source}// edited\n"), 2).await;
+    let output = server.output_gate.lock().await;
+    server
+        .lock_inner()
+        .workspace
+        .source_inventory(uri.as_str())
+        .unwrap();
+    PARSE_EXPANDED_BUILDS.with(|builds| builds.set(0));
+    let params = |note: Diagnostic| CodeActionParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        range: note.range,
+        context: CodeActionContext {
+            diagnostics: vec![note],
+            only: Some(vec![CodeActionKind::QUICKFIX]),
+            trigger_kind: Some(CodeActionTriggerKind::AUTOMATIC),
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    };
+    let request = server.code_action(params(old));
+    tokio::pin!(request);
+    let early = tokio::time::timeout(std::time::Duration::from_millis(25), request.as_mut()).await;
+    assert!(
+        early.is_err(),
+        "stored fix bypassed pending analysis: {early:?}"
+    );
+    assert_eq!(PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get), 0);
+    drop(output);
+    assert!(
+        request.await.unwrap().is_none(),
+        "obsolete diagnostic kept its fix"
+    );
+    assert_eq!(
+        PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get),
+        0,
+        "automatic fix repeated the worker's model parse"
+    );
+    let current = server
+        .code_action(params(stored_fix()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        current.iter().any(|action| {
+            matches!(action, CodeActionOrCommand::CodeAction(action) if action.edit.is_some())
+        }),
+        "current automatic quick fix was lost"
+    );
+}
+
+#[tokio::test]
+async fn automatic_requests_share_pending_work_and_omit_templates() {
+    // Guards the lightbulb timer bypassing pending analysis or building an
+    // unrequested shock template. Explicit requests still receive templates.
+    let uri = Url::parse("untitled:rest-during-check.mod").unwrap();
+    let source = "var y; varexo e; model; [name='y'] y=e; end; stoch_simul;";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open_source(server, &uri, source.into(), 1).await;
+    let output = server.output_gate.lock().await;
+    let request = server.code_action(CodeActionParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+        context: CodeActionContext {
+            diagnostics: Vec::new(),
+            only: None,
+            trigger_kind: Some(CodeActionTriggerKind::AUTOMATIC),
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    });
+    tokio::pin!(request);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(25), request.as_mut())
+            .await
+            .is_err(),
+        "automatic code actions bypassed their pending worker"
+    );
+    assert!(server.lock_inner().semantic_views.is_empty());
+    drop(output);
+    let automatic = request.await.unwrap().unwrap_or_default();
+    assert!(!automatic.iter().any(|action| {
+        matches!(action, CodeActionOrCommand::CodeAction(action) if action.title == "Insert stochastic shocks template")
+    }), "automatic request built a shock template");
+    let highlighted = server
+        .document_highlight(highlight_at(&uri, source, source.find("y=e").unwrap()))
+        .await
+        .unwrap();
+    let highlighted = highlighted.expect("equation name lost occurrence highlights");
+    assert!(highlighted.len() >= 2);
+    let invoked = server
+        .code_action(CodeActionParams {
+            text_document: TextDocumentIdentifier { uri },
+            range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+            context: CodeActionContext {
+                diagnostics: Vec::new(),
+                only: None,
+                trigger_kind: Some(CodeActionTriggerKind::INVOKED),
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap();
+    let invoked = invoked.expect("explicit code action lost the shock template");
+    assert!(invoked.iter().any(|action| {
+        matches!(action, CodeActionOrCommand::CodeAction(action) if action.title == "Insert stochastic shocks template")
+    }));
+}
+
+#[tokio::test]
+async fn unchanged_diagnostics_are_not_published_again() {
+    // Guards a finished check republishing the same diagnostics and making the
+    // editor load code actions again.
+    let uri = Url::parse("untitled:stable-diagnostics.mod").unwrap();
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    server.upsert(uri.clone(), "var y; model; y=0; end;".into(), 1);
+    let again = server.lock_inner().merge_diagnostics(Some(&uri));
+    assert!(
+        again.is_empty(),
+        "unchanged diagnostics were published again: {again:?}"
+    );
+}

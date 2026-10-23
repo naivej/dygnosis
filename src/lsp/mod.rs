@@ -109,6 +109,12 @@ struct ValueHintSite {
     statement_id: usize,
 }
 
+/// Request-local handles to Workspace's existing model and written map.
+type NameView = (
+    Arc<Model>,
+    Arc<crate::engine::language::expand::ExpandReport>,
+);
+
 #[cfg(test)]
 thread_local! {
     static VALUE_HINT_SOURCE_INDEXES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -255,31 +261,24 @@ impl Inner {
                 .map(|(_, doc)| doc)
         })
     }
-    fn name_views(
-        &mut self,
-        uri: &Url,
-    ) -> Option<Vec<(Model, crate::engine::workspace::model_map::WrittenModelMap)>> {
+    fn name_views(&mut self, uri: &Url) -> Option<Vec<NameView>> {
         let roots = self.context_roots(uri);
         if self.context_ambiguous(uri) {
             return None;
         }
         if roots.is_empty() {
-            let model = self.workspace.get_model(uri.as_str())?.clone();
+            let model = self.workspace.model_snapshot(uri.as_str())?;
             let text = self.workspace.get_source(uri.as_str())?;
             return Some(vec![(
                 model,
-                crate::engine::language::expand::expand_report(text).model_map,
+                Arc::new(crate::engine::language::expand::expand_report(text)),
             )]);
         }
         let mut views = Vec::new();
         for root in roots {
             self.prepare_root(&root);
-            let model = self.workspace.get_effective_model(root.as_str())?.clone();
-            let map = self
-                .workspace
-                .expand_report(root.as_str())?
-                .model_map
-                .clone();
+            let model = self.workspace.effective_model_snapshot(root.as_str())?;
+            let map = self.workspace.expand_report_snapshot(root.as_str())?;
             views.push((model, map));
         }
         Some(views)
@@ -791,8 +790,7 @@ impl Inner {
             .into_iter()
             .filter(|uri| {
                 !pending.contains(uri)
-                    && (Some(uri) == first
-                        || self.published.get(uri) != routed.get(uri)
+                    && (self.published.get(uri) != routed.get(uri)
                         || self.publication_versions.get(uri).copied()
                             != Some(current_versions[uri]))
             })
@@ -1333,10 +1331,10 @@ impl Backend {
         let Some(revision) = inner.root_revision(&root) else {
             return Vec::new();
         };
-        let Some(model) = inner.workspace.get_effective_model(root.as_str()).cloned() else {
+        let Some(model) = inner.workspace.effective_model_snapshot(root.as_str()) else {
             return Vec::new();
         };
-        let Some(report) = inner.workspace.expand_report(root.as_str()).cloned() else {
+        let Some(report) = inner.workspace.expand_report_snapshot(root.as_str()) else {
             return Vec::new();
         };
         if !report.complete
@@ -1458,7 +1456,9 @@ impl Backend {
         let views = inner.name_views(&pos.text_document.uri)?;
         let sites: Vec<_> = views
             .iter()
-            .map(|(model, map)| NameSites::new(model, map, &pos.text_document.uri, &text))
+            .map(|(model, report)| {
+                NameSites::new(model, &report.model_map, &pos.text_document.uri, &text)
+            })
             .collect();
         let file = crate::engine::workspace::include_resolver::normalize_uri(
             pos.text_document.uri.as_str(),
@@ -1712,6 +1712,18 @@ impl Backend {
         for row in rows {
             let lib = &row.diagnostic;
             let Some(fix) = &lib.fix else { continue };
+            let index = LineIndex::new(&row.text);
+            let diag_range = span_range(&index, &row.text, lib.span);
+            if !ranges_overlap(diag_range, params.range) {
+                continue;
+            }
+            if !params.context.diagnostics.is_empty()
+                && !context_owns_stored_fix(&params.context, lib, diag_range, &row)
+            {
+                continue;
+            }
+            // Reject unrelated stored fixes before checking their root inputs.
+            // Every returned fix still needs the original revision and bytes.
             inner.prepare_root(&row.root);
             if inner.workspace.input_revision(row.root.as_str()).as_deref() != Some(&row.revision) {
                 continue;
@@ -1721,16 +1733,6 @@ impl Backend {
                 .map(|doc| doc.text.as_str())
                 .or_else(|| inner.workspace.get_source(uri.as_str()));
             if current != Some(row.text.as_ref()) {
-                continue;
-            }
-            let index = LineIndex::new(&row.text);
-            let diag_range = span_range(&index, &row.text, lib.span);
-            if !ranges_overlap(diag_range, params.range) {
-                continue;
-            }
-            if !params.context.diagnostics.is_empty()
-                && !context_owns_stored_fix(&params.context, lib, diag_range, &row)
-            {
                 continue;
             }
             let seen_key = (
@@ -2079,9 +2081,9 @@ impl Backend {
         let views = inner.name_views(uri)?;
         let sites: Vec<_> = views
             .iter()
-            .map(|(model, map)| {
+            .map(|(model, report)| {
                 (
-                    NameSites::new(model, map, uri, &text),
+                    NameSites::new(model, &report.model_map, uri, &text),
                     classify_variable_timing(model),
                 )
             })
@@ -3647,11 +3649,17 @@ impl LanguageServer for Backend {
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         ordering::ready().await;
+        // Stored fixes need current model inputs, including automatic requests.
+        // Share the pending worker before validation; the lightbulb timer still
+        // omits shock templates that only an explicit request needs.
         self.wait_document_analysis(Some(&params.text_document.uri))
             .await;
+        let automatic = params.context.trigger_kind == Some(CodeActionTriggerKind::AUTOMATIC);
         let mut actions = self.quick_fixes(&params).unwrap_or_default();
-        for action in self.shock_templates(&params) {
-            actions.push(CodeActionOrCommand::CodeAction(action));
+        if !automatic {
+            for action in self.shock_templates(&params) {
+                actions.push(CodeActionOrCommand::CodeAction(action));
+            }
         }
         if actions.is_empty() {
             Ok(None)
