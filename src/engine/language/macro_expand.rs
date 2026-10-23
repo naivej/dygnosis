@@ -582,6 +582,7 @@ trait MacroFileVisitor {
         &mut self,
         span: Span,
         active: bool,
+        control_active: Option<bool>,
         frames: &[usize],
         arena: &[FrameRec],
         budget: &mut MacroBudget,
@@ -737,6 +738,7 @@ impl MacroFileVisitor for MacroFiles<'_> {
         &mut self,
         span: Span,
         active: bool,
+        control_active: Option<bool>,
         frames: &[usize],
         arena: &[FrameRec],
         budget: &mut MacroBudget,
@@ -767,6 +769,7 @@ impl MacroFileVisitor for MacroFiles<'_> {
             file: file.clone(),
             span,
             active,
+            control_active,
             include_call: self.calls.last().copied().unwrap_or(0) as u64,
             parent_include_call: self
                 .calls
@@ -2818,7 +2821,7 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                     };
                     i += 1;
                     push_if_frame(state, &mut stack, tokens, i, tok.span, "ifdef", cond);
-                    record_source_directive(state, tok.span, em);
+                    record_control_directive(state, tok.span, em, emitting(&stack));
                 }
                 Dir::Ifndef => {
                     let em = emitting(&stack);
@@ -2833,7 +2836,7 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                     };
                     i += 1;
                     push_if_frame(state, &mut stack, tokens, i, tok.span, "ifndef", cond);
-                    record_source_directive(state, tok.span, em);
+                    record_control_directive(state, tok.span, em, emitting(&stack));
                 }
                 Dir::If => {
                     let em = emitting(&stack);
@@ -2845,7 +2848,7 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                     if let Some(cond) = cond {
                         i += 1;
                         push_if_frame(state, &mut stack, tokens, i, tok.span, "if", cond);
-                        record_source_directive(state, tok.span, em);
+                        record_control_directive(state, tok.span, em, emitting(&stack));
                     } else {
                         let next = take_if_end(state.src, tokens, i);
                         retain_raw_macro(state, &tokens[i..next], &mut out, &mut traces);
@@ -2888,7 +2891,7 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                         frame.taken = frame.taken || active;
                         open_next_branch(state, frame, tokens, i, boundary, "elseif", active);
                     }
-                    record_source_directive(state, boundary, em);
+                    record_control_directive(state, boundary, em, emitting(&stack));
                 }
                 Dir::Else => {
                     if stack.is_empty() {
@@ -2916,7 +2919,7 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                         frame.taken = true;
                         open_next_branch(state, frame, tokens, i, boundary, "else", active);
                     }
-                    record_source_directive(state, boundary, em);
+                    record_control_directive(state, boundary, em, emitting(&stack));
                 }
                 Dir::Endif => {
                     let end_span = tok.span;
@@ -2951,7 +2954,7 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                             }
                         }
                     } else {
-                        record_source_directive(state, tok.span, false);
+                        record_control_directive(state, tok.span, false, false);
                         if next > i + 1 {
                             let endfor = tokens[next - 1].span;
                             record_source_directive(state, endfor, false);
@@ -3160,6 +3163,7 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                             && let Err(error) = visitor.region(
                                 tok.span,
                                 true,
+                                None,
                                 &state.origin_stack,
                                 state.arena,
                                 state.budget,
@@ -3224,6 +3228,7 @@ fn push_discarded(state: &mut ExpandState<'_, '_>, start: u32, end: u32) {
         && let Err(error) = visitor.region(
             Span { start, end },
             false,
+            None,
             &state.origin_stack,
             state.arena,
             state.budget,
@@ -3354,6 +3359,7 @@ fn record_source_emit(state: &mut ExpandState<'_, '_>, tok: &Token) -> Result<()
         visitor.region(
             tok.span,
             true,
+            None,
             &state.origin_stack,
             state.arena,
             state.budget,
@@ -3396,11 +3402,30 @@ fn record_source_emit(state: &mut ExpandState<'_, '_>, tok: &Token) -> Result<()
 }
 
 fn record_source_directive(state: &mut ExpandState<'_, '_>, dir: Span, copy_leading_gap: bool) {
+    record_directive(state, dir, copy_leading_gap, None);
+}
+
+fn record_control_directive(
+    state: &mut ExpandState<'_, '_>,
+    dir: Span,
+    copy_leading_gap: bool,
+    active: bool,
+) {
+    record_directive(state, dir, copy_leading_gap, Some(active));
+}
+
+fn record_directive(
+    state: &mut ExpandState<'_, '_>,
+    dir: Span,
+    copy_leading_gap: bool,
+    control_active: Option<bool>,
+) {
     if !state.stopped
         && let Some(visitor) = state.file_visitor.as_deref_mut()
         && let Err(error) = visitor.region(
             dir,
             copy_leading_gap,
+            control_active,
             &state.origin_stack,
             state.arena,
             state.budget,
@@ -3605,7 +3630,7 @@ fn unroll_for(
         }
         None => tokens_body_span(body),
     };
-    record_source_directive(state, for_tok.span, true);
+    record_control_directive(state, for_tok.span, true, !items.is_empty());
     let body_span = trimmed_body_span(state.src, tokens_body_span(body));
     // A collection or `when` filter that yields no iteration leaves the written
     // body inactive; mark it discarded like an untaken `@#if` branch.

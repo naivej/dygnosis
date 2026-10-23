@@ -248,6 +248,9 @@ pub struct SourceItemOccurrence {
 pub struct SourceItemAvailability {
     pub source_id: String,
     pub availability: SourceAvailability,
+    /// Outline control rows describe their arm, while source inspection keeps
+    /// describing execution of the directive itself.
+    pub(crate) control_availability: SourceAvailability,
     pub cause: Option<Arc<AvailabilityCause>>,
     pub occurrences: Vec<SourceItemOccurrence>,
 }
@@ -309,6 +312,7 @@ pub(crate) struct MacroAvailabilityRegion {
     pub file: String,
     pub span: Span,
     pub active: bool,
+    pub control_active: Option<bool>,
     pub include_call: u64,
     pub parent_include_call: Option<u64>,
     pub loops: Vec<SourceLoopOccurrence>,

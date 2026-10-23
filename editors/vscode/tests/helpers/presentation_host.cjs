@@ -71,6 +71,7 @@ async function checkStatusHovers(service, evidence, waitFor) {
   };
   const model = await hover("dygnosis.modelCounts", "Aggregate model");
   assert.ok(model.headings.includes("Aggregate model"));
+  assert.match(model.text, /Current config: Source/);
   assert.match(model.text, /1 endogenous \(0 static, 1 predetermined, 0 forward-looking, 0 mixed\)/);
   assert.doesNotMatch(model.text, /presentation\.mod|before transformation|Click/);
   await waitFor(async () => (await service.execute("dynare/workspaceStatus"))?.complete, "workspace counts finish before native hover");
@@ -80,6 +81,44 @@ async function checkStatusHovers(service, evidence, waitFor) {
   assert.deepEqual(workspace.tableAlignments, [[["left", "right"]]], "headerless workspace counts retain column alignment");
   assert.doesNotMatch(workspace.text, /Not fully checked|Excluded|Pending|Checking|Click|Warnings|Errors|unopened/);
   evidence.checks.push("native status hovers render bold headings, inline endogenous timing and a workspace count table without filenames, scope, click instructions or zero-state rows");
+}
+
+async function checkModelActivity(service, input, evidence, waitFor) {
+  // Guard a pending macro command remaining silent, creating another status
+  // item, or leaving the model's counts hidden after its reply completes.
+  const status = () => nativeWorkbench(async send => {
+    const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+      "(() => { const items=[...document.querySelectorAll('.statusbar-item')]; const item=items.find(item=>item.id.endsWith('dygnosis.modelCounts')); return {text:item?.textContent.replace(/\\s+/g,' ').trim(),extra:items.some(item=>item.id.endsWith('dygnosis.serverActivity'))}; })()" });
+    return result.result.value;
+  });
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const previous = service.middleware.sendRequest;
+  service.middleware.sendRequest = async (type, param, token, next) => {
+    const result = await (previous ? previous(type, param, token, next) : next(type, param, token));
+    if ((typeof type === "string" ? type : type.method) === "workspace/executeCommand" && param?.command === "dynare/showEffectiveModel") await gate;
+    return result;
+  };
+  const pending = vscode.commands.executeCommand("dygnosis.showEffectiveModel");
+  try {
+    let busy;
+    await waitFor(async () => {
+      busy = await status();
+      return busy.text?.includes("Expanding macros");
+    }, "pending macro expansion reuses the model-count status item");
+    assert.equal(busy.extra, false, "model activity must not add another status item");
+    assert.equal(vscode.window.activeTextEditor.document, input.document, "the busy indicator appears before the preview opens");
+    release();
+    await pending;
+    assert.equal(vscode.window.activeTextEditor.document.uri.scheme, "dygnosis-effective");
+    await waitFor(async () => (await status()).text === "Source: 1 0 1", "completed macro expansion restores model counts");
+    evidence.checks.push("pending macro expansion shows activity in the existing model-count item before the preview opens, then restores Source counts without another status item");
+  } finally {
+    release();
+    service.middleware.sendRequest = previous;
+    await pending;
+    await vscode.window.showTextDocument(input.document);
+  }
 }
 
 async function checkPresentation(service, workspaceRoot, evidence, helpers) {
@@ -96,6 +135,7 @@ async function checkPresentation(service, workspaceRoot, evidence, helpers) {
   };
   const input = await open("presentation.mod", "var y;\nparameters rho;\nrho=.9;\nhelper=1;\nmodel;\ny=rho*y(-1);\nend;\n");
   await checkStatusHovers(service, evidence, waitFor);
+  await checkModelActivity(service, input, evidence, waitFor);
   const symbols = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", input.document.uri);
   assert.deepEqual(symbols.map(symbol => symbol.name), ["var", "parameters", "model"]);
   const parameter = symbols.find(symbol => symbol.name === "parameters").children.find(symbol => symbol.name === "rho");
@@ -105,6 +145,8 @@ async function checkPresentation(service, workspaceRoot, evidence, helpers) {
   const commands = await vscode.commands.getCommands(true);
   assert.ok(commands.includes("dygnosis.chooseModelOwner"));
   assert.ok(commands.includes("dygnosis.openChanges"));
+  assert.ok(commands.includes("dygnosis.jumpToEquation"));
+  assert.ok(!commands.includes("dygnosis.browseLensEquations"));
   evidence.checks.push("native Outline keeps parameter declarations and model equations without assignment rows; complete model has no detail; owner and Changes actions remain registered");
 
   const pick = async (environment, command, args, cancel = false) => {
@@ -137,14 +179,9 @@ async function checkPresentation(service, workspaceRoot, evidence, helpers) {
   };
   await pick(input, "dygnosis.jumpToEquation", [], true);
   await pick(input, "dygnosis.jumpToEquation", []);
-  let lens;
-  await waitFor(async () => {
-    const lenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", input.document.uri);
-    lens = lenses?.find(row => row.command?.command === "dygnosis.browseLensEquations");
-    return lens?.command.title === "Jump to equation...";
-  }, "uniform native equation CodeLens title");
-  await pick(input, lens.command.command, lens.command.arguments);
-  evidence.checks.push("native command and CodeLens each show one unnamed-equation list, jump to written source, and cancel without moving selection");
+  const lenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", input.document.uri);
+  assert.ok(!lenses?.some(row => row.command?.command === "dygnosis.browseLensEquations"));
+  evidence.checks.push("equation CodeLens and its adapter command are absent; the native Jump to equation command shows one unnamed-equation list, jumps to written source, and cancels without moving selection");
 
   const heterogeneous = await open("scope-counts.mod", await fs.readFile(path.resolve(__dirname, "../../../../tests/fixtures/compare/het_before.mod"), "utf8"));
   assert.equal(heterogeneous.info.complete, true);
@@ -157,17 +194,16 @@ async function checkPresentation(service, workspaceRoot, evidence, helpers) {
   await waitFor(async () => nativeWorkbench(async send => {
     const result = await send("Runtime.evaluate", { returnByValue: true,
       expression: `(() => { const item=[...document.querySelectorAll('.statusbar-item')].find(item=>item.id.endsWith('dygnosis.modelCounts')); return item?.textContent.replace(/\\s+/g,' ').trim(); })()` });
-    return result.result.value === "2 1 2";
+    return result.result.value === "Source: 2 1 2";
   }), "native status bar totals aggregate and heterogeneous counts before hover");
   evidence.checks.push("real heterogeneous model shows summed endogenous/exogenous/equation totals on the status bar before hover");
 
   const repeated = await open("repeated-opener.mod", "var y;\n@#for copy in 1:2\nmodel;\ny=@{copy};\nend;\n@#endfor\n");
   assert.equal(repeated.info.equations.length, 2);
   const repeatedLenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", repeated.document.uri);
-  const repeatedLens = repeatedLenses.find(row => row.command?.command === "dygnosis.browseLensEquations");
-  assert.equal(repeatedLens.command.title, "Jump to equation...");
-  await pick(repeated, repeatedLens.command.command, repeatedLens.command.arguments);
-  evidence.checks.push("repeated macro opener lists both counted copies directly and keeps the written target");
+  assert.ok(!repeatedLenses?.some(row => row.command?.command === "dygnosis.browseLensEquations"));
+  await pick(repeated, "dygnosis.jumpToEquation", []);
+  evidence.checks.push("the native Jump to equation command lists both counted macro copies and keeps the written target");
   await checkPreviewOutline(service, workspaceRoot, evidence, helpers);
   await checkOwnerContexts(service, workspaceRoot, evidence, helpers);
 

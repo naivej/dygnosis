@@ -13,10 +13,11 @@ class Emitter {
   listeners = new Set();
   event = listener => { this.listeners.add(listener); return new Disposable(() => this.listeners.delete(listener)); };
   fire(value) { for (const listener of [...this.listeners]) listener(value); }
+  dispose() { this.listeners.clear(); }
 }
 function uri(value) {
   const parsed = new URL(value);
-  return { scheme: parsed.protocol.slice(0, -1), path: parsed.pathname, toString: () => value };
+  return { scheme: parsed.protocol.slice(0, -1), path: parsed.pathname, fsPath: decodeURIComponent(parsed.pathname), toString: () => value };
 }
 function document(value = "file:///workspace/main.mod", extra = {}) {
   return { uri: uri(value), languageId: "dynare", version: 1, isClosed: false, ...extra };
@@ -30,7 +31,7 @@ function deferred() {
 const flush = () => new Promise(resolve => setImmediate(resolve));
 let host;
 const vscode = {
-  Disposable, MarkdownString,
+  Disposable, MarkdownString, EventEmitter: Emitter, Uri: { parse: uri },
   StatusBarAlignment: { Left: 1 },
   window: {
     get activeTextEditor() { return host.editor; },
@@ -63,6 +64,7 @@ Module._load = function(id, ...args) {
   return originalLoad.call(this, id, ...args);
 };
 const { modelStatus, registerStatus } = require(compiledModule("status"));
+const { RequestActivity } = require(compiledModule("activity"));
 Module._load = originalLoad;
 
 function facts(doc = document(), overrides = {}) {
@@ -78,13 +80,19 @@ function facts(doc = document(), overrides = {}) {
     ...overrides,
   };
 }
+function analysis(configuration = {}, extra = {}) {
+  return { state: "selected", selection: { configuration_id: "choice", name: null, preview: false, invocation_scope: "explicit_macro_inputs" },
+    configuration, selection_generation: 1, include_paths: null, macro_complete: true, model_complete: true, overrides: [], ...extra };
+}
 function setup(doc = document()) {
   host = { editor: doc ? { document: doc } : undefined, settings: {}, resourceSettings: new Map(), scopes: [], items: [],
     active: new Emitter(), edited: new Emitter(), closed: new Emitter(), configured: new Emitter() };
   const changed = new Emitter();
+  const activityChanged = new Emitter();
   const service = {
     client: {}, currentInstance: 1, supportsModelInfo: true, logged: [], requests: [],
     log: message => service.logged.push(message), onDidChange: changed.event,
+    onDidChangeActivity: activityChanged.event, modelActivity: () => undefined,
     rootForDocument: async current => service.root ?? current.uri,
     modelInfo: async (root, current) => {
       service.requests.push({ root, document: current });
@@ -99,13 +107,24 @@ function setup(doc = document()) {
     } else host.settings[key] = value;
     host.configured.fire({ affectsConfiguration: (section, target) => key.startsWith(section.replace(/^dynare\./, "")) && (!resource || target?.toString() === resource) });
   };
-  return { host, service, changed, configure, doc };
+  return { host, service, changed, activityChanged, configure, doc };
+}
+
+function trackActivity(context, env) {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  const activity = new RequestActivity();
+  env.service.onDidChangeActivity = activity.onDidChange;
+  env.service.modelActivity = (document, root) => activity.forDocument(document, root);
+  context.after(() => activity.dispose());
+  const middleware = activity.middleware({});
+  return { activity, clock: context.mock.timers,
+    request: (method, params, pending) => middleware.sendRequest(method, params, undefined, () => pending.promise) };
 }
 
 test("total icons and separate count blocks retain every class and dimension in hover and speech", () => {
   // Guards omitting dimension counts from the status bar or losing the separate hover facts.
   const value = modelStatus(facts(), ["endogenous", "exogenous", "equations"]);
-  assert.equal(value.text, "$(symbol-variable) 104  $(symbol-field) 12  $(symbol-operator) 93");
+  assert.equal(value.text, "Source: $(symbol-variable) 104  $(symbol-field) 12  $(symbol-operator) 93");
   const report = [
     "Aggregate model",
     "4 endogenous (1 static, 1 predetermined, 1 forward-looking, 1 mixed)",
@@ -113,8 +132,8 @@ test("total icons and separate count blocks retain every class and dimension in 
     "100 endogenous (1 static, 0 predetermined, 0 forward-looking, 0 mixed)",
     "10 exogenous", "90 equations",
   ];
-  assert.equal(tooltipText(value.tooltip), report.join("\n"));
-  assert.match(value.tooltip.value, /^\*\*Aggregate model\*\*/);
+  assert.equal(tooltipText(value.tooltip), `[Current config](command:dygnosis.selectAnalysisConfiguration): Source\n${report.join("\n")}`);
+  assert.match(value.tooltip.value, /\*\*Aggregate model\*\*/);
   assert.doesNotMatch(tooltipText(value.tooltip), /main\.mod|before transformation|Click/);
   assert.equal(value.accessibilityLabel, `Dynare model counts. Total: 104 endogenous, 12 exogenous, 93 equations. ${report.join(". ")}. Choose the analysis configuration.`);
   assert.doesNotMatch(value.text, /warning|error/);
@@ -125,16 +144,49 @@ test("total counts include every dimension and fall back to aggregate when none 
   const info = facts();
   info.heterogeneity_dimensions.push({ ...info.heterogeneity_dimensions[0], dimension: "firms", n_endogenous: 3, n_exogenous: 1, n_equations: 2 });
   assert.equal(modelStatus(info, ["endogenous", "exogenous", "equations"]).text,
-    "$(symbol-variable) 107  $(symbol-field) 13  $(symbol-operator) 95");
+    "Source: $(symbol-variable) 107  $(symbol-field) 13  $(symbol-operator) 95");
   info.heterogeneity_dimensions = [];
   assert.equal(modelStatus(info, ["endogenous", "exogenous", "equations"]).text,
-    "$(symbol-variable) 4  $(symbol-field) 2  $(symbol-operator) 3");
+    "Source: $(symbol-variable) 4  $(symbol-field) 2  $(symbol-operator) 3");
+});
+
+test("configuration hover shows selected expressions and links to the shared selector", () => {
+  // Guards showing only a preset name, or losing the selector when macro choices change.
+  const metadata = analysis({ defines: [{ name: "N", expression: "2" }, { name: "M", expression: "N+1" }] });
+  const source = modelStatus(facts(document(), { analysis: analysis() }), ["equations"]);
+  assert.equal(source.text, "Source: $(symbol-operator) 93");
+  assert.match(source.tooltip.value, /^\[Current config\]\(command:dygnosis.selectAnalysisConfiguration\): Source/);
+  const configured = modelStatus(facts(document(), { analysis: metadata }), ["equations"]);
+  assert.equal(configured.text, "Current config: $(symbol-operator) 93");
+  assert.match(tooltipText(configured.tooltip), /N = 2; M = N\+1/);
+  assert.deepEqual(configured.tooltip.isTrusted, { enabledCommands: ["dygnosis.selectAnalysisConfiguration"] });
+});
+
+test("preview values and stale or incomplete outcomes keep configuration access", () => {
+  // Guards unavailable counts hiding the choices or cause needed to reset a preview.
+  const target = { file: null, site_id: "definition", source_revision: "source" };
+  const operation = { kind: "definition", target, expression: '"[link](command:untrusted)"' };
+  const metadata = analysis({ overrides: [operation] }, {
+    state: "stale", selection: { configuration_id: "preview", name: "Alternative", preview: true, invocation_scope: "preview" },
+    cause: { code: "STALE", message: "The written definition changed. Reset the analysis configuration." },
+    overrides: [{ operation, application: "unknown", known_execution_count: 0, execution_count: null, cause: "Its target changed." }],
+  });
+  for (const complete of [false, true]) {
+    const value = modelStatus(facts(document(), { analysis: metadata, complete, n_equations: undefined }), ["equations"]);
+    assert.equal(value.text, complete ? "$(info) Current config: unavailable" : "$(info) Current config: source only");
+    assert.match(value.tooltip.value, /^\[Current config\]\(command:dygnosis.selectAnalysisConfiguration\)/);
+    assert.match(tooltipText(value.tooltip), /Definition override = "\[link\]\(command:untrusted\)"/);
+    assert.ok(value.tooltip.value.includes('\\[link\\]\\(command:untrusted\\)'));
+    assert.match(tooltipText(value.tooltip), /preview.*stale/);
+    assert.match(tooltipText(value.tooltip), /Its target changed/);
+    assert.match(tooltipText(value.tooltip), /Reset the analysis configuration/);
+  }
 });
 
 test("a total outside the safe integer range is unavailable", () => {
   // Guards displaying a rounded total even when each scope has a valid count.
   const info = facts(document(), { n_endogenous: Number.MAX_SAFE_INTEGER });
-  assert.equal(modelStatus(info, ["endogenous"]).text, "$(info) Dynare: unavailable");
+  assert.equal(modelStatus(info, ["endogenous"]).text, "$(info) Source: unavailable");
 });
 test("selected count order applies to each dimension and hiding endogenous hides every class", () => {
   // Guards against dimensions ignoring count selection or exposing hidden classes.
@@ -143,7 +195,7 @@ test("selected count order applies to each dimension and hiding endogenous hides
     { dimension: "firms", n_endogenous: 0, n_exogenous: 0, n_equations: 0 },
   ] });
   const value = modelStatus(info, ["equations", "exogenous"]);
-  assert.equal(value.text, "$(symbol-operator) 93  $(symbol-field) 12");
+  assert.equal(value.text, "Source: $(symbol-operator) 93  $(symbol-field) 12");
   assert.match(tooltipText(value.tooltip), /Aggregate model\n3 equations\n2 exogenous\nHeterogeneous model: households\n90 equations\n10 exogenous\nHeterogeneous model: firms\n0 equations\n0 exogenous/);
   for (const text of [tooltipText(value.tooltip), value.accessibilityLabel]) {
     assert.doesNotMatch(text, /endogenous|static|predetermined|forward-looking|mixed/);
@@ -164,7 +216,7 @@ test("missing class lists display all four zero classes for aggregate and dimens
 });
 test("incomplete expansion withholds even supplied old numbers", () => {
   const value = modelStatus(facts(document(), { complete: false, message: "Model expansion is incomplete" }), ["endogenous", "equations"]);
-  assert.equal(value.text, "$(info) Dynare: incomplete");
+  assert.equal(value.text, "$(info) Source: incomplete");
   assert.match(tooltipText(value.tooltip), /Counts are unavailable/);
   assert.match(tooltipText(value.tooltip), /Model expansion is incomplete/);
   assert.doesNotMatch(tooltipText(value.tooltip), /Endogenous:|households|Timing:/);
@@ -178,7 +230,7 @@ test("incomplete reasons appear in the hover without reading diagnostics", () =>
       { code: "I211", message: "Macro expression 'length([1])' could not be evaluated; some model checks were withheld.", location: null },
     ],
   }), ["endogenous", "equations"]);
-  assert.equal(value.text, "$(info) Dynare: incomplete");
+  assert.equal(value.text, "$(info) Source: incomplete");
   assert.match(tooltipText(value.tooltip), /Unknown variable missing/);
   assert.match(tooltipText(value.tooltip), /Macro expression 'length\(\[1\]\)' could not be evaluated/);
   assert.doesNotMatch(tooltipText(value.tooltip), /Model expansion is incomplete/);
@@ -217,7 +269,7 @@ test("resource settings choose count order, live disable, empty list, and reset"
   const registration = registerStatus(env.service);
   await flush();
   const item = env.host.items[0];
-  assert.equal(item.text, "$(symbol-operator) 93  $(symbol-variable) 104");
+  assert.equal(item.text, "Source: $(symbol-operator) 93  $(symbol-variable) 104");
   assert.ok(env.host.scopes.every(value => value.section === "dynare" && value.scope.languageId === "dynare" && value.scope.uri === env.doc.uri));
   env.configure("statusBar.enabled", false);
   assert.equal(item.visible, false);
@@ -230,7 +282,7 @@ test("resource settings choose count order, live disable, empty list, and reset"
   env.host.resourceSettings.delete(env.doc.uri.toString());
   env.configure("statusBar.counts", undefined);
   await flush();
-  assert.equal(item.text, "$(symbol-variable) 104  $(symbol-field) 12  $(symbol-operator) 93");
+  assert.equal(item.text, "Source: $(symbol-variable) 104  $(symbol-field) 12  $(symbol-operator) 93");
   registration.dispose();
 });
 test("invalid settings are safely filtered or fall back with an Output explanation", async () => {
@@ -239,7 +291,7 @@ test("invalid settings are safely filtered or fall back with an Output explanati
   env.configure("statusBar.counts", ["equations", "equations", "invented", 1]);
   const registration = registerStatus(env.service);
   await flush();
-  assert.equal(env.host.items[0].text, "$(symbol-operator) 93");
+  assert.equal(env.host.items[0].text, "Source: $(symbol-operator) 93");
   assert.ok(env.service.logged.some(message => message.includes("Invalid dynare.statusBar.enabled")));
   assert.ok(env.service.logged.some(message => message.includes("Invalid or repeated entries")));
   registration.dispose();
@@ -278,8 +330,8 @@ test("a mod opened as an include uses its chosen root while preferences use the 
   await flush();
   assert.equal(env.service.requests[0].root.toString(), "file:///workspace/owner.mod");
   assert.equal(env.service.requests[0].document.toString(), env.doc.uri.toString());
-  assert.equal(env.host.items[0].text, "$(symbol-operator) 93");
-  assert.match(tooltipText(env.host.items[0].tooltip), /^Aggregate model/);
+  assert.equal(env.host.items[0].text, "Source: $(symbol-operator) 93");
+  assert.match(tooltipText(env.host.items[0].tooltip), /Aggregate model/);
   assert.doesNotMatch(tooltipText(env.host.items[0].tooltip), /owner\.mod|part\.mod/);
   registration.dispose();
 });
@@ -360,7 +412,7 @@ test("settings disabled during a request and disposal prevent late item updates"
   await flush();
   assert.equal(item.visible, false);
   assert.equal(item.disposed, true);
-  for (const emitter of [env.changed, env.host.active, env.host.edited, env.host.closed, env.host.configured]) assert.equal(emitter.listeners.size, 0);
+  for (const emitter of [env.changed, env.activityChanged, env.host.active, env.host.edited, env.host.closed, env.host.configured]) assert.equal(emitter.listeners.size, 0);
 });
 test("client replacement and mismatched root, document or version cannot publish numbers", async () => {
   for (const mismatch of ["client", "root", "document", "version"]) {
@@ -386,7 +438,7 @@ test("unavailable, incomplete and unsupported engines replace previous numbers",
   env.service.modelInfo = async () => facts(env.doc, { complete: false });
   env.changed.fire();
   await flush();
-  assert.equal(env.host.items[0].text, "$(info) Dynare: incomplete");
+  assert.equal(env.host.items[0].text, "$(info) Source: incomplete");
   env.service.modelInfo = async () => undefined;
   env.changed.fire();
   await flush();
@@ -405,4 +457,97 @@ test("a failed request remains quiet apart from Output and shows unavailable sta
   assert.equal(env.host.items[0].text, "$(info) Dynare: unavailable");
   assert.deepEqual(env.service.logged, ["Error: connection closed"]);
   registration.dispose();
+});
+
+test("pending model actions reuse the count item and restore configuration counts without another request", async context => {
+  // Guards a separate activity item, lost action feedback, and a redundant modelInfo refresh on completion.
+  const env = setup(), tracked = trackActivity(context, env);
+  env.service.modelInfo = async () => {
+    env.service.requests.push("modelInfo");
+    return facts(env.doc, { analysis: analysis({ defines: [{ name: "N", expression: "2" }] }) });
+  };
+  const registration = registerStatus(env.service); await flush();
+  const item = env.host.items[0], counts = item.text, tooltip = item.tooltip, requests = env.service.requests.length;
+  const expansion = deferred(), hover = deferred();
+  const first = tracked.request("workspace/executeCommand", { command: "dynare/showEffectiveModel", arguments: [env.doc.uri.toString()] }, expansion);
+  const second = tracked.request("textDocument/hover", { textDocument: { uri: env.doc.uri.toString() } }, hover);
+  tracked.clock.tick(249); assert.equal(item.text, counts);
+  tracked.clock.tick(1); assert.match(item.text, /sync~spin.*Expanding macros/);
+  assert.match(tooltipText(item.tooltip), /Loading hover/); assert.equal(env.host.items.length, 1);
+  assert.match(tooltipText(item.tooltip), /N = 2/);
+  assert.match(item.tooltip.value, /\[Current config\]\(command:dygnosis.selectAnalysisConfiguration\)/);
+  assert.deepEqual(item.tooltip.isTrusted, { enabledCommands: ["dygnosis.selectAnalysisConfiguration"] });
+  assert.equal(item.command, "dygnosis.selectAnalysisConfiguration");
+  expansion.resolve(); await first; assert.match(item.text, /Loading hover/);
+  hover.resolve(); await second;
+  assert.equal(item.text, counts); assert.match(item.text, /^Current config:/); assert.equal(item.tooltip, tooltip);
+  assert.equal(env.service.requests.length, requests);
+  registration.dispose();
+});
+
+test("activity before owner resolution keeps the latest incomplete result underneath the action", async context => {
+  // Guards a root lookup or completed count refresh hiding unfinished expansion, then restoring stale counts.
+  const env = setup(), tracked = trackActivity(context, env), owner = deferred(), model = deferred(), expansion = deferred();
+  env.service.rootForDocument = () => owner.promise;
+  env.service.modelInfo = () => model.promise;
+  const pending = tracked.request("workspace/executeCommand", { command: "dynare/showEffectiveModel", arguments: [{ root_uri: env.doc.uri.toString() }] }, expansion);
+  const registration = registerStatus(env.service);
+  tracked.clock.tick(250); assert.match(env.host.items[0].text, /Expanding macros/);
+  owner.resolve(env.doc.uri); await flush();
+  model.resolve(facts(env.doc, { complete: false, incomplete_reasons: [{ message: "The selected branch cannot be expanded." }] }));
+  await flush(); assert.match(env.host.items[0].text, /Expanding macros/);
+  expansion.resolve(); await pending;
+  assert.equal(env.host.items[0].text, "$(info) Source: incomplete");
+  assert.match(tooltipText(env.host.items[0].tooltip), /selected branch cannot be expanded/);
+  registration.dispose();
+});
+
+test("edits during activity cannot restore old numbers before the new guarded count result", async context => {
+  // Guards action completion repainting counts from an older document version.
+  const env = setup(), tracked = trackActivity(context, env);
+  const registration = registerStatus(env.service); await flush();
+  const expansion = deferred(), model = deferred();
+  const pending = tracked.request("workspace/executeCommand", { command: "dynare/showEffectiveModel", arguments: [env.doc.uri.toString()] }, expansion);
+  tracked.clock.tick(250);
+  env.service.modelInfo = () => model.promise;
+  ++env.doc.version; env.host.edited.fire({ document: env.doc }); await flush();
+  assert.match(env.host.items[0].text, /Expanding macros/);
+  expansion.resolve(); await pending;
+  assert.equal(env.host.items[0].text, "$(sync~spin) Dynare: updating");
+  model.resolve(facts(env.doc, { n_equations: 8, analysis: analysis({ defines: [{ name: "N", expression: "3" }] }) }));
+  await flush();
+  assert.equal(env.host.items[0].text, "Current config: $(symbol-variable) 104  $(symbol-field) 12  $(symbol-operator) 98");
+  registration.dispose();
+});
+
+test("other model activity cannot replace the active item's counts after an editor switch", async context => {
+  // Guards root A's unfinished action replacing root B's status or a non-Dynare editor's hidden item.
+  const env = setup(), tracked = trackActivity(context, env);
+  env.service.modelInfo = async (root, current) => facts(env.host.editor.document, { root_uri: root.toString(), document_uri: current.toString() });
+  const registration = registerStatus(env.service); await flush();
+  const expansion = deferred(), pending = tracked.request("workspace/executeCommand", {
+    command: "dynare/showEffectiveModel", arguments: [{ root_uri: env.doc.uri.toString() }],
+  }, expansion);
+  tracked.clock.tick(250); assert.match(env.host.items[0].text, /Expanding macros/);
+  env.host.editor = { document: document("file:///workspace/second.mod") };
+  env.host.active.fire(env.host.editor); await flush();
+  assert.match(env.host.items[0].text, /^Source:/); assert.doesNotMatch(env.host.items[0].text, /Expanding/);
+  env.host.editor = { document: document("file:///workspace/notes.txt", { languageId: "plaintext" }) };
+  env.host.active.fire(env.host.editor);
+  expansion.resolve(); await pending; assert.equal(env.host.items[0].visible, false);
+  registration.dispose();
+});
+
+test("empty count selection and disposal also hide pending model actions", async context => {
+  // Guards the shared action display bypassing the status-bar setting or reviving a disposed item.
+  const env = setup(), tracked = trackActivity(context, env), expansion = deferred();
+  const registration = registerStatus(env.service); await flush();
+  const pending = tracked.request("workspace/executeCommand", { command: "dynare/showEffectiveModel", arguments: [env.doc.uri.toString()] }, expansion);
+  tracked.clock.tick(250); assert.match(env.host.items[0].text, /Expanding macros/);
+  env.configure("statusBar.counts", []); assert.equal(env.host.items[0].visible, false);
+  env.configure("statusBar.counts", ["equations"]); await flush();
+  assert.match(env.host.items[0].text, /Expanding macros/);
+  registration.dispose();
+  expansion.resolve(); await pending;
+  assert.equal(env.host.items[0].visible, false); assert.equal(env.host.items[0].disposed, true);
 });

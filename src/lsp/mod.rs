@@ -973,6 +973,8 @@ impl Backend {
     }
 
     fn doc_symbols(&self, uri: &Url) -> Option<Vec<DocumentSymbol>> {
+        use crate::engine::analysis::source_inventory::SourceItemKind;
+
         let mut inner = self.lock_inner();
         let text = inner.document(uri)?.text.clone();
         let preferences = inner.presentation_for(uri);
@@ -983,7 +985,7 @@ impl Backend {
             .as_ref()
             .into_iter()
             .flat_map(|file| file.availability.iter())
-            .map(|item| (item.source_id.as_str(), item.availability))
+            .map(|item| (item.source_id.as_str(), item))
             .collect();
         if inner.context_ambiguous(uri) {
             let mut rows = Vec::new();
@@ -1036,7 +1038,16 @@ impl Backend {
         model_map::add_source_symbols(&mut rows, &inventory, &text, &preferences, |item| {
             availability
                 .get(item.source_id.as_str())
-                .copied()
+                .map(|state| {
+                    if matches!(
+                        item.kind,
+                        SourceItemKind::Conditional | SourceItemKind::Branch | SourceItemKind::Loop
+                    ) {
+                        state.control_availability
+                    } else {
+                        state.availability
+                    }
+                })
                 .unwrap_or_default()
         });
         Some(rows)

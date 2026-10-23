@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import { DygnosisClient, isAnalysisDocument } from "../client/client";
 import { ModelInfo } from "../client/protocol";
 import { booleanSetting, listSetting } from "../client/settings";
-import { analysisLabel } from "./analysis_configuration";
 import type { EffectivePreviewRegistry } from "./preview";
 
 export const statusCounts = ["endogenous", "exogenous", "equations"];
@@ -36,22 +35,42 @@ function incompleteDetail(info: ModelInfo): string {
   return info.message ?? "Model expansion is incomplete.";
 }
 
+function configurationHover(info: ModelInfo): vscode.MarkdownString {
+  const analysis = info.analysis;
+  const choices = [
+    ...(analysis?.configuration.defines ?? []).map(input => `${input.name} = ${input.expression}`),
+    ...(analysis?.configuration.overrides ?? []).map(operation => operation.kind === "definition"
+      ? `Definition override = ${operation.expression}`
+      : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview"),
+  ];
+  const tooltip = new vscode.MarkdownString("[Current config](command:dygnosis.selectAnalysisConfiguration): ");
+  tooltip.appendText(choices.length ? choices.join("; ") : analysis?.selection.name ?? "Source");
+  if (analysis?.selection.preview) tooltip.appendText(" (preview)");
+  if (analysis?.state === "stale") tooltip.appendText(" (stale)");
+  if (analysis?.selection.name && choices.length) tooltip.appendMarkdown("  \n").appendText(analysis.selection.name);
+  for (const receipt of analysis?.overrides ?? []) {
+    if (receipt.application !== "applied" || receipt.cause) tooltip.appendMarkdown("  \n").appendText(
+      `${receipt.operation.kind === "branch" ? "Branch preview" : "Definition override"}: ${receipt.application === "not_reached" ? "not reached" : receipt.application}${receipt.cause ? ` — ${receipt.cause}` : ""}`);
+  }
+  if (analysis?.include_paths !== null && analysis?.include_paths !== undefined)
+    tooltip.appendMarkdown("  \n").appendText(`Include paths: ${analysis.include_paths.join(", ") || "none"}`);
+  if (analysis?.cause) tooltip.appendMarkdown("\n\n").appendText(analysis.cause.message);
+  tooltip.isTrusted = { enabledCommands: ["dygnosis.selectAnalysisConfiguration"] };
+  return tooltip;
+}
+
 /** Sum scope counts for the status bar; retain each scope's facts in the hover. */
 export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusContent {
   const analysis = info.analysis;
-  const label = analysis ? `Dynare: ${analysisLabel(analysis)}` : "Dynare";
-  const analysisDetail = analysis ? [
-    `Analysis: ${analysisLabel(analysis)}`,
-    `Root: ${info.root_uri}`,
-    ...(analysis.configuration.defines ?? []).map(input => `${input.name} = ${input.expression}`),
-    ...analysis.overrides.map(receipt => `${receipt.operation.kind}: ${receipt.application}${receipt.execution_count === null ? " (later applications unknown)" : ` (${receipt.execution_count})`}${receipt.cause ? ` — ${receipt.cause}` : ""}`),
-    ...(analysis.cause ? [analysis.cause.message] : []),
-  ].join("\n") : "";
+  const configured = analysis && (analysis.selection.name || analysis.configuration.defines?.length ||
+    analysis.configuration.overrides?.length || analysis.include_paths !== null);
+  const label = configured ? "Current config" : "Source";
+  const tooltip = configurationHover(info);
   if (!info.complete) {
     const detail = incompleteDetail(info);
     return {
       text: `$(info) ${label}: ${analysis?.state === "stale" ? "source only" : "incomplete"}`,
-      tooltip: `${analysisDetail ? `${analysisDetail}\n` : ""}${detail}\nCounts are unavailable.`,
+      tooltip: tooltip.appendMarkdown("\n\n").appendText(`${detail}\nCounts are unavailable.`),
       accessibilityLabel: "Dynare model expansion is incomplete. Counts are unavailable. Choose the analysis configuration.",
     };
   }
@@ -65,17 +84,13 @@ export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusConte
     return { ...countDetails[count], value: values.every(validCount) ? values.reduce((total, value) => total + value, 0) : undefined };
   });
   if (shown.some(count => !validCount(count.value))) return {
-    text: "$(info) Dynare: unavailable",
-    tooltip: "Model counts are unavailable.",
+    text: `$(info) ${label}: unavailable`,
+    tooltip: tooltip.appendMarkdown("\n\n").appendText("Model counts are unavailable."),
     accessibilityLabel: "Dynare model counts are unavailable. Choose the analysis configuration.",
   };
-  const tooltip = new vscode.MarkdownString(), report: string[] = [];
-  if (analysisDetail) {
-    tooltip.appendText(analysisDetail).appendMarkdown("\n\n[Select analysis configuration](command:dygnosis.selectAnalysisConfiguration) · [Reset](command:dygnosis.resetAnalysisConfiguration)\n\n");
-    tooltip.isTrusted = { enabledCommands: ["dygnosis.selectAnalysisConfiguration", "dygnosis.resetAnalysisConfiguration"] };
-  }
+  const report: string[] = [];
   for (const group of groups) {
-    if (report.length) tooltip.appendMarkdown("\n\n");
+    tooltip.appendMarkdown("\n\n");
     tooltip.appendMarkdown("**").appendText(group.title).appendMarkdown("**\n\n");
     const lines = countLines(group.facts, counts);
     lines.forEach((line, index) => {
@@ -85,7 +100,7 @@ export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusConte
     report.push(group.title, ...lines);
   }
   return {
-    text: `${analysis ? `${label}  ` : ""}${shown.map(count => `$(${count.icon}) ${String(count.value)}`).join("  ")}`,
+    text: `${label}: ${shown.map(count => `$(${count.icon}) ${String(count.value)}`).join("  ")}`,
     tooltip,
     accessibilityLabel: `Dynare model counts. Total: ${shown.map(count => `${String(count.value)} ${count.label}`).join(", ")}. ${report.join(". ")}. Choose the analysis configuration.`,
   };
@@ -98,11 +113,27 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
   item.command = "dygnosis.selectAnalysisConfiguration";
   let generation = 0;
   let disposed = false;
+  let displayed: { document: vscode.TextDocument; root?: vscode.Uri; value: StatusContent; current(): boolean } | undefined;
   const content = (value: StatusContent): void => {
     item.text = value.text;
     item.tooltip = value.tooltip;
     item.accessibilityInformation = { label: value.accessibilityLabel };
     item.show();
+  };
+  const render = (): void => {
+    if (!displayed?.current()) return;
+    const activity = service.modelActivity(displayed.document.uri, displayed.root);
+    const tooltip = activity && new vscode.MarkdownString().appendText(activity.detail).appendMarkdown("\n\n");
+    if (tooltip) {
+      if (typeof displayed.value.tooltip === "string") tooltip.appendMarkdown("[Current config](command:dygnosis.selectAnalysisConfiguration)\n\n").appendText(displayed.value.tooltip);
+      else tooltip.appendMarkdown(displayed.value.tooltip.value);
+      tooltip.isTrusted = { enabledCommands: ["dygnosis.selectAnalysisConfiguration"] };
+    }
+    content(activity ? {
+      text: `$(sync~spin) Dynare: ${activity.label}…`,
+      tooltip: tooltip!,
+      accessibilityLabel: `Dynare: ${activity.label}. ${activity.pending} pending model request${activity.pending === 1 ? "" : "s"}. Choose the analysis configuration.`,
+    } : displayed.value);
   };
   const preferences = (document: vscode.TextDocument): { enabled: boolean; counts: StatusCount[] } => ({
     enabled: booleanSetting("statusBar.enabled", document.uri, true, service.log),
@@ -110,6 +141,7 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
   });
   const refresh = (): void => {
     const request = ++generation;
+    displayed = undefined;
     item.hide();
     item.text = "";
     item.tooltip = undefined;
@@ -127,12 +159,18 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
       const latest = preferences(document);
       return latest.enabled && latest.counts.join("\n") === settings.counts.join("\n");
     };
-    content({
+    displayed = { document, current, value: {
       text: "$(sync~spin) Dynare: updating",
       tooltip: "Refreshing model counts…",
       accessibilityLabel: "Dynare model counts are updating. Choose the analysis configuration.",
-    });
-    const unavailable = (): void => content({
+    } };
+    const updateContent = (value: StatusContent): void => {
+      if (!current() || !displayed) return;
+      displayed.value = value;
+      render();
+    };
+    render();
+    const unavailable = (): void => updateContent({
       text: "$(info) Dynare: unavailable",
       tooltip: service.supportsModelInfo
         ? "Model counts are unavailable. Choose a model root, or open Dygnosis Output for details."
@@ -143,13 +181,15 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
       const root = preview?.root ?? await service.rootForDocument(document);
       if (!current()) return;
       if (!root) {
-        content({
+        updateContent({
           text: "$(info) Dynare: choose model owner",
           tooltip: "This file needs a model owner for model counts. Run Dygnosis: Choose model owner from the Command Palette. Open its parent model first if no owner is listed.",
           accessibilityLabel: "Dynare model counts need a model owner. Run Dygnosis: Choose model owner from the Command Palette.",
         });
         return;
       }
+      displayed!.root = root;
+      render();
       const client = service.client;
       const requestedDocument = preview ? root : document.uri;
       const info = await service.modelInfo(root, requestedDocument);
@@ -158,7 +198,7 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
       if (info.root_uri !== root.toString() || info.document_uri !== requestedDocument.toString() || !preview && info.document_version !== version) {
         unavailable(); return;
       }
-      content(modelStatus(info, settings.counts));
+      updateContent(modelStatus(info, settings.counts));
     };
     void update().catch((error: unknown) => {
       if (current()) { service.log(String(error)); unavailable(); }
@@ -177,10 +217,12 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
       if (event.affectsConfiguration("dynare.statusBar", document?.uri)) refresh();
     }),
     service.onDidChange(refresh),
+    service.onDidChangeActivity(render),
   ];
   refresh();
   return new vscode.Disposable(() => {
     disposed = true;
+    displayed = undefined;
     ++generation;
     for (const listener of listeners) listener.dispose();
     item.hide();

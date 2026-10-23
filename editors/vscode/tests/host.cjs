@@ -686,20 +686,16 @@ exports.run = async function run() {
     await require("./helpers/color_host.cjs").checkBlockTintEditing(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, writeObservedInput });
     await require("./helpers/model_local_host.cjs").checkModelLocalEditing(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, currentSnapshot, writeObservedInput });
     await vscode.window.showTextDocument(document);
-    let equationLens;
-    await waitFor(async () => {
-      const lenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", document.uri);
-      equationLens = lenses?.find(lens => lens.command?.command === "dygnosis.browseLensEquations");
-      return equationLens?.command?.title === "Jump to equation...";
-    }, "equation CodeLens shows the jump title");
-    const equationJump = vscode.commands.executeCommand(equationLens.command.command, ...equationLens.command.arguments);
+    const lenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", document.uri);
+    assert.ok(!lenses?.some(lens => lens.command?.command === "dygnosis.browseLensEquations"));
+    const equationJump = vscode.commands.executeCommand("dygnosis.jumpToEquation");
     await new Promise(resolve => setTimeout(resolve, 500));
     await vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem");
     await equationJump;
     assert.equal(vscode.window.activeTextEditor.document.uri.toString(), document.uri.toString());
     const writtenEquation = info.equations[0].location;
     assert.deepEqual(vscode.window.activeTextEditor.selection.start, new vscode.Position(writtenEquation.range.start.line, writtenEquation.range.start.character));
-    evidence.checks.push("native equation CodeLens picker jumps to the exact written equation");
+    evidence.checks.push("equation CodeLens is absent; the native Jump to equation command jumps to the exact written equation");
     await vscode.commands.executeCommand("dygnosis.showEffectiveModel");
     assert.equal(vscode.window.activeTextEditor.document.uri.scheme, "dygnosis-effective");
     assert.equal(vscode.window.activeTextEditor.document.languageId, "dynare");

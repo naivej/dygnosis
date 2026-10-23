@@ -30,7 +30,29 @@ pub struct NameDetails {
 pub struct OutlinePreferences {
     pub sections: Vec<String>,
     pub equation_numbers: bool,
-    pub inactive_source: bool,
+    pub activity: OutlineActivity,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum OutlineActivity {
+    #[default]
+    Both,
+    Active,
+    Inactive,
+}
+
+impl OutlineActivity {
+    pub(crate) fn includes(
+        self,
+        state: crate::engine::analysis_configuration::SourceAvailability,
+    ) -> bool {
+        use crate::engine::analysis_configuration::SourceAvailability;
+        !matches!(
+            (self, state),
+            (Self::Active, SourceAvailability::Inactive)
+                | (Self::Inactive, SourceAvailability::Active)
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -50,7 +72,7 @@ impl Default for PresentationSettings {
             outline: OutlinePreferences {
                 sections: OUTLINE_SECTIONS.iter().map(|s| (*s).to_owned()).collect(),
                 equation_numbers: true,
-                inactive_source: true,
+                activity: OutlineActivity::Both,
             },
             parameter_value_hints: true,
         }
@@ -334,12 +356,20 @@ fn read_settings(value: &Value, settings: &mut ResourceSettings, explanations: &
             &mut settings.presentation.outline.equation_numbers,
             explanations,
         );
-        read_bool(
-            outline,
-            "inactiveSource",
-            &mut settings.presentation.outline.inactive_source,
-            explanations,
-        );
+        if let Some(raw) = outline.get("activity") {
+            settings.presentation.outline.activity = match raw.as_str() {
+                Some("both") => OutlineActivity::Both,
+                Some("active") => OutlineActivity::Active,
+                Some("inactive") => OutlineActivity::Inactive,
+                _ => {
+                    explanations.push(
+                        "Invalid dynare.outline.activity; show both active and inactive source."
+                            .to_owned(),
+                    );
+                    OutlineActivity::Both
+                }
+            };
+        }
         if let Some(raw) = outline.get("sections") {
             let mut sections = Vec::new();
             if let Some(items) = raw.as_array() {

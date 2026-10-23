@@ -62,7 +62,11 @@ test("source and expanded selectors use one root and never apply saved startup c
   assert.equal(env.service.calls[0][1].name, "Alternative");
   const expanded = { uri: uri("dygnosis-effective:/1/main.mod"), version: 1, isClosed: false };
   env.sessions.set(expanded.uri.toString(), { root: env.document.uri }); host.editor = { document: expanded };
-  host.answers.push(items => items.find(item => item.label === "Source"));
+  host.answers.push(items => {
+    const reset = items.find(item => item.label === "Source");
+    assert.equal(reset.description, "Reset analysis configuration");
+    return reset;
+  });
   await env.run("selectAnalysisConfiguration");
   assert.equal(env.service.calls[1][0].toString(), env.document.uri.toString());
   assert.deepEqual(env.service.calls[1][1], {});

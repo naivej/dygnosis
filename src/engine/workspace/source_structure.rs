@@ -602,6 +602,7 @@ impl Workspace {
                         .summary(&file, item.selection, proven)
                 });
                 let mut occurrences = Vec::new();
+                let (mut control_active, mut control_inactive) = (false, false);
                 let mut occurrence_owned = 0usize;
                 let mut excluded = None;
                 if let Some(trace) = trace.as_ref() {
@@ -610,6 +611,11 @@ impl Workspace {
                     // identity is unique; projection need not clone IDs into
                     // another per-row de-duplication table.
                     for region in trace.availability_index.matching(&file, item.selection) {
+                        if region.control_active.unwrap_or(region.active) {
+                            control_active = true;
+                        } else {
+                            control_inactive = true;
+                        }
                         let loop_strings = region
                             .loops
                             .iter()
@@ -691,6 +697,16 @@ impl Workspace {
                 let projected = SourceItemAvailability {
                     source_id: item.source_id.clone(),
                     availability: state,
+                    control_availability: if !proven {
+                        SourceAvailability::Unknown
+                    } else {
+                        match (control_active, control_inactive) {
+                            (true, true) => SourceAvailability::Mixed,
+                            (true, false) => SourceAvailability::Active,
+                            (false, true) => SourceAvailability::Inactive,
+                            _ => SourceAvailability::Unknown,
+                        }
+                    },
                     cause,
                     occurrences,
                 };

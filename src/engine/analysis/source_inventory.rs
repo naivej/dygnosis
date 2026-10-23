@@ -41,9 +41,13 @@ pub(crate) struct SourceItem {
     pub source_id: String,
     pub kind: SourceItemKind,
     pub span: Span,
+    /// Outline stops a conditional arm before the next sibling or endif.
+    /// Source inspection keeps the full conditional or directive span above.
+    pub branch_end: Option<u32>,
     pub selection: Span,
     pub name: Option<String>,
     pub written_kind: Option<String>,
+    pub declaration_metadata: Option<Box<SourceDeclarationMetadata>>,
     pub path: Vec<SourcePathStep>,
     /// A proven containing written item, never an inferred semantic owner.
     pub parent: Option<usize>,
@@ -51,6 +55,12 @@ pub(crate) struct SourceItem {
     pub template: bool,
     pub header_end: u32,
     pub function: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SourceDeclarationMetadata {
+    pub long_name: Option<String>,
+    pub tex_name: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,7 +105,7 @@ pub(crate) struct SourceInventory {
 struct MacroFrame<'a> {
     opener: &'a MacroDirective,
     parent: Vec<SourcePathStep>,
-    branches: Vec<&'a MacroDirective>,
+    branches: Vec<(&'a MacroDirective, usize)>,
     item: usize,
 }
 
@@ -348,9 +358,11 @@ impl SourceInventory {
             source_id: format!("source:{}:{}:{kind:?}", span.start, span.end),
             kind,
             span,
+            branch_end: None,
             selection,
             name,
             written_kind: None,
+            declaration_metadata: None,
             path: self.path_at(selection.start).to_vec(),
             parent: None,
             tags: BTreeMap::new(),
@@ -412,7 +424,7 @@ impl SourceInventory {
                 stack.push(MacroFrame {
                     opener: directive,
                     parent: path.clone(),
-                    branches: vec![directive],
+                    branches: vec![(directive, item)],
                     item,
                 });
                 path.push(SourcePathStep {
@@ -425,7 +437,7 @@ impl SourceInventory {
                 if let Some(frame) = stack.last_mut()
                     && conditional(&frame.opener.kind)
                 {
-                    frame.branches.push(directive);
+                    frame.branches.push((directive, item));
                     path.clone_from(&frame.parent);
                     path.push(SourcePathStep {
                         opener: frame.opener.span,
@@ -439,28 +451,24 @@ impl SourceInventory {
                     || kind == "endfor" && frame.opener.kind == "for"
             }) {
                 self.items[frame.item].span.end = directive.span.end;
-                self.folds.push(region(Span {
-                    start: frame.opener.span.start,
-                    end: directive.span.end,
-                }));
                 if conditional(&frame.opener.kind) {
-                    for (index, branch) in frame.branches.iter().enumerate() {
-                        let start = if index == 0 {
-                            let end = branch.span.end as usize;
-                            if end > 0 && text.as_bytes()[end - 1] == b'\n' {
-                                end
-                            } else {
-                                next_line(text, end)
-                            }
-                        } else {
-                            branch.span.start as usize
-                        };
-                        let boundary = frame.branches.get(index + 1).unwrap_or(&directive);
+                    for (index, (branch, item)) in frame.branches.iter().enumerate() {
+                        let start = branch.span.start as usize;
+                        let boundary = frame
+                            .branches
+                            .get(index + 1)
+                            .map_or(directive, |(branch, _)| *branch);
                         let end = line_start(text, boundary.span.start as usize);
+                        self.items[*item].branch_end = Some(end as u32);
                         if start < end {
                             self.folds.push(region(Span::new(start, end)));
                         }
                     }
+                } else {
+                    self.folds.push(region(Span {
+                        start: frame.opener.span.start,
+                        end: directive.span.end,
+                    }));
                 }
                 path = frame.parent;
                 self.contexts.push((directive.span.start, path.clone()));
@@ -554,7 +562,7 @@ impl SourceInventory {
             }
             self.items.push(row);
         }
-        for declaration in &model.written_declarations {
+        for (declaration_index, declaration) in model.written_declarations.iter().enumerate() {
             if !self.reserve(
                 budget,
                 1 + self.path_at(declaration.declaration.span.start).len(),
@@ -577,6 +585,36 @@ impl SourceInventory {
                 Some(name.to_owned()),
             );
             row.written_kind = Some(declaration.written_kind.clone());
+            let metadata = &declaration.declaration;
+            // The parser's declaration token range selects the name only.
+            // Adjacent retained names bound this name's trailing metadata.
+            let metadata_span = Span {
+                start: target.end,
+                end: model
+                    .written_declarations
+                    .get(declaration_index + 1)
+                    .filter(|next| next.statement_id == declaration.statement_id)
+                    .map_or(
+                        model.statements[declaration.statement_id].span.end,
+                        |next| next.declaration.span.start,
+                    ),
+            };
+            if (metadata.long_name.is_some() || metadata.tex_name.is_some())
+                && !intersects(&self.interpolations, metadata_span)
+            {
+                if !self.reserve(
+                    budget,
+                    std::mem::size_of::<SourceDeclarationMetadata>()
+                        + metadata.long_name.as_ref().map_or(0, String::len)
+                        + metadata.tex_name.as_ref().map_or(0, String::len),
+                ) {
+                    return;
+                }
+                row.declaration_metadata = Some(Box::new(SourceDeclarationMetadata {
+                    long_name: metadata.long_name.clone(),
+                    tex_name: metadata.tex_name.clone(),
+                }));
+            }
             self.items.push(row);
         }
         for equation in &model.written_equations {
@@ -991,6 +1029,26 @@ mod tests {
         // Guards union parsing turning alternative declarations into one binding.
         let text = "@#if UNKNOWN\nvar y;\n@#else\nparameters y;\n@#endif\n";
         let source = inventory(text);
+        // Presentation ranges must not shorten source inspection's conditional
+        // owner or enlarge a branch directive into its body.
+        let conditional = source
+            .items
+            .iter()
+            .find(|row| row.kind == SourceItemKind::Conditional)
+            .unwrap();
+        assert_eq!(
+            &text[conditional.span.start as usize..conditional.span.end as usize],
+            text.trim_end()
+        );
+        let branch = source
+            .items
+            .iter()
+            .find(|row| row.kind == SourceItemKind::Branch)
+            .unwrap();
+        assert_eq!(
+            &text[branch.span.start as usize..branch.span.end as usize],
+            "@#else"
+        );
         let candidates: Vec<_> = source
             .items
             .iter()

@@ -2,6 +2,22 @@
 
 ## v0.11.33
 
+- Remove the **Jump to equation...** CodeLens and its setting. The Command
+  Palette command remains available.
+- Model counts show **Source** or **Current config** in the status bar. The
+  hover shows selected macro choices and links to the configuration selector,
+  where **Source** resets the choices. The same item shows pending model work,
+  including macro expansion, and restores counts when the action finishes.
+- Hover inside inactive commands selects the requested option or name instead
+  of the command keyword at the start of the line.
+- Fold and collapse each macro conditional arm separately in the editor and
+  Outline. Collapsing `@#if` keeps `@#elseif` and `@#else` visible.
+- Outline activity labels describe the selected macro arm or loop body and
+  appear only on its controlling entry. Use the Outline toolbar filter to show
+  active entries, inactive entries or both.
+- Inactive Outline declarations keep available labels and type icons. Remove
+  source-candidate labels and endogenous timing from Outline. Equations with
+  included expressions have one entry, without duplicate model or fragment rows.
 - Choose one analysis configuration for a model root from the source editor or
   macro expansion preview. Set initial macro values, preview a definition or
   conditional branch, or save choices for later use. Saved configurations do

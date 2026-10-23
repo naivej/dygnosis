@@ -157,11 +157,58 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
         .text
         .get(item.span.start as usize..item.span.end as usize)
         .unwrap_or("");
-    let name = item.name.as_deref().unwrap_or("Written source");
+    // A containing statement supplies availability, not the hovered name.
+    // Reuse its retained lexical tokens for a precise inner token and range.
+    let (name, selection, option) = if item.selection.start <= byte && byte < item.selection.end {
+        (
+            item.name.as_deref().unwrap_or("Written source"),
+            item.selection,
+            None,
+        )
+    } else if item.kind == SourceItemKind::MacroDefinition {
+        // A preview receipt describes the whole written directive, including
+        // its keyword and replacement expression outside the defined name.
+        (
+            item.name.as_deref().unwrap_or("Written source"),
+            item.span,
+            None,
+        )
+    } else {
+        let tokens = &file.inventory.lexical_tokens;
+        let at = tokens.partition_point(|token| token.span.end <= byte);
+        let token = tokens.get(at).filter(|token| {
+            token.kind == TokenKind::Ident
+                && token.span.start <= byte
+                && byte < token.span.end
+                && item.span.start <= token.span.start
+                && token.span.end <= item.span.end
+        })?;
+        let name = token.text(&file.text);
+        let option = if item.kind == SourceItemKind::Command
+            && tokens
+                .get(at + 1)
+                .is_some_and(|next| next.kind == TokenKind::Eq)
+        {
+            item.name.as_deref().and_then(|command| {
+                syntax_intel::options(command)
+                    .find(|option| option.name.eq_ignore_ascii_case(name))
+                    .map(|option| (command, option))
+            })
+        } else {
+            None
+        };
+        (name, token.span, option)
+    };
     let mut message = format!("**{name}** · {}", availability_label(state));
     if let Some(cause) = availability.and_then(|row| row.cause.as_ref()) {
         message.push_str("\n\n");
         message.push_str(&cause.message);
+    }
+    if let Some((command, option)) = option {
+        message.push_str(&format!(
+            "\n\n**`{command}` option**: `{name}`\n\n{}",
+            option.summary
+        ));
     }
     if let Some(choice) = overridden {
         use crate::engine::analysis_configuration::AnalysisOverride;
@@ -210,10 +257,7 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
         message.push_str("\n\nThis is written source information. Model values, timing and equation numbers require a complete configuration that executes this code.");
     }
     let index = LineIndex::new(&file.text);
-    let mut hover = markdown_hover(
-        message,
-        Some(span_range(&index, &file.text, item.selection)),
-    );
+    let mut hover = markdown_hover(message, Some(span_range(&index, &file.text, selection)));
     label(inner, document, &mut hover);
     Some(hover)
 }

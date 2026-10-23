@@ -60,7 +60,7 @@ async fn nested_macro_and_branch_folds_do_not_hide_the_next_directive() {
     let text = "@#if UNKNOWN\nvar\ny;\n@#elseif OTHER\nparameters\np;\n@#else\n@#for co in COUNTRIES\nvar GDP_@{co}\nC_@{co};\n@#endfor\n@#endif\n";
     assert_eq!(
         folds(text).await,
-        vec![(0, 11), (1, 2), (3, 5), (4, 5), (6, 10), (7, 10), (8, 9)]
+        vec![(0, 2), (1, 2), (3, 5), (4, 5), (6, 10), (7, 10), (8, 9)]
     );
 }
 
@@ -69,7 +69,7 @@ async fn inactive_blocks_and_failed_macro_evaluation_keep_written_boundaries() {
     let text = "@#if 0\nmodel;\ny=0;\nend;\n@#else\nmodel(linear);\ny=1;\nend;\n@#endif\n@#error \"stop\"\nparameters\np;\n";
     assert_eq!(
         folds(text).await,
-        vec![(0, 8), (1, 3), (4, 7), (5, 7), (10, 11)]
+        vec![(0, 3), (1, 3), (4, 7), (5, 7), (10, 11)]
     );
 }
 
@@ -83,13 +83,13 @@ async fn repeated_macro_expansion_has_one_written_fold_per_start_line() {
 async fn conditional_variants_and_continued_directives_use_physical_lines() {
     for keyword in ["if", "ifdef", "ifndef"] {
         let text = format!("@#{keyword} UNKNOWN\nvar y;\nvar c;\n@#endif\n");
-        assert_eq!(folds(&text).await, vec![(0, 3), (1, 2)], "{keyword}");
+        assert_eq!(folds(&text).await, vec![(0, 2)], "{keyword}");
     }
     let text = "@#if UNKNOWN \\\\\n || OTHER\nvar y;\nvar c;\n@#else\nvar z;\n@#endif\n";
-    assert_eq!(folds(text).await, vec![(0, 6), (2, 3), (4, 5)]);
+    assert_eq!(folds(text).await, vec![(0, 3), (4, 5)]);
     assert_eq!(
         folds(&text.replace('\n', "\r\n")).await,
-        vec![(0, 6), (2, 3), (4, 5)]
+        vec![(0, 3), (4, 5)]
     );
 }
 
@@ -119,7 +119,7 @@ async fn incomplete_constructs_recover_later_complete_source_without_borrowing_c
     );
     assert_eq!(
         folds("@#if UNKNOWN\nmodel;\ny=0;\n@#else\nend;\n@#endif\nparameters\np;\n").await,
-        vec![(0, 5), (1, 2), (3, 4), (6, 7)]
+        vec![(0, 2), (3, 4), (6, 7)]
     );
     assert_eq!(
         folds("model;\ny=;\nend;\nparameters\np;\n").await,

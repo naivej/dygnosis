@@ -99,8 +99,8 @@ function service(options = {}) {
         onNotification: (_method, listener) => { client.notify = listener; return new Disposable(); },
         onDidChangeState: listener => { client.state = listener; return new Disposable(); },
         getFeature: request => ({ clear() { (host.clearedFeatures ??= []).push(request); }, unregister() {}, register() { ++host.symbols; } }),
-        sendRequest: (method, params) => Promise.resolve(method === "textDocument/documentLink"
-          ? host.links?.(params) ?? [] : model()),
+        sendRequest: (method, params, token) => _middleware.sendRequest(method, params, token, () => Promise.resolve(options.request
+          ? options.request(method, params, token) : method === "textDocument/documentLink" ? host.links?.(params) ?? [] : model())),
       };
       const managed = { client, disposed: false,
         start: () => { capture({ workspaceFolders: host.folders.map(folder => ({ uri: folder.uri.toString(), name: folder.name })), capabilities: {}, initializationOptions: settings }); if (!options.pending) initialized.resolve(); return initialized.promise; },
@@ -110,6 +110,36 @@ function service(options = {}) {
     },
   });
 }
+
+test("macro requests and native providers share activity that restart, server stop and shutdown clear", async context => {
+  // Guards activity missing direct executeCommand calls or surviving a retired server instance.
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  reset();
+  const root = Uri.parse("file:///workspace/root.mod"), request = { textDocument: { uri: root.toString() } };
+  const expansion = deferred(), hover = deferred(), final = deferred();
+  const client = service({ request: (method, params) => params?.command === "dynare/showEffectiveModel" ? expansion.promise
+    : method === "textDocument/hover" ? hover.promise : final.promise });
+  try {
+    await client.ensureStarted();
+    const old = client.execute("dynare/showEffectiveModel", [root.toString()]);
+    await flush(); context.mock.timers.tick(250);
+    assert.equal(client.modelActivity(root).label, "Expanding macros");
+    await client.restart(); assert.equal(client.modelActivity(root), undefined);
+    const current = client.client.sendRequest("textDocument/hover", request);
+    context.mock.timers.tick(250); assert.equal(client.modelActivity(root).label, "Loading hover");
+    expansion.resolve({}); await old;
+    assert.equal(client.modelActivity(root).label, "Loading hover");
+    client.client.state({ newState: languageClient.State.Stopped });
+    assert.equal(client.modelActivity(root), undefined);
+    hover.resolve(); await current;
+    await client.restart();
+    const last = client.client.sendRequest("textDocument/references", request);
+    context.mock.timers.tick(250); assert.equal(client.modelActivity(root).label, "Finding references");
+    await client.shutdown();
+    assert.equal(client.modelActivity(root), undefined);
+    final.resolve(); await last;
+  } finally { await client.shutdown(); }
+});
 
 test("restart closes the protocol before destroying the server input stream", async () => {
   // Guards Restart Language Server producing ERR_STREAM_DESTROYED or EPIPE on shutdown writes.

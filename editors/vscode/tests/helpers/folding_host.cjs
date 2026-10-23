@@ -45,11 +45,31 @@ async function checkFolding(service, workspaceRoot, evidence, { waitFor, writeOb
   const expected = [
     { start: 0, end: 3 }, { start: 5, end: 8 },
     { start: 10, end: 23 }, { start: 11, end: 22 },
-    { start: 12, end: 21 }, { start: 13, end: 14 },
+    { start: 12, end: 14 },
     { start: 15, end: 17 }, { start: 18, end: 20 },
   ];
   const actualBounds = ranges.map(({ start, end }) => ({ start, end }));
   assert.deepEqual(actualBounds, expected, "native provider must return exact unindented declaration, block, and branch fold boundaries");
+
+  const flatten = rows => rows.flatMap(row => [row, ...flatten(row.children ?? [])]);
+  let outline;
+  await waitFor(async () => {
+    outline = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", document.uri);
+    return flatten(outline ?? []).some(row => row.name === '@#for country in ["home", "foreign"]');
+  }, "native VS Code source Outline provider result");
+  const loop = flatten(outline).find(row => row.name === '@#for country in ["home", "foreign"]');
+  const arms = (loop.children ?? []).filter(row => /^@#(?:if|elseif|else)\b/.test(row.name));
+  const armBounds = arms.map(row => ({ name: row.name, start: row.range.start.line, end: row.range.end.line }));
+  assert.deepEqual(armBounds, [
+    { name: '@#if country == "home"', start: 12, end: 15 },
+    { name: '@#elseif country == "foreign"', start: 15, end: 18 },
+    { name: "@#else", start: 18, end: 21 },
+  ], "native Outline must keep conditional arms as siblings inside their loop");
+  for (const arm of arms) {
+    assert.ok(arm.children?.length > 0, `${arm.name} must retain its own source contents`);
+    assert.ok(flatten(arm.children).every(row => row.range.start.isAfterOrEqual(arm.range.start) && row.range.end.isBeforeOrEqual(arm.range.end)), `${arm.name} contents must stay inside their own arm`);
+  }
+  evidence.folding.outline_arms = armBounds;
 
   const realModel = "C:/Users/Shifu/Github/dynare/examples/macroprocessor/bkk_1992.mod";
   try {
@@ -127,12 +147,12 @@ async function checkNativeCommands(editor, evidence, waitFor) {
     const unfoldedLines = await assertLines([0, 1, 2, 3, 4], [], "Unfold restores the declaration body");
 
     editor.revealRange(new vscode.Range(12, 0, 16, 0), vscode.TextEditorRevealType.AtTop);
-    cursorAt(13);
+    cursorAt(12);
     await vscode.commands.executeCommand("editor.fold");
-    const firstBranchLines = await assertLines([13, 15], [14], "first branch fold keeps the @#elseif directive visible");
-    cursorAt(13);
+    const firstBranchLines = await assertLines([12, 15], [13, 14], "@#if fold keeps the @#elseif directive visible");
+    cursorAt(12);
     await vscode.commands.executeCommand("editor.unfold");
-    await assertLines([13, 14, 15], [], "Unfold restores the first macro branch");
+    await assertLines([12, 13, 14, 15], [], "Unfold restores the first macro branch");
 
     editor.revealRange(new vscode.Range(18, 0, 21, 0), vscode.TextEditorRevealType.AtTop);
     cursorAt(18);

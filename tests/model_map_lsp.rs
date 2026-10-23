@@ -435,6 +435,130 @@ async fn model_info_shares_counts_keeps_metadata_and_supplies_exact_lens_anchors
 }
 
 #[tokio::test]
+async fn outline_equation_with_includes_has_one_owner_and_no_fragment_rows() {
+    // Guards one equation becoming a row for every include-separated segment,
+    // duplicate model containers, and fragment containers in included files.
+    for newline in ["\n", "\r\n"] {
+        let root = url("equation-pieces.mod");
+        let expression = url("expression.inc");
+        let correction = url("correction.inc");
+        let text = "var y;\nmodel;\n[name='joined'] y=1+(\n@#include \"expression.inc\"\n)+(\n@#include \"correction.inc\"\n);\nend;\n".replace('\n', newline);
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        open(server, &expression, "y(-1)\n").await;
+        open(server, &correction, "0\n").await;
+        open(server, &root, &text).await;
+        assert_eq!(info(server, &root, None).await["n_equations"], 1);
+        let rows = symbols(server, &root).await;
+        assert_local_tree(&rows, &text, None);
+        let mut entries = Vec::new();
+        all(&rows, &mut entries);
+        assert_eq!(
+            entries.iter().filter(|row| row.name == "model").count(),
+            1,
+            "{rows:?}"
+        );
+        let equations: Vec<_> = entries
+            .iter()
+            .filter(|row| row.kind == SymbolKind::OPERATOR)
+            .collect();
+        assert_eq!(equations.len(), 1, "{rows:?}");
+        assert_eq!(equations[0].name, "1 · joined");
+        assert_eq!(equations[0].selection_range.start, Position::new(2, 0));
+        assert!(entries.iter().all(|row| !row.name.contains("fragment")));
+        for include in [&expression, &correction] {
+            assert!(
+                symbols(server, include).await.is_empty(),
+                "an expression suffix is not a separate equation"
+            );
+        }
+        server
+            .did_change_configuration(DidChangeConfigurationParams {
+                settings: json!({"outline":{"activity":"inactive"}}),
+            })
+            .await;
+        assert!(
+            symbols(server, &root).await.is_empty(),
+            "split active equations must not leak into the Inactive filter"
+        );
+    }
+}
+
+#[tokio::test]
+async fn outline_inactive_declarations_keep_metadata_and_icons_without_timing_or_candidate_labels()
+{
+    // Guards inactive names losing their literal metadata/type icons and
+    // active endogenous names still displaying timing in Outline.
+    let root = url("outline-metadata.mod");
+    let text = "@#if 0\nvar hidden $Y$ (long_name='Output');\nvarexo hidden_e $E$ (long_name='Shock');\nparameters hidden_p $P$ (long_name='Value');\n@#else\nvar live $Y$ (long_name='Output');\nvarexo live_e $E$ (long_name='Shock');\nparameters live_p $P$ (long_name='Value');\n@#endif\nmodel; live=live(-1)+live_e; end;\n";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open(server, &root, text).await;
+    let rows = symbols(server, &root).await;
+    let mut entries = Vec::new();
+    all(&rows, &mut entries);
+    for (inactive, active, icon, detail) in [
+        ("hidden", "live", SymbolKind::VARIABLE, "Output · $Y$"),
+        ("hidden_e", "live_e", SymbolKind::FIELD, "Shock · $E$"),
+        ("hidden_p", "live_p", SymbolKind::NUMBER, "Value · $P$"),
+    ] {
+        for name in [inactive, active] {
+            let row = entries.iter().find(|row| row.name == name).unwrap();
+            assert_eq!(row.detail.as_deref(), Some(detail), "{row:?}");
+            assert_eq!(row.kind, icon, "{row:?}");
+        }
+    }
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: json!({"nameDetails":{"longName":false,"tex":false}}),
+        })
+        .await;
+    let rows = symbols(server, &root).await;
+    let mut entries = Vec::new();
+    all(&rows, &mut entries);
+    for name in ["hidden", "live", "hidden_e", "live_e", "hidden_p", "live_p"] {
+        assert!(
+            entries
+                .iter()
+                .find(|row| row.name == name)
+                .unwrap()
+                .detail
+                .is_none()
+        );
+    }
+}
+
+#[tokio::test]
+async fn outline_keeps_literal_metadata_but_omits_unexpanded_metadata() {
+    // Guards an inert interpolation placeholder being shown as a real label.
+    let root = url("outline-literal-metadata.mod");
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open(server, &root, "@#if 0\nvar literal $L$ (long_name='Literal') templated $@{TEX}$ (long_name='@{LABEL}');\n@#endif\nvar y; model; y=0; end;\n").await;
+    let rows = symbols(server, &root).await;
+    let mut entries = Vec::new();
+    all(&rows, &mut entries);
+    assert_eq!(
+        entries
+            .iter()
+            .find(|row| row.name == "literal")
+            .unwrap()
+            .detail
+            .as_deref(),
+        Some("Literal · $L$")
+    );
+    assert!(
+        entries
+            .iter()
+            .find(|row| row.name == "templated")
+            .unwrap()
+            .detail
+            .is_none(),
+        "unexpanded metadata must not show inert placeholders"
+    );
+}
+
+#[tokio::test]
 async fn outline_and_folding_are_local_for_split_blocks_and_every_supported_kind() {
     let root = url("split.mod");
     let body = url("body.inc");
@@ -452,11 +576,7 @@ async fn outline_and_folding_are_local_for_split_blocks_and_every_supported_kind
     all(&local, &mut flat);
     assert!(!flat.iter().any(|row| row.name.ends_with("body")));
     let child_rows = symbols(server, &body).await;
-    let fragment = child_rows
-        .iter()
-        .find(|row| row.name == "model (fragment)")
-        .unwrap();
-    assert!(fragment.detail.is_none());
+    assert!(child_rows.iter().all(|row| !row.name.contains("fragment")));
     let mut flat = Vec::new();
     all(&child_rows, &mut flat);
     assert!(flat.iter().any(|row| row.name == "1 · body"));
@@ -502,6 +622,256 @@ async fn outline_and_folding_are_local_for_split_blocks_and_every_supported_kind
     assert_eq!(incomplete["complete"], false);
     assert!(incomplete.get("n_equations").is_none());
     assert!(incomplete["equations"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn conditional_outline_arms_are_siblings_with_their_own_contents() {
+    // Guards the opening arm hiding its siblings, branch headings losing their
+    // contents, and nested loops or conditionals escaping their written arm.
+    for keyword in ["if", "ifdef", "ifndef"] {
+        for newline in ["\n", "\r\n"] {
+            let text = format!(
+                "@#define FLAG=0\n@#{keyword} FLAG\nparameters first;\n@#for k in [1]\n@#if k\nparameters inner;\n@#else\nparameters alternate;\n@#endif\n@#endfor\n@#elseif 1\nparameters second;\n@#else\nparameters last;\n@#endif\n"
+            )
+            .replace('\n', newline);
+            let root = url("conditional-outline.mod");
+            let (service, _socket) = new_service();
+            let server = service.inner();
+            open(server, &root, &text).await;
+            let rows = symbols(server, &root).await;
+            assert_local_tree(&rows, &text, None);
+            let arms: Vec<_> = rows
+                .iter()
+                .filter(|row| row.name.starts_with("@#"))
+                .collect();
+            assert_eq!(
+                arms.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
+                [
+                    format!("@#{keyword} FLAG"),
+                    "@#elseif 1".into(),
+                    "@#else".into()
+                ]
+            );
+            // Activity belongs to the selected arm, not to evaluation of its
+            // header or the preceding arm. Contents must not repeat it.
+            let first_active = keyword == "ifdef";
+            assert_eq!(
+                arms[0].detail.as_deref(),
+                Some(if first_active { "active" } else { "inactive" })
+            );
+            assert_eq!(
+                arms[1].detail.as_deref(),
+                Some(if first_active { "inactive" } else { "active" })
+            );
+            assert_eq!(arms[2].detail.as_deref(), Some("inactive"));
+            let mut entries = Vec::new();
+            all(&rows, &mut entries);
+            for row in entries.iter().filter(|row| !row.name.starts_with("@#")) {
+                assert!(
+                    !row.detail
+                        .as_deref()
+                        .unwrap_or_default()
+                        .split_whitespace()
+                        .any(|word| matches!(word, "active" | "inactive" | "mixed" | "unknown")),
+                    "{row:?}"
+                );
+            }
+            for (arm, start, end, declaration) in [
+                (arms[0], 1, 10, "first"),
+                (arms[1], 10, 12, "second"),
+                (arms[2], 12, 14, "last"),
+            ] {
+                assert_eq!(arm.range.start.line, start);
+                assert_eq!(arm.range.end, Position::new(end, 0));
+                let mut contents = Vec::new();
+                all(arm.children.as_deref().unwrap(), &mut contents);
+                assert!(contents.iter().any(|row| row.name == declaration));
+            }
+            let loop_row = arms[0]
+                .children
+                .as_ref()
+                .unwrap()
+                .iter()
+                .find(|row| row.name == "@#for k in [1]")
+                .unwrap();
+            let inner = loop_row.children.as_ref().unwrap();
+            assert_eq!(
+                inner
+                    .iter()
+                    .map(|row| row.name.as_str())
+                    .collect::<Vec<_>>(),
+                ["@#if k", "@#else"]
+            );
+            for (arm, start, end, declaration) in
+                [(&inner[0], 4, 6, "inner"), (&inner[1], 6, 8, "alternate")]
+            {
+                assert_eq!(arm.range.start.line, start);
+                assert_eq!(arm.range.end, Position::new(end, 0));
+                let mut contents = Vec::new();
+                all(arm.children.as_deref().unwrap(), &mut contents);
+                assert!(contents.iter().any(|row| row.name == declaration));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn outline_control_activity_handles_empty_nested_and_repeated_arms() {
+    // Guards body-token guesses mislabeling empty arms, nested exclusions or
+    // conditions that select different arms in separate loop/include visits.
+    // Incomplete or ownerless execution must not invent a selected arm.
+    let root = url("control-activity.mod");
+    let text = "@#if 0\n@#elseif 1\n@#else\n@#endif\n@#if 1\n@#if 0\n@#endif\n@#else\n@#if 1\n@#endif\n@#endif\n@#for k in [0,1]\n@#if k\n@#else\n@#endif\n@#endfor\n@#for empty in []\n@#if 1\n@#endif\n@#endfor\n";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open(server, &root, text).await;
+    let rows = symbols(server, &root).await;
+    let mut entries = Vec::new();
+    all(&rows, &mut entries);
+    for (line, expected) in [
+        (0, "inactive"),
+        (1, "active"),
+        (2, "inactive"),
+        (4, "active"),
+        (5, "inactive"),
+        (7, "inactive"),
+        (8, "inactive"),
+        (11, "active"),
+        (12, "mixed"),
+        (13, "mixed"),
+        (16, "inactive"),
+        (17, "inactive"),
+    ] {
+        let row = entries
+            .iter()
+            .find(|row| row.selection_range.start.line == line)
+            .unwrap();
+        assert_eq!(row.detail.as_deref(), Some(expected), "{row:?}");
+    }
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: json!({"outline":{"activity":"active"}}),
+        })
+        .await;
+    let rows = symbols(server, &root).await;
+    let mut visible = Vec::new();
+    all(&rows, &mut visible);
+    assert!(
+        visible
+            .iter()
+            .all(|row| row.detail.as_deref() != Some("inactive"))
+    );
+    assert!(
+        visible
+            .iter()
+            .any(|row| row.selection_range.start.line == 1)
+    );
+    assert!(
+        visible
+            .iter()
+            .any(|row| row.detail.as_deref() == Some("mixed"))
+    );
+    let child = url("control-activity.inc");
+    open(server, &child, "@#if k\n@#else\n@#endif\n").await;
+    open(
+        server,
+        &root,
+        "@#for k in [0,1]\n@#include \"control-activity.inc\"\n@#endfor\n",
+    )
+    .await;
+    assert!(
+        symbols(server, &child)
+            .await
+            .iter()
+            .all(|row| row.detail.as_deref() == Some("mixed"))
+    );
+    open(server, &root, "@#if MISSING\n@#else\n@#endif\n").await;
+    let unknown = symbols(server, &root).await;
+    assert_eq!(unknown.len(), 2);
+    assert!(
+        unknown
+            .iter()
+            .all(|row| row.detail.as_deref() == Some("unknown"))
+    );
+    let ownerless = url("ownerless-control.inc");
+    open(server, &ownerless, "@#if 1\n@#else\n@#endif\n").await;
+    let unknown = symbols(server, &ownerless).await;
+    assert_eq!(unknown.len(), 2);
+    assert!(
+        unknown
+            .iter()
+            .all(|row| row.detail.as_deref() == Some("unknown"))
+    );
+}
+
+#[tokio::test]
+async fn outline_activity_filter_prunes_semantic_and_source_rows_and_keeps_context() {
+    // Guards filtering only source candidates while leaving active semantic
+    // rows in Inactive, and losing containers needed for matching children.
+    let root = url("outline-filter.mod");
+    let text = "var y;\nmodel;\n@#if 0\n[name='dormant'] y=2;\n@#else\n[name='running'] y=1;\n@#endif\nend;\n";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open(server, &root, text).await;
+    for (filter, present, absent) in [
+        (
+            "active",
+            vec!["var", "y", "model", "@#else", "1 · running"],
+            vec!["@#if 0", "dormant"],
+        ),
+        (
+            "inactive",
+            vec!["model", "@#if 0", "dormant"],
+            vec!["var", "y", "@#else", "1 · running"],
+        ),
+        (
+            "both",
+            vec![
+                "var",
+                "y",
+                "model",
+                "@#if 0",
+                "dormant",
+                "@#else",
+                "1 · running",
+            ],
+            vec![],
+        ),
+    ] {
+        server
+            .did_change_configuration(DidChangeConfigurationParams {
+                settings: json!({"outline":{"activity":filter}}),
+            })
+            .await;
+        let rows = symbols(server, &root).await;
+        assert_local_tree(&rows, text, None);
+        let mut entries = Vec::new();
+        all(&rows, &mut entries);
+        for name in present {
+            assert!(
+                entries.iter().any(|row| row.name == name),
+                "{filter} missing {name}: {rows:?}"
+            );
+        }
+        for name in absent {
+            assert!(
+                entries.iter().all(|row| row.name != name),
+                "{filter} retained {name}: {rows:?}"
+            );
+        }
+        assert_eq!(
+            info(server, &root, None).await["n_equations"],
+            1,
+            "presentation must not change model facts"
+        );
+    }
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: json!({"outline":{"activity":"inactive"}}),
+        })
+        .await;
+    open(server, &root, "var y; model; y=0; end;\n").await;
+    assert!(symbols(server, &root).await.is_empty());
 }
 
 #[tokio::test]

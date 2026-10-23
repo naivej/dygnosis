@@ -86,7 +86,7 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
   const choose = async (invocation: Target, proof: AnalysisContext, placeHolder: string, actions = false): Promise<AnalysisSide | "save" | "inputs"> => {
     const saved = presets(invocation.root);
     const entries: (vscode.QuickPickItem & { side?: AnalysisSide; action?: "save" | "inputs" })[] = [
-      { label: "Source", description: "Use the written macro inputs", side: { analysis: {}, include_paths: null } },
+      { label: "Source", description: actions ? "Reset analysis configuration" : "Use the written macro inputs", side: { analysis: {}, include_paths: null } },
       ...saved.values.map(value => ({ label: value.name, description: "Saved configuration", side: presetSide(value, saved.folder!) })),
     ];
     if (actions) entries.push({ label: "Set macro inputs…", action: "inputs" }, { label: "Save current configuration…", action: "save" });

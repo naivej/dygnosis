@@ -11,7 +11,6 @@ export interface NavigationContext {
   info: ModelSnapshot;
   guard?: () => boolean;
 }
-export interface ModelBlockNavigationContext extends NavigationContext { blockIds: string[] }
 interface EquationPick extends vscode.QuickPickItem { equation: Equation }
 interface OwnerPick extends vscode.QuickPickItem { root: vscode.Uri; info: ModelSnapshot }
 function sourceLabel(location: Location | null): string {
@@ -50,7 +49,7 @@ function navigationCurrent(service: DygnosisClient, context: NavigationContext, 
     vscode.window.activeTextEditor?.document === context.document && context.document.version === context.version &&
     service.currentInstance === context.info.client_instance;
 }
-/** Reused by ordinary equation commands and the CodeLens block browser. */
+/** Reused by equation navigation and macro expansion previews. */
 export async function validateNavigationContext(service: DygnosisClient, context: NavigationContext,
   guard: () => boolean = () => true): Promise<ModelSnapshot | undefined> {
   const { document, version, root, info } = context;
@@ -79,24 +78,6 @@ async function jumpEquation(service: DygnosisClient, context: NavigationContext,
       !!currentRow?.location && sameWrittenLocation(currentRow.location, target);
   });
 }
-/** Browse only the explicit root and block occurrences from a validated lens. */
-export async function browseModelEquations(service: DygnosisClient, context: ModelBlockNavigationContext, active: () => boolean = () => true): Promise<void> {
-  await runCommand(service, () => browseEquations(service, context), active);
-}
-async function browseEquations(service: DygnosisClient, context: ModelBlockNavigationContext): Promise<void> {
-  const info = await validateNavigationContext(service, context);
-  if (!info) { refuse("The model changed. Choose the equation again."); }
-  const blocks = context.blockIds.map(id => info.statements.find(row => row.id === id));
-  if (!blocks.length || blocks.some(row => !row || row.name !== "model" || row.kind !== "block" ||
-      !row.complete || row.native || !row.lens_anchor)) { refuse("The model block is no longer available. Wait for its CodeLens to refresh."); }
-  const blockIds = new Set(context.blockIds);
-  const equations = info.equations.filter(equation => blockIds.has(equation.block_id));
-  if (!equations.length) { refuse("This model block has no surviving counted equations."); }
-  const pick = await vscode.window.showQuickPick(equationPicks(equations),
-    { placeHolder: "Jump to an equation before transformation", matchOnDescription: true, matchOnDetail: true });
-  if (pick) await jumpEquation(service, context, pick.equation);
-}
-
 /** Equation navigation and owner selection over the client's shared model facts. */
 export function registerModelNavigation(service: DygnosisClient): vscode.Disposable {
   let disposed = false;
@@ -157,8 +138,6 @@ export function registerModelNavigation(service: DygnosisClient): vscode.Disposa
   };
   const action = (run: () => Promise<void>) => (): Promise<void | undefined> => runCommand(service, run, () => !disposed);
   const listeners = [
-    vscode.commands.registerCommand("dygnosis.browseModelEquations", (context: ModelBlockNavigationContext) =>
-      browseModelEquations(service, { ...context, guard: () => !disposed && (context.guard?.() ?? true) }, () => !disposed)),
     vscode.commands.registerCommand("dygnosis.jumpToEquation", action(jumpToEquation)),
     vscode.commands.registerCommand("dygnosis.chooseModelOwner", action(chooseOwner)),
   ];

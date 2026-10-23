@@ -723,7 +723,7 @@ async fn invalid_settings_normalize_duplicates_and_fall_back_to_defaults() {
         "schemaVersion":1,"folders":[],"loose":{
             "formatIndent":-1,"searchPaths":[null,"lib","lib"],
             "nameDetails":{"longName":"false","tex":false},
-            "outline":{"sections":["equations","bad","equations","blocks"],"equationNumbers":null},
+            "outline":{"sections":["equations","bad","equations","blocks"],"equationNumbers":null,"activity":"invalid"},
             "parameterValueHints":"false"
         }
     }}}))).await.unwrap();
@@ -732,6 +732,10 @@ async fn invalid_settings_normalize_duplicates_and_fall_back_to_defaults() {
     assert!(!preferences.name_details.tex);
     assert_eq!(preferences.outline.sections, ["equations", "blocks"]);
     assert!(preferences.outline.equation_numbers);
+    assert_eq!(
+        preferences.outline.activity,
+        dygnosis::server::settings::OutlineActivity::Both
+    );
     assert!(preferences.parameter_value_hints);
     backend
         .did_change_configuration(DidChangeConfigurationParams {

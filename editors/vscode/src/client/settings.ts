@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 
 export const outlineSections = ["declarations", "blocks", "commands", "dimensions", "equations"];
+export const outlineActivities = ["both", "active", "inactive"] as const;
+export type OutlineActivity = typeof outlineActivities[number];
 export type Log = (message: string) => void;
 /** Macro tint changes no server input; simultaneous engine-setting changes still do. */
 export function macroTintOnlyChange(event: vscode.ConfigurationChangeEvent, resource?: vscode.Uri): boolean {
@@ -19,6 +21,12 @@ export function booleanSetting(key: string, resource: vscode.Uri | undefined, fa
   if (typeof value === "boolean") return value;
   log(`Invalid dynare.${key}; using ${String(fallback)}.`);
   return fallback;
+}
+export function outlineActivitySetting(resource: vscode.Uri | undefined, log: Log): OutlineActivity {
+  const value = valueSetting("outline.activity", resource, "both");
+  if (typeof value === "string" && outlineActivities.some(option => option === value)) return value as OutlineActivity;
+  log("Invalid dynare.outline.activity; using both.");
+  return "both";
 }
 export function listSetting(key: string, resource: vscode.Uri | undefined, allowed: string[], fallback: string[], log: Log): string[] {
   const value = valueSetting(key, resource, fallback);
@@ -53,7 +61,7 @@ export function engineSettings(resource: vscode.Uri | undefined, log: Log) {
     outline: {
       sections: listSetting("outline.sections", resource, outlineSections, outlineSections, log),
       equationNumbers: booleanSetting("outline.equationNumbers", resource, true, log),
-      inactiveSource: booleanSetting("outline.inactiveSource", resource, true, log),
+      activity: outlineActivitySetting(resource, log),
     },
     parameterValueHints: booleanSetting("parameterValueHints", resource, true, log),
   };

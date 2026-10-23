@@ -18,8 +18,8 @@ For model structure, open VS Code's **Outline** while the preview is active.
 
 The source editor and macro expansion preview use one analysis configuration
 for the model root. To change it, run **Dynare: Select Analysis Configuration**
-from either view or use the model status. The selector starts with **Source**,
-which uses the macro inputs written in the model. Choose **Set macro inputs…**
+from either view or use the model status. Select **Source** to reset the
+configuration to the macro inputs written in the model. Choose **Set macro inputs…**
 to enter initial values, or select a saved configuration for this root.
 
 To change one written macro definition, place the cursor on it in the source
@@ -28,8 +28,8 @@ replacement expression or choose **Skip this definition**. To inspect another
 arm of a conditional, place the cursor in its chain and run **Dynare: Preview
 Macro Branch**; choose a listed arm or **No branch**. These choices affect the
 analysis and preview. They do not change the `.mod` or include file. The model
-status and preview title identify the selected configuration; previews are
-labelled.
+status hover shows the selected macro choices; the preview title identifies
+the selected configuration and labels previews.
 
 Run **Dynare: Reset Analysis Configuration** to return to **Source**. To save
 the current choices for later, run **Dynare: Save Analysis Configuration**

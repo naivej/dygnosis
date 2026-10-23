@@ -33,7 +33,13 @@ loose file).
 ## Model structure and counts
 
 Status bar model counts combine the aggregate model and all heterogeneous
-dimensions.
+dimensions. The label is **Source** for the model's written macro inputs and
+**Current config** when you select other analysis choices. Hover to see the
+macro choices and separate counts. Click **Current config** in the hover to
+select a configuration or reset to **Source**.
+
+While a model action is pending, the same item shows its activity, such as
+**Expanding macros…**. It returns to model counts when the action finishes.
 
 Toggle the status bar item with [Dynare › Status Bar:
 Enabled](settings:dynare.statusBar.enabled) and choose which counts appear (and
@@ -44,7 +50,6 @@ their order) in [Dynare › Status Bar: Counts](settings:dynare.statusBar.counts
 | Action | Result |
 |---|---|
 | **Dygnosis: Jump to equation...** in the Command Palette | Opens the **Jump to an equation before transformation** picker for every counted equation in the active model. |
-| Click **Jump to equation...** above a `model` block | Opens the equation picker filtered to that block ([Dynare › Code Lens: Model Equations](settings:dynare.codeLens.modelEquations)). |
 | Click **Find references** above a declaration | Runs **Find All References** for that symbol, or lets you pick a symbol when the declaration lists several ([Dynare › Code Lens: Declaration References](settings:dynare.codeLens.declarationReferences)). |
 | Click **Expand macros** above the first `model` block | Opens the macro expansion preview ([Dynare › Code Lens: Effective Model](settings:dynare.codeLens.effectiveModel)). |
 

@@ -148,6 +148,13 @@
         "icon": "$(organization)"
       },
       {
+        "command": "dygnosis.filterOutline",
+        "title": "Filter Outline by macro activity...",
+        "category": "Dygnosis",
+        "enablement": "dygnosis.analysisDocument",
+        "icon": "$(filter)"
+      },
+      {
         "command": "dygnosis.explainDiagnostic",
         "title": "Explain a check",
         "category": "Dygnosis"
@@ -368,6 +375,10 @@
       ],
       "commandPalette": [
         {
+          "command": "dygnosis.filterOutline",
+          "when": "dygnosis.analysisDocument"
+        },
+        {
           "command": "dygnosis.showNotFullyCheckedModels",
           "when": "!dygnosis.workspaceNotFullyCheckedOnly"
         },
@@ -413,6 +424,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "dygnosis.filterOutline",
+          "when": "view == outline && dygnosis.analysisDocument",
+          "group": "navigation@0"
+        },
         {
           "command": "dygnosis.showNotFullyCheckedModels",
           "when": "view == dygnosis.workspace && !dygnosis.workspaceNotFullyCheckedOnly",
@@ -583,7 +599,7 @@
             "type": "boolean",
             "default": true,
             "scope": "resource",
-            "description": "Show aggregate model counts in the status bar for the active .mod or .dyn."
+            "description": "Show model counts and pending model actions in the status bar for the active Dynare file or macro expansion."
           },
           "dynare.statusBar.counts": {
             "type": "array",
@@ -604,11 +620,13 @@
             "scope": "resource",
             "description": "Aggregate counts shown in the status bar, in this order. Empty hides the bar."
           },
-          "dynare.outline.inactiveSource": {
-            "type": "boolean",
-            "default": true,
+          "dynare.outline.activity": {
+            "type": "string",
+            "enum": ["both", "active", "inactive"],
+            "enumDescriptions": ["Show active and inactive entries.", "Show active entries.", "Show inactive entries."],
+            "default": "both",
             "scope": "resource",
-            "description": "Show recognizable inactive source entries in Outline and breadcrumbs. Availability follows the selected analysis configuration."
+            "description": "Filter Outline and breadcrumbs by macro activity in the selected configuration. Mixed and unknown entries remain visible in each mode. Containers remain when needed to show matching children."
           }
         }
       },
@@ -659,12 +677,6 @@
             ],
             "scope": "window",
             "description": "Locations for model actions. Commands remain in the Command Palette. An empty list hides toolbar and context-menu actions."
-          },
-          "dynare.codeLens.modelEquations": {
-            "type": "boolean",
-            "default": true,
-            "scope": "resource",
-            "description": "Jump to a surviving equation from each safely mapped model opener. Equation numbers are before transformation. Also respects editor.codeLens."
           },
           "dynare.codeLens.declarationReferences": {
             "type": "boolean",

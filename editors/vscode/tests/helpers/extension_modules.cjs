@@ -3,6 +3,7 @@ const path = require("node:path");
 
 const outputRoot = path.resolve(__dirname, "../../out");
 const moduleFiles = Object.freeze({
+  activity: "client/activity",
   analysis_configuration: "editor/analysis_configuration",
   source_candidates: "editor/source_candidates",
   binary: "client/binary",
@@ -25,6 +26,7 @@ const moduleFiles = Object.freeze({
   mcp: "mcp/mcp",
   model_navigation: "editor/model_navigation",
   origin_jumps: "editor/origin_jumps",
+  outline: "editor/outline",
   preview: "editor/preview",
   workspace_mcp: "mcp/workspace_mcp",
   workspace_status: "editor/workspace_status",

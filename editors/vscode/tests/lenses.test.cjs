@@ -104,8 +104,7 @@ Module._load = function(id, ...args) {
   };
   return originalLoad.call(this, id, ...args);
 };
-const { lensPreferences, modelLensGroups, declarationLensGroups, registerLenses } = require(compiledModule("lenses"));
-const { browseModelEquations } = require(compiledModule("model_navigation"));
+const { lensPreferences, declarationLensGroups, registerLenses } = require(compiledModule("lenses"));
 const { registerEffectivePreview } = require(compiledModule("preview"));
 Module._load = originalLoad;
 const lensContributions = { configuration: require("../package.json").contributes.configuration.find(group => group.title === "Dygnosis: Actions") };
@@ -140,7 +139,7 @@ function setup(doc = document(), extraDocs = []) {
     visible: new Emitter(), active: new Emitter(), edited: new Emitter(), opened: new Emitter(), closed: new Emitter(), configured: new Emitter(),
     loads: [], shown: [], languages: [], content: new Map() };
   const changed = new Emitter();
-  const service = { currentInstance: 1, roots: [], requests: [], validations: [], jumps: [], logged: [], engineRequests: [],
+  const service = { currentInstance: 1, roots: [], requests: [], validations: [], logged: [], engineRequests: [],
     log: message => service.logged.push(message), onDidChange: changed.event,
     ensureStarted: async () => {},
     rootForDocument: async current => {
@@ -156,12 +155,6 @@ function setup(doc = document(), extraDocs = []) {
       service.validations.push({ root: root.toString(), revision, instance, resource: resource.toString() });
       const info = service.fresh ? await service.fresh(root, resource) : await service.modelInfo(root, resource);
       return info?.revision === revision && instance === service.currentInstance ? info : undefined;
-    },
-    openLocation: async (target, root, guard) => {
-      const loaded = await vscode.workspace.openTextDocument(uri(target.uri));
-      if (guard && !await guard(loaded)) return;
-      service.jumps.push({ target, root: root.toString() });
-      await vscode.window.showTextDocument(loaded);
     },
     execute: async (command, args) => {
       service.engineRequests.push({ command, args });
@@ -179,85 +172,40 @@ function setup(doc = document(), extraDocs = []) {
     else host.settings[setting] = value;
     host.configured.fire({ affectsConfiguration: section => setting.startsWith(section) });
   };
-  host.commands.set("dygnosis.browseModelEquations", context => browseModelEquations(service, context));
-  return { host, doc, service, changed, registration, provider, token, provide, run, configure,
-    context: (extra = {}) => ({ document: doc, version: doc.version, root: service.root ?? doc.uri, info: facts(doc, { root_uri: (service.root ?? doc.uri).toString() }), blockIds: ["s1"], ...extra }) };
+  return { host, doc, service, changed, registration, provider, token, provide, run, configure };
 }
 
 test("resource controls use approved defaults and native visibility with safe invalid-value fallback", () => {
   const env = setup();
   const properties = lensContributions.configuration.properties;
-  for (const [key, fallback] of [["modelEquations", true], ["declarationReferences", false], ["effectiveModel", false]]) {
+  for (const [key, fallback] of [["declarationReferences", false], ["effectiveModel", false]]) {
     assert.equal(properties[`dynare.codeLens.${key}`].type, "boolean"); assert.equal(properties[`dynare.codeLens.${key}`].scope, "resource");
     assert.equal(properties[`dynare.codeLens.${key}`].default, fallback);
     env.host.settings[`dynare.codeLens.${key}`] = "false";
   }
-  assert.deepEqual(lensPreferences(env.doc, env.service.log), { modelEquations: true, declarationReferences: false, effectiveModel: false });
-  assert.equal(env.service.logged.length, 3); assert.ok(env.host.scopes.every(row => row.scope.languageId === "dynare"));
-  env.configure("editor.codeLens", false); assert.deepEqual(lensPreferences(env.doc, env.service.log), { modelEquations: false, declarationReferences: false, effectiveModel: false });
+  assert.deepEqual(lensPreferences(env.doc, env.service.log), { declarationReferences: false, effectiveModel: false });
+  assert.equal(env.service.logged.length, 2); assert.ok(env.host.scopes.every(row => row.scope.languageId === "dynare"));
+  env.configure("editor.codeLens", false); assert.deepEqual(lensPreferences(env.doc, env.service.log), { declarationReferences: false, effectiveModel: false });
   env.registration.dispose();
 });
-test("default actionable model lens reuses the cache facts and creates no reference scan or solver command", async () => {
+test("default settings expose no equation lens or model-information request", async () => {
   const env = setup(); const lenses = await env.provide();
-  assert.equal(lenses.length, 1); assert.equal(lenses[0].command.title, "Jump to equation...");
-  assert.equal(lenses[0].command.command, "dygnosis.browseLensEquations");
-  assert.deepEqual(lenses[0].range, new Range(3, 0, 3, 5)); assert.equal(env.service.requests.length, 1);
+  assert.deepEqual(lenses, []); assert.equal(env.service.requests.length, 0);
+  assert.equal(env.host.commands.has("dygnosis.browseLensEquations"), false);
+  assert.equal(Object.hasOwn(lensContributions.configuration.properties, "dynare.codeLens.modelEquations"), false);
   assert.equal(env.host.references.length, 0); assert.equal(env.service.engineRequests.length, 0);
-  env.host.answers.push(items => items[0]); await env.run(lenses[0]);
-  assert.equal(env.host.picks.length, 1); assert.equal(env.host.picks[0].options.placeHolder, "Jump to an equation before transformation");
-  assert.deepEqual(env.service.jumps, [{ target: location(undefined, 5), root: env.doc.uri.toString() }]); env.registration.dispose();
+  env.registration.dispose();
 });
-test("aggregate, heterogeneous and multiple model blocks keep their separate surviving rows", async () => {
-  const env = setup(); const blocks = [statement(), statement("s2", { lens_anchor: location(undefined, 20), dimension: "households", equation_count: 2 }),
-    statement("s3", { lens_anchor: location(undefined, 40), equation_count: 0 })];
-  const rows = [equation(), equation("e2", { block_id: "s2", scope: "dimension", dimension: "households", location: location("file:///workspace/hank.inc", 2) }),
-    equation("e3", { block_id: "s2", scope: "dimension", dimension: "households", number: 2 })];
-  env.service.info = () => facts(env.doc, { statements: blocks, equations: rows });
-  const lenses = await env.provide(); assert.deepEqual(lenses.map(row => row.command.title), ["Jump to equation...", "Jump to equation...", "Jump to equation..."]);
-  env.host.answers.push(items => items[0]); await env.run(lenses[1]);
-  assert.equal(env.host.picks[0].items.length, 2); assert.ok(env.host.picks[0].items.every(row => /households/.test(row.description)));
-  assert.equal(env.service.jumps[0].target.uri, "file:///workspace/hank.inc");
-  // The empty surviving block offers an action and explains its empty state.
-  env.host.activeEditor = env.host.editors[0]; await env.run(lenses[2]);
-  assert.match(env.host.messages.at(-1), /no surviving counted equations/); env.registration.dispose();
-});
-test("repeated macro openers list all occurrences and scopes in one searchable picker", async () => {
-  const env = setup();
-  const firstOrigin = [{ kind: "for", variable: "i", value: "1", segments: [] }], secondOrigin = [{ kind: "for", variable: "i", value: "2", segments: [] }];
-  const blocks = [statement("s1", { origin_frames: firstOrigin }),
-    statement("s2", { dimension: "firms", equation_count: 2, origin_frames: secondOrigin }),
-    statement("other", { lens_anchor: location(undefined, 20) })];
-  const rows = [equation("e1", { origin_frames: firstOrigin }),
-    equation("e2", { block_id: "s2", scope: "dimension", dimension: "firms", number: 1, name: "", origin_frames: secondOrigin }),
-    equation("e3", { block_id: "s2", scope: "dimension", dimension: "firms", number: 2, origin_frames: secondOrigin }),
-    equation("outside", { block_id: "other" })];
-  env.service.info = () => facts(env.doc, { statements: blocks, equations: rows });
-  const lenses = await env.provide(); assert.equal(lenses.length, 2); assert.equal(lenses[0].command.title, "Jump to equation...");
-  env.host.answers.push(items => items[2]); await env.run(lenses[0]);
-  assert.equal(env.host.picks.length, 1);
-  const { items, options } = env.host.picks[0];
-  assert.deepEqual(items.map(row => row.label), ["1 · Euler", "1 · Unnamed equation", "2 · Euler"]);
-  assert.deepEqual(items.map(row => row.equation.id), ["e1", "e2", "e3"]);
-  assert.match(items[0].detail, /i=1/); assert.match(items[1].detail, /i=2/);
-  assert.match(items[0].description, /Aggregate/); assert.match(items[1].description, /Dimension firms/);
-  assert.equal(options.matchOnDescription, true); assert.equal(options.matchOnDetail, true);
-  assert.equal(env.service.jumps.length, 1); env.registration.dispose();
-});
-test("removal/replacement counts only server surviving rows, without adding replacement or per-equation lenses", async () => {
-  const env = setup(); env.service.info = () => facts(env.doc, { statements: [statement("s1", { equation_count: 0 }),
-    statement("replacement", { name: "model_replace", equation_count: null, lens_anchor: null })],
-    equations: [equation("replacement:e", { block_id: "replacement" })] });
-  assert.deepEqual((await env.provide()).map(row => row.command.title), ["Jump to equation..."]); env.registration.dispose();
-});
-test("incomplete, partial, ambiguous mapping and unsafe anchors expose no authoritative lenses", () => {
-  const env = setup();
+
+test("incomplete, partial and unsafe model anchors expose no expansion lens", async () => {
+  const env = setup(); env.configure("dynare.codeLens.effectiveModel", true);
   for (const extra of [{ complete: false }, { statements: [statement("s1", { complete: false })] },
     { statements: [statement("s1", { native: true })] }, { statements: [statement("s1", { lens_anchor: null })] },
-    { statements: [statement("s1", { equation_count: null })] }, { statements: [statement("s1", { equation_count: 99 })] },
-    { equations: [equation("e1", { location: null })] }, { statements: [statement("s1", { lens_anchor: location(undefined, 100) })] },
+    { statements: [statement("s1", { lens_anchor: location(undefined, 100) })] },
     { statements: [statement("s1", { lens_anchor: location(undefined, 3, 59, 61) })] },
     { statements: [statement("s1", { lens_anchor: { ...location(), range: { start: { line: 3, character: 0 }, end: { line: 4, character: 5 } } } })] }]) {
-    assert.equal(modelLensGroups(facts(env.doc, extra), env.doc).length, 0);
+    env.service.info = () => facts(env.doc, extra);
+    assert.deepEqual(await env.provide(), []);
   }
   env.registration.dispose();
 });
@@ -269,12 +217,14 @@ test("file-local anchors never use include segments or guessed first-model locat
 });
 test("includes require a selected known owner and keep its root even for included mod files", async () => {
   for (const value of ["file:///workspace/shared.inc", "file:///workspace/part.mod"]) {
-    const env = setup(document(value));
+    const env = setup(document(value)); env.configure("dynare.codeLens.effectiveModel", true);
     if (value.endsWith(".inc")) { assert.equal((await env.provide()).length, 0); assert.equal(env.service.requests.length, 0); }
     env.service.root = uri("file:///owners/b.mod"); env.service.info = () => facts(env.doc, { root_uri: env.service.root.toString(),
-      statements: [statement("s1", { lens_anchor: location(value) })], equations: [equation("e1", { location: location(value, 5) })] });
+      statements: [statement("s1", { lens_anchor: location(value) })], first_model_anchor: location(value),
+      equations: [equation("e1", { location: location(value, 5) })] });
     const lenses = await env.provide(); assert.equal(lenses.length, 1); assert.equal(env.service.requests.at(-1).root, "file:///owners/b.mod");
-    env.host.answers.push(items => items[0]); await env.run(lenses[0]); assert.equal(env.service.jumps[0].root, "file:///owners/b.mod"); env.registration.dispose();
+    assert.equal(lenses[0].command.arguments[0].context.root.toString(), "file:///owners/b.mod");
+    env.registration.dispose();
   }
 });
 test("optional references group names and same-line statements, preserve retyping and request lazily", async () => {
@@ -285,7 +235,7 @@ test("optional references group names and same-line statements, preserve retypin
   env.service.info = () => facts(env.doc, { statements: [statement(), ...["decl1", "decl2", "macrocopy"].map(id =>
     statement(id, { kind: "declaration", name: "var", equation_count: null, lens_anchor: location(undefined, 1, 0, 3) }))], declarations });
   const lenses = await env.provide(); const lens = lenses.find(row => row.command.title === "Find references");
-  assert.equal(lenses.length, 2); assert.equal(env.host.references.length, 0);
+  assert.equal(lenses.length, 1); assert.equal(env.host.references.length, 0);
   assert.equal(declarationLensGroups(await env.service.modelInfo(env.doc.uri, env.doc.uri), env.doc)[0].declarations.length, 3);
   env.host.answers.push(items => items[1]); await env.run(lens);
   assert.deepEqual(env.host.picks[0].items.map(row => row.label), ["y", "beta", "z"]); assert.equal(env.host.picks[0].items[1].description, "parameter");
@@ -310,25 +260,27 @@ test("symbol-picker cancellation and stale selections never ask for references",
     assert.equal(env.host.references.length, 0, change); env.registration.dispose();
   }
 });
-test("native/feature off stops requests, invalidates old actions and reset restores defaults live", async () => {
-  const env = setup(); const old = (await env.provide())[0]; let events = 0;
+test("native/feature off stops requests and invalidates old actions; re-enabling restores lenses live", async () => {
+  const env = setup(); env.configure("dynare.codeLens.effectiveModel", true);
+  const preview = registerEffectivePreview(env.service); const old = (await env.provide())[0]; let events = 0;
   const listener = env.provider.onDidChangeCodeLenses(() => ++events);
-  for (const setting of ["dynare.codeLens.modelEquations", "editor.codeLens"]) {
+  for (const setting of ["dynare.codeLens.effectiveModel", "editor.codeLens"]) {
     env.configure(setting, false); const count = env.service.requests.length;
-    assert.deepEqual(await env.provide(), []); assert.equal(env.service.requests.length, count); await env.run(old); assert.equal(env.host.picks.length, 0);
-    delete env.host.settings[setting]; env.host.configured.fire({ affectsConfiguration: () => true }); assert.equal((await env.provide()).length, 1);
+    assert.deepEqual(await env.provide(), []); assert.equal(env.service.requests.length, count); await env.run(old); assert.equal(env.service.engineRequests.length, 0);
+    env.configure(setting, true); assert.equal((await env.provide()).length, 1);
   }
-  assert.equal(events, 4); assert.equal(env.service.currentInstance, 1); listener.dispose(); env.registration.dispose();
+  assert.equal(events, 4); assert.equal(env.service.currentInstance, 1); listener.dispose(); preview.dispose(); env.registration.dispose();
 });
 test("presentation controls resolve against the displayed resource in multiple folders", async () => {
   const other = document("file:///other/model.mod"); const env = setup(document(), [other]);
-  env.configure("dynare.codeLens.modelEquations", false, other.uri.toString());
+  env.configure("dynare.codeLens.effectiveModel", true); env.configure("dynare.codeLens.effectiveModel", false, other.uri.toString());
   assert.equal((await env.provide()).length, 1); assert.deepEqual(await env.provide(other), []);
   assert.equal(env.service.requests.length, 1); env.registration.dispose();
 });
 test("cancelled, superseded, hidden, closed, retyped and mismatched replies cannot restore lenses", async () => {
   for (const change of ["cancel", "superseded", "version", "owner", "instance", "hidden", "closed", "retyped", "rootReply", "documentReply", "versionReply", "instanceReply"]) {
-    const env = setup(); const late = deferred(); env.service.modelInfo = () => late.promise; const token = env.token();
+    const env = setup(); env.configure("dynare.codeLens.effectiveModel", true);
+    const late = deferred(); env.service.modelInfo = () => late.promise; const token = env.token();
     const pending = env.provide(env.doc, token); await flush(); const snapshot = facts(env.doc);
     if (change === "cancel") token.isCancellationRequested = true;
     if (change === "superseded") { env.service.modelInfo = async () => snapshot; await env.provide(); }
@@ -347,45 +299,13 @@ test("cancelled, superseded, hidden, closed, retyped and mismatched replies cann
 });
 test("unsupported resources and unavailable facts stay quiet without source parsing", async () => {
   for (const doc of [document("dygnosis-effective:/main.mod"), document("vscode-vfs:/main.mod"), document(undefined, { languageId: "plaintext" }), document(undefined, { isClosed: true })]) {
-    const env = setup(doc); assert.equal((await env.provide()).length, 0); assert.equal(env.service.requests.length, 0); env.registration.dispose();
+    const env = setup(doc); env.configure("dynare.codeLens.effectiveModel", true);
+    assert.equal((await env.provide()).length, 0); assert.equal(env.service.requests.length, 0); env.registration.dispose();
   }
-  const env = setup(); env.service.modelInfo = async () => undefined; assert.deepEqual(await env.provide(), []);
+  const env = setup(); env.configure("dynare.codeLens.effectiveModel", true);
+  env.service.modelInfo = async () => undefined; assert.deepEqual(await env.provide(), []);
   env.service.modelInfo = async () => { throw new Error("Unsupported schema"); }; assert.deepEqual(await env.provide(), []);
   assert.ok(env.service.logged.includes("Error: Unsupported schema")); assert.equal(env.host.messages.length, 0); env.registration.dispose();
-});
-test("block bridge validates root/revision/instance and refuses stale input during the picker and source loading", async () => {
-  for (const change of ["cancel", "version", "owner", "instance", "revision", "guard", "source"]) {
-    const env = setup(); const lens = (await env.provide())[0]; const pick = deferred(); env.host.answers.push(() => pick.promise);
-    const pending = env.run(lens); await flush(); assert.equal(env.host.picks.length, 1);
-    if (change === "version") ++env.doc.version;
-    if (change === "owner") env.service.root = uri("file:///other.mod");
-    if (change === "instance") ++env.service.currentInstance;
-    if (change === "revision") env.service.fresh = async () => undefined;
-    if (change === "guard") env.configure("dynare.codeLens.modelEquations", false);
-    if (change === "source") {
-      const loaded = deferred(); env.host.load = () => loaded.promise;
-      pick.resolve(env.host.picks[0].items[0]); await flush(); env.configure("editor.codeLens", false);
-      loaded.resolve(document()); await pending;
-    } else { pick.resolve(change === "cancel" ? undefined : env.host.picks[0].items[0]); await pending; }
-    assert.equal(env.service.jumps.length, 0, change); env.registration.dispose();
-  }
-});
-test("repeated-opener list cancellation and change prevent navigation", async () => {
-  for (const change of ["cancel", "version"]) {
-    const env = setup(); const info = facts(env.doc, { statements: [statement(), statement("s2")], equations: [equation(), equation("e2", { block_id: "s2" })] });
-    env.service.info = () => info; const lens = (await env.provide())[0]; const pick = deferred(); env.host.answers.push(() => pick.promise);
-    const pending = env.run(lens); await flush(); if (change === "version") ++env.doc.version;
-    pick.resolve(change === "cancel" ? undefined : env.host.picks[0].items[0]); await pending;
-    assert.equal(env.host.picks.length, 1); assert.equal(env.service.jumps.length, 0); env.registration.dispose();
-  }
-});
-test("a verified unopened include still opens when loading refreshes presentation without changing revision", async () => {
-  const env = setup(); const target = "file:///workspace/unopened.inc";
-  env.service.info = () => facts(env.doc, { equations: [equation("e1", { location: location(target, 7) })] });
-  const lens = (await env.provide())[0]; const loader = deferred(); env.host.load = () => loader.promise;
-  env.host.answers.push(items => items[0]); const pending = env.run(lens); await flush();
-  assert.equal(env.host.loads.length, 1); env.changed.fire(); loader.resolve(document(target)); await pending;
-  assert.deepEqual(env.service.jumps, [{ target: location(target, 7), root: env.doc.uri.toString() }]); env.registration.dispose();
 });
 test("effective lens needs a safe opener but does not need an authoritative equation count", async () => {
   const env = setup(); env.configure("dynare.codeLens.effectiveModel", true);
@@ -429,19 +349,13 @@ test("ordinary effective-preview menu URI arguments retain the native root picke
   assert.equal(env.host.shown.length, 1); assert.equal(env.service.validations.length, 0);
   preview.dispose(); env.registration.dispose();
 });
-test("dyn and untitled roots retain exact URI and mapped anchors", async () => {
-  for (const value of ["file:///workspace/main.DYN", "untitled:/scratch.mod"]) {
-    const env = setup(document(value)); env.service.info = () => facts(env.doc, { statements: [statement("s1", { lens_anchor: location(value) })], equations: [equation("e1", { location: location(value, 5) })] });
-    const lens = (await env.provide())[0]; env.host.answers.push(items => items[0]); await env.run(lens);
-    assert.equal(env.service.jumps[0].root, value); assert.equal(env.service.jumps[0].target.uri, value); env.registration.dispose();
-  }
-});
 test("disposal removes provider/commands/listeners and rejects pending replies and forged targets", async () => {
-  const env = setup(); const lens = (await env.provide())[0]; await env.host.commands.get("dygnosis.browseLensEquations")({ ...lens.command.arguments[0] });
-  assert.equal(env.host.picks.length, 0); const late = deferred(); env.service.modelInfo = () => late.promise;
+  const env = setup(); env.configure("dynare.codeLens.effectiveModel", true);
+  const lens = (await env.provide())[0]; await env.host.commands.get("dygnosis.showLensEffectiveModel")({ ...lens.command.arguments[0] });
+  assert.equal(env.host.executed.length, 0); const late = deferred(); env.service.modelInfo = () => late.promise;
   const pending = env.provide(); await flush(); env.registration.dispose(); late.resolve(facts(env.doc));
   assert.deepEqual(await pending, []); assert.ok(env.host.providers[0].disposed);
   for (const event of [env.changed, env.host.visible, env.host.active, env.host.edited, env.host.opened, env.host.closed, env.host.configured]) assert.equal(event.listeners.size, 0);
-  assert.equal(env.host.commands.has("dygnosis.browseLensEquations"), false); assert.equal(env.host.commands.has("dygnosis.findLensReferences"), false);
+  assert.equal(env.host.commands.has("dygnosis.showLensEffectiveModel"), false); assert.equal(env.host.commands.has("dygnosis.findLensReferences"), false);
   env.registration.dispose();
 });

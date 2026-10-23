@@ -11,6 +11,7 @@ import { configurationSnapshot, macroTintOnlyChange } from "./settings";
 import { AnalysisConfiguration, AnalysisContext, PresetBinding, ModelInfo, parseAnalysisContext, parseModelInfo, record, timingModifiers, tokenRoles } from "./protocol";
 import { renameSymbol } from "./rename";
 import { sameSourceUri as sameUri } from "./source_uri";
+import { ModelActivity, RequestActivity } from "./activity";
 
 interface ClientProcess extends ManagedClient { readonly client: LanguageClient }
 export interface ClientDependencies {
@@ -105,6 +106,8 @@ export interface InputInvalidation { root?: string; reason: "input" | "file" | "
 export class DygnosisClient implements vscode.Disposable {
   readonly output = vscode.window.createOutputChannel("Dygnosis");
   readonly middleware: Middleware = {};
+  private readonly activity = new RequestActivity();
+  readonly onDidChangeActivity = this.activity.onDidChange;
   private readonly lifecycle = new ClientLifecycle<ClientProcess>();
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChange = this.changed.event;
@@ -114,7 +117,7 @@ export class DygnosisClient implements vscode.Disposable {
   readonly onDidChangeAnalysis = this.analysisChanged.event;
   private readonly invalidated = new vscode.EventEmitter<InputInvalidation>();
   readonly onDidInvalidate = this.invalidated.event;
-  private readonly disposables: vscode.Disposable[] = [this.output, this.changed, this.invalidated, this.modelInfoUpdated, this.analysisChanged];
+  private readonly disposables: vscode.Disposable[] = [this.output, this.activity, this.changed, this.invalidated, this.modelInfoUpdated, this.analysisChanged];
   private analysisSupported = false;
   private readonly analysisAttempts = new Map<string, number>();
   private readonly acceptedAnalysis = new Map<string, number>();
@@ -217,6 +220,7 @@ export class DygnosisClient implements vscode.Disposable {
   get currentInstance(): number { return this.instance; }
   get supportsModelInfo(): boolean { return this.modelInfoSupported; }
   get supportsAnalysisConfiguration(): boolean { return this.analysisSupported; }
+  modelActivity(document: vscode.Uri, root?: vscode.Uri): ModelActivity | undefined { return this.activity.forDocument(document, root); }
   private pruneSourceLinks(source: vscode.Uri, version?: number): void {
     for (const [key, link] of this.includeLinks) if (sameUri(link.source, source) && link.version !== version) this.includeLinks.delete(key);
   }
@@ -265,6 +269,7 @@ export class DygnosisClient implements vscode.Disposable {
     this.invalidateInputs(file ? { root, reason: "file", uri: file.toString() } : { root, reason: "input", ...(inputRevision ? { inputRevision } : {}), ...(modelRevision ? { modelRevision } : {}) });
   }
   private invalidateLifecycle(): void {
+    this.activity.reset();
     ++this.instance;
     this.clearDocumentContexts();
     this.documentContextSupported = false;
@@ -328,7 +333,8 @@ export class DygnosisClient implements vscode.Disposable {
       if (this.closed || generation !== this.startGeneration) return;
       this.log(`LSP executable: ${binary.path}`);
       const create = this.dependencies.create ?? ((...args: ConstructorParameters<typeof ProcessClient>) => new ProcessClient(...args));
-      await this.lifecycle.replace(() => create(binary, this.output, this.middleware, configurationSnapshot(this.log), params => { this.lastInitializeParams = params; }), async managed => {
+      await this.lifecycle.replace(() => create(binary, this.output, this.activity.middleware(this.middleware, document => this.selectedOwners.get(document) ??
+        (isRootUri(vscode.Uri.parse(document)) && !this.ownedDocuments.has(document) ? document : undefined)), configurationSnapshot(this.log), params => { this.lastInitializeParams = params; }), async managed => {
         this.reportedFailure = undefined;
         const client = managed.client;
         client.getFeature(RenameRequest.method).clear();
@@ -355,7 +361,12 @@ export class DygnosisClient implements vscode.Disposable {
         this.invalidate();
         if (!this.modelInfoSupported) this.log("This engine does not support model information. Update dynare.serverPath or use the bundled binary.");
       });
-    } catch (error) { if (!this.closed && generation === this.startGeneration) throw new Error(`Dygnosis could not start. Reinstall the extension or check dynare.serverPath. ${String(error)}`, { cause: error }); }
+    } catch (error) {
+      if (!this.closed && generation === this.startGeneration) {
+        this.activity.reset();
+        throw new Error(`Dygnosis could not start. Reinstall the extension or check dynare.serverPath. ${String(error)}`, { cause: error });
+      }
+    }
   }
   async restart(): Promise<void> {
     if (this.closed) return;

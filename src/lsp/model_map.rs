@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use serde_json::{Value, json};
 use tower_lsp::lsp_types::*;
 
-use crate::engine::analysis::model_info::{TimingInfo, classify_variable_timing};
+use crate::engine::analysis::model_info::classify_variable_timing;
 use crate::engine::analysis::source_inventory::{SourceInventory, SourceItem, SourceItemKind};
 use crate::engine::analysis_configuration::SourceAvailability;
 use crate::engine::language::model::{Model, StatementKind, WrittenDeclaration};
@@ -93,6 +93,40 @@ fn range_key(range: Range) -> (u32, u32, u32, u32) {
         range.end.line,
         range.end.character,
     )
+}
+
+fn declaration_icon(kind: &str) -> SymbolKind {
+    match kind {
+        "parameters" => SymbolKind::NUMBER,
+        "varexo" | "varexo_det" => SymbolKind::FIELD,
+        "external_function" => SymbolKind::FUNCTION,
+        "heterogeneity_dimension" => SymbolKind::NAMESPACE,
+        _ => SymbolKind::VARIABLE,
+    }
+}
+
+fn declaration_detail(
+    kind: &str,
+    written_kind: &str,
+    long_name: Option<&str>,
+    tex_name: Option<&str>,
+    preferences: &PresentationSettings,
+) -> Option<String> {
+    let mut details = Vec::new();
+    if kind != written_kind {
+        details.push(kind.to_owned());
+    }
+    if preferences.name_details.long_name
+        && let Some(long) = long_name
+    {
+        details.push(long.to_owned());
+    }
+    if preferences.name_details.tex
+        && let Some(tex) = tex_name
+    {
+        details.push(format!("${tex}$"));
+    }
+    (!details.is_empty()).then(|| details.join(" · "))
 }
 
 /// Reuse written Outline labels over verified token positions in one display document.
@@ -267,6 +301,28 @@ impl<'a> WrittenView<'a> {
             .collect()
     }
 
+    /// Outline has one display extent per written file. Navigation and model
+    /// facts keep the exact, disjoint source segments in source_json.
+    fn outline_location(&self, source: &SourceOccurrence, require_owner: bool) -> Option<Location> {
+        if require_owner {
+            let owner = source.anchor.as_ref().or_else(|| source.segments.first())?;
+            if self.location(owner)?.uri != *self.uri {
+                return None;
+            }
+        }
+        let mut locations = source
+            .segments
+            .iter()
+            .filter_map(|segment| self.location(segment))
+            .filter(|location| location.uri == *self.uri);
+        let mut location = locations.next()?;
+        for next in locations {
+            location.range.start = location.range.start.min(next.range.start);
+            location.range.end = location.range.end.max(next.range.end);
+        }
+        Some(location)
+    }
+
     pub(crate) fn source_json(&self, source: &SourceOccurrence) -> Value {
         let locations: Vec<_> = source
             .segments
@@ -420,7 +476,6 @@ impl<'a> WrittenView<'a> {
         written: &WrittenDeclaration,
         location: Location,
         preferences: &PresentationSettings,
-        timing: &HashMap<String, TimingInfo>,
     ) -> DocumentSymbol {
         let declaration = &written.declaration;
         let kind = if self.final_types && self.authoritative {
@@ -430,38 +485,16 @@ impl<'a> WrittenView<'a> {
         } else {
             &written.written_kind
         };
-        let mut details = Vec::new();
-        if kind != written.written_kind {
-            details.push(kind.to_string());
-        }
-        if kind == "var"
-            && self.final_types
-            && self.authoritative
-            && let Some(timing) = timing.get(self.model.name(declaration.name))
-        {
-            details.push(timing.class.label().to_string());
-        }
-        if preferences.name_details.long_name
-            && let Some(long) = &declaration.long_name
-        {
-            details.push(long.clone());
-        }
-        if preferences.name_details.tex
-            && let Some(tex) = &declaration.tex_name
-        {
-            details.push(format!("${tex}$"));
-        }
-        let icon = match kind {
-            "parameters" => SymbolKind::NUMBER,
-            "varexo" | "varexo_det" => SymbolKind::FIELD,
-            "external_function" => SymbolKind::FUNCTION,
-            "heterogeneity_dimension" => SymbolKind::NAMESPACE,
-            _ => SymbolKind::VARIABLE,
-        };
         symbol(
             self.model.name(declaration.name).to_string(),
-            (!details.is_empty()).then(|| details.join(" · ")),
-            icon,
+            declaration_detail(
+                kind,
+                &written.written_kind,
+                declaration.long_name.as_deref(),
+                declaration.tex_name.as_deref(),
+                preferences,
+            ),
+            declaration_icon(kind),
             location.range,
             location.range,
             Vec::new(),
@@ -469,11 +502,6 @@ impl<'a> WrittenView<'a> {
     }
 
     pub fn symbols(&self, preferences: &PresentationSettings) -> Vec<DocumentSymbol> {
-        let timing = if self.final_types && self.authoritative {
-            classify_variable_timing(self.model)
-        } else {
-            HashMap::new()
-        };
         let enabled = |section: &str| {
             preferences
                 .outline
@@ -488,7 +516,7 @@ impl<'a> WrittenView<'a> {
             if statement.kind == StatementKind::Assignment {
                 continue;
             }
-            for location in self.local_locations(source) {
+            if let Some(location) = self.outline_location(source, false) {
                 let anchor = source
                     .anchor
                     .as_ref()
@@ -585,8 +613,7 @@ impl<'a> WrittenView<'a> {
                         .into_iter()
                         .filter(|location| contains(range, location.range))
                     {
-                        let child =
-                            self.declaration_symbol(declaration, location, preferences, &timing);
+                        let child = self.declaration_symbol(declaration, location, preferences);
                         if !children.contains(&child) {
                             children.push(child);
                         }
@@ -611,7 +638,7 @@ impl<'a> WrittenView<'a> {
                         written.text.chars().take(60).collect()
                     };
                     for location in self
-                        .local_locations(&row.source)
+                        .outline_location(&row.source, true)
                         .into_iter()
                         .filter(|location| contains(range, location.range))
                     {
@@ -717,7 +744,7 @@ impl<'a> WrittenView<'a> {
                 "block" => enabled("blocks") || (!dimensions.is_empty() && enabled("dimensions")),
                 _ => enabled("commands"),
             };
-            if show {
+            if show && !(kind == "block" && anchor.is_none()) {
                 let title = if (name == "model"
                     || (kind == "declaration" && matches!(name.as_str(), "var" | "varexo")))
                     && dimensions.len() == 1
@@ -725,8 +752,6 @@ impl<'a> WrittenView<'a> {
                     format!("{name}(heterogeneity={})", dimensions.first().unwrap())
                 } else if dimensions.len() > 1 || object_names.len() > 1 {
                     format!("{name} (multiple expansions)")
-                } else if anchor.is_none() && kind == "block" {
-                    format!("{name} (fragment)")
                 } else if let Some(object) = object_names.first() {
                     format!("{name}({object})")
                 } else {
@@ -794,7 +819,7 @@ impl<'a> WrittenView<'a> {
 }
 
 /// Merge written rows by their source locations. Accepted rows keep their
-/// semantic labels, timing and equation numbers; added rows make no such claim.
+/// semantic labels and equation numbers; added rows retain literal metadata.
 pub(crate) fn add_source_symbols(
     rows: &mut Vec<DocumentSymbol>,
     inventory: &SourceInventory,
@@ -812,9 +837,16 @@ pub(crate) fn add_source_symbols(
     let normalized = crate::engine::language::parser::normalize_newlines(text);
     let index = LineIndex::new(&normalized);
     let range = |span: Span| super::span_range(&index, &normalized, span);
-    fn flatten(mut row: DocumentSymbol, flat: &mut Vec<DocumentSymbol>) {
+    struct OutlineRow {
+        symbol: DocumentSymbol,
+        availability: SourceAvailability,
+    }
+    fn flatten(mut row: DocumentSymbol, flat: &mut Vec<OutlineRow>) {
         let children = row.children.take();
-        flat.push(row);
+        flat.push(OutlineRow {
+            symbol: row,
+            availability: SourceAvailability::Unknown,
+        });
         if let Some(children) = children {
             for child in children {
                 flatten(child, flat);
@@ -825,11 +857,16 @@ pub(crate) fn add_source_symbols(
     for row in rows.drain(..) {
         flatten(row, &mut flat);
     }
-    let mut selections: BTreeSet<_> = flat
+    let mut selections: BTreeMap<_, _> = flat
         .iter()
-        .map(|row| range_key(row.selection_range))
+        .enumerate()
+        .map(|(index, row)| (range_key(row.symbol.selection_range), index))
         .collect();
-    let mut spans: BTreeSet<_> = flat.iter().map(|row| range_key(row.range)).collect();
+    let mut spans: BTreeMap<_, _> = flat
+        .iter()
+        .enumerate()
+        .map(|(index, row)| (range_key(row.symbol.range), index))
+        .collect();
     for item in &inventory.items {
         let show = match item.kind {
             SourceItemKind::Declaration | SourceItemKind::MacroDefinition => {
@@ -843,32 +880,52 @@ pub(crate) fn add_source_symbols(
             SourceItemKind::Command => enabled("commands"),
             _ => false,
         };
+        let selection = range(item.selection);
+        let span = range(Span {
+            start: item.span.start,
+            end: item.branch_end.unwrap_or(item.span.end),
+        });
+        let state = availability(item);
+        if let Some(&existing) = selections
+            .get(&range_key(selection))
+            .or_else(|| spans.get(&range_key(span)))
+        {
+            flat[existing].availability = state;
+            continue;
+        }
         if !show {
             continue;
         }
-        let selection = range(item.selection);
-        let span = range(item.span);
-        if selections.contains(&range_key(selection)) || spans.contains(&range_key(span)) {
-            continue;
-        }
-        let state = availability(item);
-        if state == SourceAvailability::Inactive && !preferences.outline.inactive_source {
-            continue;
-        }
-        let status = match state {
-            SourceAvailability::Active => "active",
-            SourceAvailability::Inactive => "inactive",
-            SourceAvailability::Mixed => "mixed",
-            SourceAvailability::Unknown => "unknown",
-        };
         let literal_candidate =
             item.kind == SourceItemKind::Declaration && item.span == item.selection;
-        let detail = if literal_candidate {
-            format!("source candidate · {status}")
-        } else if item.template {
-            format!("source template · {status}")
+        let detail = if matches!(
+            item.kind,
+            SourceItemKind::Conditional | SourceItemKind::Branch | SourceItemKind::Loop
+        ) {
+            Some(
+                match state {
+                    SourceAvailability::Active => "active",
+                    SourceAvailability::Inactive => "inactive",
+                    SourceAvailability::Mixed => "mixed",
+                    SourceAvailability::Unknown => "unknown",
+                }
+                .to_owned(),
+            )
+        } else if literal_candidate {
+            let kind = item.written_kind.as_deref().unwrap_or("var");
+            declaration_detail(
+                kind,
+                kind,
+                item.declaration_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.long_name.as_deref()),
+                item.declaration_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.tex_name.as_deref()),
+                preferences,
+            )
         } else {
-            status.into()
+            None
         };
         let name = item.name.clone().unwrap_or_else(|| {
             text.get(item.span.start as usize..item.span.end as usize)
@@ -892,7 +949,9 @@ pub(crate) fn add_source_symbols(
             name
         };
         let icon = match item.kind {
-            SourceItemKind::Declaration if literal_candidate => SymbolKind::VARIABLE,
+            SourceItemKind::Declaration if literal_candidate => {
+                declaration_icon(item.written_kind.as_deref().unwrap_or("var"))
+            }
             SourceItemKind::Declaration => SymbolKind::NAMESPACE,
             SourceItemKind::Equation => SymbolKind::OPERATOR,
             SourceItemKind::MacroDefinition if item.function => SymbolKind::FUNCTION,
@@ -900,40 +959,56 @@ pub(crate) fn add_source_symbols(
             SourceItemKind::Command => SymbolKind::EVENT,
             _ => SymbolKind::MODULE,
         };
-        selections.insert(range_key(selection));
-        spans.insert(range_key(span));
-        flat.push(symbol(
-            name,
-            Some(detail),
-            icon,
-            span,
-            selection,
-            Vec::new(),
-        ));
+        selections.insert(range_key(selection), flat.len());
+        spans.insert(range_key(span), flat.len());
+        flat.push(OutlineRow {
+            symbol: symbol(name, detail, icon, span, selection, Vec::new()),
+            availability: state,
+        });
     }
     // A single ordered stack groups only ranges that prove containment. It
     // avoids searching every existing Outline row for each source candidate.
-    flat.sort_by_key(|row| (row.range.start, std::cmp::Reverse(row.range.end)));
-    let mut stack: Vec<DocumentSymbol> = Vec::new();
-    fn finish(stack: &mut Vec<DocumentSymbol>, output: &mut Vec<DocumentSymbol>) {
+    flat.sort_by_key(|row| {
+        (
+            row.symbol.range.start,
+            std::cmp::Reverse(row.symbol.range.end),
+        )
+    });
+    let mut stack: Vec<OutlineRow> = Vec::new();
+    fn finish(
+        stack: &mut Vec<OutlineRow>,
+        output: &mut Vec<DocumentSymbol>,
+        activity: super::settings::OutlineActivity,
+    ) {
         let row = stack.pop().expect("nonempty Outline stack");
+        // Filter as the existing tree stack closes each row. Keep a container
+        // only when it matches or contains retained children.
+        if !activity.includes(row.availability)
+            && row.symbol.children.as_ref().is_none_or(Vec::is_empty)
+        {
+            return;
+        }
         if let Some(parent) = stack.last_mut() {
-            parent.children.get_or_insert_with(Vec::new).push(row);
+            parent
+                .symbol
+                .children
+                .get_or_insert_with(Vec::new)
+                .push(row.symbol);
         } else {
-            output.push(row);
+            output.push(row.symbol);
         }
     }
     for row in flat {
-        while stack
-            .last()
-            .is_some_and(|parent| parent.range == row.range || !contains(parent.range, row.range))
-        {
-            finish(&mut stack, rows);
+        while stack.last().is_some_and(|parent| {
+            parent.symbol.range == row.symbol.range
+                || !contains(parent.symbol.range, row.symbol.range)
+        }) {
+            finish(&mut stack, rows, preferences.outline.activity);
         }
         stack.push(row);
     }
     while !stack.is_empty() {
-        finish(&mut stack, rows);
+        finish(&mut stack, rows, preferences.outline.activity);
     }
 }
 

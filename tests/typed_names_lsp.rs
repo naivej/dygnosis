@@ -48,6 +48,44 @@ async fn help(server: &Backend, pos: TextDocumentPositionParams) -> Option<Hover
         .unwrap()
 }
 
+#[tokio::test]
+async fn inactive_command_hover_uses_the_requested_option_or_name() {
+    // Guards a containing inactive command returning its opener's text/range
+    // for an option or value, and borrowing a same-name active binding.
+    let source = "// café 🚀\nvar pac_rent;\nmodel; pac_rent=0; end;\n@#if 0\npac_model(model_name=pac_rent);\n@#endif\n";
+    for newline in ["\n", "\r\n"] {
+        let text = source.replace('\n', newline);
+        let document = uri("inactive-pac-hover.mod");
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        open(server, &document, &text).await;
+        for (needle, name, offset) in [
+            ("pac_model(", "pac_model", 0),
+            ("model_name=pac_rent", "model_name", 0),
+            ("model_name=pac_rent", "pac_rent", 11),
+        ] {
+            let start = position(&document, &text, needle, offset).position;
+            let query = position(&document, &text, needle, offset + 2);
+            let hover = help(server, query).await.expect("written token hover");
+            let message = markdown(&hover);
+            assert!(
+                message.starts_with(&format!("**{name}**")),
+                "{name}: {message}"
+            );
+            assert!(message.contains("inactive"), "{name}: {message}");
+            assert!(!message.contains("Timing:"), "{name}: {message}");
+            assert_eq!(
+                hover.range,
+                Some(Range::new(
+                    start,
+                    Position::new(start.line, start.character + name.len() as u32)
+                )),
+                "{name}: hover must select the requested written token"
+            );
+        }
+    }
+}
+
 fn markdown(hover: &Hover) -> &str {
     match &hover.contents {
         HoverContents::Markup(content) => &content.value,

@@ -125,7 +125,7 @@ function setup(doc = document()) {
 
 test("navigation registers independently with no tree, model refresh or background fact requests", async () => {
   const env = setup(); await flush();
-  assert.deepEqual([...env.host.commands.keys()].sort(), ["dygnosis.browseModelEquations", "dygnosis.chooseModelOwner", "dygnosis.jumpToEquation"]);
+  assert.deepEqual([...env.host.commands.keys()].sort(), ["dygnosis.chooseModelOwner", "dygnosis.jumpToEquation"]);
   assert.equal(env.service.requests.length, 0); assert.equal(env.host.contexts.size, 0);
   for (const event of [env.changed, env.host.active, env.host.visibility, env.host.edited, env.host.closed, env.host.configured]) {
     assert.equal(event.listeners.size, 0); event.fire();

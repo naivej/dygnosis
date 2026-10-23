@@ -39,16 +39,32 @@ Outline: Sections](settings:dynare.outline.sections) and toggle equation
 numbers in [Dynare › Outline: Equation
 Numbers](settings:dynare.outline.equationNumbers).
 
-Under declarations, each variable row shows its timing class, `long_name` and
-`$TeX$` label beside the name. Heterogeneous blocks and declarations include
+Under declarations, each variable row shows its `long_name` and `$TeX$` label
+beside the name. Inactive declarations show the same literal labels and type
+icons when available. Heterogeneous blocks and declarations include
 their dimension (such as `model(heterogeneity=households)`). Named `@#define`
 macros also appear as entries.
+
+An equation has one entry in the file where it starts, including when its
+expression continues through includes. Equations written entirely inside an
+include appear in that include's Outline.
+
+Each `@#if`, `@#elseif` and `@#else` arm has a separate Outline entry and folding
+range. Collapsing one arm keeps the next arm visible.
+Activity labels appear on these arm entries and `@#for` entries. They describe
+the selected arm or loop body; entries inside do not repeat the label.
+
+Click **Filter Outline by macro activity...** (the filter icon in the Outline
+toolbar) to choose **Active**, **Inactive** or **Both**. You can also use
+[Dynare › Outline: Activity](settings:dynare.outline.activity). Containers stay
+visible when needed for matching children. Repeated code can be active in
+some loop iterations or include visits and inactive in others; these mixed
+entries match both filters. Entries with unknown activity stay visible.
 
 ## Inactive source
 
 The Outline can show recognizable entries written in inactive macro branches
-and loop bodies, without active equation numbers. Use [Dynare: Outline: Inactive
-Source](settings:dynare.outline.inactiveSource) to hide or show them.
+and loop bodies, without active equation numbers.
 
 For a name that appears only in inactive source, place the cursor on the name
 and choose **Go to Source Candidate**. The picker labels each result

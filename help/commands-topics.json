@@ -8,6 +8,7 @@
   "dygnosis.treatAsRoot": "model-and-includes",
   "dygnosis.jumpToEquation": "model-and-includes",
   "dygnosis.chooseModelOwner": "model-and-includes",
+  "dygnosis.filterOutline": "navigate-code",
   "dygnosis.explainDiagnostic": "diagnostics",
   "dygnosis.showDiagnostic": "diagnostics",
   "dygnosis.showAllDiagnostics": "diagnostics",

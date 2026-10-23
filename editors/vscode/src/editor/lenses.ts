@@ -2,11 +2,10 @@ import { refuse, explainFailure } from "../client/refusal";
 import * as vscode from "vscode";
 import { documentSelector, DygnosisClient, isAnalysisDocument, ModelSnapshot } from "../client/client";
 import { sameWrittenLocation } from "./model_navigation";
-import type { Declaration, Location, ModelInfo, Statement } from "../client/protocol";
+import type { Declaration, Location, ModelInfo } from "../client/protocol";
 import { booleanSetting, Log } from "../client/settings";
 
-export interface LensPreferences { modelEquations: boolean; declarationReferences: boolean; effectiveModel: boolean }
-interface ModelGroup { anchor: Location; statements: Statement[] }
+export interface LensPreferences { declarationReferences: boolean; effectiveModel: boolean }
 interface DeclarationGroup { anchor: Location; declarations: Declaration[] }
 interface LensContext {
   document: vscode.TextDocument; version: number; root: vscode.Uri; info: ModelSnapshot;
@@ -19,7 +18,6 @@ export function lensPreferences(document: vscode.TextDocument, log: Log): LensPr
   if (typeof native !== "boolean") log("Invalid editor.codeLens; using true.");
   const visible = native !== false;
   return {
-    modelEquations: visible && booleanSetting("codeLens.modelEquations", document.uri, true, log),
     declarationReferences: visible && booleanSetting("codeLens.declarationReferences", document.uri, false, log),
     effectiveModel: visible && booleanSetting("codeLens.effectiveModel", document.uri, false, log),
   };
@@ -32,40 +30,9 @@ function safeAnchor(anchor: Location | null, document: vscode.TextDocument): anc
   return start.line === end.line && start.line < document.lineCount &&
     start.character < end.character && end.character <= document.lineAt(start.line).text.length;
 }
-function anchorKey(anchor: Location): string { return JSON.stringify(anchor.range); }
 function asRange(anchor: Location): vscode.Range {
   const { start, end } = anchor.range;
   return new vscode.Range(start.line, start.character, end.line, end.character);
-}
-/** One browser per written opener, retaining all execution identities. */
-function mappedModelGroups(info: ModelInfo, document: vscode.TextDocument): ModelGroup[] {
-  if (!info.complete) return [];
-  const groups = new Map<string, ModelGroup>();
-  for (const statement of info.statements) {
-    if (statement.name !== "model" || statement.kind !== "block" || !statement.complete || statement.native ||
-        !safeAnchor(statement.lens_anchor, document)) continue;
-    const key = anchorKey(statement.lens_anchor);
-    const group = groups.get(key) ?? { anchor: statement.lens_anchor, statements: [] };
-    group.statements.push(statement);
-    groups.set(key, group);
-  }
-  return [...groups.values()];
-}
-export function modelLensGroups(info: ModelInfo, document: vscode.TextDocument): ModelGroup[] {
-  const counts = new Map<string, { count: number; mapped: boolean }>();
-  for (const row of info.equations) {
-    const count = counts.get(row.block_id) ?? { count: 0, mapped: true };
-    ++count.count; count.mapped &&= row.location !== null;
-    counts.set(row.block_id, count);
-  }
-  return mappedModelGroups(info, document).filter(group => {
-    // A safe opener alone does not prove every equation's written location.
-    const safe = group.statements.every(statement => {
-      const rows = counts.get(statement.id) ?? { count: 0, mapped: true };
-      return statement.equation_count !== null && statement.equation_count === rows.count && rows.mapped;
-    });
-    return safe;
-  });
 }
 /** One reference action per written line; macro copies keep symbol choices. */
 export function declarationLensGroups(info: ModelInfo, document: vscode.TextDocument): DeclarationGroup[] {
@@ -146,14 +113,13 @@ export function registerLenses(service: DygnosisClient): vscode.Disposable {
           accepted.add(target);
           result.push(new vscode.CodeLens(asRange(anchor), { title, command, arguments: [target] }));
         };
-        const models = modelLensGroups(info, document);
-        if (preferences.modelEquations) for (const group of models) add("modelEquations", group.anchor,
-          group.statements.map(row => row.id), "Jump to equation...", "dygnosis.browseLensEquations");
         if (preferences.declarationReferences) for (const group of declarationLensGroups(info, document))
           add("declarationReferences", group.anchor, group.declarations.map(row => row.id), "Find references", "dygnosis.findLensReferences");
         if (preferences.effectiveModel && safeAnchor(info.first_model_anchor, document)) {
-          const first = mappedModelGroups(info, document).find(group => sameWrittenLocation(group.anchor, info.first_model_anchor!));
-          if (first) add("effectiveModel", first.anchor, first.statements.map(row => row.id), "Expand macros", "dygnosis.showLensEffectiveModel");
+          const first = info.statements.find(statement => statement.name === "model" && statement.kind === "block" &&
+            statement.complete && !statement.native && safeAnchor(statement.lens_anchor, document) &&
+            sameWrittenLocation(statement.lens_anchor, info.first_model_anchor!));
+          if (first) add("effectiveModel", info.first_model_anchor, [first.id], "Expand macros", "dygnosis.showLensEffectiveModel");
         }
         return current() ? result : [];
       } catch (error) { if (current()) service.log(String(error)); return []; }
@@ -171,16 +137,6 @@ export function registerLenses(service: DygnosisClient): vscode.Disposable {
   };
   const listeners = [
     vscode.languages.registerCodeLensProvider(documentSelector, provider),
-    vscode.commands.registerCommand("dygnosis.browseLensEquations", action(async (target, info) => {
-      const group = modelLensGroups(info, target.context.document).find(row => sameWrittenLocation(row.anchor, target.anchor));
-      if (!group || group.statements.map(row => row.id).join("\n") !== target.ids.join("\n")) { unavailable(); return; }
-      await vscode.commands.executeCommand("dygnosis.browseModelEquations", {
-        document: target.context.document, version: target.context.version, root: target.context.root, info,
-        // Opening an ordinary source overlay can refresh UI without changing
-        // its input revision. The navigation helper checks that revision again.
-        blockIds: target.ids, guard: () => contextCurrent(target.context, true, false),
-      });
-    })),
     vscode.commands.registerCommand("dygnosis.findLensReferences", action(async (target, info) => {
       const group = declarationLensGroups(info, target.context.document).find(row => row.anchor.range.start.line === target.anchor.range.start.line);
       if (!group || group.declarations.map(row => row.id).join("\n") !== target.ids.join("\n")) { unavailable(); return; }

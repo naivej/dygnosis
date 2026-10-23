@@ -48,6 +48,34 @@ async function input(text, waitFor) {
   await nativeWorkbench(send => send("Input.insertText", { text }));
   await press("Enter", "Enter", 13);
 }
+async function openConfigurationFromStatus(waitFor) {
+  let point;
+  await waitFor(async () => {
+    point = await nativeWorkbench(async send => {
+      const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+        "(() => { const item=[...document.querySelectorAll('.statusbar-item')].find(item=>item.id.endsWith('dygnosis.modelCounts')); const box=item?.getBoundingClientRect(); return box?.width && item.textContent.startsWith('Current config:') ? {x:box.x+box.width/2,y:box.y+box.height/2} : null; })()" });
+      return result.result.value;
+    });
+    return point;
+  }, "configured counts use Current config in the native status bar");
+  await nativeWorkbench(async send => {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 10, y: 10 });
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+  });
+  await waitFor(async () => nativeWorkbench(async send => {
+    const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+      "(() => { const hover=[...document.querySelectorAll('.monaco-hover .rendered-markdown')].find(item=>item.getClientRects().length && item.textContent.replaceAll(String.fromCharCode(160),' ').includes('Forced branch preview')); const link=[...hover?.querySelectorAll('a')??[]].find(item=>item.textContent==='Current config'); if(!link) return false; link.click(); return true; })()" });
+    return result.result.value;
+  }), "Current config hover link opens the configuration selector").catch(async error => {
+    const state = await nativeWorkbench(async send => {
+      const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+        "({status:[...document.querySelectorAll('.statusbar-item')].filter(item=>item.id.endsWith('dygnosis.modelCounts')).map(item=>item.outerHTML),hovers:[...document.querySelectorAll('.monaco-hover')].map(item=>item.outerHTML),point:document.elementFromPoint(" + point.x + "," + point.y + ")?.outerHTML})" });
+      return result.result.value;
+    });
+    error.message += `; native hover state=${JSON.stringify(state)}`;
+    throw error;
+  });
+}
 async function dismissOutcome(cause, waitFor) {
   await vscode.commands.executeCommand("notifications.showList");
   let outcome;
@@ -71,7 +99,7 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   assert.ok(process.env.DYGNOSIS_HOST_CDP_PORT, "Analysis acceptance uses native controls");
   await waitFor(() => service.supportsAnalysisConfiguration, "analysis configuration capability");
   const rootPath = path.join(workspaceRoot, "analysis.mod"), helperPath = path.join(workspaceRoot, "analysis-active.inc");
-  const source = '@#define FLAG = 1\nvar y;\n@#if 0\nparameters dormant_p;\n@#endif\nmodel;\n@#if FLAG\n@#include "analysis-active.inc"\n@#else\ny=2;\n@#endif\nend;\n';
+  const source = '@#define FLAG = 1\nvar y $Y$ (long_name=\'Output\');\n@#if 0\nparameters dormant_p $P$ (long_name=\'Dormant\');\n@#endif\nmodel;\n@#if FLAG\n@#include "analysis-active.inc"\n@#else\ny=2;\n@#endif\nend;\n';
   await writeObservedInput(service, helperPath, "y=1;\n");
   await writeObservedInput(service, rootPath, source);
   const document = await vscode.workspace.openTextDocument(rootPath);
@@ -84,12 +112,29 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   const dormantPosition = document.positionAt(source.indexOf("dormant_p"));
   const descendants = rows => (rows ?? []).flatMap(row => [row, ...descendants(row.children)]);
   let dormant;
+  async function assertBranchActivity(selected) {
+    let rows;
+    await waitFor(async () => {
+      rows = descendants(await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", document.uri));
+      return rows.find(row => row.name === "@#if 0")?.detail === "inactive" &&
+        rows.find(row => row.name === "@#if FLAG")?.detail === (selected ? "active" : "inactive") &&
+        rows.find(row => row.name === "@#else")?.detail === (selected ? "inactive" : "active");
+    }, "native Outline refreshes arm activity for the accepted configuration").catch(async error => {
+      error.message += `; analysis=${JSON.stringify((await context())?.analysis)}; arms=${JSON.stringify(rows?.filter(row => row.name.startsWith("@#")).map(row => ({name:row.name,detail:row.detail,range:row.selectionRange})))}`;
+      throw error;
+    });
+    for (const row of rows.filter(row => !row.name.startsWith("@#")))
+      assert.doesNotMatch(row.detail ?? "", /\b(?:active|inactive|mixed|unknown)\b/, `${row.name} repeats macro activity`);
+  }
   await waitFor(async () => {
     const rows = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", document.uri);
     dormant = descendants(rows).find(row => row.name === "dormant_p");
-    return dormant?.detail?.includes("inactive");
-  }, "native written Outline exposes the dormant declaration as inactive");
-  assert.match(dormant.detail, /source candidate.*inactive/);
+    return dormant?.detail === "Dormant · $P$";
+  }, "native written Outline exposes the dormant declaration without a repeated activity label");
+  await assertBranchActivity(true);
+  const startupRows = descendants(await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", document.uri));
+  assert.equal(startupRows.find(row => row.name === "dormant_p").kind, vscode.SymbolKind.Number);
+  assert.equal(startupRows.find(row => row.name === "y").detail, "Output · $Y$", "endogenous Outline metadata has no timing class");
   assert.equal(dormant.selectionRange.contains(dormantPosition), true);
   let dormantHover;
   await waitFor(async () => {
@@ -103,7 +148,55 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   assert.deepEqual(dormantDefinitions ?? [], [], "an inactive written declaration does not invent a semantic binding");
   assert.equal(hasExpansion(), false, "source-only provider requests do not open an expanded view");
   evidence.analysis_source_only = { outline: dormant.detail, hover: dormantHover, definitions: 0 };
-  evidence.checks.push("native source-only Outline and hover expose an inactive declaration without inventing a semantic binding or equation number");
+  evidence.checks.push("native source-only Outline labels controlling macro arms; dormant declaration hover keeps its inactive state without inventing a binding or equation number");
+  await vscode.commands.executeCommand("outline.focus");
+  const outlineHeader = await nativeWorkbench(async send => {
+    const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+      "(() => { const header=[...document.querySelectorAll('.pane-header')].find(item=>item.textContent==='Outline'); const box=header?.getBoundingClientRect(); return box?.width && box.height ? {x:box.x+box.width/2,y:box.y+box.height/2,collapsed:header.getAttribute('aria-expanded')==='false'} : null; })()" });
+    return result.result.value;
+  });
+  assert.ok(outlineHeader, "native Outline header is visible");
+  await nativeWorkbench(async send => {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: outlineHeader.x, y: outlineHeader.y });
+    if (outlineHeader.collapsed) for (const type of ["mousePressed", "mouseReleased"])
+      await send("Input.dispatchMouseEvent", { type, button: "left", clickCount: 1, x: outlineHeader.x, y: outlineHeader.y });
+  });
+  let filterPoint;
+  await waitFor(async () => {
+    filterPoint = await nativeWorkbench(async send => {
+      const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+        "(() => { const item=[...document.querySelectorAll('.action-label')].find(item=>item.getAttribute('aria-label')?.includes('Filter Outline by macro activity') && item.getClientRects().length); const box=item?.getBoundingClientRect(); return box?.width && box.height ? {x:box.x+box.width/2,y:box.y+box.height/2} : null; })()" });
+      return result.result.value;
+    });
+    return filterPoint;
+  }, "native Outline toolbar offers the activity filter").catch(async error => {
+    const state = await nativeWorkbench(async send => {
+      const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+        "({headers:[...document.querySelectorAll('.pane-header')].filter(item=>item.textContent.includes('Outline')).map(item=>item.outerHTML)})" });
+      return result.result.value;
+    });
+    error.message += `; native Outline state=${JSON.stringify(state)}`; throw error;
+  });
+  await waitFor(async () => nativeWorkbench(async send => {
+    const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+      "(() => { const item=[...document.querySelectorAll('.action-label')].find(item=>item.getAttribute('aria-label')?.includes('Filter Outline by macro activity') && item.getClientRects().length); if(!item || item.getAttribute('aria-disabled')==='true') return false; item.click(); return true; })()" });
+    return result.result.value;
+  }), "native Outline filter button opens its picker after layout settles");
+  await choose("Inactive", waitFor, false, "Show active, inactive, or both");
+  await waitFor(async () => {
+    const rows = descendants(await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", document.uri));
+    return rows.some(row => row.name === "dormant_p") && !rows.some(row => row.name === "@#if FLAG");
+  }, "Inactive filter removes active rows and retains dormant source");
+  for (const [label, matches] of [
+    ["Active", rows => !rows.some(row => row.name === "dormant_p") && rows.some(row => row.name === "@#if FLAG") && !rows.some(row => row.name === "@#else")],
+    ["Both", rows => rows.some(row => row.name === "dormant_p") && rows.some(row => row.name === "@#if FLAG") && rows.some(row => row.name === "@#else")],
+  ]) {
+    const selecting = vscode.commands.executeCommand("dygnosis.filterOutline");
+    await choose(label, waitFor, false, "Show active, inactive, or both"); await selecting;
+    await waitFor(async () => matches(descendants(await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", document.uri))), `${label} filter refreshes the native Outline provider`);
+  }
+  await assertBranchActivity(true);
+  evidence.checks.push("native Outline toolbar filter selects Inactive, Active and Both and refreshes the source provider without an editor change");
   const helper = await vscode.workspace.openTextDocument(helperPath);
   await vscode.window.showTextDocument(helper);
   await waitFor(async () => (await service.rootForDocument(helper))?.toString() === document.uri.toString(), "helper initially has its executed root");
@@ -115,6 +208,7 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   let selected = await context();
   assert.equal(selected.analysis.selection.preview, true);
   assert.equal(selected.analysis.configuration.overrides[0].kind, "branch");
+  await assertBranchActivity(false);
   assert.equal(document.getText(), source, "analysis preview does not edit written macros");
   await vscode.window.showTextDocument(helper);
   assert.equal((await service.rootForDocument(helper))?.toString(), document.uri.toString(), "a dormant helper retains the chosen root");
@@ -135,8 +229,8 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   const events = [];
   const inputEvents = service.onDidInvalidate(event => events.push({ kind: "input", ...event }));
   const analysisEvents = service.onDidChangeAnalysis(event => events.push({ kind: "analysis", generation: event.context.analysis.selection_generation }));
-  const resetting = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
-  await choose("Source", waitFor); await resetting;
+  await openConfigurationFromStatus(waitFor);
+  await choose("Source", waitFor);
   await waitFor(() => vscode.window.activeTextEditor?.document.uri.scheme === "dygnosis-effective" &&
     vscode.window.activeTextEditor.document.uri.toString() !== preview.uri.toString(), "successful Source refresh creates a new immutable URI").catch(async error => {
       error.message += `; events=${JSON.stringify(events)}; source=${JSON.stringify(await context())}; editors=${JSON.stringify(vscode.window.visibleTextEditors.map(editor=>({uri:editor.document.uri.toString(),text:editor.document.getText()})))}`;
@@ -147,6 +241,7 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   assert.match(preview.uri.path, /Source/); assert.match(preview.getText(), /y=1/);
   assert.match(originalPreview.uri.path, /Analysis preview/);
   assert.equal((await context()).analysis.selection.preview, false);
+  await assertBranchActivity(true);
   const loading = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
   await choose("Else preview", waitFor); await loading;
   await waitFor(() => vscode.window.activeTextEditor?.document.uri.scheme === "dygnosis-effective" &&
@@ -237,6 +332,17 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
     }
   } finally { await appearance.update("colorTheme", previousTheme, vscode.ConfigurationTarget.Workspace); }
   evidence.checks.push("native configuration controls support keyboard selection, cancellation, and dark, light, high-contrast dark/light themes");
+  const splitPath = path.join(workspaceRoot, "outline-split.mod"), expressionPath = path.join(workspaceRoot, "outline-expression.inc");
+  await writeObservedInput(service, expressionPath, "y(-1)\n");
+  await writeObservedInput(service, splitPath, 'var y;\nmodel;\n[name=\'joined\'] y=1+(\n@#include "outline-expression.inc"\n);\nend;\n');
+  const splitDocument = await vscode.workspace.openTextDocument(splitPath);
+  await vscode.window.showTextDocument(splitDocument);
+  await waitFor(async () => (await service.modelInfo(splitDocument.uri))?.complete === true, "included-expression model is complete");
+  const splitRows = descendants(await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", splitDocument.uri));
+  assert.equal(splitRows.filter(row => row.name === "model").length, 1);
+  assert.equal(splitRows.filter(row => row.name === "1 · joined").length, 1);
+  assert.ok(splitRows.every(row => !/fragment|source candidate|source template/.test(row.name + " " + row.detail)));
+  evidence.checks.push("native Outline keeps inactive literal metadata and type icons, omits endogenous timing, and shows one model/equation entry across included expressions without fragments");
 }
 
 module.exports = { checkAnalysisConfigurations };

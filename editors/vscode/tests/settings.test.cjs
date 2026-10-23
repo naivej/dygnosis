@@ -41,6 +41,21 @@ test("invalid values fall back and empty presentation lists remain empty", () =>
   assert.equal(booleanSetting("enabled", undefined, true, () => {}), true);
   assert.deepEqual(listSetting("sections", undefined, ["one"], ["one"], () => {}), []);
 });
+
+test("Outline activity choices resolve by resource and invalid values use Both", () => {
+  const logged = [];
+  globals["outline.activity"] = "inactive";
+  workspace["outline.activity"] = "active";
+  try {
+    let settings = configurationSnapshot(message => logged.push(message)).dynare.configuration;
+    assert.equal(settings.loose.outline.activity, "inactive");
+    assert.equal(settings.folders[0].settings.outline.activity, "active");
+    workspace["outline.activity"] = "invalid";
+    settings = configurationSnapshot(message => logged.push(message)).dynare.configuration;
+    assert.equal(settings.folders[0].settings.outline.activity, "both");
+    assert.ok(logged.includes("Invalid dynare.outline.activity; using both."));
+  } finally { delete globals["outline.activity"]; delete workspace["outline.activity"]; }
+});
 test("macro work settings reach each root scope and simultaneous tint changes reach the engine", () => {
   const { macroTintOnlyChange } = require(compiledModule("settings"));
   globals.macroWorkLimit = 500000;
