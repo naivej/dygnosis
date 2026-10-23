@@ -18,8 +18,10 @@ mod document_analysis;
 mod document_context;
 mod source_intelligence;
 mod workspace_checks;
+mod written_requests;
 
 mod ordering;
+mod parameter_hints;
 mod presentation_refresh;
 
 mod locals;
@@ -120,12 +122,10 @@ thread_local! {
     static VALUE_HINT_SOURCE_INDEXES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-fn value_hint_source_index(text: &str) -> LineIndex {
+fn value_hint_source_index(source: &crate::engine::workspace::SourceDocument) -> Arc<LineIndex> {
     #[cfg(test)]
     VALUE_HINT_SOURCE_INDEXES.with(|indexes| indexes.set(indexes.get() + 1));
-    let normalized = crate::engine::language::parser::normalize_newlines(text);
-    debug_assert_eq!(normalized.len(), text.len());
-    LineIndex::new(&normalized)
+    source.source_index()
 }
 
 fn value_hint_range(index: &LineIndex, text: &str, span: Span) -> Option<Range> {
@@ -180,6 +180,7 @@ struct Inner {
     routed_library: HashMap<Url, Vec<RoutedDiagnostic>>,
     workspace: Workspace,
     semantic_views: HashMap<Url, Arc<crate::engine::analysis::symbols::SemanticModel>>,
+    parameter_hints: HashMap<Url, Arc<parameter_hints::Entry>>,
     source_inspection_notices: HashMap<Url, String>,
     settings: SettingsStore,
     tracked_roots: HashMap<Url, String>,
@@ -206,6 +207,7 @@ impl Default for Inner {
             routed_library: HashMap::new(),
             workspace: Workspace::new(),
             semantic_views: HashMap::new(),
+            parameter_hints: HashMap::new(),
             source_inspection_notices: HashMap::new(),
             settings: SettingsStore::default(),
             tracked_roots: HashMap::new(),
@@ -817,6 +819,7 @@ impl Inner {
 pub struct Backend {
     client: Client,
     inner: Arc<Mutex<Inner>>,
+    written_sources: Arc<Mutex<HashMap<Url, crate::engine::workspace::SourceDocument>>>,
     workspace_wake: Arc<tokio::sync::Notify>,
     document_analysis_done: Arc<tokio::sync::Notify>,
     output_gate: Arc<tokio::sync::Mutex<()>>,
@@ -834,6 +837,7 @@ impl Backend {
         Self {
             client,
             inner: Arc::new(Mutex::new(Inner::default())),
+            written_sources: Arc::new(Mutex::new(HashMap::new())),
             workspace_wake: Arc::new(tokio::sync::Notify::new()),
             document_analysis_done: Arc::new(tokio::sync::Notify::new()),
             output_gate: Arc::new(tokio::sync::Mutex::new(())),
@@ -903,9 +907,19 @@ impl Backend {
         let mut inner = self.lock_inner();
         inner.document_analysis.retire_aliases(&uri);
         let key = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
+        let mut sources = self.written_sources.lock().unwrap();
         inner.docs.retain(|candidate, _| {
-            candidate == &uri
+            let keep = candidate == &uri
                 || crate::engine::workspace::include_resolver::normalize_uri(candidate.as_str())
+                    != key;
+            if !keep {
+                sources.remove(candidate);
+            }
+            keep
+        });
+        inner.parameter_hints.retain(|candidate, _| {
+            candidate != &uri
+                && crate::engine::workspace::include_resolver::normalize_uri(candidate.as_str())
                     != key
         });
         inner.align_workspace_root(&uri);
@@ -915,6 +929,9 @@ impl Backend {
         }
         inner.prepare_root(&uri);
         inner.workspace.update_document(uri.as_str(), &text);
+        if let Some(source) = inner.workspace.source_document(uri.as_str(), &key) {
+            sources.insert(uri.clone(), source);
+        }
         inner.docs.insert(
             uri.clone(),
             OpenDoc {
@@ -947,116 +964,19 @@ impl Backend {
             .unwrap_or_default()
     }
 
-    /// Some is a written-source result, including a proven empty result.
-    /// None leaves the existing model and source-availability providers in charge.
+    /// Written source may prove that no model hover result can exist.
     fn written_hover_at(&self, pos: &TextDocumentPositionParams) -> Option<Option<Hover>> {
-        use crate::engine::analysis::source_inventory::SourceItemKind;
-        let inner = self.lock_inner();
-        let text = &inner.document(&pos.text_document.uri)?.text;
-        let index = LineIndex::new(&crate::engine::language::parser::normalize_newlines(text));
-        let byte = index.offset_utf16(text, span_pos(pos.position));
-        let inventory = inner
-            .workspace
-            .source_inventory(pos.text_document.uri.as_str())?;
-        if !syntax_intel::hover_may_need_model(&inventory, text, byte) {
-            return Some(None);
-        }
-        let (word, span) = syntax_intel::candidate_word_at(text, byte)?;
-        if !crate::engine::catalog::syntax::records()
-            .iter()
-            .any(|record| {
-                record.name.eq_ignore_ascii_case(word)
-                    || record.kind == "macro_directive"
-                        && record
-                            .name
-                            .trim_start_matches("@#")
-                            .eq_ignore_ascii_case(word)
-                    || record
-                        .aliases
-                        .iter()
-                        .any(|alias| alias.eq_ignore_ascii_case(word))
-            })
+        let source = self.written_source(&pos.text_document.uri)?;
+        let result = written_requests::hover(&source, pos.position);
+        let sources = self.written_sources.lock().unwrap();
+        if sources
+            .get(&pos.text_document.uri)
+            .is_some_and(|current| current.same_source(&source))
         {
-            return None;
+            result
+        } else {
+            None
         }
-        let range = Some(span_range(&index, text, span));
-        if macro_directive_name_with_tokens(text, byte, &inventory.macro_tokens) == Some(span) {
-            let result = crate::engine::catalog::syntax::query(
-                &crate::engine::catalog::syntax::SyntaxQuery {
-                    name: Some(word.into()),
-                    kind: Some("macro_directive".into()),
-                    ..Default::default()
-                },
-            );
-            return result
-                .records
-                .first()
-                .map(|record| Some(markdown_hover(syntax_intel::documentation(record), range)));
-        }
-        let context = syntax_intel::source_context(&inventory, text, byte, false)?;
-        let item = inventory
-            .items
-            .iter()
-            .filter(|item| {
-                (matches!(item.kind, SourceItemKind::Block | SourceItemKind::Command)
-                    || item.kind == SourceItemKind::Declaration && item.span != item.selection)
-                    && !item.template
-                    && item.span.start <= byte
-                    && byte
-                        < if item.kind == SourceItemKind::Block {
-                            item.header_end
-                        } else {
-                            item.span.end
-                        }
-            })
-            .min_by_key(|item| item.span.end - item.span.start)?;
-        if item.selection != span {
-            let at = inventory
-                .lexical_tokens
-                .partition_point(|token| token.span.end <= byte);
-            let token = inventory.lexical_tokens.get(at)?;
-            if token.span != span
-                || !inventory
-                    .lexical_tokens
-                    .get(at + 1)
-                    .is_some_and(|token| token.kind == TokenKind::Eq)
-            {
-                return None;
-            }
-            let command = item.name.as_deref()?;
-            let option = syntax_intel::options(command)
-                .find(|option| option.name.eq_ignore_ascii_case(word))?;
-            let description =
-                shocks_overwrite_doc(text, byte, command, &option.name, &option.summary);
-            return Some(Some(markdown_hover(
-                format!("**`{command}` option**: `{word}`\n\n{description}"),
-                range,
-            )));
-        }
-        if item
-            .name
-            .as_deref()
-            .is_none_or(|name| !name.eq_ignore_ascii_case(word))
-        {
-            return None;
-        }
-        let matches: Vec<_> = syntax_intel::records(&context)
-            .into_iter()
-            .filter(|record| {
-                record.name.eq_ignore_ascii_case(word)
-                    || record
-                        .aliases
-                        .iter()
-                        .any(|alias| alias.eq_ignore_ascii_case(word))
-            })
-            .map(syntax_intel::documentation)
-            .collect();
-        (!matches.is_empty()).then(|| {
-            Some(markdown_hover(
-                format!("**`{word}`**\n\n{}", matches.join("\n\n")),
-                range,
-            ))
-        })
     }
 
     #[cfg(test)]
@@ -1316,88 +1236,6 @@ impl Backend {
         out
     }
 
-    fn value_hints(&self, params: &InlayHintParams) -> Vec<InlayHint> {
-        let uri = &params.text_document.uri;
-        let mut inner = self.lock_inner();
-        if !inner.presentation_for(uri).parameter_value_hints {
-            return Vec::new();
-        }
-        let roots = inner.context_roots(uri);
-        let root = if roots.len() == 1 {
-            roots[0].clone()
-        } else {
-            return Vec::new();
-        };
-        let Some(revision) = inner.root_revision(&root) else {
-            return Vec::new();
-        };
-        let Some(model) = inner.workspace.effective_model_snapshot(root.as_str()) else {
-            return Vec::new();
-        };
-        let Some(report) = inner.workspace.expand_report_snapshot(root.as_str()) else {
-            return Vec::new();
-        };
-        if !report.complete
-            || !report.model_map.complete
-            || !inner.workspace.includes_complete(root.as_str())
-        {
-            return Vec::new();
-        }
-        let key = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
-        let Some(text) = inner.workspace.get_source(uri.as_str()) else {
-            return Vec::new();
-        };
-        let index = value_hint_source_index(text);
-        // All executions at an anchor take part, including unknown values.
-        let mut sites: std::collections::BTreeMap<(u32, u32), ValueHintSite> =
-            std::collections::BTreeMap::new();
-        for value in crate::engine::analysis::assignment_values::assignment_values(&model) {
-            let source = &report.model_map.statements[value.statement_id];
-            let Some(anchor) = source
-                .anchor
-                .as_ref()
-                .filter(|anchor| anchor.file.as_deref() == Some(key.as_str()))
-            else {
-                continue;
-            };
-            let range = if source.segments.len() == 1
-                && source.segments[0].file.as_deref() == Some(key.as_str())
-            {
-                value_hint_range(&index, text, source.segments[0].span)
-            } else {
-                None
-            };
-            let proof = value.value.filter(|_| range.is_some());
-            sites
-                .entry((anchor.span.start, anchor.span.end))
-                .and_modify(|site| {
-                    if site.value.map(f64::to_bits) != proof.map(f64::to_bits)
-                        || site.range != range
-                    {
-                        site.value = None;
-                    }
-                    site.plain |= value.written_plain_number;
-                })
-                .or_insert(ValueHintSite {
-                    value: proof,
-                    range,
-                    plain: value.written_plain_number,
-                    statement_id: value.statement_id,
-                });
-        }
-        sites.into_values().filter_map(|ValueHintSite {value, range, plain, statement_id:id}| {
-            let value = value?;
-            let position = range?.end;
-            if plain || !pos_in_range(position, params.range) { return None; }
-            Some(InlayHint {
-                position, label: InlayHintLabel::String(format!("= {value}")), kind: None,
-                text_edits: None, tooltip: Some(InlayHintTooltip::String("Value from this expression and earlier assignments.".into())),
-                padding_left: Some(true), padding_right: Some(false),
-                data: Some(json!({"root_uri":root,"revision":revision,"statement_id":format!("s{id}")})),
-            })
-        }).collect()
-    }
-
     fn decl_location(&self, pos: &TextDocumentPositionParams) -> Option<Location> {
         rename::definition(&mut self.lock_inner(), pos)
     }
@@ -1449,8 +1287,18 @@ impl Backend {
             return highlights;
         }
         let text = inner.document(&pos.text_document.uri)?.text.clone();
-        let normalized = crate::engine::language::parser::normalize_newlines(&text);
-        let index = LineIndex::new(&normalized);
+        let file = crate::engine::workspace::include_resolver::normalize_uri(
+            pos.text_document.uri.as_str(),
+        );
+        let index = inner
+            .workspace
+            .source_document(pos.text_document.uri.as_str(), &file)
+            .map(|source| source.source_index())
+            .unwrap_or_else(|| {
+                Arc::new(LineIndex::new(
+                    &crate::engine::language::parser::normalize_newlines(&text),
+                ))
+            });
         let references = rename::references(&mut inner, pos, true)?;
         let typed = typed_names::sites(&mut inner, &pos.text_document.uri);
         let views = inner.name_views(&pos.text_document.uri)?;
@@ -1460,9 +1308,6 @@ impl Backend {
                 NameSites::new(model, &report.model_map, &pos.text_document.uri, &text)
             })
             .collect();
-        let file = crate::engine::workspace::include_resolver::normalize_uri(
-            pos.text_document.uri.as_str(),
-        );
         let mut source_uris = HashMap::new();
         let hits = references
             .into_iter()
@@ -1891,6 +1736,7 @@ impl Backend {
         let analysis = inner.workspace_settings_changed(&previous);
         if analysis {
             inner.document_analysis.cancel();
+            self.refresh_written_sources(&inner);
         }
         (explanations, settings::SettingsChange { analysis, hints })
     }
@@ -3363,7 +3209,18 @@ impl LanguageServer for Backend {
             let mut inner = self.lock_inner();
             inner.document_analysis.cancel();
             let key = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
+            let mut sources = self.written_sources.lock().unwrap();
             inner.docs.retain(|candidate, _| {
+                let keep =
+                    crate::engine::workspace::include_resolver::normalize_uri(candidate.as_str())
+                        != key;
+                if !keep {
+                    sources.remove(candidate);
+                }
+                keep
+            });
+            drop(sources);
+            inner.parameter_hints.retain(|candidate, _| {
                 crate::engine::workspace::include_resolver::normalize_uri(candidate.as_str()) != key
             });
             inner.document_contexts.remove(&key);
@@ -3465,6 +3322,13 @@ impl LanguageServer for Backend {
             for (uri, text, version) in snapshots {
                 inner.prepare_root(&uri);
                 inner.workspace.update_document(uri.as_str(), &text);
+                let key = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
+                if let Some(source) = inner.workspace.source_document(uri.as_str(), &key) {
+                    self.written_sources
+                        .lock()
+                        .unwrap()
+                        .insert(uri.clone(), source);
+                }
                 if let Some(doc) = inner.docs.get_mut(&uri) {
                     doc.version = version;
                 }
@@ -3597,6 +3461,9 @@ impl LanguageServer for Backend {
         params: DocumentHighlightParams,
     ) -> Result<Option<Vec<DocumentHighlight>>> {
         ordering::ready().await;
+        if !self.written_binding_may_exist(&params.text_document_position_params) {
+            return Ok(None);
+        }
         self.wait_document_analysis(Some(
             &params.text_document_position_params.text_document.uri,
         ))
@@ -3831,6 +3698,7 @@ impl LanguageServer for Backend {
             inner.document_contexts.clear();
             inner.workspace_settings_changed(&previous);
             inner.document_analysis.cancel();
+            self.refresh_written_sources(&inner);
             inner.refresh_diagnostics(None)
         };
         ordering::committed();
@@ -5490,10 +5358,13 @@ mod value_hint_projection_tests {
         let server = service.inner();
         let uri = Url::parse("file:///inlay-projection.mod").unwrap();
         server.upsert(uri.clone(), text, 1);
-        for range in [
+        for (request, range) in [
             Range::new(Position::new(0, 0), Position::new(u32::MAX, u32::MAX)),
             Range::new(Position::new(expected[2].0.line, 0), expected[2].0),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             VALUE_HINT_SOURCE_INDEXES.with(|indexes| indexes.set(0));
             let rows = server
                 .inlay_hint(InlayHintParams {
@@ -5521,8 +5392,8 @@ mod value_hint_projection_tests {
             assert_eq!(actual, expected);
             assert_eq!(
                 VALUE_HINT_SOURCE_INDEXES.with(std::cell::Cell::get),
-                1,
-                "inlay hints must index their written source once per request"
+                usize::from(request == 0),
+                "inlay hints must project once per current source and owner"
             );
         }
     }

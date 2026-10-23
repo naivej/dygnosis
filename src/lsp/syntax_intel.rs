@@ -103,6 +103,26 @@ pub(crate) fn source_context(
 /// names and semantic equation tags must still reach their binding owner.
 pub(crate) fn hover_may_need_model(inventory: &SourceInventory, text: &str, byte: u32) -> bool {
     use crate::engine::analysis::source_inventory::SourceItemKind;
+    // A quoted literal include target has only its document link. The macro
+    // directive name remains eligible for syntax help, as do computed inputs.
+    let macro_index = inventory
+        .macro_tokens
+        .partition_point(|token| token.span.end <= byte);
+    if let Some(token) = inventory.macro_tokens.get(macro_index).filter(|token| {
+        token.kind == TokenKind::MacroDir && token.span.start <= byte && byte < token.span.end
+    }) {
+        let directive = token.text(text);
+        if let Some(filename) = crate::engine::language::parser::literal_include_filename(directive)
+            && !filename.contains("@{")
+            && let Some(quote) = directive.find(['\"', '\''])
+        {
+            let start = token.span.start as usize + quote;
+            let end = start + filename.len() + 2;
+            if start <= byte as usize && (byte as usize) < end {
+                return false;
+            }
+        }
+    }
     if !inventory.structure_complete() || macro_at(&inventory.macro_tokens, byte) {
         return true;
     }

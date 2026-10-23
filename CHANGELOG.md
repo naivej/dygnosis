@@ -9,14 +9,17 @@
   remain available during that check.
 - Literal command, macro-directive and explicit option help can appear while
   model analysis runs.
-- Hover skips model lookups for equation labels, comments and other positions
-  that have no hover information.
+- Hover and occurrence highlights skip model lookups for equation labels,
+  quoted include paths and other positions that have no result. Syntax help
+  can respond while another request uses model information.
 - Completion, syntax colors and parameter value hints respond faster in
   large models. Automatic lightbulb requests skip shock templates;
   choose **Refactor...** to request them.
 - Hover responds faster in models with many labelled declarations, and
   declaration labels no longer produce false helper-file links.
 - Recently used model information stays available for faster repeated use.
+- Parameter value hints reuse their current result when the editor requests
+  another visible range. Edits and changed model inputs update the result.
 
 ## v0.11.33
 

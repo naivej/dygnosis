@@ -103,6 +103,7 @@ pub struct IncludeRecords {
 
 struct Doc {
     source: Arc<String>,
+    source_index: OnceLock<Arc<crate::engine::language::span::LineIndex>>,
     model: OnceLock<Arc<Model>>,
     source_inventory: Mutex<Vec<(MacroWorkLimit, Arc<SourceInventory>)>>,
     macro_source: Mutex<Option<Arc<MacroSource>>>,
@@ -112,6 +113,13 @@ struct Doc {
 }
 
 impl Doc {
+    fn source_index(&self) -> Arc<crate::engine::language::span::LineIndex> {
+        Arc::clone(self.source_index.get_or_init(|| {
+            Arc::new(crate::engine::language::span::LineIndex::new(
+                &crate::engine::language::parser::normalize_newlines(&self.source),
+            ))
+        }))
+    }
     fn source_digest(&self) -> String {
         use sha2::{Digest, Sha256};
         if let Some(source) = self
@@ -253,6 +261,7 @@ impl Doc {
             });
         Self {
             source: Arc::clone(&self.source),
+            source_index: self.source_index.clone(),
             model: OnceLock::new(),
             source_inventory: Mutex::new(
                 self.source_inventory
@@ -281,6 +290,12 @@ pub(crate) struct SourceDocument {
 impl SourceDocument {
     pub(crate) fn source(&self) -> &str {
         &self.doc.source
+    }
+    pub(crate) fn source_index(&self) -> Arc<crate::engine::language::span::LineIndex> {
+        self.doc.source_index()
+    }
+    pub(crate) fn same_source(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.doc, &other.doc) && self.work_limit == other.work_limit
     }
     pub(crate) fn inventory(&self) -> Option<Arc<SourceInventory>> {
         self.doc
@@ -1477,6 +1492,7 @@ impl Workspace {
             key.to_string(),
             Arc::new(Doc {
                 source: Arc::new(source),
+                source_index: OnceLock::new(),
                 model: OnceLock::from(Arc::new(model)),
                 source_inventory: Mutex::new(Vec::new()),
                 macro_source: Mutex::new(None),
@@ -1519,6 +1535,7 @@ impl Workspace {
             key.clone(),
             Arc::new(Doc {
                 source: Arc::new(source),
+                source_index: OnceLock::new(),
                 model: OnceLock::new(),
                 source_inventory: Mutex::new(Vec::new()),
                 macro_source: Mutex::new(None),
@@ -1621,6 +1638,7 @@ impl Workspace {
             key.clone(),
             Arc::new(Doc {
                 source: Arc::new(source),
+                source_index: OnceLock::new(),
                 model: OnceLock::from(Arc::new(model)),
                 source_inventory: Mutex::new(Vec::new()),
                 macro_source: Mutex::new(None),
@@ -2789,6 +2807,7 @@ impl Workspace {
                 key.to_owned(),
                 Arc::new(Doc {
                     source: Arc::clone(&source),
+                    source_index: OnceLock::new(),
                     model: OnceLock::new(),
                     source_inventory: Mutex::new(Vec::new()),
                     macro_source: Mutex::new(None),
@@ -2877,6 +2896,7 @@ impl Workspace {
             key.to_string(),
             Arc::new(Doc {
                 source,
+                source_index: OnceLock::new(),
                 model: OnceLock::new(),
                 source_inventory: Mutex::new(Vec::new()),
                 macro_source: Mutex::new(None),

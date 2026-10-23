@@ -203,6 +203,15 @@ where
         // call runs in frame receive order, before handler futures are polled.
         let input = self.admission.enter(changes_input(&request));
         let future = self.service.call(request);
-        Box::pin(INPUT.scope(input, future))
+        Box::pin(async move {
+            // buffer_unordered admits concurrent futures but polls them in one
+            // task. A synchronous provider would otherwise stop its siblings.
+            // Transport capacity still bounds tasks; the input ticket stays in
+            // the worker until its state is committed or the future is dropped.
+            let mut task = CancellationTask(tokio::spawn(INPUT.scope(input, future)));
+            (&mut task.0)
+                .await
+                .expect("LSP request handler task failed")
+        })
     }
 }

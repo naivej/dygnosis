@@ -466,6 +466,69 @@ async fn independent_reads_overlap_and_later_input_waits_for_older_reads() {
     input.await.unwrap().unwrap();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn synchronous_provider_does_not_block_polling_an_independent_read() {
+    // Guards transport concurrency sharing one polling task: a synchronous
+    // model provider must not prevent another admitted read from starting.
+    use tower::Service;
+    use tower_lsp::jsonrpc::Request;
+    struct SynchronousProvider {
+        events: tokio::sync::mpsc::UnboundedSender<&'static str>,
+        released: Arc<Mutex<std::sync::mpsc::Receiver<()>>>,
+    }
+    impl Service<Request> for SynchronousProvider {
+        type Response = ();
+        type Error = std::convert::Infallible;
+        type Future = std::pin::Pin<
+            Box<dyn std::future::Future<Output = std::result::Result<(), Self::Error>> + Send>,
+        >;
+        fn poll_ready(
+            &mut self,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::result::Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+        fn call(&mut self, request: Request) -> Self::Future {
+            let events = self.events.clone();
+            let released = Arc::clone(&self.released);
+            Box::pin(async move {
+                ordering::ready().await;
+                if request.method() == "synchronousModelRead" {
+                    events.send("model started").unwrap();
+                    let _ = released
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(std::time::Duration::from_secs(1));
+                    events.send("model finished").unwrap();
+                } else {
+                    events.send("independent read").unwrap();
+                }
+                Ok(())
+            })
+        }
+    }
+    let (events, mut observed) = tokio::sync::mpsc::unbounded_channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let mut service = ordering::OrderedService::new(SynchronousProvider {
+        events,
+        released: Arc::new(Mutex::new(released)),
+    });
+    let model = service.call(Request::build("synchronousModelRead").finish());
+    let read = service.call(Request::build("ordinaryRead").finish());
+    let joined = tokio::spawn(async move { tokio::join!(model, read) });
+    let first = observed.recv().await.unwrap();
+    let second = observed.recv().await.unwrap();
+    // Always release the blocking provider before checking the ordering.
+    release.send(()).unwrap();
+    let (model, read) = joined.await.unwrap();
+    model.unwrap();
+    read.unwrap();
+    assert!(
+        first == "independent read" || second == "independent read",
+        "synchronous provider monopolized transport polling: {first}, {second}"
+    );
+}
+
 #[tokio::test]
 async fn committed_input_does_not_hold_reads_for_publication_and_dropped_input_releases() {
     use tower::Service;

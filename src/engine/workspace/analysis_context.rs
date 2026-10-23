@@ -215,6 +215,7 @@ impl Workspace {
                             file.clone(),
                             Arc::new(Doc {
                                 source: Arc::new(text),
+                                source_index: OnceLock::new(),
                                 model: OnceLock::new(),
                                 source_inventory: Mutex::new(Vec::new()),
                                 macro_source: Mutex::new(None),
@@ -238,6 +239,7 @@ impl Workspace {
                             file.clone(),
                             Arc::new(Doc {
                                 source: Arc::new(text),
+                                source_index: OnceLock::new(),
                                 model: OnceLock::new(),
                                 source_inventory: Mutex::new(Vec::new()),
                                 macro_source: Mutex::new(None),

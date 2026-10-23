@@ -904,6 +904,172 @@ async fn quick_fixes_outside_the_requested_range_do_not_validate_roots() {
 }
 
 #[tokio::test]
+async fn repeated_hint_ranges_reuse_the_same_calculation() {
+    // Guards idle/range requests repeating assignment evaluation and hint
+    // grouping for the same current model instead of reusing their result.
+    let uri = Url::parse("untitled:idle-parameter-hints.mod").unwrap();
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    server.upsert(
+        uri.clone(),
+        "parameters p; p=1+2; var y; model; y=p; end;".into(),
+        1,
+    );
+    let params = InlayHintParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        range: Range::new(Position::new(0, 0), Position::new(1, 0)),
+        work_done_progress_params: Default::default(),
+    };
+    let before = server.value_hints(&params);
+    assert!(!before.is_empty());
+    VALUE_HINT_SOURCE_INDEXES.with(|indexes| indexes.set(0));
+    let repeated = server.value_hints(&params);
+    assert_eq!(
+        serde_json::to_value(&repeated).unwrap(),
+        serde_json::to_value(&before).unwrap()
+    );
+    assert_eq!(
+        VALUE_HINT_SOURCE_INDEXES.with(std::cell::Cell::get),
+        0,
+        "unchanged hints repeated source projection"
+    );
+    server.upsert(
+        uri,
+        "parameters p; p=1+3; var y; model; y=p; end;".into(),
+        2,
+    );
+    let edited = server.value_hints(&params);
+    assert_eq!(
+        serde_json::to_value(&edited[0].label).unwrap(),
+        json!("= 4")
+    );
+    server
+        .did_close(DidCloseTextDocumentParams {
+            text_document: params.text_document,
+        })
+        .await;
+    assert!(
+        server.lock_inner().parameter_hints.is_empty(),
+        "closed hint result retained"
+    );
+    assert!(
+        server.written_sources.lock().unwrap().is_empty(),
+        "closed source retained"
+    );
+}
+
+#[tokio::test]
+async fn include_keyword_and_computed_arguments_remain_model_eligible() {
+    // Guards rejecting the whole directive when only its literal path has no
+    // hover or binding answer. Computed arguments need their macro provider.
+    let uri = Url::parse("untitled:include-eligibility.mod").unwrap();
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    let source = "@#include \"a.inc\"\n";
+    server.store_document(uri.clone(), source.into(), 1);
+    let keyword = highlight_at(&uri, source, source.find("include").unwrap() + 1)
+        .text_document_position_params;
+    let hover = server
+        .written_hover_at(&keyword)
+        .flatten()
+        .expect("include syntax help");
+    assert!(serde_json::to_string(&hover).unwrap().contains("include"));
+    for source in ["@#include target\n", "@#include \"@{target}.inc\"\n"] {
+        server.store_document(uri.clone(), source.into(), 2);
+        let target = highlight_at(&uri, source, source.find("target").unwrap() + 1)
+            .text_document_position_params;
+        assert!(
+            server.written_binding_may_exist(&target),
+            "computed include was rejected"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn written_hover_does_not_wait_for_the_mutable_model_lock() {
+    // Guards source-only requests being serialized behind unrelated model
+    // projection. No model facts can contribute to the include-path answer.
+    let uri = Url::parse("untitled:independent-written-requests.mod").unwrap();
+    let source = "@#include \"expectations/pac_pce-expression.inc\"\nvar y; model; y=0; end;";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    server.store_document(uri.clone(), source.into(), 1);
+    let reader = server.clone();
+    let position = highlight_at(&uri, source, source.find("pac_pce-expression").unwrap() + 2)
+        .text_document_position_params;
+    let holder = server.clone();
+    let (locked, ready) = tokio::sync::oneshot::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let held = tokio::task::spawn_blocking(move || {
+        let _guard = holder.lock_inner();
+        locked.send(()).unwrap();
+        released.recv().unwrap();
+    });
+    ready.await.unwrap();
+    let mut request = tokio::spawn(async move {
+        reader
+            .hover(HoverParams {
+                text_document_position_params: position,
+                work_done_progress_params: Default::default(),
+            })
+            .await
+            .unwrap()
+    });
+    let completed = tokio::time::timeout(std::time::Duration::from_millis(250), &mut request).await;
+    release.send(()).unwrap();
+    held.await.unwrap();
+    assert!(
+        completed.is_ok(),
+        "written hover waited for the model mutex"
+    );
+    assert!(completed.unwrap().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn display_labels_and_literal_include_paths_skip_model_requests() {
+    // Guards automatic hover/highlight requests waiting for model analysis at
+    // source positions that cannot have a binding or model hover result.
+    let source =
+        "@#include \"expectations/pac_pce-expression.inc\"\nvar y; model; [name='y'] y=0; end;";
+    for target in ["label_highlight", "include_hover", "include_highlight"] {
+        let uri = Url::parse("untitled:negative-editor-requests.mod").unwrap();
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        open_source(server, &uri, source.into(), 1).await;
+        let output = server.output_gate.lock().await;
+        let byte = if target == "label_highlight" {
+            source.find("'y'").unwrap() + 1
+        } else {
+            source.find("pac_pce-expression.inc").unwrap() + 4
+        };
+        let position = highlight_at(&uri, source, byte);
+        let request = async {
+            if target == "include_hover" {
+                serde_json::to_value(
+                    server
+                        .hover(HoverParams {
+                            text_document_position_params: position.text_document_position_params,
+                            work_done_progress_params: Default::default(),
+                        })
+                        .await
+                        .unwrap(),
+                )
+                .unwrap()
+            } else {
+                serde_json::to_value(server.document_highlight(position).await.unwrap()).unwrap()
+            }
+        };
+        let result = tokio::time::timeout(std::time::Duration::from_millis(100), request)
+            .await
+            .unwrap_or_else(|_| panic!("{target} waited for model analysis"));
+        assert!(result.is_null(), "{target} fabricated model information");
+        assert!(server.lock_inner().semantic_views.is_empty());
+        drop(output);
+        server.wait_document_analysis(Some(&uri)).await;
+    }
+}
+
+#[tokio::test]
 async fn automatic_stored_fixes_join_the_pending_document_check() {
     // Guards an in-range stored fix rebuilding edited file-root analysis
     // under the request lock before its obsolete revision can be rejected.
