@@ -39,8 +39,7 @@ macro choices and separate counts. Click **Current config** in the hover to
 select a configuration or reset to **Source**.
 
 While a model action is pending, the same item shows its activity, such as
-**Expanding macros…**. Its hover lists the pending requests. It returns to model
-counts and the configuration hover when the action finishes.
+**Expanding macros…**. It returns to model counts when the action finishes.
 
 Toggle the status bar item with [Dynare › Status Bar:
 Enabled](settings:dynare.statusBar.enabled) and choose which counts appear (and
@@ -54,14 +53,11 @@ their order) in [Dynare › Status Bar: Counts](settings:dynare.statusBar.counts
 | Click **Find references** above a declaration | Runs **Find All References** for that symbol, or lets you pick a symbol when the declaration lists several ([Dynare › Code Lens: Declaration References](settings:dynare.codeLens.declarationReferences)). |
 | Click **Expand macros** above the first `model` block | Opens the macro expansion preview ([Dynare › Code Lens: Effective Model](settings:dynare.codeLens.effectiveModel)). |
 
-Each picker row shows `<number> · <name or Unnamed equation>`, **Aggregate** or
-**Dimension `<name>`**, `filename:line`, and the equation text (plus macro loop
-values such as `j=1`). Type a number, tag, symbol or expression fragment to
-filter the list, then press `Enter` to jump to that line.
+Type in the picker to filter by number, tag, symbol or expression, then press
+`Enter` to jump to that line.
 
-The clickable labels above blocks and declarations are VS Code **CodeLens**
-actions. They require **Editor: Code Lens** (`editor.codeLens`) and the
-corresponding setting under **Dygnosis: Actions**.
+CodeLens labels require **Editor: Code Lens** (`editor.codeLens`) and the
+matching entry under [Dynare: Editor Actions](settings:dynare.editorActions).
 
 Equation numbers reflect the model before Dynare's equation transformations and
 can differ from numbers printed by MATLAB or Octave. Model-local `#`
