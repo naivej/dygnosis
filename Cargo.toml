@@ -46,3 +46,4 @@ debug = "full"
 
 [profile.release]
 codegen-units = 1
+lto = true
