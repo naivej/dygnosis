@@ -12,12 +12,15 @@
 - Hover and occurrence highlights skip model lookups for equation labels,
   quoted include paths and other positions that have no result. Syntax help
   can respond while another request uses model information.
+- Go to Definition and Find References return sooner on positions with no
+  symbol. Expanding selections with multiple cursors is faster.
 - Completion, syntax colors and parameter value hints respond faster in
   large models. Automatic lightbulb requests skip shock templates;
   choose **Refactor...** to request them.
 - Hover responds faster in models with many labelled declarations, and
   declaration labels no longer produce false helper-file links.
-- Recently used model information stays available for faster repeated use.
+- Model counts and Outline respond faster in large models and reuse current
+  model information.
 - Parameter value hints reuse their current result when the editor requests
   another visible range. Edits and changed model inputs update the result.
 

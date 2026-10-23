@@ -47,6 +47,21 @@ impl DocumentAnalysis {
 }
 
 impl Inner {
+    /// Written trivia starts in root lexical context only when this document
+    /// owns its current view and no queued different root can acquire it.
+    pub(super) fn source_has_root_context(&self, document: &Url) -> bool {
+        let key = crate::engine::workspace::include_resolver::normalize_uri(document.as_str());
+        let roots = self.context_roots(document);
+        roots.len() == 1
+            && crate::engine::workspace::include_resolver::normalize_uri(roots[0].as_str()) == key
+            && self.document_analysis.pending.keys().all(|root| {
+                crate::engine::workspace::include_resolver::normalize_uri(root.as_str()) == key
+                    || !self
+                        .workspace
+                        .root_may_use(root.as_str(), document.as_str())
+            })
+    }
+
     fn document_analysis_root_is_current(&self, root: &Url) -> bool {
         let contexts = self.context_roots(root);
         contexts.is_empty() || contexts == [root.clone()]

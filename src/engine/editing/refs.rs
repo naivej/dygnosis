@@ -1,7 +1,7 @@
 //! Lexer-based identifier occurrences. Shared by LSP and MCP.
 
 use crate::engine::diagnostics::check_parse::reserved_reason;
-use crate::engine::language::lexer::{TokenKind, tokenize};
+use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::span::Span;
 
 /// Dynare NAME token: letter or underscore, then letters, digits, underscores.
@@ -24,15 +24,18 @@ pub fn is_legal_ident(name: &str) -> bool {
 
 /// Ident token whose span contains `byte_offset` (`start <= offset < end`).
 pub fn ident_at(src: &str, byte_offset: u32) -> Option<(String, Span)> {
-    for tok in tokenize(src) {
-        if tok.kind != TokenKind::Ident {
-            continue;
-        }
-        if tok.span.start <= byte_offset && byte_offset < tok.span.end {
-            return Some((tok.text(src).to_string(), tok.span));
-        }
-    }
-    None
+    let span = ident_span_at(&tokenize(src), byte_offset)?;
+    Some((src[span.start as usize..span.end as usize].to_owned(), span))
+}
+
+/// Query an existing written lexer inventory without tokenizing it again.
+pub(crate) fn ident_span_at(tokens: &[Token], byte_offset: u32) -> Option<Span> {
+    let at = tokens.partition_point(|token| token.span.end <= byte_offset);
+    let token = tokens.get(at)?;
+    (token.kind == TokenKind::Ident
+        && token.span.start <= byte_offset
+        && byte_offset < token.span.end)
+        .then_some(token.span)
 }
 
 /// Ident tokens whose text equals `name`. Comments and strings are trivia / not Ident.

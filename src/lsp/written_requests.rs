@@ -136,6 +136,60 @@ impl Backend {
             }
         }
     }
+    pub(super) fn written_colors_empty(&self, uri: &Url, range: Range) -> bool {
+        let Some(source) = self.written_source(uri) else {
+            return false;
+        };
+        let Some(inventory) = source.inventory() else {
+            return false;
+        };
+        if !inventory.structure_complete() {
+            return false;
+        }
+        let index = source.source_index();
+        let start = index.offset_utf16(source.source(), span_pos(range.start));
+        let end = index.offset_utf16(source.source(), span_pos(range.end));
+        let intersects = |token: &crate::engine::language::lexer::Token| {
+            token.span.start < end && start < token.span.end
+        };
+        // A prior macro can change lexical context, including by ending a
+        // comment before this range. Written trivia is proof only before any
+        // macro input that can affect the requested prefix.
+        if inventory
+            .lexical_tokens
+            .iter()
+            .any(|token| token.kind != TokenKind::Eof && intersects(token))
+            || inventory
+                .macro_tokens
+                .iter()
+                .take_while(|token| token.span.start < end)
+                .any(|token| {
+                    matches!(
+                        token.kind,
+                        TokenKind::MacroDir | TokenKind::MacroInterp | TokenKind::MacroPrefix
+                    )
+                })
+        {
+            return false;
+        }
+        // Includes can inherit comment or string context from another file.
+        // Use the existing owner/pending-work proof; a file suffix is not proof
+        // that the displayed file starts a fresh lexical context.
+        let inner = match self.inner.try_lock() {
+            Ok(inner) => inner,
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return false,
+        };
+        if !inner.source_has_root_context(uri) {
+            return false;
+        }
+        self.written_sources
+            .lock()
+            .unwrap()
+            .get(uri)
+            .is_some_and(|current| current.same_source(&source))
+    }
+
     pub(super) fn written_binding_may_exist(&self, pos: &TextDocumentPositionParams) -> bool {
         let Some(source) = self.written_source(&pos.text_document.uri) else {
             return true;

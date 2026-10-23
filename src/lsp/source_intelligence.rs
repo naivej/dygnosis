@@ -81,7 +81,12 @@ pub(super) fn label(inner: &Inner, document: &Url, hover: &mut Hover) {
 }
 
 /// Resolve literal written include links without acquiring any dormant body.
-pub(super) fn literal_links(inner: &mut Inner, document: &Url, text: &str) -> Vec<DocumentLink> {
+pub(super) fn literal_links(
+    inner: &mut Inner,
+    document: &Url,
+    text: &str,
+    index: &LineIndex,
+) -> Vec<DocumentLink> {
     let roots = inner.context_roots(document);
     if roots.len() != 1 {
         return Vec::new();
@@ -91,7 +96,6 @@ pub(super) fn literal_links(inner: &mut Inner, document: &Url, text: &str) -> Ve
     let Some(inventory) = inner.workspace.source_inventory(document.as_str()) else {
         return Vec::new();
     };
-    let index = LineIndex::new(text);
     let including = normalize_uri(document.as_str());
     let Ok(mut lookup) = inner.workspace.source_include_lookup(root.as_str()) else {
         return Vec::new();
@@ -119,7 +123,7 @@ pub(super) fn literal_links(inner: &mut Inner, document: &Url, text: &str) -> Ve
             continue;
         };
         links.push(DocumentLink {
-            range: span_range(&index, text, token.span),
+            range: span_range(index, text, token.span),
             target: Some(uri),
             tooltip: Some(format!("Open Source: {literal}")),
             data: Some(json!({"dygnosis_source_include":true,"root_uri":root})),
@@ -327,7 +331,10 @@ mod tests {
         let parses =
             crate::engine::language::parser::PARSE_EXPANDED_BUILDS.with(|builds| builds.get());
         crate::engine::workspace::SOURCE_LOOKUP_BUILDS.with(|builds| builds.set(0));
-        assert_eq!(literal_links(&mut inner, &root, &text).len(), 100);
+        assert_eq!(
+            literal_links(&mut inner, &root, &text, &LineIndex::new(&text)).len(),
+            100
+        );
         assert_eq!(
             crate::engine::workspace::SOURCE_LOOKUP_BUILDS.with(|builds| builds.get()),
             1

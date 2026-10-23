@@ -125,6 +125,24 @@ pub fn model_info_json(model: &Model) -> Value {
 
 /// Complete model facts with the same accepted locals used for source origins.
 pub(crate) fn model_info_json_with_locals(model: &Model, locals: &ModelLocals) -> Value {
+    model_info_json_with_locals_and_timing(model, Some(locals), &TimingAnalysis::new(model))
+}
+
+/// Project one request's shared timing and accepted-local facts. A caller
+/// without local facts retains the same accepted-parser collection boundary.
+pub(crate) fn model_info_json_with_locals_and_timing(
+    model: &Model,
+    locals: Option<&ModelLocals>,
+    timing: &TimingAnalysis,
+) -> Value {
+    let collected_locals;
+    let locals = match locals {
+        Some(locals) => locals,
+        None => {
+            collected_locals = accepted_model_locals(model);
+            &collected_locals
+        }
+    };
     let endogenous: Vec<String> = model
         .final_endogenous()
         .into_iter()
@@ -142,7 +160,6 @@ pub(crate) fn model_info_json_with_locals(model: &Model, locals: &ModelLocals) -
         .filter(|decl| model.final_heterogeneity(decl).is_none())
         .map(|d| model.name(d.name).to_string())
         .collect();
-    let timing = TimingAnalysis::new(model);
     let mut static_vars = Vec::new();
     let mut predetermined = Vec::new();
     let mut forward_looking = Vec::new();
@@ -159,7 +176,7 @@ pub(crate) fn model_info_json_with_locals(model: &Model, locals: &ModelLocals) -
         }
     }
     let summary = model.summary();
-    let model_locals = model_locals_json_with_facts(model, locals, &timing);
+    let model_locals = model_locals_json_with_facts(model, locals, timing);
     let heterogeneous_dimensions: Vec<Value> = heterogeneous_dimension_names(model)
         .into_iter()
         .map(|dimension| {

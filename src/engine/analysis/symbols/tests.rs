@@ -20,6 +20,211 @@ fn choose(view: &SemanticModel, name: &str) -> Binding {
     view.select(Selector::Name(name)).unwrap().unwrap()
 }
 
+// Empty written targets must not ask every binding to construct references.
+// Quoted external declarations and semantic tag operands remain real targets.
+#[test]
+fn target_selection_prunes_inert_text_before_reference_queries() {
+    let text = "external_function(name='ext',nargs=1);var y;parameters p;model;[name='label',mcp='y>0']y=ext(p);end;\n// comment\n@#include \"body.inc\"\n";
+    let view = capture(
+        "root.mod",
+        &[("root.mod", text), ("body.inc", "")],
+        "targets",
+    );
+    for needle in ["label", "comment"] {
+        REFERENCE_LOOKUPS.with(|count| count.set(0));
+        assert!(
+            view.select(Selector::Target {
+                file: "root.mod",
+                byte: text.find(needle).unwrap() as u32,
+            })
+            .unwrap()
+            .is_none(),
+            "{needle}"
+        );
+        assert_eq!(
+            REFERENCE_LOOKUPS.with(std::cell::Cell::get),
+            0,
+            "inert {needle} constructed binding references"
+        );
+    }
+    assert!(
+        view.select(Selector::Target {
+            file: "root.mod",
+            byte: text.find("body.inc").unwrap() as u32,
+        })
+        .unwrap()
+        .is_none()
+    );
+    for (needle, expected) in [("'ext'", "ext"), ("y>0", "y")] {
+        let byte = text.find(needle).unwrap() as u32 + u32::from(needle.starts_with('\''));
+        assert_eq!(
+            view.select(Selector::Target {
+                file: "root.mod",
+                byte
+            })
+            .unwrap()
+            .unwrap()
+            .name,
+            expected
+        );
+    }
+}
+
+// Repeated selections and reference providers share one accepted callback/call
+// inventory, rather than rebuilding it once for each binding and request.
+#[test]
+fn binding_queries_share_accepted_call_collection() {
+    ACCEPTED_CALL_COLLECTIONS.with(|count| count.set(0));
+    let view = model("parameters p;p=.5;var y;model;y=sin(p)+cos(p)+y(-1);end;");
+    for _ in 0..2 {
+        for name in ["p", "sin", "cos"] {
+            let binding = choose(&view, name);
+            assert!(!view.references(&binding, true).is_empty());
+        }
+    }
+    assert_eq!(
+        ACCEPTED_CALL_COLLECTIONS.with(std::cell::Cell::get),
+        1,
+        "accepted calls were rebuilt across binding queries"
+    );
+}
+
+// Masking an interpolation can merge its placeholder with a literal NAME.
+// Source intelligence must not change Target selection or repeat raw lexing.
+#[test]
+fn target_selection_keeps_raw_names_beside_macro_interpolations() {
+    let text = "@#define empty=\"\"\nparameters p;var y;model;y=p@{empty}+@{empty}p;end;";
+    let mut workspace =
+        Workspace::overlay_documents(&BTreeMap::from([("root.mod".into(), text.into())]));
+    let raw = SemanticModel::capture(&mut workspace, "root.mod", "same".into()).unwrap();
+    workspace.source_inventory("root.mod").unwrap();
+    let cached = SemanticModel::capture(&mut workspace, "root.mod", "same".into()).unwrap();
+    for byte in [
+        text.find("p@{").unwrap(),
+        text.find("@{empty}p").unwrap() + "@{empty}".len(),
+    ] {
+        assert_eq!(
+            cached.target_name("root.mod", byte as u32).as_deref(),
+            Some("p")
+        );
+        assert_eq!(
+            cached
+                .select(Selector::Target {
+                    file: "root.mod",
+                    byte: byte as u32
+                })
+                .unwrap(),
+            raw.select(Selector::Target {
+                file: "root.mod",
+                byte: byte as u32
+            })
+            .unwrap()
+        );
+    }
+    let tokens = cached.source_tokens("root.mod").unwrap();
+    assert_eq!(
+        tokens.target_tokens(text).unwrap().as_ptr(),
+        tokens.target_tokens(text).unwrap().as_ptr()
+    );
+}
+
+// A macro can close a raw comment before copied source. Raw-trivia proof must
+// not hide its accepted binding, across ordinary, local, builtin or named roles.
+#[test]
+fn target_selection_keeps_accepted_sites_after_macro_delimiters() {
+    for (text, needle, expected) in [
+        ("var y; model; /* @{\"*/\"} y=0; end;", "y=0", "y"),
+        ("var y; model; #q=1; /* @{\"*/\"} y=q; end;", "q;", "q"),
+        ("var y; model; /* @{\"*/\"} y=sin(y); end;", "sin(y)", "sin"),
+        (
+            "var y;model;[name='Y']y=0;end; /* @{\"*/\"} var_model(model_name=vm,eqtags=['Y']);",
+            "vm,",
+            "vm",
+        ),
+    ] {
+        let view = model(text);
+        assert!(view.complete, "{text}");
+        let binding = view
+            .select(Selector::Target {
+                file: "root.mod",
+                byte: text.find(needle).unwrap() as u32,
+            })
+            .unwrap()
+            .expect("accepted copied site was hidden by raw trivia");
+        assert_eq!(binding.name, expected);
+        assert!(view.references(&binding, true).iter().any(|site| {
+            site.written.as_ref().is_some_and(|(file, span)| {
+                file == "root.mod" && span.start == text.find(needle).unwrap() as u32
+            })
+        }));
+    }
+
+    // An include can inherit a comment opened by an earlier sibling include,
+    // even when its own source has no macros.
+    let body = "% */ var y; model; y=0; end;";
+    let view = capture(
+        "root.mod",
+        &[
+            (
+                "root.mod",
+                "@#include \"prefix.inc\"\n@#include \"body.inc\"\n",
+            ),
+            ("prefix.inc", "/*"),
+            ("body.inc", body),
+        ],
+        "inherited",
+    );
+    let selected = view
+        .select(Selector::Target {
+            file: "body.inc",
+            byte: body.find("y=0").unwrap() as u32,
+        })
+        .unwrap()
+        .expect("inherited lexical context hid the accepted binding");
+    assert_eq!(selected.name, "y");
+
+    // Generated tokens can retain the complete interpolation as their anchor.
+    // Keep selection at its delimiter eligible for the same accepted binding.
+    let text = "var y; model; y=@{\"y\"}; end;";
+    let view = model(text);
+    let binding = choose(&view, "y");
+    let byte = text.find("@{").unwrap() as u32;
+    let anchored = view.references(&binding, true).iter().any(|site| {
+        site.written
+            .as_ref()
+            .is_some_and(|(file, span)| file == "root.mod" && span.start <= byte && byte < span.end)
+    });
+    assert!(anchored, "fixture needs an accepted interpolation anchor");
+    assert_eq!(
+        view.select(Selector::Target {
+            file: "root.mod",
+            byte
+        })
+        .unwrap()
+        .unwrap()
+        .id,
+        binding.id
+    );
+}
+
+// A stopped lazy build must not poison the same immutable view for a later
+// uncancelled query. Both bindings and projected call sites publish atomically.
+#[test]
+fn cancelled_binding_and_call_projection_do_not_publish_partial_facts() {
+    use std::sync::atomic::AtomicBool;
+    let view = model("parameters p;p=.5;var y;model;y=sin(p)+cos(p);end;");
+    let flag = Arc::new(AtomicBool::new(false));
+    crate::engine::control::cancel_after(&flag, 2);
+    assert!(crate::engine::control::run(Some(flag), || view.bindings()).is_err());
+    assert!(view.bindings.get().is_none());
+    let binding = choose(&view, "sin");
+    let flag = Arc::new(AtomicBool::new(false));
+    crate::engine::control::cancel_after(&flag, 2);
+    assert!(crate::engine::control::run(Some(flag), || view.references(&binding, true)).is_err());
+    assert!(view.call_sites.get().is_none());
+    assert_eq!(view.references(&binding, true).len(), 1);
+}
+
 // Source intelligence must not make Rename omit dormant uses or introduce a
 // collision in a skipped branch, even when the selected model is complete.
 #[test]
@@ -210,7 +415,10 @@ fn rename_reuses_written_tokens_without_eager_source_inventory() {
         )
         .is_ok()
     );
-    let SourceTokens::Inventory(reused) = cached.source_tokens["root.mod"].get().unwrap() else {
+    let SourceTokens::Inventory {
+        inventory: reused, ..
+    } = cached.source_tokens["root.mod"].get().unwrap()
+    else {
         panic!("an available lexical inventory must be reused")
     };
     assert!(Arc::ptr_eq(reused, &inventory));

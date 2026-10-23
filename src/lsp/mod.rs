@@ -17,6 +17,7 @@ mod comparison_inputs;
 mod document_analysis;
 mod document_context;
 mod source_intelligence;
+mod source_projection;
 mod workspace_checks;
 mod written_requests;
 
@@ -64,7 +65,7 @@ use crate::engine::language::expand::{EquationOrigin, OriginFrame};
 use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::language::model::{Decl, Equation, Model};
 use crate::engine::language::span::{LineIndex, Span};
-use crate::engine::workspace::Workspace;
+use crate::engine::workspace::{SourceDocument, Workspace};
 use crate::lsp::model_map::{WrittenView, common_leaves};
 use crate::lsp::names::{NameRole, NameSites, SemanticMapping};
 use crate::lsp::settings::{
@@ -249,6 +250,12 @@ impl Inner {
         Some(format!(
             "Source information for {file} is incomplete. {cause} Available Outline entries and folds are retained; source names and syntax help are limited to proven source context."
         ))
+    }
+
+    fn source_document(&self, uri: &Url) -> Option<SourceDocument> {
+        self.document(uri)?;
+        let file = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
+        self.workspace.source_document(uri.as_str(), &file)
     }
 
     fn document(&self, uri: &Url) -> Option<&OpenDoc> {
@@ -1146,7 +1153,8 @@ impl Backend {
         use crate::engine::analysis::source_inventory::SourceItemKind;
 
         let mut inner = self.lock_inner();
-        let text = inner.document(uri)?.text.clone();
+        let source = inner.source_document(uri)?;
+        let text = source.source();
         let preferences = inner.presentation_for(uri);
         let inventory = inner.workspace.source_inventory(uri.as_str())?;
         let roots = inner.context_roots(uri);
@@ -1159,7 +1167,7 @@ impl Backend {
             .collect();
         if inner.context_ambiguous(uri) {
             let mut rows = Vec::new();
-            model_map::add_source_symbols(&mut rows, &inventory, &text, &preferences, |_| {
+            model_map::add_source_symbols(&mut rows, &inventory, text, &preferences, |_| {
                 crate::engine::analysis_configuration::SourceAvailability::Unknown
             });
             return Some(rows);
@@ -1167,10 +1175,10 @@ impl Backend {
         let mut views = Vec::new();
         for root in &roots {
             inner.root_revision(root);
-            let Some(model) = inner.workspace.get_effective_model(root.as_str()).cloned() else {
+            let Some(model) = inner.workspace.effective_model_snapshot(root.as_str()) else {
                 continue;
             };
-            let Some(report) = inner.workspace.expand_report(root.as_str()).cloned() else {
+            let Some(report) = inner.workspace.expand_report_snapshot(root.as_str()) else {
                 continue;
             };
             let authoritative = roots.len() == 1
@@ -1179,7 +1187,7 @@ impl Backend {
                 && inner.workspace.includes_complete(root.as_str());
             let view = WrittenView::new(
                 uri,
-                &text,
+                text,
                 &model,
                 &report.model_map,
                 Some(&inner.workspace),
@@ -1189,7 +1197,7 @@ impl Backend {
             .with_known_uris(inner.docs.keys().chain(std::iter::once(root)));
             let mut rows = view.symbols(&preferences);
             if let Some(semantic) = typed_names::root_view(&mut inner, root) {
-                model_map::add_binding_symbols(&mut rows, &semantic, uri, &text, &preferences);
+                model_map::add_binding_symbols(&mut rows, &semantic, uri, text, &preferences);
             }
             views.push(rows);
         }
@@ -1199,13 +1207,13 @@ impl Backend {
             view
         } else if roots.is_empty() {
             let model = inner.workspace.get_model(uri.as_str())?;
-            let report = crate::engine::language::expand::expand_report(&text);
-            WrittenView::new(uri, &text, model, &report.model_map, None, false, false)
+            let report = crate::engine::language::expand::expand_report(text);
+            WrittenView::new(uri, text, model, &report.model_map, None, false, false)
                 .symbols(&preferences)
         } else {
             Vec::new()
         };
-        model_map::add_source_symbols(&mut rows, &inventory, &text, &preferences, |item| {
+        model_map::add_source_symbols(&mut rows, &inventory, text, &preferences, |item| {
             availability
                 .get(item.source_id.as_str())
                 .map(|state| {
@@ -1512,15 +1520,27 @@ impl Backend {
 
     fn signature_at(&self, pos: &TextDocumentPositionParams) -> Option<SignatureHelp> {
         let mut inner = self.lock_inner();
-        let doc = inner.document(&pos.text_document.uri)?;
-        let index = LineIndex::new(&crate::engine::language::parser::normalize_newlines(
-            &doc.text,
-        ));
-        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
-        let text = doc.text.clone();
-        let context = inner.syntax_context(&pos.text_document.uri, &text, byte, true)?;
-        crate::lsp::signature_help::function_signature_help(&text, byte, context.language)
-            .or_else(|| crate::lsp::signature_help::signature_help(&text, byte))
+        let source = inner.source_document(&pos.text_document.uri)?;
+        let text = source.source();
+        let index = source.source_index();
+        let byte = index.offset_utf16(text, span_pos(pos.position));
+        let inventory = source.inventory()?;
+        let semantic_source =
+            inner.semantic_completion_source(&pos.text_document.uri, byte, &inventory);
+        let context = inner.syntax_context_with_source(
+            &pos.text_document.uri,
+            text,
+            byte,
+            true,
+            &inventory,
+            semantic_source,
+        )?;
+        crate::lsp::signature_help::combined_signature_help(
+            text,
+            byte,
+            context.language,
+            &inventory.macro_tokens,
+        )
     }
 
     fn prepare_rename_at(&self, pos: &TextDocumentPositionParams) -> Result<Range> {
@@ -1743,16 +1763,17 @@ impl Backend {
 
     fn folding_ranges(&self, uri: &Url) -> Option<Vec<FoldingRange>> {
         let inner = self.lock_inner();
-        let text = crate::engine::language::parser::normalize_newlines(&inner.document(uri)?.text);
-        let inventory = inner.workspace.source_inventory(uri.as_str())?;
-        let index = LineIndex::new(&text);
+        let source = inner.source_document(uri)?;
+        let text = source.source();
+        let inventory = source.inventory()?;
+        let index = source.source_index();
         let mut ranges: Vec<_> = inventory
             .folds
             .iter()
             .filter_map(|fold| {
-                let start_line = index.position_utf16(&text, fold.span.start).line;
+                let start_line = index.position_utf16(text, fold.span.start).line;
                 let end_line = index
-                    .position_utf16(&text, fold.span.end.saturating_sub(1))
+                    .position_utf16(text, fold.span.end.saturating_sub(1))
                     .line;
                 (start_line < end_line).then_some(FoldingRange {
                     start_line,
@@ -1790,17 +1811,21 @@ impl Backend {
         let inner = self.lock_inner();
         let doc = inner.document(uri)?;
         let model = inner.workspace.get_model(uri.as_str())?;
-        let index = LineIndex::new(&doc.text);
+        let index = inner.source_document(uri)?.source_index();
+        let tokens = source_projection::selection_tokens(&doc.text);
         let file_range = full_document_range(&doc.text);
         let mut out = Vec::new();
         for &pos in positions {
             let mut chain = Vec::new();
             let byte = index.offset_utf16(&doc.text, span_pos(pos));
-            if let Some((_, span)) = ident_at(&doc.text, byte) {
+            if let Some(span) = crate::engine::editing::refs::ident_span_at(&tokens, byte) {
                 chain.push(span_range(&index, &doc.text, span));
             }
-            if let Some(eq) = equation_at(model, &index, &doc.text, pos) {
-                chain.push(span_range(&index, &doc.text, eq.span));
+            if let Some(eq) = equation_at_byte(model, byte) {
+                let range = span_range(&index, &doc.text, eq.span);
+                if range_has_pos(range, pos) {
+                    chain.push(range);
+                }
             }
             for span in [
                 model.model_block,
@@ -1812,9 +1837,11 @@ impl Backend {
             .into_iter()
             .flatten()
             {
-                let rng = span_range(&index, &doc.text, span);
-                if range_has_pos(rng, pos) {
-                    chain.push(rng);
+                if span.start <= byte && byte <= span.end {
+                    let range = span_range(&index, &doc.text, span);
+                    if range_has_pos(range, pos) {
+                        chain.push(range);
+                    }
                 }
             }
             chain.push(file_range);
@@ -1849,13 +1876,14 @@ impl Backend {
 
     fn document_links(&self, uri: &Url) -> Option<Vec<DocumentLink>> {
         let mut inner = self.lock_inner();
-        let text = inner.document(uri)?.text.clone();
+        let source = inner.source_document(uri)?;
+        let text = source.source();
         let includes = inner
             .workspace
             .get_model(uri.as_str())
             .map(|m| m.includes.clone())
             .unwrap_or_default();
-        let index = LineIndex::new(&text);
+        let index = source.source_index();
         let records = inner
             .workspace
             .include_records(uri.as_str())
@@ -1881,7 +1909,7 @@ impl Backend {
                 continue;
             };
             links.push(DocumentLink {
-                range: span_range(&index, &text, inc.span),
+                range: span_range(&index, text, inc.span),
                 target: Some(target),
                 tooltip: Some(format!("Open {}", inc.filename)),
                 data: source_root
@@ -1901,13 +1929,13 @@ impl Backend {
                 .and_then(|n| n.to_str())
                 .unwrap_or(rec.name.as_str());
             links.push(DocumentLink {
-                range: span_range(&index, &text, rec.named_in),
+                range: span_range(&index, text, rec.named_in),
                 target: Some(target),
                 tooltip: Some(format!("{} {basename}", rec.kind.as_str())),
                 data: None,
             });
         }
-        for link in source_intelligence::literal_links(&mut inner, uri, &text) {
+        for link in source_intelligence::literal_links(&mut inner, uri, text, &index) {
             if let Some(existing) = links
                 .iter_mut()
                 .find(|existing| existing.range == link.range)
@@ -1922,28 +1950,46 @@ impl Backend {
 
     fn semantic_tokens(&self, uri: &Url, range: Option<Range>) -> Option<SemanticTokens> {
         let mut inner = self.lock_inner();
-        let text = inner.document(uri)?.text.clone();
-        let typed = typed_names::sites(&mut inner, uri);
+        let source = inner.source_document(uri)?;
+        let text = source.source();
+        let index = source.source_index();
+        let byte_range = range.map(|range| Span {
+            start: index.offset_utf16(text, span_pos(range.start)),
+            end: index.offset_utf16(text, span_pos(range.end)),
+        });
+        let typed = typed_names::sites_in_range(&mut inner, uri, byte_range);
+        let file = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
+        let tokens = source_projection::color_tokens(
+            text,
+            typed
+                .as_ref()
+                .and_then(|sites| sites.raw_source_tokens(&file)),
+        );
         let views = inner.name_views(uri)?;
+        let mapping = inner.semantic_mapping.clone();
         let sites: Vec<_> = views
             .iter()
             .map(|(model, report)| {
                 (
-                    NameSites::new(model, &report.model_map, uri, &text),
-                    classify_variable_timing(model),
+                    NameSites::for_range(model, &report.model_map, uri, text, byte_range),
+                    source_projection::color_timing(model, &mapping),
                 )
             })
             .collect();
-        let mapping = inner.semantic_mapping.clone();
-        let normalized = crate::engine::language::parser::normalize_newlines(&text);
-        let index = LineIndex::new(&normalized);
         let mut raw = Vec::new();
-        for tok in tokenize(&text) {
+        let first = range.map_or(0, |range| {
+            let byte = index.offset_utf16(text, span_pos(range.start));
+            tokens.partition_point(|token| token.span.start < byte)
+        });
+        for tok in &tokens[first..] {
             if tok.kind != TokenKind::Ident {
                 continue;
             }
-            let name = tok.text(&text);
-            let start = index.position_utf16(&text, tok.span.start);
+            let name = tok.text(text);
+            let start = index.position_utf16(text, tok.span.start);
+            if range.is_some_and(|range| Position::new(start.line, start.character) >= range.end) {
+                break;
+            }
             if let Some(range) = range
                 && !pos_in_range_half_open(Position::new(start.line, start.character), range)
             {
@@ -2000,18 +2046,18 @@ impl Backend {
                 })
                 .reduce(|common, modifiers| common & modifiers)
                 .unwrap_or(0);
-            let end = index.position_utf16(&text, tok.span.end);
+            let end = index.position_utf16(text, tok.span.end);
             let length = if start.line == end.line {
                 end.character.saturating_sub(start.character)
             } else {
-                tok.text(&text).encode_utf16().count() as u32
+                tok.text(text).encode_utf16().count() as u32
             };
             raw.push((start.line, start.character, length, ttype, mods));
         }
         if let Some(typed) = &typed {
             let mut positions: HashSet<_> = raw.iter().map(|token| (token.0, token.1)).collect();
             for (span, role, declaration) in typed.iter() {
-                let start = index.position_utf16(&text, span.start);
+                let start = index.position_utf16(text, span.start);
                 if range.is_some_and(|range| {
                     !pos_in_range_half_open(Position::new(start.line, start.character), range)
                 }) {
@@ -2020,7 +2066,7 @@ impl Backend {
                 let Some(token_type) = mapping.token_type(role) else {
                     continue;
                 };
-                let end = index.position_utf16(&text, span.end);
+                let end = index.position_utf16(text, span.end);
                 if start.line == end.line && positions.insert((start.line, start.character)) {
                     raw.push((
                         start.line,
@@ -2194,10 +2240,10 @@ impl Backend {
         let Some(revision) = revision else {
             return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND"});
         };
-        let Some(model) = inner.workspace.get_effective_model(root.as_str()).cloned() else {
+        let Some(model) = inner.workspace.effective_model_snapshot(root.as_str()) else {
             return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND"});
         };
-        let Some(report) = inner.workspace.expand_report(root.as_str()).cloned() else {
+        let Some(report) = inner.workspace.expand_report_snapshot(root.as_str()) else {
             return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND"});
         };
         let complete = report.complete
@@ -2208,10 +2254,24 @@ impl Backend {
             .include_records(root.as_str())
             .cloned()
             .unwrap_or_default();
-        let local_facts =
-            complete.then(|| crate::engine::analysis::model_info::accepted_model_locals(&model));
-        let mut result = if let Some(local_facts) = &local_facts {
-            crate::engine::analysis::model_info::model_info_json_with_locals(&model, local_facts)
+        let semantic = complete
+            .then(|| inner.semantic_views.get(&root))
+            .flatten()
+            .filter(|view| view.complete && view.revision == revision)
+            .cloned();
+        let local_owned = (complete && semantic.is_none())
+            .then(|| crate::engine::analysis::model_info::accepted_model_locals(&model));
+        let local_facts = semantic
+            .as_ref()
+            .map(|view| view.local_facts())
+            .or(local_owned.as_ref());
+        let timing = complete.then(|| crate::engine::analysis::timing::TimingAnalysis::new(&model));
+        let mut result = if let Some(local_facts) = local_facts {
+            crate::engine::analysis::model_info::model_info_json_with_locals_and_timing(
+                &model,
+                Some(local_facts),
+                timing.as_ref().unwrap(),
+            )
         } else {
             let reasons = self.model_info_reasons(&mut inner, &root);
             crate::engine::analysis::model_info::model_incomplete_status_with_reasons(
@@ -2231,14 +2291,13 @@ impl Backend {
             true,
         )
         .with_known_uris(inner.docs.keys().chain(std::iter::once(&root)));
-        let facts = view.facts_json();
-        if let Some(local_facts) = &local_facts {
+        let facts = view.facts_json(timing.as_ref());
+        if let Some(local_facts) = local_facts {
             locals::info_origins(&view, local_facts, &report.model_map, &mut result);
         }
-        result
-            .as_object_mut()
-            .unwrap()
-            .extend(facts.as_object().unwrap().clone());
+        if let Value::Object(facts) = facts {
+            result.as_object_mut().unwrap().extend(facts);
+        }
         result["schema_version"] = json!(MODEL_INFO_SCHEMA_VERSION);
         result["root_uri"] = json!(root);
         result["document_uri"] = json!(document);
@@ -2293,10 +2352,10 @@ impl Backend {
         let revision_b = Url::parse(&uri_b)
             .ok()
             .and_then(|uri| inner.root_revision(&uri));
-        let Some(model_a) = inner.workspace.get_effective_model(uri_a.as_str()).cloned() else {
+        let Some(model_a) = inner.workspace.effective_model_snapshot(uri_a.as_str()) else {
             return json!({"error": format!("No parsed model for uri_a: {uri_a}"), "code": "URI_A_NOT_FOUND"});
         };
-        let Some(model_b) = inner.workspace.get_effective_model(uri_b.as_str()).cloned() else {
+        let Some(model_b) = inner.workspace.effective_model_snapshot(uri_b.as_str()) else {
             return json!({"error": format!("No parsed model for uri_b: {uri_b}"), "code": "URI_B_NOT_FOUND"});
         };
         let mut incomplete = Vec::new();
@@ -2655,7 +2714,7 @@ impl Backend {
                 "message":analysis["cause"]["message"].as_str().unwrap_or("The model root is unavailable. Open the root before expanding it."), "analysis":analysis});
         };
         let analysis = analysis_configuration::metadata(&mut inner, &uri);
-        let Some(report) = inner.workspace.expand_report(uri.as_str()).cloned() else {
+        let Some(report) = inner.workspace.expand_report_snapshot(uri.as_str()) else {
             return json!({"success": false, "message": "Document not available"});
         };
         let requested = arguments
@@ -2888,7 +2947,7 @@ impl Backend {
     }
 
     fn model_info_reasons(&self, inner: &mut Inner, root: &Url) -> Value {
-        let model = inner.workspace.get_effective_model(root.as_str()).cloned();
+        let model = inner.workspace.effective_model_snapshot(root.as_str());
         let mut reasons = Vec::new();
         if let Some(model) = model {
             for cause in crate::engine::analysis::model_info::incomplete_causes(
@@ -3589,6 +3648,12 @@ impl LanguageServer for Backend {
         params: SemanticTokensRangeParams,
     ) -> Result<Option<SemanticTokensRangeResult>> {
         ordering::ready().await;
+        if self.written_colors_empty(&params.text_document.uri, params.range) {
+            return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
+                result_id: None,
+                data: Vec::new(),
+            })));
+        }
         self.wait_document_analysis(Some(&params.text_document.uri))
             .await;
         Ok(self
@@ -5090,6 +5155,14 @@ fn line_range_edit(text: &str, start_line: u32, end_line: u32, replacement: Stri
         range: Range::new(Position::new(start_line, 0), Position::new(end_line, end)),
         new_text: replacement,
     }
+}
+
+fn equation_at_byte(model: &Model, byte: u32) -> Option<&Equation> {
+    model
+        .equations
+        .iter()
+        .chain(&model.steady_state_equations)
+        .find(|equation| equation.span.start <= byte && byte <= equation.span.end)
 }
 
 fn equation_at<'a>(

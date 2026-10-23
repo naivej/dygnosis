@@ -6,7 +6,8 @@ use std::sync::{Arc, OnceLock};
 use super::model_locals::ModelLocals;
 use super::source_inventory::SourceInventory;
 use crate::engine::analysis_configuration::SourceAvailability;
-use crate::engine::editing::refs::{ident_at, is_legal_ident};
+use crate::engine::editing::refs::is_legal_ident;
+use crate::engine::language::expr::ExprId;
 use crate::engine::language::intern::Name;
 use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::model::Model;
@@ -16,6 +17,12 @@ use crate::engine::workspace::{SourceDocument, Workspace};
 mod named;
 mod ordinary;
 mod tags;
+
+#[cfg(test)]
+thread_local! {
+    static REFERENCE_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static ACCEPTED_CALL_COLLECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 pub(crate) const SOURCE: Refusal = Refusal::new(
     "SOURCE_UNAVAILABLE",
@@ -184,23 +191,64 @@ pub(crate) struct SemanticModel {
     tags: Vec<tags::Reference>,
     bindings: OnceLock<Vec<Binding>>,
     ordinary_sites: OnceLock<HashMap<Name, Vec<Reference>>>,
+    accepted_calls: HashMap<ExprId, (usize, Span)>,
+    call_sites: OnceLock<HashMap<String, Vec<Reference>>>,
     parse_stop: Option<usize>,
     accepted_events: HashSet<usize>,
 }
 
 enum SourceTokens {
-    Inventory(Arc<SourceInventory>),
-    Lexed(Vec<Token>),
+    Inventory {
+        inventory: Arc<SourceInventory>,
+        raw_targets: Option<OnceLock<Vec<Token>>>,
+        context_may_change_from: Option<u32>,
+    },
+    Lexed {
+        tokens: Vec<Token>,
+        context_may_change_from: Option<u32>,
+    },
 }
 
 impl SourceTokens {
     fn tokens(&self) -> Option<&[Token]> {
         match self {
-            Self::Inventory(inventory) => inventory
+            Self::Inventory { inventory, .. } => inventory
                 .structure_complete()
                 .then_some(inventory.lexical_tokens.as_slice()),
-            Self::Lexed(tokens) => Some(tokens),
+            Self::Lexed { tokens, .. } => Some(tokens),
         }
+    }
+
+    fn macro_may_change_context(&self, byte: u32) -> bool {
+        let context_may_change_from = match self {
+            Self::Inventory {
+                context_may_change_from,
+                ..
+            }
+            | Self::Lexed {
+                context_may_change_from,
+                ..
+            } => context_may_change_from,
+        };
+        context_may_change_from.is_some_and(|start| start <= byte)
+    }
+
+    fn target_tokens(&self, source: &str) -> Option<&[Token]> {
+        if let Self::Inventory {
+            raw_targets: Some(cache),
+            ..
+        } = self
+        {
+            if cache.get().is_none() {
+                let tokens = tokenize(source);
+                if crate::engine::control::cancelled() {
+                    return None;
+                }
+                let _ = cache.set(tokens);
+            }
+            return cache.get().map(Vec::as_slice);
+        }
+        self.tokens()
     }
 }
 
@@ -243,7 +291,9 @@ impl SemanticModel {
         let parse_stop = crate::engine::diagnostics::parse_preflight::first_refusal(&model)
             .map(|stop| stop.order);
         let facts = ModelLocals::collect_before(&model, parse_stop);
-        let named = named::collect(&model);
+        let accepted = crate::engine::analysis::named_callbacks::collect(&model);
+        let named = named::collect(&model, &accepted);
+        let accepted_calls = Self::collect_accepted_calls(&model, &accepted);
         check_cancelled()?;
         spans.extend(facts.declarations.iter().map(|row| row.span));
         spans.extend(facts.definitions.iter().map(|row| row.target_span));
@@ -294,6 +344,8 @@ impl SemanticModel {
             tags: Vec::new(),
             bindings: OnceLock::new(),
             ordinary_sites: OnceLock::new(),
+            accepted_calls,
+            call_sites: OnceLock::new(),
             parse_stop,
             accepted_events,
         };
@@ -304,6 +356,13 @@ impl SemanticModel {
 
     pub(crate) fn local_facts(&self) -> &ModelLocals {
         &self.facts
+    }
+
+    /// Original-source lexer facts for this captured file. Inert inventories
+    /// are borrowed only when their tokens match original lexical boundaries.
+    pub(crate) fn raw_source_tokens(&self, file: &str) -> Option<&[Token]> {
+        self.source_tokens(file)?
+            .target_tokens(self.sources.get(file)?)
     }
 
     pub fn written(&self, span: Span) -> Option<(String, Span)> {
@@ -366,12 +425,21 @@ impl SemanticModel {
     }
 
     pub fn bindings(&self) -> Vec<Binding> {
+        self.binding_inventory().to_vec()
+    }
+
+    pub(crate) fn binding_inventory(&self) -> &[Binding] {
         if crate::engine::control::cancelled() {
-            return Vec::new();
+            return &[];
         }
-        self.bindings
-            .get_or_init(|| self.collect_bindings())
-            .clone()
+        if self.bindings.get().is_none() {
+            let bindings = self.collect_bindings();
+            if crate::engine::control::cancelled() {
+                return &[];
+            }
+            let _ = self.bindings.set(bindings);
+        }
+        self.bindings.get().unwrap()
     }
 
     fn collect_bindings(&self) -> Vec<Binding> {
@@ -488,7 +556,7 @@ impl SemanticModel {
             }
         }
         // Calls are retained expression facts, including valid built-in names.
-        let accepted_calls = self.accepted_calls();
+        let accepted_calls = &self.accepted_calls;
         let mut builtin_names = HashSet::new();
         for (id, expr) in self.model.exprs.iter() {
             if crate::engine::control::cancelled() {
@@ -541,26 +609,22 @@ impl SemanticModel {
 
     pub fn select(&self, selector: Selector<'_>) -> Result<Option<Binding>, SelectionError> {
         let target_name = match &selector {
-            Selector::Target { file, byte } => self
-                .tags
-                .iter()
-                .find(|tag| {
-                    tag.written.as_ref().is_some_and(|(target, span)| {
-                        target == file && span.start <= *byte && *byte < span.end
-                    })
-                })
-                .map(|tag| tag.name.clone())
-                .or_else(|| {
-                    self.sources
-                        .get(*file)
-                        .and_then(|source| ident_at(source, *byte))
-                        .map(|(name, _)| name)
-                }),
+            Selector::Target { file, byte } => {
+                let name = self.target_name(file, *byte);
+                if name.is_none()
+                    && self
+                        .source_tokens(file)
+                        .is_some_and(|tokens| !tokens.macro_may_change_context(*byte))
+                {
+                    return Ok(None);
+                }
+                name
+            }
             _ => None,
         };
         let candidates: Vec<_> = self
-            .bindings()
-            .into_iter()
+            .binding_inventory()
+            .iter()
             .filter(|binding| match &selector {
                 Selector::Name(name) => {
                     binding.name == *name
@@ -587,6 +651,7 @@ impl SemanticModel {
                     })
                 }
             })
+            .cloned()
             .collect();
         match candidates.len() {
             0 => Ok(None),
@@ -601,7 +666,49 @@ impl SemanticModel {
         }
     }
 
+    fn target_name(&self, file: &str, byte: u32) -> Option<String> {
+        if let Some(tag) = self.tags.iter().find(|tag| {
+            tag.written.as_ref().is_some_and(|(target, span)| {
+                target == file && span.start <= byte && byte < span.end
+            })
+        }) {
+            return Some(tag.name.clone());
+        }
+        let source = self.sources.get(file)?;
+        let tokens = self.raw_source_tokens(file)?;
+        let token = tokens.get(tokens.partition_point(|token| token.span.end <= byte))?;
+        if token.span.start > byte {
+            return None;
+        }
+        if token.kind == TokenKind::Ident {
+            return Some(token.text(source).into());
+        }
+        if token.kind != TokenKind::String {
+            return None;
+        }
+        // External implementation declarations can be quoted. Only their
+        // accepted inner name, not arbitrary quoted text, is a symbol target.
+        self.model
+            .symbol_type_events
+            .iter()
+            .enumerate()
+            .take_while(|_| !crate::engine::control::cancelled())
+            .find(|(index, event)| {
+                self.accepted_events.contains(index)
+                    && !event.changed
+                    && event.kind.as_str() == "external_function"
+                    && self
+                        .written(self.external_name_span(event.span))
+                        .is_some_and(|(target, span)| {
+                            target == file && span.start <= byte && byte < span.end
+                        })
+            })
+            .map(|(_, event)| self.model.name(event.name).into())
+    }
+
     pub fn references(&self, binding: &Binding, include_declaration: bool) -> Vec<Reference> {
+        #[cfg(test)]
+        REFERENCE_LOOKUPS.with(|count| count.set(count.get() + 1));
         if crate::engine::control::cancelled() {
             return Vec::new();
         }
@@ -735,20 +842,25 @@ impl SemanticModel {
         })
     }
 
-    fn accepted_calls(&self) -> HashMap<crate::engine::language::expr::ExprId, (usize, Span)> {
-        let accepted = crate::engine::analysis::named_callbacks::collect(&self.model);
+    fn collect_accepted_calls(
+        model: &Model,
+        accepted: &crate::engine::analysis::named_callbacks::Accepted,
+    ) -> HashMap<ExprId, (usize, Span)> {
+        #[cfg(test)]
+        ACCEPTED_CALL_COLLECTIONS.with(|count| count.set(count.get() + 1));
         let owners: HashSet<_> = accepted
             .slots
             .iter()
-            .filter_map(|index| match self.model.named_slots[*index].owner {
+            .take_while(|_| !crate::engine::control::cancelled())
+            .filter_map(|index| match model.named_slots[*index].owner {
                 crate::engine::language::model::NamedSlotOwner::ModelOperator(owner) => Some(owner),
                 _ => None,
             })
             .collect();
-        let mut result: HashMap<_, _> = self
-            .model
+        let mut result: HashMap<_, _> = model
             .function_calls
             .iter()
+            .take_while(|_| !crate::engine::control::cancelled())
             .filter(|call| {
                 accepted
                     .refusal
@@ -758,12 +870,13 @@ impl SemanticModel {
             .map(|call| (call.expr, (call.order, call.span)))
             .collect();
         result.extend(
-            self.model
+            model
                 .named_model_operator_exprs
                 .iter()
+                .take_while(|_| !crate::engine::control::cancelled())
                 .filter(|(_, owner)| owners.contains(owner))
                 .map(|(id, owner)| {
-                    let row = &self.model.named_model_operators[*owner];
+                    let row = &model.named_model_operators[*owner];
                     (*id, (row.keyword_order, row.operator_span))
                 }),
         );
@@ -771,35 +884,58 @@ impl SemanticModel {
     }
 
     fn call_sites(&self, binding: &Binding) -> Vec<Reference> {
-        let mut sites: Vec<_> = self
-            .accepted_calls()
-            .into_iter()
-            .filter(|(id, _)| {
-                use crate::engine::language::expr::ExprKind;
-                match self.model.exprs.get(*id).kind {
-                    ExprKind::Call { callee, .. } => {
-                        self.model.name(callee) == binding.name
-                            || binding.identity == Identity::Builtin
-                                && self.model.name(callee).eq_ignore_ascii_case(&binding.name)
-                    }
-                    ExprKind::Expectation { .. } => binding.name == "EXPECTATION",
-                    ExprKind::SteadyState { .. } => binding.name == "STEADY_STATE",
-                    _ => false,
-                }
-            })
-            .map(|(_, (order, span))| Reference {
-                order,
-                span,
-                written: self.written(span),
-                role: "call",
-                dimension: super::model_locals::scope_at_order(&self.model, order)
-                    .flatten()
-                    .map(|name| self.model.name(name).into()),
-                declaration: false,
-            })
+        let Some(inventory) = self.call_site_inventory() else {
+            return Vec::new();
+        };
+        if binding.identity != Identity::Builtin {
+            return inventory.get(&binding.name).cloned().unwrap_or_default();
+        }
+        let mut result: Vec<_> = inventory
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case(&binding.name))
+            .flat_map(|(_, sites)| sites.iter().cloned())
             .collect();
-        sites.sort_by_key(|site| site.order);
-        sites
+        result.sort_by_key(|site| site.order);
+        result
+    }
+
+    fn call_site_inventory(&self) -> Option<&HashMap<String, Vec<Reference>>> {
+        if crate::engine::control::cancelled() {
+            return None;
+        }
+        if self.call_sites.get().is_none() {
+            let mut result = HashMap::<String, Vec<Reference>>::new();
+            for (id, &(order, span)) in &self.accepted_calls {
+                if crate::engine::control::cancelled() {
+                    return None;
+                }
+                use crate::engine::language::expr::ExprKind;
+                let name = match self.model.exprs.get(*id).kind {
+                    ExprKind::Call { callee, .. } => self.model.name(callee),
+                    ExprKind::Expectation { .. } => "EXPECTATION",
+                    ExprKind::SteadyState { .. } => "STEADY_STATE",
+                    _ => continue,
+                };
+                result.entry(name.into()).or_default().push(Reference {
+                    order,
+                    span,
+                    written: self.written(span),
+                    role: "call",
+                    dimension: super::model_locals::scope_at_order(&self.model, order)
+                        .flatten()
+                        .map(|name| self.model.name(name).into()),
+                    declaration: false,
+                });
+            }
+            for sites in result.values_mut() {
+                sites.sort_by_key(|site| site.order);
+            }
+            if crate::engine::control::cancelled() {
+                return None;
+            }
+            let _ = self.call_sites.set(result);
+        }
+        self.call_sites.get()
     }
 
     fn external_sites(&self, binding: &Binding, include_declaration: bool) -> Vec<Reference> {
@@ -1040,22 +1176,73 @@ impl SemanticModel {
     /// Reuse source syntax if a source feature already built it. Ordinary
     /// symbol reads and edits do not request an inert parse just for this proof.
     fn written_tokens(&self, file: &str) -> Option<&[Token]> {
+        self.source_tokens(file)?.tokens()
+    }
+
+    fn source_tokens(&self, file: &str) -> Option<&SourceTokens> {
         let source = self.sources.get(file)?;
         let cached = self.source_tokens.get(file)?;
         if let Some(tokens) = cached.get() {
-            return tokens.tokens();
+            return Some(tokens);
         }
+        // Macro execution precedes the lexer and can change a later quote or
+        // comment boundary or map a generated name to its own source anchor.
+        // Retain this fact once; trivia at or after it needs semantic selection.
+        let context_may_change_from = if file != self.root
+            && file != crate::engine::workspace::include_resolver::normalize_uri(&self.root)
+        {
+            // Included fragments can inherit a quote or comment from another
+            // file, even when this file contains no written macro token.
+            Some(0)
+        } else {
+            self.source_documents
+                .get(file)
+                .and_then(SourceDocument::macro_source)
+                .map(|source| {
+                    source
+                        .tokens
+                        .iter()
+                        .find(|token| {
+                            matches!(
+                                token.kind,
+                                TokenKind::MacroDir
+                                    | TokenKind::MacroInterp
+                                    | TokenKind::MacroPrefix
+                            )
+                        })
+                        .map(|token| token.span.start)
+                })
+                .unwrap_or(Some(0))
+        };
         let tokens = self
             .source_documents
             .get(file)
             .and_then(SourceDocument::cached_inventory)
-            .map(SourceTokens::Inventory)
-            .unwrap_or_else(|| SourceTokens::Lexed(tokenize(source)));
+            .map(|inventory| {
+                let raw_targets = (!inventory.structure_complete()
+                    || inventory.macro_tokens.iter().any(|token| {
+                        matches!(
+                            token.kind,
+                            TokenKind::MacroDir | TokenKind::MacroInterp | TokenKind::MacroPrefix
+                        )
+                    })
+                    || source.contains('\r'))
+                .then(OnceLock::new);
+                SourceTokens::Inventory {
+                    inventory,
+                    raw_targets,
+                    context_may_change_from,
+                }
+            })
+            .unwrap_or_else(|| SourceTokens::Lexed {
+                tokens: tokenize(source),
+                context_may_change_from,
+            });
         if crate::engine::control::cancelled() {
             return None;
         }
         let _ = cached.set(tokens);
-        cached.get()?.tokens()
+        cached.get()
     }
 
     fn prove_conditional_edit(&self, name: &str, replacement: &str) -> Result<(), Refusal> {
@@ -1143,7 +1330,7 @@ pub(crate) fn rename(
     check_cancelled()?;
     let selected = owners.get(selected_owner).ok_or(SOURCE)?;
     if !selected
-        .bindings()
+        .binding_inventory()
         .iter()
         .any(|current| current.id == binding.id)
     {
@@ -1208,8 +1395,8 @@ pub(crate) fn rename(
             owner.prove_conditional_edit(&binding.name, replacement)?;
             let owner_targets = if binding.is_local() {
                 let compatible: Vec<_> = owner
-                    .bindings()
-                    .into_iter()
+                    .binding_inventory()
+                    .iter()
                     .filter(|other| {
                         other.is_local()
                             && other.name == binding.name
@@ -1223,13 +1410,13 @@ pub(crate) fn rename(
                     return Err(BINDING);
                 }
                 let other = compatible.into_iter().next().unwrap();
-                let targets = owner.local_rename(&other, replacement)?;
-                affected_bindings.insert(index, other);
+                let targets = owner.local_rename(other, replacement)?;
+                affected_bindings.insert(index, other.clone());
                 targets
             } else if matches!(binding.identity, Identity::Named(_)) {
                 let mut compatible: Vec<_> = owner
-                    .bindings()
-                    .into_iter()
+                    .binding_inventory()
+                    .iter()
                     .filter(|other| {
                         matches!(other.identity, Identity::Named(_))
                             && other.name == binding.name
@@ -1248,7 +1435,7 @@ pub(crate) fn rename(
                     unreachable!()
                 };
                 let targets = named::rename(owner, id, replacement)?;
-                affected_bindings.insert(index, other);
+                affected_bindings.insert(index, other.clone());
                 targets
             } else {
                 let decision = ordinary::decision(owner, &binding.name, replacement)?;

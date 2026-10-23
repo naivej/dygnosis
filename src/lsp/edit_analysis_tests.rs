@@ -3,6 +3,294 @@
 use super::*;
 use crate::engine::language::parser::PARSE_EXPANDED_BUILDS;
 
+#[tokio::test]
+async fn trivia_color_range_does_not_wait_for_pending_model_work() {
+    // Guards a comment-range color request waiting for model work that cannot
+    // contribute a token inside the requested trivia.
+    let uri = Url::parse("untitled:trivia-colors.mod").unwrap();
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open_source(
+        server,
+        &uri,
+        "// a comment\nvar y; model; y=0; end;".into(),
+        1,
+    )
+    .await;
+    let output = server.output_gate.lock().await;
+    let response = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        server.semantic_tokens_range(SemanticTokensRangeParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 0), Position::new(1, 0)),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        }),
+    )
+    .await
+    .expect("comment colors waited for model analysis")
+    .unwrap();
+    assert!(
+        matches!(response, Some(SemanticTokensRangeResult::Tokens(tokens)) if tokens.data.is_empty())
+    );
+    assert!(server.lock_inner().semantic_views.is_empty());
+    drop(output);
+    server.wait_document_analysis(Some(&uri)).await;
+}
+
+#[test]
+fn trivia_color_proof_keeps_macro_and_quoted_name_ranges() {
+    // Guards macro text inside comments and accepted quoted external names
+    // being mistaken for lexer trivia.
+    let uri = Url::parse("untitled:conservative-colors.mod").unwrap();
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    for source in [
+        "// @{name}\nvar y;",
+        "external_function(name='fname', nargs=1);\n",
+    ] {
+        server.store_document(uri.clone(), source.into(), 1);
+        assert!(
+            !server
+                .written_colors_empty(&uri, Range::new(Position::new(0, 0), Position::new(1, 0)))
+        );
+    }
+}
+
+#[tokio::test]
+async fn range_colors_keep_sites_after_a_macro_changes_lexical_context() {
+    // Guards a macro before the requested range ending a written comment and
+    // making later accepted name sites visible only in the effective source.
+    let uri = Url::parse("untitled:macro-comment-colors.mod").unwrap();
+    let source = "var y; model; /* @{\"*/\"} y=0; end;";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    server.upsert(uri.clone(), source.into(), 1);
+    let start = source.find("y=0").unwrap() as u32;
+    let range = Range::new(Position::new(0, start), Position::new(0, start + 3));
+    let full = server.semantic_tokens(&uri, None).unwrap();
+    let mut column = 0;
+    let expected: Vec<_> = full
+        .data
+        .iter()
+        .filter_map(|token| {
+            assert_eq!(token.delta_line, 0);
+            column += token.delta_start;
+            pos_in_range_half_open(Position::new(0, column), range).then_some((
+                column,
+                token.length,
+                token.token_type,
+                token.token_modifiers_bitset,
+            ))
+        })
+        .collect();
+    assert!(
+        !expected.is_empty(),
+        "effective copied variable lost its color"
+    );
+    let response = server
+        .semantic_tokens_range(SemanticTokensRangeParams {
+            text_document: TextDocumentIdentifier { uri },
+            range,
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap();
+    let Some(SemanticTokensRangeResult::Tokens(tokens)) = response else {
+        panic!("range colors unavailable");
+    };
+    let mut column = 0;
+    let actual: Vec<_> = tokens
+        .data
+        .iter()
+        .map(|token| {
+            assert_eq!(token.delta_line, 0);
+            column += token.delta_start;
+            (
+                column,
+                token.length,
+                token.token_type,
+                token.token_modifiers_bitset,
+            )
+        })
+        .collect();
+    assert_eq!(actual, expected);
+}
+
+#[tokio::test]
+async fn range_colors_keep_an_includes_inherited_lexical_context() {
+    // Guards a locally empty comment range hiding accepted sites when an
+    // earlier sibling include changes the effective comment context.
+    let directory =
+        std::env::temp_dir().join(format!("dygnosis-color-include-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let root_text = "@#include \"prefix.inc\"\n@#include \"body.mod\"\n";
+    let body_text = "% */ var y; model; y=0; end;";
+    // A .mod file can be included too; its suffix cannot prove root context.
+    std::fs::write(directory.join("prefix.inc"), "/*").unwrap();
+    std::fs::write(directory.join("body.mod"), body_text).unwrap();
+    std::fs::write(directory.join("root.mod"), root_text).unwrap();
+    let root = Url::from_file_path(directory.join("root.mod")).unwrap();
+    let body = Url::from_file_path(directory.join("body.mod")).unwrap();
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    server.upsert(root.clone(), root_text.into(), 1);
+    server.upsert(body.clone(), body_text.into(), 1);
+    assert_eq!(server.lock_inner().context_roots(&body), [root]);
+    let full = server.semantic_tokens(&body, None).unwrap();
+    assert!(
+        !full.data.is_empty(),
+        "inherited effective sites lost their colors"
+    );
+    let response = server
+        .semantic_tokens_range(SemanticTokensRangeParams {
+            text_document: TextDocumentIdentifier { uri: body },
+            range: Range::new(Position::new(0, 0), Position::new(1, 0)),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap();
+    let Some(SemanticTokensRangeResult::Tokens(tokens)) = response else {
+        panic!("range colors unavailable");
+    };
+    std::fs::remove_dir_all(directory).unwrap();
+    assert_eq!(tokens, full);
+}
+
+#[test]
+fn selection_range_lexes_once_and_keeps_equation_boundaries() {
+    // Guards a whole-document lexical pass for every cursor and equation
+    // membership being tested after repeated position conversion.
+    let uri = Url::parse("untitled:selection-work.mod").unwrap();
+    let source = "// \u{1f600}\r\nvar y;\r\nmodel;\r\ny=0;\r\nend;\r\n";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    server.upsert(uri.clone(), source.into(), 1);
+    let positions = [
+        Position::new(3, 0),
+        Position::new(3, 3),
+        Position::new(4, 0),
+    ];
+    let expected: Vec<_> = positions
+        .iter()
+        .map(|position| {
+            server
+                .selection_ranges(&uri, &[*position])
+                .unwrap()
+                .remove(0)
+        })
+        .collect();
+    source_projection::SELECTION_TOKEN_SCANS.with(|scans| scans.set(0));
+    let cursors: Vec<_> = positions.into_iter().cycle().take(128).collect();
+    let actual = server.selection_ranges(&uri, &cursors).unwrap();
+    assert_eq!(
+        source_projection::SELECTION_TOKEN_SCANS.with(std::cell::Cell::get),
+        1
+    );
+    for (index, selection) in actual.iter().enumerate() {
+        assert_eq!(selection, &expected[index % expected.len()]);
+    }
+    assert_eq!(
+        actual[0].range,
+        Range::new(Position::new(3, 0), Position::new(3, 1))
+    );
+    assert_eq!(
+        actual[0].parent.as_ref().unwrap().range,
+        Range::new(Position::new(3, 0), Position::new(3, 3))
+    );
+    let inner = server.lock_inner();
+    let model = inner.workspace.get_model(uri.as_str()).unwrap();
+    let equation = &model.equations[0];
+    assert!(equation_at_byte(model, equation.span.start).is_some());
+    assert!(equation_at_byte(model, equation.span.end).is_some());
+    assert!(equation_at_byte(model, equation.span.end + 1).is_none());
+}
+
+#[test]
+fn colors_only_calculate_negotiated_timing_modifiers() {
+    // Guards visiting equations for timing when neither timing modifier can
+    // appear in the client's color result.
+    let uri = Url::parse("untitled:color-timing-work.mod").unwrap();
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    server.upsert(uri.clone(), "var y; model; y=y(+1); end;".into(), 1);
+    source_projection::COLOR_TIMING_ANALYSES.with(|analyses| analyses.set(0));
+    let ordinary = server.semantic_tokens(&uri, None).unwrap();
+    assert!(!ordinary.data.is_empty());
+    assert_eq!(
+        source_projection::COLOR_TIMING_ANALYSES.with(std::cell::Cell::get),
+        0
+    );
+    server.lock_inner().semantic_mapping.forward = 1;
+    let timing = server.semantic_tokens(&uri, None).unwrap();
+    assert_eq!(
+        source_projection::COLOR_TIMING_ANALYSES.with(std::cell::Cell::get),
+        1
+    );
+    assert!(
+        timing
+            .data
+            .iter()
+            .any(|token| token.token_modifiers_bitset == 1)
+    );
+}
+
+#[test]
+fn range_colors_keep_the_same_sites_as_full_colors() {
+    // Guards range pruning losing model locals, quoted typed names, native
+    // boundaries or names adjacent to macro interpolation.
+    fn decoded(tokens: SemanticTokens) -> Vec<(Position, u32, u32, u32)> {
+        let mut line = 0;
+        let mut column = 0;
+        tokens
+            .data
+            .into_iter()
+            .map(|token| {
+                line += token.delta_line;
+                column = if token.delta_line == 0 {
+                    column + token.delta_start
+                } else {
+                    token.delta_start
+                };
+                (
+                    Position::new(line, column),
+                    token.length,
+                    token.token_type,
+                    token.token_modifiers_bitset,
+                )
+            })
+            .collect()
+    }
+    let uri = Url::parse("untitled:range-color-sites.mod").unwrap();
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    for source in [
+        "external_function(name='fname', nargs=1);\nvar y; model; # local = y(+1); y=local; end;\n",
+        "@#define suffix = \"x\"\nvar yx; model; y@{suffix}=0; end;\n",
+        "native=1;\r\nvar y; model; y=y(+1); end;\r\n",
+    ] {
+        server.upsert(uri.clone(), source.into(), 1);
+        let full = decoded(server.semantic_tokens(&uri, None).unwrap());
+        for range in [
+            Range::new(Position::new(0, 0), Position::new(1, 0)),
+            Range::new(Position::new(1, 4), Position::new(2, 0)),
+            Range::new(Position::new(0, 23), Position::new(0, 28)),
+        ] {
+            let expected: Vec<_> = full
+                .iter()
+                .filter(|(position, ..)| pos_in_range_half_open(*position, range))
+                .cloned()
+                .collect();
+            assert_eq!(
+                decoded(server.semantic_tokens(&uri, Some(range)).unwrap()),
+                expected
+            );
+        }
+    }
+}
+
 async fn open_source(server: &Backend, uri: &Url, text: String, version: i32) {
     server
         .did_open(DidOpenTextDocumentParams {

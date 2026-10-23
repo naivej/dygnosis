@@ -49,9 +49,11 @@ fn fact(facts: &mut Vec<Fact>, kind: &'static str, name: &str) -> usize {
         })
 }
 
-pub(super) fn collect(model: &Model) -> Vec<Fact> {
+pub(super) fn collect(
+    model: &Model,
+    accepted: &crate::engine::analysis::named_callbacks::Accepted,
+) -> Vec<Fact> {
     let mut facts = Vec::new();
-    let accepted = crate::engine::analysis::named_callbacks::collect(model);
     // Auxiliary model references are resolved at Transform, against the final
     // definition tables; the two owning commands have different priorities.
     for (_, slot) in model
@@ -150,7 +152,7 @@ pub(super) fn collect(model: &Model) -> Vec<Fact> {
             span: slot.span,
         });
     }
-    collect_subsamples(model, &mut facts, &accepted);
+    collect_subsamples(model, &mut facts, accepted);
     facts
 }
 
@@ -481,7 +483,8 @@ pub(super) fn rename(
             fact
         })
         .collect();
-    if expected != collect(&renamed) {
+    let accepted = crate::engine::analysis::named_callbacks::collect(&renamed);
+    if expected != collect(&renamed, &accepted) {
         return Err(Refusal::new(
             "NAMESPACE_CAPTURE",
             "The new name would change another named reference or copy relation in an affected namespace; no edits were proposed.",

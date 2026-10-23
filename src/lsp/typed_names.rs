@@ -204,9 +204,16 @@ mod cache_tests {
 
 pub(super) struct TypedSites {
     sites: HashMap<Span, (NameRole, bool)>,
+    source_owner: Arc<SemanticModel>,
 }
 
 impl TypedSites {
+    pub fn raw_source_tokens(
+        &self,
+        file: &str,
+    ) -> Option<&[crate::engine::language::lexer::Token]> {
+        self.source_owner.raw_source_tokens(file)
+    }
     pub fn at(&self, span: Span) -> Option<(NameRole, bool)> {
         self.sites.get(&span).copied()
     }
@@ -220,13 +227,23 @@ impl TypedSites {
 
 /// Literal accepted sites only. Several owners must agree on the displayed role.
 pub(super) fn sites(inner: &mut Inner, uri: &Url) -> Option<TypedSites> {
+    sites_in_range(inner, uri, None)
+}
+
+pub(super) fn sites_in_range(
+    inner: &mut Inner,
+    uri: &Url,
+    range: Option<Span>,
+) -> Option<TypedSites> {
+    let selected =
+        |span: Span| range.is_none_or(|range| range.start <= span.start && span.start < range.end);
     let file = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
     let views = views(inner, uri)?;
     let mut groups = views.iter().map(|view| {
         let mut sites: HashMap<Span, Option<(NameRole, bool)>> = HashMap::new();
         let ordinary: HashMap<_, _> = view
-            .bindings()
-            .into_iter()
+            .binding_inventory()
+            .iter()
             .filter_map(|binding| {
                 let role = match binding.kind.as_str() {
                     "var" => NameRole::Endogenous,
@@ -234,7 +251,7 @@ pub(super) fn sites(inner: &mut Inner, uri: &Url) -> Option<TypedSites> {
                     "parameters" => NameRole::Parameter,
                     _ => return None,
                 };
-                Some((binding.name, role))
+                Some((binding.name.as_str(), role))
             })
             .collect();
         for (name, reference) in view.accepted_ordinary_sites() {
@@ -245,6 +262,7 @@ pub(super) fn sites(inner: &mut Inner, uri: &Url) -> Option<TypedSites> {
                 continue;
             };
             if target == &file
+                && selected(*span)
                 && view
                     .sources
                     .get(target)
@@ -262,18 +280,19 @@ pub(super) fn sites(inner: &mut Inner, uri: &Url) -> Option<TypedSites> {
                     .or_insert(Some(value));
             }
         }
-        for binding in view.bindings() {
+        for binding in view.binding_inventory() {
             let Some(role) = role(&binding.kind) else {
                 continue;
             };
             if binding.declaration.is_none() {
                 continue;
             }
-            for reference in view.references(&binding, true) {
+            for reference in view.references(binding, true) {
                 let Some((target, span)) = reference.written else {
                     continue;
                 };
                 if target != file
+                    || !selected(span)
                     || view
                         .sources
                         .get(&target)
@@ -302,7 +321,10 @@ pub(super) fn sites(inner: &mut Inner, uri: &Url) -> Option<TypedSites> {
     for group in groups {
         sites.retain(|span, value| group.get(span) == Some(value));
     }
-    Some(TypedSites { sites })
+    Some(TypedSites {
+        sites,
+        source_owner: Arc::clone(&views[0]),
+    })
 }
 
 fn description(binding: &Binding) -> String {

@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use serde_json::{Value, json};
 use tower_lsp::lsp_types::*;
 
-use crate::engine::analysis::model_info::classify_variable_timing;
 use crate::engine::analysis::source_inventory::{SourceInventory, SourceItem, SourceItemKind};
+use crate::engine::analysis::timing::TimingAnalysis;
 use crate::engine::analysis_configuration::SourceAvailability;
 use crate::engine::language::model::{Model, StatementKind, WrittenDeclaration};
 use crate::engine::language::span::{LineIndex, Span};
@@ -15,6 +15,7 @@ use crate::engine::workspace::Workspace;
 use crate::engine::workspace::include_resolver::{is_virtual_uri, normalize_uri};
 use crate::engine::workspace::model_map::{SourceOccurrence, WrittenModelMap, WrittenSegment};
 use crate::lsp::settings::PresentationSettings;
+use std::sync::Arc;
 
 pub(crate) struct WrittenView<'a> {
     pub uri: &'a Url,
@@ -32,7 +33,7 @@ pub(crate) struct WrittenView<'a> {
 struct SourceIndex<'a> {
     uri: Url,
     text: &'a str,
-    index: LineIndex,
+    index: Arc<LineIndex>,
 }
 struct StatementGroup {
     ids: Vec<usize>,
@@ -277,10 +278,23 @@ impl<'a> WrittenView<'a> {
             })?;
             (uri, text)
         };
-        let range = written_range(text, segment.span)?;
-        let normalized = crate::engine::language::parser::normalize_newlines(text);
-        debug_assert_eq!(normalized.len(), text.len());
-        let index = LineIndex::new(&normalized);
+        text.get(segment.span.start as usize..segment.span.end as usize)?;
+        let index = self
+            .workspace
+            .and_then(|workspace| workspace.source_document(self.uri.as_str(), key))
+            .filter(|source| std::ptr::eq(source.source(), text))
+            .map(|source| source.source_index())
+            .unwrap_or_else(|| {
+                Arc::new(LineIndex::new(
+                    &crate::engine::language::parser::normalize_newlines(text),
+                ))
+            });
+        let start = index.position_utf16(text, segment.span.start);
+        let end = index.position_utf16(text, segment.span.end);
+        let range = Range::new(
+            Position::new(start.line, start.character),
+            Position::new(end.line, end.character),
+        );
         sources.insert(
             key.to_string(),
             SourceIndex {
@@ -343,7 +357,7 @@ impl<'a> WrittenView<'a> {
             "ambiguous": source.segments.len() != 1, "origin_frames": frames})
     }
 
-    pub fn facts_json(&self) -> Value {
+    pub fn facts_json(&self, timing: Option<&TimingAnalysis>) -> Value {
         let mut counted_by_statement: HashMap<usize, Vec<_>> = HashMap::new();
         for row in self.map.equations.iter().filter(|row| row.number.is_some()) {
             counted_by_statement
@@ -391,7 +405,6 @@ impl<'a> WrittenView<'a> {
                 row
             })
             .collect();
-        let timing = classify_variable_timing(self.model);
         let declarations: Vec<_> = self
             .model
             .written_declarations
@@ -428,7 +441,7 @@ impl<'a> WrittenView<'a> {
                 );
                 row["timing"] = if self.authoritative {
                     timing
-                        .get(self.model.name(declaration.name))
+                        .and_then(|timing| timing.all.get(self.model.name(declaration.name)))
                         .map(|info| json!({"class":info.class.label(),"offsets":info.offsets}))
                         .unwrap_or(Value::Null)
                 } else {
@@ -1142,4 +1155,35 @@ pub(crate) fn add_binding_symbols(
         }
     }
     rows.sort_by_key(|row| range_key(row.range));
+}
+
+#[cfg(test)]
+mod source_index_tests {
+    use super::*;
+
+    #[test]
+    fn written_locations_share_the_document_index() {
+        // Guards first written-location projection constructing two line
+        // indexes, or retaining a separate index despite an identical Doc.
+        let uri = Url::parse("untitled:written-index.mod").unwrap();
+        let mut workspace = Workspace::new();
+        workspace.update_document(uri.as_str(), "var y;\r\nmodel; y=0; end;\r\n");
+        let model = workspace.effective_model_snapshot(uri.as_str()).unwrap();
+        let report = workspace.expand_report_snapshot(uri.as_str()).unwrap();
+        let key = normalize_uri(uri.as_str());
+        let source = workspace.source_document(uri.as_str(), &key).unwrap();
+        let view = WrittenView::new(
+            &uri,
+            source.source(),
+            &model,
+            &report.model_map,
+            Some(&workspace),
+            true,
+            true,
+        );
+        let segment = &report.model_map.declarations[0].segments[0];
+        view.location(segment).unwrap();
+        let sources = view.sources.borrow();
+        assert!(Arc::ptr_eq(&sources[&key].index, &source.source_index()));
+    }
 }

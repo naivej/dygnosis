@@ -227,6 +227,19 @@ pub(crate) struct NameSites {
 
 impl NameSites {
     pub fn new(model: &Model, map: &WrittenModelMap, uri: &Url, text: &str) -> Self {
+        Self::for_range(model, map, uri, text, None)
+    }
+
+    pub fn for_range(
+        model: &Model,
+        map: &WrittenModelMap,
+        uri: &Url,
+        text: &str,
+        range: Option<Span>,
+    ) -> Self {
+        let selected = |span: &Span| {
+            range.is_none_or(|range| span.start < range.end && range.start < span.end)
+        };
         let key = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
         // Implicit pound definitions now have parser type history, but their
         // editor role still belongs only to the model scope below. Explicit
@@ -270,13 +283,13 @@ impl NameSites {
             let role = model
                 .final_symbol_kind(declaration.declaration.name)
                 .and_then(role);
-            for span in spans(source, &key, text) {
+            for span in spans(source, &key, text).into_iter().filter(selected) {
                 declarations.push((span, role));
                 writes.push(span);
             }
         }
         for source in &map.writes {
-            writes.extend(spans(source, &key, text));
+            writes.extend(spans(source, &key, text).into_iter().filter(selected));
         }
         let mut scopes: HashMap<Option<String>, LocalScope> = HashMap::new();
         for (row, occurrence) in model.written_equations.iter().zip(&map.equations) {
@@ -286,7 +299,11 @@ impl NameSites {
                     names: HashSet::new(),
                     regions: Vec::new(),
                 });
-            scope.regions.extend(spans(&occurrence.source, &key, text));
+            scope.regions.extend(
+                spans(&occurrence.source, &key, text)
+                    .into_iter()
+                    .filter(selected),
+            );
             if row.equation.is_local
                 && let Some(ExprKind::Ident {
                     name,
