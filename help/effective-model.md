@@ -1,56 +1,51 @@
 # Inspect macro expansion
 
-With a model or included file active, open the macro expansion preview from any
-of these places:
-
-- Click **Expand macros** in the top-right editor title bar (`$(open-preview)`).
-- Right-click in the editor and choose **Expand macros**.
-- Click the **Expand macros** CodeLens above the first `model` block (when enabled).
-- Run **Dygnosis: Expand macros** from the Command Palette.
+With a model or included file active, run **Dygnosis: Expand macros** from the
+Command Palette, or click **Expand macros** in the editor title bar
+(`$(open-preview)`). The same action is also on the editor context menu and,
+when enabled, as a CodeLens above the first `model` block.
 
 Dygnosis opens a read-only editor tab beside your file with `@#include` files,
 `@#for` loops, `@#if` branches and `@{...}` substitutions expanded before
-Dynare's internal equation transformations.
-
-For model structure, open VS Code's **Outline** while the preview is active.
+Dynare's internal equation transformations. Open **Outline** on the preview for
+structure.
 
 ## Choose the analysis configuration
 
-The source editor and macro expansion preview use one analysis configuration
-for the model root. To change it, run **Dynare: Select Analysis Configuration**
-from either view or use the model status. Select **Source** to reset the
-configuration to the macro inputs written in the model. Choose **Set macro inputs…**
-to enter initial values, or select a saved configuration for this root.
+The source editor and macro expansion preview share one analysis configuration
+for the model root. Change it with **Dynare: Select Analysis Configuration**
+(or the model status):
 
-To change one written macro definition, place the cursor on it in the source
-editor and run **Dynare: Override Macro Definition for Analysis**. Enter a
-replacement expression or choose **Skip this definition**. To inspect another
-arm of a conditional, place the cursor in its chain and run **Dynare: Preview
-Macro Branch**; choose a listed arm or **No branch**. These choices affect the analysis and preview. They do not change the `.mod` or
-include file.
+| Choice | Effect |
+|---|---|
+| **Source** | Macro inputs as written in the model. |
+| **Set macro inputs…** | Enter initial macro values for this root. |
+| A saved configuration | Reuse presets listed in [Dynare: Analysis Configurations](settings:dynare.analysisConfigurations). |
 
-Run **Dynare: Reset Analysis Configuration** to return to **Source**. To save
-the current choices for later, run **Dynare: Save Analysis Configuration**
-from a model in a workspace folder. Saved configurations are available from
-the selector, but do not start automatically in a new session. The folder's
-saved presets are listed in [Dynare: Analysis Configurations](settings:dynare.analysisConfigurations).
-For comparison steps, see [Review model changes](structural-diff.md).
+For one definition, place the cursor on it and run **Dynare: Override Macro
+Definition for Analysis** (replacement expression, or **Skip this definition**).
+For another conditional arm, place the cursor in its chain and run **Dynare:
+Preview Macro Branch**. These choices affect analysis and preview only; they do
+not edit the files.
 
-Counts and other model facts come from the selected configuration. To browse
-written code outside that selection, see [Inactive source](navigate-code.md#inactive-source).
+**Dynare: Reset Analysis Configuration** returns to **Source**. **Dynare: Save
+Analysis Configuration** stores the current choices for a model in a workspace
+folder (they do not auto-apply in a new session). To compare two configurations,
+see [Review model changes](structural-diff.md).
+
+Counts and other model facts follow the selected configuration. For written
+code outside that selection, see [Inactive source](navigate-code.md#inactive-source).
 
 | Action | Shortcut | Result |
 |---|---|---|
-| **Dygnosis: Go to written source** | `Ctrl+Alt+G` (`Cmd+Alt+G` on macOS) | Jumps from the cursor or selection in the preview to the line in your model or include file that produced it (for example, `beta_1` jumps to `beta_@{j}`). |
-| **Dygnosis: Refresh macro expansion** | `Ctrl+Alt+R` (`Cmd+Alt+R` on macOS) | Updates the preview after you edit the model or an included file. |
+| **Dygnosis: Go to written source** | `Ctrl+Alt+G` (`Cmd+Alt+G` on macOS) | Jumps from the preview to the written line that produced it (for example, `beta_1` → `beta_@{j}`). |
+| **Dygnosis: Refresh macro expansion** | `Ctrl+Alt+R` (`Cmd+Alt+R` on macOS) | Updates the preview after you edit the model or an include. |
 
-Both actions also appear as buttons in the preview's top-right editor title bar
-and in the editor right-click menu.
+Both actions also appear in the preview title bar and context menu. Related
+settings: [Dynare › Effective Model: Macro Tint](settings:dynare.effectiveModel.macroTint),
+[Dynare: Editor Actions](settings:dynare.editorActions), and
+[Dynare: Macro Work Limit](settings:dynare.macroWorkLimit).
 
-- [Dynare › Effective Model: Macro Tint](settings:dynare.effectiveModel.macroTint) shades macro-expanded ranges in the preview.
-- [Dynare: Editor Actions](settings:dynare.editorActions) controls whether model actions appear in the editor `toolbar` and `contextMenu`.
-- [Dynare: Macro Work Limit](settings:dynare.macroWorkLimit) increases the macro evaluation budget for large macro programs.
-
-`@#echo` and `@#echomacrovars` messages are written to the **Dygnosis** channel
-in [Output](action:output) when the preview opens or refreshes, while
-`@#echomacrovars(save)` inserts assignment lines directly into the preview.
+`@#echo` and `@#echomacrovars` messages go to the **Dygnosis** channel in
+[Output](action:output) when the preview opens or refreshes;
+`@#echomacrovars(save)` inserts assignment lines into the preview.

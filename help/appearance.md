@@ -6,45 +6,40 @@ in VS Code's Settings editor.
 
 ## Name details
 
-Hovering over a declared symbol, viewing it in the completion list, or browsing
-**Outline** shows its `long_name` and literal TeX label (such as `$\beta$`)
-from the model file. Toggle them independently with [Dynare › Name Details:
-Long Name](settings:dynare.nameDetails.longName) and [Dynare › Name Details:
+Hover, completion and **Outline** can show a symbol's `long_name` and literal
+TeX label (such as `$\beta$`). Toggle them with [Dynare › Name Details: Long
+Name](settings:dynare.nameDetails.longName) and [Dynare › Name Details:
 Tex](settings:dynare.nameDetails.tex).
 
 ## Block backgrounds
 
-Dygnosis shades recognized Dynare blocks while you edit. Toggle block shading
-with [Dynare › Block Tint: Enabled](settings:dynare.blockTint.enabled), or run
-**Dygnosis: Open Settings** and filter by `blockTint` under **Dygnosis:
-Appearance** to set individual block types to **Off**, **Subtle** or
-**Model-strength**.
-
-Use [Dynare › Block Tint: Heterogeneous
-Models](settings:dynare.blockTint.heterogeneousModels) to override the shading
-style for specific heterogeneity dimensions (for example `{"households":
-"off"}`).
+Toggle block shading with [Dynare › Block Tint:
+Enabled](settings:dynare.blockTint.enabled). Under **Dygnosis: Appearance**, set
+individual block types to **Off**, **Subtle** or **Model-strength**, and use
+[Dynare › Block Tint: Heterogeneous
+Models](settings:dynare.blockTint.heterogeneousModels) for per-dimension
+overrides (for example `{"households": "off"}`).
 
 ## Expression value hints
 
-Top-level parameter expressions such as `beta = 1 / 1.04;` show an inline value
-hint (`= 0.961538...`) when Dygnosis can evaluate the expression statically
-(plain numbers such as `beta = 0.99;` omit the hint).
-
-Toggle these hints with [Dynare: Parameter Value
-Hints](settings:dynare.parameterValueHints). VS Code's **Editor › Inlay Hints:
+Top-level parameter expressions such as `beta = 1 / 1.04;` can show an inline
+value hint when Dygnosis evaluates them statically (plain numbers omit the
+hint). Toggle with [Dynare: Parameter Value
+Hints](settings:dynare.parameterValueHints); VS Code's **Editor › Inlay Hints:
 Enabled** (`editor.inlayHints.enabled`) must also allow inlay hints.
 
 ## Custom colors
 
-Semantic highlighting distinguishes endogenous variables, exogenous variables,
-parameters and model-local variables, as well as declared dimensions, trends,
-external functions and named models. It follows your active color theme and VS
-Code's `editor.semanticHighlighting.enabled` setting. Native MATLAB lines and
-`verbatim` blocks keep their own highlighting.
+Semantic highlighting distinguishes Dynare symbol roles and follows your theme
+plus `editor.semanticHighlighting.enabled`. Native MATLAB lines and `verbatim`
+blocks keep their own highlighting.
 
-To customize symbol colors, run **Dygnosis: Edit in settings.json** and add
-rules under `editor.semanticTokenColorCustomizations`:
+Run **Dygnosis: Edit in settings.json** to customize. Symbol colors use
+`editor.semanticTokenColorCustomizations` (for example
+`dynareParameter:dynare`); block and comparison accents use
+`workbench.colorCustomizations` keys such as
+`dynare.blockTint.modelBackground`, `dynare.blockTint.subtleBackground`,
+`dynare.effectiveModel.macroBackground` and `dynare.diff.changedForeground`.
 
 ```json
 {
@@ -56,21 +51,7 @@ rules under `editor.semanticTokenColorCustomizations`:
 }
 ```
 
-| Role | Semantic token selector |
-|---|---|
-| Endogenous variable | `dynareEndogenous:dynare` |
-| Exogenous variable (including `varexo_det`) | `dynareExogenous:dynare` |
-| Parameter | `dynareParameter:dynare` |
-| Model-local variable | `dynareModelLocal:dynare` |
-| Forward-looking endogenous variable | `dynareEndogenous.forwardLooking:dynare` |
-| Predetermined endogenous variable | `dynareEndogenous.predetermined:dynare` |
-
-To customize background shading and comparison accent colors, add keys under
-`workbench.colorCustomizations` via **Dygnosis: Edit in settings.json**:
-
-| Theme color key | Used for |
-|---|---|
-| `dynare.blockTint.modelBackground` | Whole-line background for **Model-strength** blocks. |
-| `dynare.blockTint.subtleBackground` | Whole-line background for **Subtle** blocks. |
-| `dynare.effectiveModel.macroBackground` | Background highlight for macro-expanded ranges in the macro expansion preview. |
-| `dynare.diff.changedForeground` | Accent color for paired **Replaced** rows in **Dygnosis Changes**. |
+Common semantic selectors: `dynareEndogenous:dynare`, `dynareExogenous:dynare`,
+`dynareParameter:dynare`, `dynareModelLocal:dynare`, plus
+`dynareEndogenous.forwardLooking:dynare` and
+`dynareEndogenous.predetermined:dynare`.

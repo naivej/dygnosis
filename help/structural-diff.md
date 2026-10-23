@@ -1,11 +1,10 @@
 # Review model changes
 
-Compare your model against Git history or another `.mod`/`.dyn` file from any
-of these places:
-
-- Click **Show mod changes** (`$(diff)`) in the editor title bar or editor right-click menu.
-- Right-click a `.mod`, `.dyn` or included `.inc` file in the **Source Control** view and choose **Show mod changes**.
-- Run **Dygnosis: Show mod changes** from the Command Palette (or **Dygnosis: Show mod changes with .mod file…** to pick a file directly).
+Compare your model against Git history or another `.mod`/`.dyn` file with
+**Dygnosis: Show mod changes** from the Command Palette, the editor title bar
+(`$(diff)`), or **Show mod changes** on a model file in **Source Control**. Use
+**Dygnosis: Show mod changes with .mod file…** to pick a comparison file
+directly.
 
 Your active model appears under **After** (`Working` includes saved files plus
 any open unsaved edits) and the baseline you select appears under **Before**.
@@ -19,11 +18,9 @@ any open unsaved edits) and the baseline you select appears under **Before**.
 
 ## Available views and actions
 
-The **Dygnosis Changes** tab organizes model differences by category on the
-left—such as **Symbols**, **Parameters**, **Equations**, **Model-local
-variables**, **Shock setup**, **State**, **Priors**, **Commands**, **Data**,
-**OccBin**, **Policy**, **Method of moments**, **Heterogeneity** and **Macro
-context**—and displays **Before** and **After** cards side by side.
+The **Dygnosis Changes** tab lists categories on the left (for example
+**Equations** or **Parameters**) and shows **Before** and **After** cards side
+by side.
 
 | Control | Result |
 |---|---|
