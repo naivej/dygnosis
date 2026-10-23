@@ -56,8 +56,10 @@ their order) in [Dynare › Status Bar: Counts](settings:dynare.statusBar.counts
 Type in the picker to filter by number, tag, symbol or expression, then press
 `Enter` to jump to that line.
 
-CodeLens labels require **Editor: Code Lens** (`editor.codeLens`) and the
-matching entry under [Dynare: Editor Actions](settings:dynare.editorActions).
+CodeLens labels require **Editor: Code Lens** (`editor.codeLens`) and
+[Dynare › Code Lens: Declaration References](settings:dynare.codeLens.declarationReferences)
+or [Dynare › Code Lens: Effective Model](settings:dynare.codeLens.effectiveModel),
+depending on the action.
 
 Equation numbers reflect the model before Dynare's equation transformations and
 can differ from numbers printed by MATLAB or Octave. Model-local `#`
