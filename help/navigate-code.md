@@ -24,13 +24,6 @@ equations across the model, including repeated macro copies.
 and `mcp` tags while keeping existing quotes. Equation `name` tags, symbol
 `long_name` labels and MATLAB `.m` files stay unchanged.
 
-Declared heterogeneity dimensions, trends (`trend_var`, `log_trend_var`), named
-subsamples, and named `var_model`, `trend_component_model`,
-`var_expectation_model` and `pac_model` definitions also support navigation and
-rename. Database and external-function names support **Go to Definition** and
-**Find All References**. Built-in operators such as `EXPECTATION` and
-`STEADY_STATE` support **Find All References** and hover help.
-
 ## Outline
 
 Open **Outline** in Explorer or click the **breadcrumbs** trail above the
@@ -39,23 +32,11 @@ Outline: Sections](settings:dynare.outline.sections) and toggle equation
 numbers in [Dynare › Outline: Equation
 Numbers](settings:dynare.outline.equationNumbers).
 
-Under declarations, each variable row shows its `long_name` and `$TeX$` label
-beside the name. Inactive declarations show the same literal labels and type
-icons when available. Heterogeneous blocks and declarations include
-their dimension (such as `model(heterogeneity=households)`). Named `@#define`
-macros also appear as entries.
-
-An equation has one entry in the file where it starts, including when its
-expression continues through includes. Equations written entirely inside an
-include appear in that include's Outline.
-
-Each `@#if`, `@#elseif` and `@#else` arm has a separate Outline entry and folding
-range. Activity labels on macro arms and `@#for` loops reflect the [selected
-analysis configuration](effective-model.md#choose-the-analysis-configuration).
-
-Use the Outline toolbar filter or [Dynare › Outline:
-Activity](settings:dynare.outline.activity) to show **Active**, **Inactive** or
-**Both** entries.
+Equations appear in the file where they start (including when an expression
+continues through includes). Macro arms and `@#for` loops follow the [selected
+analysis configuration](effective-model.md#choose-the-analysis-configuration);
+filter **Active**, **Inactive** or **Both** with the Outline toolbar or
+[Dynare › Outline: Activity](settings:dynare.outline.activity).
 
 ## Inactive source
 
