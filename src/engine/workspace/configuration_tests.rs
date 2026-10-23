@@ -38,6 +38,33 @@ fn names(ws: &mut Workspace) -> Vec<String> {
 }
 
 #[test]
+fn worker_snapshots_do_not_reuse_effective_models_from_another_configuration() {
+    // Guards a background snapshot keeping Source parser facts after the root
+    // selects a different analysis configuration before the worker commits.
+    let source = "@#ifndef FULL_MODEL\n@#define FULL_MODEL = 1\n@#endif\n@#if FULL_MODEL == 0\nvar small; model; small=0; end;\n@#else\nvar a; var b; model; a=0; b=0; end;\n@#endif\n";
+    let mut ws = workspace(source, &[]);
+    assert_eq!(ws.get_effective_model("main.mod").unwrap().endogenous.len(), 2);
+    let worker = ws.snapshot_for_root_with_limit(
+        "main.mod",
+        ws.root_paths("main.mod").to_vec(),
+        ws.root_macro_work_limit("main.mod"),
+    );
+    ws.set_root_analysis_configuration(
+        "main.mod",
+        AnalysisConfiguration {
+            defines: vec![InitialDefinition {
+                name: "FULL_MODEL".into(),
+                expression: "0".into(),
+            }],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    ws.adopt_root_analysis("main.mod", worker);
+    assert_eq!(ws.get_effective_model("main.mod").unwrap().endogenous.len(), 1);
+}
+
+#[test]
 fn analysis_choices_and_paths_commit_together_after_one_validation() {
     // Guards native selection changing include paths after rejecting choices,
     // or eagerly rebuilding the model while committing one accepted change.

@@ -40,6 +40,16 @@ fn source_selection() -> AnalysisSelection {
         .clone()
 }
 
+fn analysis_configuration_id(
+    root_analyses: &HashMap<String, Arc<ResolvedAnalysis>>,
+    key: &str,
+) -> String {
+    root_analyses
+        .get(key)
+        .map(|analysis| analysis.selection.configuration_id.clone())
+        .unwrap_or_else(|| source_selection().configuration_id)
+}
+
 use self::companion::{CompanionKind, CompanionRecord};
 use crate::engine::analysis::source_inventory::SourceInventory;
 use crate::engine::analysis_configuration::*;
@@ -1237,8 +1247,18 @@ impl Workspace {
         snapshot.set_root_macro_work_limit(uri, work_limit);
         // set_root_search_paths invalidates the cache when the scope is first
         // registered; restore the immutable joined source after that operation.
-        if let Some(source) = self.spliced.get(&key).filter(|_| reuse_joined) {
-            snapshot.spliced.insert(key.clone(), Arc::clone(source));
+        let reuse_parser_cache = reuse_joined
+            && self
+                .effective
+                .get(&key)
+                .is_some_and(|model| {
+                    model.analysis_selection().configuration_id
+                        == analysis_configuration_id(&self.root_analyses, &key)
+                });
+        if reuse_parser_cache {
+            if let Some(source) = self.spliced.get(&key) {
+                snapshot.spliced.insert(key.clone(), Arc::clone(source));
+            }
             if let Some(model) = self.effective.get(&key) {
                 snapshot.effective.insert(key.clone(), model.clone());
             }
@@ -1719,6 +1739,8 @@ impl Workspace {
                 self.docs.insert(file, doc);
             }
         }
+        let adopt_parser_cache = analysis_configuration_id(&source.root_analyses, &key)
+            == analysis_configuration_id(&self.root_analyses, &key);
         macro_rules! adopt {
             ($($field:ident),+ $(,)?) => { $(
                 if let Some(value) = source.$field.remove(&key) {
@@ -1726,16 +1748,10 @@ impl Workspace {
                 }
             )+ };
         }
-        adopt!(
-            effective,
-            spliced,
-            expand,
-            records,
-            companions,
-            input_snapshots,
-            dependency_candidates,
-            include_owners
-        );
+        if adopt_parser_cache {
+            adopt!(effective, spliced, expand, records, companions);
+        }
+        adopt!(input_snapshots, dependency_candidates, include_owners);
     }
 
     fn root_paths(&self, key: &str) -> &[PathBuf] {
