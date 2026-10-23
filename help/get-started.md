@@ -14,11 +14,7 @@ commands such as **Dygnosis: Open Help**, **Dygnosis: Expand macros** or
 bar, the editor right-click menu, **Outline**, **Problems**, and **Dynare
 workspace checks** in Explorer.
 
-In **Dygnosis Help**, use **Search** at the top to find a feature, command,
-setting or check code. Use **←** and **→** to move through your reading
-history, **Copy topic link** to copy a link to the current topic, and **Copy
-example** on any code block. Clicking a setting link opens that setting in VS
-Code's Settings editor.
+Setting links in Help open that control in VS Code Settings.
 
 ## Understand the model
 

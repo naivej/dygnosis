@@ -19,11 +19,9 @@ any open unsaved edits) and the baseline you select appears under **Before**.
 
 ## Available views and actions
 
-The **Dygnosis Changes** tab organizes model differences by category on the
-left—such as **Symbols**, **Parameters**, **Equations**, **Model-local
-variables**, **Shock setup**, **State**, **Priors**, **Commands**, **Data**,
-**OccBin**, **Policy**, **Method of moments**, **Heterogeneity** and **Macro
-context**—and displays **Before** and **After** cards side by side.
+The **Dygnosis Changes** tab groups differences by category on the left (for
+example **Equations** or **Parameters**) and shows **Before** and **After**
+cards side by side.
 
 | Control | Result |
 |---|---|

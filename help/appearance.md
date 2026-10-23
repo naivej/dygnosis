@@ -1,29 +1,23 @@
 # Read labels, hints and colors
 
 Dygnosis uses metadata labels, inline value hints, block shading and semantic
-colors to make models easier to read. Click any setting link below to open it
-in VS Code's Settings editor.
+colors to make models easier to read.
 
 ## Name details
 
-Hovering over a declared symbol, viewing it in the completion list, or browsing
-**Outline** shows its `long_name` and literal TeX label (such as `$\beta$`)
-from the model file. Toggle them independently with [Dynare › Name Details:
-Long Name](settings:dynare.nameDetails.longName) and [Dynare › Name Details:
+`long_name` and TeX labels from the model appear in hovers, completion and
+**Outline**. Toggle them with [Dynare › Name Details: Long
+Name](settings:dynare.nameDetails.longName) and [Dynare › Name Details:
 Tex](settings:dynare.nameDetails.tex).
 
 ## Block backgrounds
 
-Dygnosis shades recognized Dynare blocks while you edit. Toggle block shading
-with [Dynare › Block Tint: Enabled](settings:dynare.blockTint.enabled), or run
-**Dygnosis: Open Settings** and filter by `blockTint` under **Dygnosis:
-Appearance** to set individual block types to **Off**, **Subtle** or
-**Model-strength**.
-
-Use [Dynare › Block Tint: Heterogeneous
-Models](settings:dynare.blockTint.heterogeneousModels) to override the shading
-style for specific heterogeneity dimensions (for example `{"households":
-"off"}`).
+Toggle block shading with [Dynare › Block Tint:
+Enabled](settings:dynare.blockTint.enabled). Run **Dygnosis: Open Settings** and
+filter by `blockTint` under **Dygnosis: Appearance** to set each block type to
+**Off**, **Subtle** or **Model-strength**. Per-dimension overrides:
+[Dynare › Block Tint: Heterogeneous
+Models](settings:dynare.blockTint.heterogeneousModels).
 
 ## Expression value hints
 
@@ -37,14 +31,9 @@ Enabled** (`editor.inlayHints.enabled`) must also allow inlay hints.
 
 ## Custom colors
 
-Semantic highlighting distinguishes endogenous variables, exogenous variables,
-parameters and model-local variables, as well as declared dimensions, trends,
-external functions and named models. It follows your active color theme and VS
-Code's `editor.semanticHighlighting.enabled` setting. Native MATLAB lines and
-`verbatim` blocks keep their own highlighting.
-
-To customize symbol colors, run **Dygnosis: Edit in settings.json** and add
-rules under `editor.semanticTokenColorCustomizations`:
+Semantic highlighting follows your theme and `editor.semanticHighlighting.enabled`.
+Run **Dygnosis: Edit in settings.json** to customize symbol colors under
+`editor.semanticTokenColorCustomizations`:
 
 ```json
 {
