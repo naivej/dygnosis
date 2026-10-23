@@ -277,6 +277,9 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   await vscode.workspace.applyEdit(edit);
   await waitFor(async () => (await context())?.analysis.state === "stale", "exact target guard marks edited source stale");
   await vscode.window.showTextDocument(savedPreview);
+  // The virtual-document content event reaches VS Code independently of the
+  // engine response. Faster analysis must not turn that delivery into a race.
+  await waitFor(() => savedPreview.getText().includes("OUTDATED EXPANSION"), "source edit updates the captured preview's outdated label");
   assert.match(savedPreview.getText(), /OUTDATED EXPANSION/);
   const refreshing = vscode.commands.executeCommand("dygnosis.refreshEffectiveModel");
   evidence.analysis_stale_refusal = await dismissOutcome("override's source changed", waitFor);

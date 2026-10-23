@@ -152,7 +152,7 @@ async fn full(server: &Backend, document: &Url) -> Vec<SemanticToken> {
 // Guards concise hover timing, the declared convention even without a use,
 // and agreement of equation-based classes across editor features.
 #[tokio::test]
-async fn predetermined_timing_agrees_in_hover_tokens_outline_and_model_map() {
+async fn predetermined_timing_agrees_in_hover_tokens_and_model_map() {
     let document = uri("predetermined.mod");
     let text = "var k f s m u unused;\npredetermined_variables k f s m unused;\nmodel;\nk(1)=k;\nf(2)=0;\ns(1)=0;\nm(1)=m+m(2);\nu=u(-1);\nend;";
     let (service, _socket) = new_service();
@@ -244,9 +244,9 @@ async fn predetermined_timing_agrees_in_hover_tokens_outline_and_model_map() {
         .children
         .as_ref()
         .unwrap();
-    for (name, class, _) in &expected {
+    for (name, _, _) in &expected {
         let row = declarations.iter().find(|row| row.name == *name).unwrap();
-        assert!(row.detail.as_deref().unwrap().contains(class), "{row:?}");
+        assert!(row.detail.is_none(), "{row:?}");
     }
     let map = server
         .execute_command(ExecuteCommandParams {
@@ -390,12 +390,7 @@ async fn heterogeneous_uses_do_not_change_aggregate_timing_displays() {
     }
     for name in ["k", "h"] {
         assert!(
-            declaration(&outline, name)
-                .unwrap()
-                .detail
-                .as_deref()
-                .unwrap()
-                .contains("static"),
+            declaration(&outline, name).unwrap().detail.is_none(),
             "{outline:?}"
         );
     }

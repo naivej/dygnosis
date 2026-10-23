@@ -7,7 +7,7 @@ import {
 } from "vscode-languageclient/node";
 import { Binary, resolveBinary } from "./binary";
 import { ClientLifecycle, ManagedClient } from "./lifecycle";
-import { configurationSnapshot, macroTintOnlyChange } from "./settings";
+import { analysisSettingsChanged, configurationSnapshot, serverSettingsChanged } from "./settings";
 import { AnalysisConfiguration, AnalysisContext, PresetBinding, ModelInfo, parseAnalysisContext, parseModelInfo, record, timingModifiers, tokenRoles } from "./protocol";
 import { renameSymbol } from "./rename";
 import { sameSourceUri as sameUri } from "./source_uri";
@@ -94,7 +94,7 @@ class ProcessClient implements ManagedClient {
   }
 }
 interface CachedRequest {
-  epoch: number; version: number | null; cancellation: vscode.CancellationTokenSource;
+  version: number | null; cancellation: vscode.CancellationTokenSource; settled: boolean;
   result: Promise<ModelSnapshot | undefined>;
 }
 export interface ModelSnapshot extends ModelInfo { client_instance: number }
@@ -124,7 +124,7 @@ export class DygnosisClient implements vscode.Disposable {
   private readonly analysisInstances = new WeakMap<AnalysisContext, number>();
   private readonly cache = new Map<string, CachedRequest>();
   private readonly freshTails = new Map<string, Promise<void>>();
-  private readonly cancelFreshRequests = new Set<() => void>();
+  private readonly cancelFreshRequests = new Map<() => void, string>();
   private readonly infos = new Map<string, ModelInfo>();
   private readonly selectedOwners = new Map<string, string>();
   private readonly explicitOwnerDocuments = new Set<string>();
@@ -208,9 +208,9 @@ export class DygnosisClient implements vscode.Disposable {
       }),
       vscode.workspace.onDidChangeWorkspaceFolders(() => { this.clearDocumentContexts(); void this.sendSettings().catch(error => this.log(String(error))); }),
       vscode.workspace.onDidChangeConfiguration(event => {
-        if (!event.affectsConfiguration("dynare") || macroTintOnlyChange(event)) return;
+        if (!event.affectsConfiguration("dynare")) return;
         if (event.affectsConfiguration("dynare.serverPath")) void this.restart().catch(error => this.log(String(error)));
-        else void this.sendSettings().catch(error => this.log(String(error)));
+        else if (serverSettingsChanged(event)) void this.sendSettings(analysisSettingsChanged(event)).catch(error => this.log(String(error)));
       }),
     );
     const tabChanges = vscode.window.tabGroups.onDidChangeTabs?.(event => this.closeEditorTabs(event.closed));
@@ -278,19 +278,30 @@ export class DygnosisClient implements vscode.Disposable {
     this.invalidateInputs({ reason: "lifecycle" });
   }
   private invalidateInputs(event: InputInvalidation): void {
-    const root = event.root;
+    const roots = event.root ? new Set([event.root]) : event.uri ? this.rootsAffectedByFile(vscode.Uri.parse(event.uri)) : undefined;
+    const affected = (root: string): boolean => !roots || roots.has(root);
     ++this.epoch;
-    // Every in-flight snapshot uses the global epoch. Release its fresh
-    // callers immediately; a server ignoring cancellation must not hold a queue.
-    for (const cancel of this.cancelFreshRequests) cancel();
+    // Release affected fresh callers even if their server ignores cancellation.
+    // Independent roots retain both completed results and compatible requests.
+    for (const [cancel, root] of this.cancelFreshRequests) if (affected(root)) cancel();
     for (const [key, request] of this.cache) {
-      if (!root || key.startsWith(`${root}\n`)) { request.cancellation.cancel(); request.cancellation.dispose(); this.cache.delete(key); }
+      if (affected(key.split("\n", 1)[0])) { request.cancellation.cancel(); request.cancellation.dispose(); this.cache.delete(key); }
     }
-    if (root) this.infos.delete(root); else this.infos.clear();
+    for (const root of this.infos.keys()) if (affected(root)) this.infos.delete(root);
     this.invalidated.fire(event);
     this.changed.fire();
     this.scheduleRootRefresh();
     this.scheduleSymbolRefresh();
+  }
+  private rootsAffectedByFile(file: vscode.Uri): Set<string> {
+    const roots = new Set([...this.rootCandidates.keys(), ...this.infos.keys(), ...this.selectedOwners.values(),
+      ...[...this.cache.keys()].map(key => key.split("\n", 1)[0])]);
+    const equal = (value: string): boolean => sameUri(vscode.Uri.parse(value), file);
+    return new Set([...roots].filter(root => equal(root) ||
+      // Without dependency coverage, the pending input cannot prove independence.
+      !this.infos.get(root)?.dependency_candidates ||
+      [...this.rootCandidates.get(root) ?? []].some(equal) ||
+      [...this.selectedOwners].some(([document, owner]) => owner === root && equal(document))));
   }
   private scheduleSymbolRefresh(): void {
     if (this.closed || !this.client) return;
@@ -304,8 +315,7 @@ export class DygnosisClient implements vscode.Disposable {
       this.refreshTimer = undefined;
       const roots = new Set(vscode.workspace.textDocuments.filter(doc => isRootUri(doc.uri) && !this.ownedDocuments.has(doc.uri.toString())).map(doc => doc.uri.toString()));
       for (const root of this.selectedOwners.values()) roots.add(root);
-      for (const root of this.rootCandidates.keys()) if (!roots.has(root)) this.rootCandidates.delete(root);
-      this.pruneDependencyWatchers();
+      this.pruneModelCaches();
       void Promise.all([...roots].map(root => this.modelInfo(vscode.Uri.parse(root)))).catch(error => this.log(String(error)));
     }, 75);
   }
@@ -379,9 +389,9 @@ export class DygnosisClient implements vscode.Disposable {
     try { await replacement; }
     finally { if (this.starting === replacement) this.starting = undefined; }
   }
-  async sendSettings(): Promise<void> {
+  async sendSettings(inputsChanged = true): Promise<void> {
     ++this.settingsGeneration;
-    this.invalidate();
+    if (inputsChanged) this.invalidate();
     await this.client?.sendNotification("workspace/didChangeConfiguration", { settings: configurationSnapshot(this.log) });
     this.refreshSymbols();
   }
@@ -482,7 +492,7 @@ export class DygnosisClient implements vscode.Disposable {
   /** Fresh navigators sharing a root/document cannot cancel one another. */
   private freshModelInfo(root: vscode.Uri, document: vscode.Uri, token?: vscode.CancellationToken): Promise<ModelSnapshot | undefined> {
     const documentKey = document.toString(), key = `${root.toString()}\n${documentKey}`;
-    const epoch = this.epoch, instance = this.client;
+    const instance = this.client;
     const version = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === documentKey)?.version ?? null;
     let cancelled = false, active: CachedRequest | undefined, abort: () => void = () => {};
     const aborted = new Promise<undefined>(resolve => { abort = () => { resolve(undefined); }; });
@@ -493,13 +503,13 @@ export class DygnosisClient implements vscode.Disposable {
         if (this.cache.get(key) === active) this.cache.delete(key);
       }
     };
-    this.cancelFreshRequests.add(cancel);
+    this.cancelFreshRequests.set(cancel, root.toString());
     const callerSubscription = token?.onCancellationRequested(cancel);
     if (token?.isCancellationRequested) cancel();
     const previous = this.freshTails.get(key) ?? Promise.resolve();
     const task = previous.then(() => {
       const currentVersion = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === documentKey)?.version ?? null;
-      if (cancelled || this.closed || epoch !== this.epoch || instance !== this.client || version !== currentVersion) return undefined;
+      if (cancelled || this.closed || instance !== this.client || version !== currentVersion) return undefined;
       const result = this.requestModelInfo(root, document, true);
       active = this.cache.get(key);
       return Promise.race([result, aborted]);
@@ -521,13 +531,16 @@ export class DygnosisClient implements vscode.Disposable {
     const rootKey = root.toString(), documentKey = document.toString(), key = `${rootKey}\n${documentKey}`;
     const version = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === documentKey)?.version ?? null;
     const existing = this.cache.get(key);
-    if (!fresh && existing?.epoch === this.epoch && existing.version === version) return existing.result;
+    if (!fresh && existing && !existing.cancellation.token.isCancellationRequested && existing.version === version) {
+      this.cache.delete(key); this.cache.set(key, existing);
+      return existing.result;
+    }
     existing?.cancellation.cancel();
     existing?.cancellation.dispose();
     const cancellation = new vscode.CancellationTokenSource();
-    const epoch = this.epoch, instance = this.client;
+    const instance = this.client;
     const result = this.execute("dynare/modelInfo", [{ root_uri: rootKey, document_uri: documentKey }], cancellation.token).then(value => {
-      if (cancellation.token.isCancellationRequested || epoch !== this.epoch || instance !== this.client) return undefined;
+      if (cancellation.token.isCancellationRequested || instance !== this.client) return undefined;
       const info = parseModelInfo(value, rootKey, documentKey);
       const currentVersion = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === documentKey)?.version ?? null;
       if (info.document_version !== currentVersion) return undefined;
@@ -541,9 +554,29 @@ export class DygnosisClient implements vscode.Disposable {
     }).catch((error: unknown) => {
       if (cancellation.token.isCancellationRequested || this.closed) return undefined;
       throw error;
+    }).finally(() => {
+      const current = this.cache.get(key);
+      if (current?.cancellation === cancellation) { current.settled = true; this.pruneModelCaches(); }
     });
-    this.cache.set(key, { epoch, version, cancellation, result });
+    this.cache.set(key, { version, cancellation, result, settled: false });
     return result;
+  }
+  private pruneModelCaches(): void {
+    const open = new Set(vscode.workspace.textDocuments.filter(doc => !doc.isClosed).map(doc => doc.uri.toString()));
+    const selected = new Set(this.selectedOwners.values());
+    const idle = [...this.cache].filter(([key, request]) => {
+      const [root, document] = key.split("\n");
+      return request.settled && !open.has(document) && !(root === document && selected.has(root));
+    });
+    // Active documents and pending requests keep their snapshots. Retain at most
+    // eight other responses, including their dependency coverage and watchers.
+    for (const [key, request] of idle.slice(0, Math.max(0, idle.length - 8))) {
+      request.cancellation.dispose(); this.cache.delete(key);
+    }
+    const retained = new Set([...open, ...selected, ...[...this.cache.keys()].map(key => key.split("\n", 1)[0])]);
+    for (const root of this.infos.keys()) if (!retained.has(root)) this.infos.delete(root);
+    for (const root of this.rootCandidates.keys()) if (!retained.has(root)) this.rootCandidates.delete(root);
+    this.pruneDependencyWatchers();
   }
   async revalidate(root: vscode.Uri, expectedRevision: string, expectedInstance: number, document = root, token?: vscode.CancellationToken): Promise<ModelSnapshot | undefined> {
     if (expectedInstance !== this.instance || token?.isCancellationRequested) return undefined;

@@ -199,6 +199,7 @@ impl WorkspaceCheckState {
         }).collect();
         let complete = enabled
             && !self.cancelled
+            && !self.discovery_requested
             && self.discovery == "complete"
             && counts["pending"] == 0
             && counts["checking"] == 0;
@@ -209,7 +210,8 @@ impl WorkspaceCheckState {
     }
 
     fn finished(&self) -> bool {
-        self.discovery == "complete"
+        !self.discovery_requested
+            && self.discovery == "complete"
             && !self
                 .roots
                 .values()
@@ -218,6 +220,43 @@ impl WorkspaceCheckState {
 }
 
 impl Inner {
+    pub(super) fn overlay_versions(&self) -> HashMap<String, i32> {
+        self.docs
+            .iter()
+            .map(|(uri, doc)| (normalize_uri(uri.as_str()), doc.version))
+            .collect()
+    }
+
+    /// Compare effective analysis inputs once per known root. Presentation and
+    /// formatting settings do not affect checked reports or dependency evidence.
+    pub(super) fn workspace_settings_changed(&mut self, previous: &SettingsStore) -> bool {
+        let mut roots: HashSet<Url> = self.workspace_checks.roots.keys().cloned().collect();
+        roots.extend(self.docs.keys().cloned());
+        roots.extend(self.tracked_roots.keys().cloned());
+        roots.extend(self.document_contexts.values().cloned());
+        let changed: Vec<_> = roots
+            .into_iter()
+            .filter(|root| {
+                self.settings.analysis_changed(
+                    previous,
+                    root,
+                    self.analysis_configuration.paths_for(root).is_some(),
+                )
+            })
+            .collect();
+        let discovery_changed = self.settings.discovery_changed(previous);
+        if !self.workspace_checks.initialized || discovery_changed {
+            self.workspace_reconfigure(false);
+        }
+        for root in &changed {
+            self.prepare_root(root);
+            self.semantic_views.remove(root);
+            self.reports.remove(root);
+            self.workspace_analysis_changed(root);
+        }
+        !changed.is_empty() || discovery_changed
+    }
+
     pub(super) fn workspace_analysis_changed(&mut self, root: &Url) {
         if self.workspace_checks.cancelled || self.workspace_checks.finished() {
             self.workspace_checks.begin_pass();
@@ -287,11 +326,13 @@ impl Inner {
         for (root, entry) in &mut self.workspace_checks.roots {
             let selected =
                 settings.workspace_diagnostics && selection(settings, root) == Some(true);
-            entry.selected = selected;
+            let was_selected = std::mem::replace(&mut entry.selected, selected);
             if selected {
-                if force || entry.state == "checking" || entry.state == "pending" {
-                    entry.force = force;
-                    entry.proven = false;
+                if force || !was_selected || entry.state == "checking" || entry.state == "pending" {
+                    entry.force |= force;
+                    if force {
+                        entry.proven = false;
+                    }
                     entry.queue(Duration::ZERO);
                     self.reports.remove(root);
                 }
@@ -478,12 +519,9 @@ impl Backend {
             return;
         }
         inner.workspace_checks.worker_running = true;
-        let client = self.client.clone();
-        let state = Arc::clone(&self.inner);
-        let wake = Arc::clone(&self.workspace_wake);
-        let output_gate = Arc::clone(&self.output_gate);
+        let backend = self.clone();
         tokio::spawn(async move {
-            run_worker(client, state, wake, output_gate).await;
+            run_worker(backend).await;
         });
     }
 
@@ -541,12 +579,11 @@ enum Work {
     Stop,
 }
 
-async fn run_worker(
-    client: Client,
-    state: Arc<Mutex<Inner>>,
-    wake: Arc<tokio::sync::Notify>,
-    output_gate: Arc<tokio::sync::Mutex<()>>,
-) {
+async fn run_worker(backend: Backend) {
+    let client = backend.client.clone();
+    let state = Arc::clone(&backend.inner);
+    let wake = Arc::clone(&backend.workspace_wake);
+    let output_gate = Arc::clone(&backend.output_gate);
     loop {
         let work = {
             let mut inner = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -576,7 +613,11 @@ async fn run_worker(
                     .workspace_checks
                     .roots
                     .iter()
-                    .filter(|(_, entry)| entry.selected && entry.due.is_some_and(|due| due <= now))
+                    .filter(|(root, entry)| {
+                        entry.selected
+                            && !inner.document_analysis.has_pending(root)
+                            && entry.due.is_some_and(|due| due <= now)
+                    })
                     .min_by_key(|(_, entry)| {
                         (
                             Some(entry.identity.as_str()) != active.as_deref(),
@@ -603,11 +644,7 @@ async fn run_worker(
                     entry.due = None;
                     entry.state = "checking";
                     let generation = entry.generation;
-                    let overlays = inner
-                        .docs
-                        .iter()
-                        .map(|(uri, doc)| (normalize_uri(uri.as_str()), doc.version))
-                        .collect();
+                    let overlays = inner.overlay_versions();
                     let mut workspace = Box::new(inner.workspace.snapshot_for_root_with_limit(
                         root.as_str(),
                         settings.search_paths,
@@ -632,12 +669,20 @@ async fn run_worker(
                 } else if let Some(due) = inner
                     .workspace_checks
                     .roots
-                    .values()
-                    .filter(|entry| entry.selected)
-                    .filter_map(|entry| entry.due)
+                    .iter()
+                    .filter(|(root, entry)| {
+                        entry.selected && !inner.document_analysis.has_pending(root)
+                    })
+                    .filter_map(|(_, entry)| entry.due)
                     .min()
                 {
                     Work::Delay(due.saturating_duration_since(now))
+                } else if inner.workspace_checks.roots.iter().any(|(root, entry)| {
+                    entry.selected
+                        && entry.due.is_some()
+                        && inner.document_analysis.has_pending(root)
+                }) {
+                    Work::Delay(Duration::from_secs(60))
                 } else {
                     Work::Stop
                 }
@@ -734,11 +779,23 @@ async fn run_worker(
                                     || failed_owner(root, &current_folders, &failed_folders)
                             });
                             for (root, (key, selected)) in roots {
+                                let checked = inner
+                                    .reports
+                                    .get(&root)
+                                    .cloned()
+                                    .and_then(CachedReport::capture);
                                 let entry = inner
                                     .workspace_checks
                                     .roots
                                     .entry(root)
                                     .or_insert_with(RootEntry::pending);
+                                if entry.cached_report.is_none()
+                                    && let Some(checked) = checked
+                                {
+                                    entry.cached_report = Some(checked.report);
+                                    entry.stamps = checked.stamps;
+                                    entry.owner_files = checked.owner_files;
+                                }
                                 let previous = std::mem::replace(&mut entry.identity, key);
                                 if !selected {
                                     entry.cancel_work();
@@ -804,16 +861,8 @@ async fn run_worker(
                         continue;
                     }
                     match result {
-                        Ok(Ok(checked)) => {
-                            let mut open_versions = HashMap::new();
-                            for (uri, doc) in &inner.docs {
-                                open_versions
-                                    .entry(normalize_uri(uri.as_str()))
-                                    .or_insert(doc.version);
-                            }
-                            let current = checked.dependencies.iter().all(|key| {
-                                open_versions.get(key).copied() == overlays.get(key).copied()
-                            });
+                        Ok(Ok(mut checked)) => {
+                            let current = checked.overlays_match(&inner, &overlays);
                             if !checked.current || !current {
                                 inner
                                     .workspace_checks
@@ -822,6 +871,13 @@ async fn run_worker(
                                     .unwrap()
                                     .queue(TYPING_PAUSE);
                                 continue;
+                            }
+                            let contexts = inner.document_context_snapshot();
+                            if let Some(workspace) = checked.workspace.take() {
+                                inner
+                                    .workspace
+                                    .adopt_root_analysis(root.as_str(), workspace);
+                                inner.bound_workspace_cache();
                             }
                             inner.workspace_checks.analysis_ms += checked.elapsed_ms;
                             inner.workspace_checks.completed_jobs += 1;
@@ -846,6 +902,7 @@ async fn run_worker(
                             entry.cached_report =
                                 checked.complete.then(|| Arc::clone(&checked.report));
                             inner.reports.insert(root.clone(), checked.report);
+                            inner.queue_document_context_changes(&root, contexts);
                             // A fragment opened before discovery no longer owns
                             // an independent compilation-unit report once known.
                             let fragments: Vec<_> = inner
@@ -879,6 +936,7 @@ async fn run_worker(
                     inner.merge_diagnostics(Some(&root))
                 };
                 publish(&client, publications).await;
+                backend.kick_document_analysis();
             }
             Work::Delay(delay) => {
                 tokio::select! { _ = tokio::time::sleep(delay) => {}, _ = wake.notified() => {} }
@@ -889,25 +947,46 @@ async fn run_worker(
     }
 }
 
-struct Checked {
-    report: Arc<RootReport>,
+pub(super) struct Checked {
+    pub(super) report: Arc<RootReport>,
     dependencies: HashSet<String>,
     dependency_uris: BTreeSet<Url>,
     owner_files: HashSet<String>,
-    current: bool,
+    pub(super) current: bool,
     complete: bool,
     elapsed_ms: f64,
     stamps: InputStamps,
     reused: bool,
+    workspace: Option<Workspace>,
 }
 
-struct CachedReport {
+impl Checked {
+    pub(super) fn overlays_match(&self, inner: &Inner, captured: &HashMap<String, i32>) -> bool {
+        let current = inner.overlay_versions();
+        self.dependencies
+            .iter()
+            .all(|key| current.get(key) == captured.get(key))
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct CachedReport {
     report: Arc<RootReport>,
     stamps: InputStamps,
     owner_files: HashSet<String>,
 }
 
-fn compute(
+impl CachedReport {
+    pub(super) fn capture(report: Arc<RootReport>) -> Option<Self> {
+        report.reusable.then(|| Self {
+            stamps: report.stamps.clone(),
+            owner_files: report.owner_files.clone(),
+            report,
+        })
+    }
+}
+
+pub(super) fn compute(
     root: &Url,
     mut workspace: Workspace,
     prior: Option<CachedReport>,
@@ -931,6 +1010,7 @@ fn compute(
             current: true,
             complete: true,
             elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
+            workspace: Some(workspace),
         });
     }
     let revision = workspace.input_revision(root.as_str()).ok_or_else(|| {
@@ -967,29 +1047,77 @@ fn compute(
         .iter()
         .filter_map(|path| file_url_from_path_key(path))
         .collect();
-    let owner_files = workspace
+    let owner_files: HashSet<String> = workspace
         .include_records(root.as_str())
         .into_iter()
         .flat_map(|records| records.resolved.iter())
         .map(|record| path_key(&record.path))
         .collect();
+    let mut report = prepare_root_report(
+        root,
+        set,
+        text,
+        revision,
+        &workspace.root_analysis_configuration(root.as_str()),
+    );
+    report.reusable = complete;
+    let stamps = workspace.input_stamps(root.as_str());
+    report.stamps = stamps.clone();
+    report.owner_files = owner_files.clone();
     Ok(Checked {
-        report: Arc::new(prepare_root_report(
-            root,
-            set,
-            text,
-            revision,
-            &workspace.root_analysis_configuration(root.as_str()),
-        )),
+        report: Arc::new(report),
         dependencies,
         dependency_uris,
         owner_files,
         current,
         complete,
         elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
-        stamps: workspace.input_stamps(root.as_str()),
+        stamps,
         reused: false,
+        workspace: Some(workspace),
     })
+}
+
+impl Inner {
+    pub(super) fn commit_document_check(&mut self, root: &Url, mut checked: Checked) {
+        if let Some(workspace) = checked.workspace.take() {
+            self.workspace.adopt_root_analysis(root.as_str(), workspace);
+        }
+        if let Some(entry) = self
+            .workspace_checks
+            .roots
+            .get_mut(root)
+            // An older save can finish by report reuse after an explicit
+            // Recheck. Keep that forced job queued for an actual check.
+            .filter(|entry| entry.selected && !(entry.force && checked.reused))
+        {
+            self.workspace_checks.completed_jobs += 1;
+            self.workspace_checks.analysis_ms += checked.elapsed_ms;
+            self.workspace_checks.reused_jobs += u64::from(checked.reused);
+            entry.cancel_work();
+            entry.generation += 1;
+            entry.due = None;
+            entry.identity = normalize_uri(root.as_str());
+            entry.state = if checked.complete {
+                "checked"
+            } else {
+                "incomplete"
+            };
+            entry.dependencies = checked.dependencies;
+            entry.dependency_uris = checked.dependency_uris;
+            entry.owner_files = checked.owner_files;
+            entry.stamps = checked.stamps;
+            entry.proven = checked.complete;
+            entry.force = false;
+            entry.revision = Some(checked.report.revision.clone());
+            entry.errors = checked.report.errors;
+            entry.warnings = checked.report.warnings;
+            entry.failure = None;
+            entry.cached_report = checked.complete.then(|| Arc::clone(&checked.report));
+        }
+        self.reports.insert(root.clone(), checked.report);
+        self.bound_workspace_cache();
+    }
 }
 
 /// Bind walked roots to open documents or existing roots.
@@ -1194,6 +1322,44 @@ async fn send_status(client: &Client, state: &Mutex<Inner>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn newer_discovery_request_keeps_the_previous_completed_walk_pending() {
+        // Guards a watched-file event arriving during a walk: committing that
+        // older walk cannot announce completion before the queued walk runs.
+        let state = WorkspaceCheckState {
+            discovery: "complete",
+            discovery_requested: true,
+            ..Default::default()
+        };
+        assert_eq!(state.status(true, &Workspace::new())["complete"], false);
+        assert!(!state.finished());
+    }
+
+    #[test]
+    fn reused_document_report_does_not_consume_explicit_workspace_recheck() {
+        // Guards a save job captured before Recheck satisfying that forced
+        // request entirely from a cached diagnostic report.
+        let root = Url::parse("untitled:forced-recheck.mod").unwrap();
+        let mut workspace = Workspace::new();
+        workspace.update_document(root.as_str(), "var y; model; y=0; end;");
+        let first = compute(&root, workspace, None).unwrap();
+        let prior = CachedReport::capture(Arc::clone(&first.report)).unwrap();
+        let workspace = first.workspace.unwrap();
+        let reused = compute(&root, workspace, Some(prior)).unwrap();
+        assert!(reused.reused);
+        let mut inner = Inner::default();
+        inner
+            .workspace_checks
+            .roots
+            .insert(root.clone(), RootEntry::pending());
+        inner.commit_document_check(&root, reused);
+        let entry = &inner.workspace_checks.roots[&root];
+        assert!(entry.force && entry.due.is_some());
+        assert_eq!(inner.workspace_checks.completed_jobs, 0);
+        assert!(inner.reports.contains_key(&root));
+    }
+
     #[test]
     fn successful_nested_discovery_removes_deleted_includes_despite_parent_failure() {
         let folder = Url::from_file_path(std::env::temp_dir().join("workspace-parent")).unwrap();
@@ -1386,6 +1552,9 @@ mod tests {
                 revision: String::new(),
                 errors: 0,
                 warnings: 0,
+                reusable: false,
+                stamps: InputStamps::new(),
+                owner_files: HashSet::new(),
             }),
         );
         inner.align_workspace_root(&alias);

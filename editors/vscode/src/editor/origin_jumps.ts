@@ -6,7 +6,7 @@ import type { EffectivePreviewRegistry, EffectivePreviewSession } from "./previe
 import { appendMacroMessages, effectivePreviewArguments } from "./preview";
 import { location, record } from "../client/protocol";
 import type { Location, Position, Range } from "../client/protocol";
-import { booleanSetting, listSetting, macroTintOnlyChange } from "../client/settings";
+import { analysisSettingsChanged, booleanSetting, listSetting } from "../client/settings";
 
 /** The input-only event and native placement option are integrated with 0.11.2. */
 export interface OriginJumpClient extends Pick<DygnosisClient, "client" | "currentInstance" | "log" | "failure" | "revalidate" | "execute" | "output" | "onDidChangeAnalysis"> {
@@ -303,7 +303,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
         if ((state.payload?.dependency_candidates ?? [session.root.toString()]).some(uri => sameUri(uri, document.uri.toString()))) stale(state);
       }),
       vscode.workspace.onDidChangeConfiguration(event => {
-        if (event.affectsConfiguration("dynare", session.root) && !macroTintOnlyChange(event, session.root)) stale(state);
+        if (analysisSettingsChanged(event, session.root) || event.affectsConfiguration("dynare.serverPath", session.root)) stale(state);
       }));
     if (supportsNavigation(service)) {
       try {

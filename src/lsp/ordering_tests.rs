@@ -126,8 +126,8 @@ async fn delayed_refresh_replies_do_not_freeze_incoming_edits_and_requests() {
         assert!(has_symbol(&wire.response(2).await["result"], "before"));
 
         let mut burst = Vec::new();
-        for _ in 0..4 {
-            burst.push(json!({"jsonrpc":"2.0", "method":"workspace/didChangeConfiguration", "params":{"settings":{}}}));
+        for index in 0..4 {
+            burst.push(json!({"jsonrpc":"2.0", "method":"workspace/didChangeConfiguration", "params":{"settings":{"macroWorkLimit":2_000_001 + index}}}));
         }
         // Exceed the transport's bounded input queue while replies are delayed.
         for id in 3..131 {
@@ -159,8 +159,9 @@ async fn refresh_bursts_keep_one_follow_up_and_shutdown_does_not_wait_for_a_repl
         "inlayHint": {"refreshSupport": true}
     }}))
     .await;
-    let change = json!({"jsonrpc":"2.0", "method":"workspace/didChangeConfiguration", "params":{"settings":{}}});
-    wire.send(std::slice::from_ref(&change)).await;
+    let uri = "untitled:refresh-follow-up.mod";
+    wire.send(&[open(uri, 1, "before"), symbols(2, uri)]).await;
+    assert!(has_symbol(&wire.response(2).await["result"], "before"));
     let tokens = timeout(
         Duration::from_secs(2),
         wire.server_request("workspace/semanticTokens/refresh"),
@@ -168,9 +169,18 @@ async fn refresh_bursts_keep_one_follow_up_and_shutdown_does_not_wait_for_a_repl
     .await
     .unwrap();
 
-    let uri = "untitled:refresh-follow-up.mod";
-    let mut burst = vec![change; 16];
-    burst.extend([open(uri, 1, "current"), symbols(100, uri)]);
+    let mut burst: Vec<_> = (0..16)
+        .map(|index| {
+            json!({
+                "jsonrpc":"2.0", "method":"workspace/didChangeConfiguration",
+                "params":{"settings":{"parameterValueHints": index % 2 != 0}}
+            })
+        })
+        .collect();
+    burst.push(json!({"jsonrpc":"2.0", "method":"textDocument/didChange", "params":{
+        "textDocument":{"uri":uri,"version":2}, "contentChanges":[{"text":"var current; model; current=0; end;"}]
+    }}));
+    burst.push(symbols(100, uri));
     wire.send(&burst).await;
     let result = timeout(Duration::from_secs(2), wire.response(100))
         .await

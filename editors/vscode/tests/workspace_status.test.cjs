@@ -136,6 +136,20 @@ function setup(options = {}) {
   const configure = (key, value) => { host.settings[key] = value; host.configured.fire({ affectsConfiguration: section => section === "dynare" || `dynare.${key}`.startsWith(section) }); };
   return { host, service, changed, updated, configure };
 }
+test("Outline filters retain workspace status and dependency watchers", async () => {
+  // Guards a presentation-only setting replacing checked rows with a pending workspace pass.
+  const env = setup({ client: connection() });
+  const registration = registerWorkspaceStatus(env.service);
+  try {
+    await flush();
+    const watchers = [...env.host.watchers], queries = env.service.queries.length;
+    env.configure("outline.activity", "inactive"); await flush();
+    assert.ok(watchers.every(watcher => !watcher.disposed));
+    assert.equal(env.host.watchers.length, watchers.length);
+    assert.equal(env.service.queries.length, queries);
+  } finally { registration.dispose(); }
+});
+
 function rows(env) { return env.host.views[0].options.treeDataProvider.getChildren(); }
 function child(item, label) { return item.children.find(row => row.label === label); }
 function liveWatchers(env, pattern) { return env.host.watchers.filter(watcher => !watcher.disposed && (!pattern || watcher.pattern.pattern === pattern)); }

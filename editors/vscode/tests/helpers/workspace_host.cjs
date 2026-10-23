@@ -52,7 +52,7 @@ async function scrollWorkspaceTreeByViewport(direction = 1) {
   await scrollWorkspaceTree(step * direction);
 }
 async function revealRow(label, waitFor) {
-  await scrollWorkspaceTreeToTop();
+  await scrollWorkspaceTreeToTop(waitFor);
   await waitFor(async () => {
     if ((await findRows(label)).length) return true;
     await scrollWorkspaceTreeByViewport();
@@ -80,8 +80,18 @@ async function expandFolder(label, waitFor) {
   if ((await findRows(label))[0]?.expanded === "false") await clickRow(label, 0, true);
   await waitFor(async () => (await findRows(label))[0]?.expanded === "true", `native workspace folder ${label} expands`);
 }
-async function scrollWorkspaceTreeToTop() {
+async function scrollWorkspaceTreeToTop(waitFor) {
   const rootLabel = path.basename(vscode.workspace.workspaceFolders[0].uri.fsPath);
+  await openExplorer(waitFor);
+  // The virtualized list can retain scroll/focus after replacing its rows.
+  // A status refresh can temporarily hide it. Native Home reveals its first
+  // item after rendering, without changing folder expansion.
+  await waitFor(() => nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); const list=pane?.querySelector('.monaco-list'); if(!list?.getClientRects().length||!list.querySelector('.monaco-list-row')) return false; list.focus(); return list.contains(document.activeElement); })()`),
+    "native workspace tree becomes visible and receives keyboard focus");
+  await nativeWorkbench(async send => {
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Home", code: "Home", windowsVirtualKeyCode: 36, nativeVirtualKeyCode: 36 });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Home", code: "Home", windowsVirtualKeyCode: 36, nativeVirtualKeyCode: 36 });
+  });
   for (let index = 0; index < 40; ++index) {
     const rows = await treeRows();
     if (rows[0]?.label === rootLabel) return;
@@ -179,14 +189,14 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
 
   await openExplorer(waitFor);
   await enlargeWorkspaceTreePane();
-  await scrollWorkspaceTreeToTop();
+  await scrollWorkspaceTreeToTop(waitFor);
   await expandFolder(path.basename(workspaceRoot), waitFor);
   for (const folder of ["alpha", "beta", "includes", "models", "only-includes"])
     await expandFolder(folder, waitFor);
   await expandFolder("variants", waitFor);
   for (const name of ["root.mod", "root.dyn", "policy.dyn", "shared.inc", "calibration.inc", "standalone.inc"])
     await revealRow(name, waitFor);
-  await scrollWorkspaceTreeToTop();
+  await scrollWorkspaceTreeToTop(waitFor);
   await waitFor(async () => {
     const rows = await treeRows();
     return rows.filter(row => row.label === "same.mod").length === 2;
@@ -205,7 +215,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
     if (name.endsWith(".inc")) assert.match(fileRow.text, /Include file/, `${name} has the Include file description`);
     if (name.endsWith(".inc")) assert.equal((await treeRows()).filter(row => row.label === name).length, 1, `${name} appears once at its actual path`);
   }
-  await scrollWorkspaceTreeToTop();
+  await scrollWorkspaceTreeToTop(waitFor);
 
   const alphaPattern = await ignoreFolderRow("alpha", workspaceRoot, waitFor);
   const alphaRootPath = path.join(workspaceRoot, "alpha", "same.mod").toLowerCase();
@@ -300,7 +310,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
     assert.equal(clicked, true, `native workspace toolbar contains ${title}`);
   };
   await clickFilter("Show not fully checked models");
-  await scrollWorkspaceTreeToTop();
+  await scrollWorkspaceTreeToTop(waitFor);
   await waitFor(async () => rowTextIncludes(await treeRows(), "policy.dyn"), "filter expands the path to the affected model");
   const filteredRows = await treeRows();
   assert.ok(rowTextIncludes(filteredRows, "models") && rowTextIncludes(filteredRows, "variants"));
@@ -341,6 +351,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   }
   evidence.checks.push("opening an affected model replaces its previous preview tab without clearing the filtered view or its expanded paths during pending and running checks");
   await clickFilter("Show all workspace files");
+  await revealRow("models", waitFor);
   await waitFor(async () => (await findRows("models"))[0]?.expanded === "false", "clearing the filter restores the collapsed models folder");
   await fs.writeFile(policyPath, files.get("models/variants/policy.dyn"));
   await waitFor(async () => {

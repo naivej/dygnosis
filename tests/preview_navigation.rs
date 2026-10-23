@@ -1252,7 +1252,7 @@ async fn unopened_roots_refresh_disk_include_overlay_and_settings_revisions() {
         })
         .await;
     let configured = preview(backend, &root).await;
-    assert_ne!(configured["revision"], overlay["revision"]);
+    assert_eq!(configured["revision"], overlay["revision"]);
     assert_eq!(configured["navigation"], overlay["navigation"]);
     backend
         .did_close(DidCloseTextDocumentParams {

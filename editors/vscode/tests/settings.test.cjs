@@ -57,14 +57,15 @@ test("Outline activity choices resolve by resource and invalid values use Both",
   } finally { delete globals["outline.activity"]; delete workspace["outline.activity"]; }
 });
 test("macro work settings reach each root scope and simultaneous tint changes reach the engine", () => {
-  const { macroTintOnlyChange } = require(compiledModule("settings"));
+  const { analysisSettingsChanged } = require(compiledModule("settings"));
   globals.macroWorkLimit = 500000;
   workspace.macroWorkLimit = 2000000;
   try {
     const snapshot = configurationSnapshot(() => {}).dynare.configuration;
     assert.equal(snapshot.loose.macroWorkLimit, 500000);
     assert.equal(snapshot.folders[0].settings.macroWorkLimit, 2000000);
-    assert.equal(macroTintOnlyChange({ affectsConfiguration: key => ["dynare.effectiveModel.macroTint", "dynare.macroWorkLimit"].includes(key) }), false);
+    assert.equal(analysisSettingsChanged({ affectsConfiguration: key => ["dynare.effectiveModel.macroTint", "dynare.macroWorkLimit"].includes(key) }), true);
+    assert.equal(analysisSettingsChanged({ affectsConfiguration: key => key === "dynare.effectiveModel.macroTint" }), false);
     globals.macroWorkLimit = "invalid";
     assert.equal(configurationSnapshot(() => {}).dynare.configuration.loose.macroWorkLimit, "invalid", "the server validates and explains the fallback");
   } finally { delete globals.macroWorkLimit; delete workspace.macroWorkLimit; }

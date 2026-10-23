@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 
 mod analysis_configuration;
 mod comparison_inputs;
+mod document_analysis;
 mod document_context;
 mod source_intelligence;
 mod workspace_checks;
@@ -87,6 +88,9 @@ struct RootReport {
     revision: String,
     errors: usize,
     warnings: usize,
+    reusable: bool,
+    stamps: crate::engine::workspace::InputStamps,
+    owner_files: HashSet<String>,
 }
 
 #[derive(Clone)]
@@ -185,6 +189,7 @@ struct Inner {
     publication_versions: HashMap<Url, Option<i32>>,
     reports: HashMap<Url, Arc<RootReport>>,
     workspace_checks: workspace_checks::WorkspaceCheckState,
+    document_analysis: document_analysis::DocumentAnalysis,
 }
 
 impl Default for Inner {
@@ -210,6 +215,7 @@ impl Default for Inner {
             publication_versions: HashMap::new(),
             reports: HashMap::new(),
             workspace_checks: workspace_checks::WorkspaceCheckState::default(),
+            document_analysis: document_analysis::DocumentAnalysis::default(),
         }
     }
 }
@@ -467,17 +473,21 @@ impl Inner {
     }
 
     fn root_revision(&mut self, uri: &Url) -> Option<String> {
+        self.root_revision_with_inputs(uri)
+            .map(|(revision, _)| revision)
+    }
+
+    fn root_revision_with_inputs(&mut self, uri: &Url) -> Option<(String, String)> {
         self.remember_request_root(uri);
-        let settings = self.prepare_root(uri);
+        self.prepare_root(uri);
         let inputs = self.workspace.input_revision(uri.as_str())?;
         let mut hash = std::collections::hash_map::DefaultHasher::new();
-        settings.hash(&mut hash);
         inputs.hash(&mut hash);
         let revision = format!("{:016x}", hash.finish());
         self.tracked_roots
             .entry(uri.clone())
             .or_insert_with(|| revision.clone());
-        Some(revision)
+        Some((revision, inputs))
     }
 
     fn changed_model_info(&mut self) -> Vec<Value> {
@@ -518,8 +528,11 @@ impl Inner {
             discover_roots.extend(self.known_owner_roots(document));
         }
         discover_roots.extend(self.document_contexts.values().cloned());
+        let mut input_revisions = HashMap::new();
         for uri in discover_roots {
-            self.root_revision(&uri);
+            if let Some((_, inputs)) = self.root_revision_with_inputs(&uri) {
+                input_revisions.insert(uri, inputs);
+            }
         }
         self.revalidate_document_contexts();
         let mut roots = HashSet::new();
@@ -534,10 +547,21 @@ impl Inner {
         let mut roots: Vec<_> = roots.into_iter().collect();
         roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
         for uri in &roots {
-            if is_model_root(uri) {
-                self.root_revision(uri);
+            let input_revision = if is_model_root(uri) {
+                input_revisions.remove(uri).or_else(|| {
+                    self.root_revision_with_inputs(uri)
+                        .map(|(_, inputs)| inputs)
+                })
             } else {
                 self.prepare_root(uri);
+                self.workspace.input_revision(uri.as_str())
+            };
+            if input_revision.as_ref().is_some_and(|revision| {
+                self.reports
+                    .get(uri)
+                    .is_some_and(|report| report.revision == *revision)
+            }) {
+                continue;
             }
             let set = check_in_workspace_with_origins(&mut self.workspace, uri.as_str());
             let revision = self
@@ -550,7 +574,14 @@ impl Inner {
                 .or_else(|| self.workspace.get_source(uri.as_str()).map(Arc::from))
                 .unwrap_or_default();
             let choices = self.workspace.root_analysis_configuration(uri.as_str());
-            let report = prepare_root_report(uri, set, text, revision, &choices);
+            let mut report = prepare_root_report(uri, set, text, revision, &choices);
+            report.reusable = self.workspace.includes_complete(uri.as_str())
+                && self
+                    .workspace
+                    .expand_report(uri.as_str())
+                    .is_some_and(|report| report.complete);
+            report.stamps = self.workspace.input_stamps(uri.as_str());
+            report.owner_files = self.workspace.known_include_files(uri.as_str());
             self.reports.insert(uri.clone(), Arc::new(report));
         }
         self.reports
@@ -664,8 +695,33 @@ impl Inner {
             }
             *items = unique;
         }
+        // Another root can finish while this document's checked report is
+        // absent. Keep its last publication until its current owners finish;
+        // an empty route here is not a completed check of the edited version.
+        let pending: HashSet<_> = self
+            .published
+            .keys()
+            .chain(routed.keys())
+            .filter(|uri| self.document_analysis_pending(uri))
+            .cloned()
+            .collect();
+        for uri in &pending {
+            if let Some(previous) = self.published.get(uri) {
+                routed.insert(uri.clone(), previous.clone());
+            } else {
+                routed.remove(uri);
+            }
+            if let Some(previous) = self.routed_library.get(uri) {
+                routed_library.insert(uri.clone(), previous.clone());
+            } else {
+                routed_library.remove(uri);
+            }
+        }
         self.routed_library = routed_library;
         for (uri, doc) in &mut self.docs {
+            if pending.contains(uri) {
+                continue;
+            }
             let mut unique: Vec<crate::Diagnostic> = Vec::new();
             for diag in library_routed.remove(uri).unwrap_or_default() {
                 if !unique.iter().any(|prior| {
@@ -682,7 +738,9 @@ impl Inner {
             doc.library = unique;
         }
         for (uri, doc) in &mut self.docs {
-            doc.diagnostics = routed.get(uri).cloned().unwrap_or_default();
+            if !pending.contains(uri) {
+                doc.diagnostics = routed.get(uri).cloned().unwrap_or_default();
+            }
         }
         let mut publish: Vec<Url> = self
             .published
@@ -718,20 +776,25 @@ impl Inner {
         let current_versions: HashMap<_, _> = publish
             .iter()
             .map(|uri| {
-                let version = self
-                    .docs
-                    .get(uri)
-                    .map(|doc| doc.version)
-                    .or_else(|| open_versions.get(&identity(uri)).copied());
+                let version = if pending.contains(uri) {
+                    self.publication_versions.get(uri).copied().flatten()
+                } else {
+                    self.docs
+                        .get(uri)
+                        .map(|doc| doc.version)
+                        .or_else(|| open_versions.get(&identity(uri)).copied())
+                };
                 (uri.clone(), version)
             })
             .collect();
         let output = publish
             .into_iter()
             .filter(|uri| {
-                Some(uri) == first
-                    || self.published.get(uri) != routed.get(uri)
-                    || self.publication_versions.get(uri).copied() != Some(current_versions[uri])
+                !pending.contains(uri)
+                    && (Some(uri) == first
+                        || self.published.get(uri) != routed.get(uri)
+                        || self.publication_versions.get(uri).copied()
+                            != Some(current_versions[uri]))
             })
             .map(|uri| {
                 let version = routed
@@ -752,12 +815,14 @@ impl Inner {
 }
 
 /// Language server backend (document overlay + diagnostics).
+#[derive(Clone)]
 pub struct Backend {
     client: Client,
     inner: Arc<Mutex<Inner>>,
     workspace_wake: Arc<tokio::sync::Notify>,
+    document_analysis_done: Arc<tokio::sync::Notify>,
     output_gate: Arc<tokio::sync::Mutex<()>>,
-    presentation_refresh: presentation_refresh::PresentationRefresh,
+    presentation_refresh: Arc<presentation_refresh::PresentationRefresh>,
 }
 
 impl std::fmt::Debug for Backend {
@@ -772,8 +837,9 @@ impl Backend {
             client,
             inner: Arc::new(Mutex::new(Inner::default())),
             workspace_wake: Arc::new(tokio::sync::Notify::new()),
+            document_analysis_done: Arc::new(tokio::sync::Notify::new()),
             output_gate: Arc::new(tokio::sync::Mutex::new(())),
-            presentation_refresh: presentation_refresh::PresentationRefresh::default(),
+            presentation_refresh: Arc::new(presentation_refresh::PresentationRefresh::default()),
         }
     }
 
@@ -823,13 +889,21 @@ impl Backend {
             .request(&self.client, tokens, hints);
     }
 
+    /// Prepare a checked fixture synchronously for focused presentation tests.
+    #[cfg(test)]
     fn upsert(
         &self,
         uri: Url,
         text: String,
         version: i32,
     ) -> Vec<(Url, Option<i32>, Vec<Diagnostic>)> {
+        self.store_document(uri.clone(), text, version);
+        self.lock_inner().refresh_diagnostics(Some(&uri))
+    }
+
+    fn store_document(&self, uri: Url, text: String, version: i32) {
         let mut inner = self.lock_inner();
+        inner.document_analysis.retire_aliases(&uri);
         let key = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
         inner.docs.retain(|candidate, _| {
             candidate == &uri
@@ -852,7 +926,6 @@ impl Backend {
                 library: Vec::new(),
             },
         );
-        inner.refresh_diagnostics(Some(&uri))
     }
 
     fn pull_items(&self, uri: &Url) -> Vec<Diagnostic> {
@@ -876,20 +949,178 @@ impl Backend {
             .unwrap_or_default()
     }
 
-    fn hover_at(&self, pos: &TextDocumentPositionParams) -> Option<Hover> {
-        let mut inner = self.lock_inner();
-        if let Some(document) = inner.document(&pos.text_document.uri) {
-            let index = LineIndex::new(&document.text);
-            let byte = index.offset_utf16(&document.text, span_pos(pos.position));
-            if let Some(hover) =
-                source_intelligence::hover(&mut inner, &pos.text_document.uri, byte)
+    /// Some is a written-source result, including a proven empty result.
+    /// None leaves the existing model and source-availability providers in charge.
+    fn written_hover_at(&self, pos: &TextDocumentPositionParams) -> Option<Option<Hover>> {
+        use crate::engine::analysis::source_inventory::SourceItemKind;
+        let inner = self.lock_inner();
+        let text = &inner.document(&pos.text_document.uri)?.text;
+        let index = LineIndex::new(&crate::engine::language::parser::normalize_newlines(text));
+        let byte = index.offset_utf16(text, span_pos(pos.position));
+        let inventory = inner
+            .workspace
+            .source_inventory(pos.text_document.uri.as_str())?;
+        if !syntax_intel::hover_may_need_model(&inventory, text, byte) {
+            return Some(None);
+        }
+        let (word, span) = syntax_intel::candidate_word_at(text, byte)?;
+        if !crate::engine::catalog::syntax::records()
+            .iter()
+            .any(|record| {
+                record.name.eq_ignore_ascii_case(word)
+                    || record.kind == "macro_directive"
+                        && record
+                            .name
+                            .trim_start_matches("@#")
+                            .eq_ignore_ascii_case(word)
+                    || record
+                        .aliases
+                        .iter()
+                        .any(|alias| alias.eq_ignore_ascii_case(word))
+            })
+        {
+            return None;
+        }
+        let range = Some(span_range(&index, text, span));
+        if macro_directive_name_with_tokens(text, byte, &inventory.macro_tokens) == Some(span) {
+            let result = crate::engine::catalog::syntax::query(
+                &crate::engine::catalog::syntax::SyntaxQuery {
+                    name: Some(word.into()),
+                    kind: Some("macro_directive".into()),
+                    ..Default::default()
+                },
+            );
+            return result
+                .records
+                .first()
+                .map(|record| Some(markdown_hover(syntax_intel::documentation(record), range)));
+        }
+        let context = syntax_intel::source_context(&inventory, text, byte, false)?;
+        let item = inventory
+            .items
+            .iter()
+            .filter(|item| {
+                (matches!(item.kind, SourceItemKind::Block | SourceItemKind::Command)
+                    || item.kind == SourceItemKind::Declaration && item.span != item.selection)
+                    && !item.template
+                    && item.span.start <= byte
+                    && byte
+                        < if item.kind == SourceItemKind::Block {
+                            item.header_end
+                        } else {
+                            item.span.end
+                        }
+            })
+            .min_by_key(|item| item.span.end - item.span.start)?;
+        if item.selection != span {
+            let at = inventory
+                .lexical_tokens
+                .partition_point(|token| token.span.end <= byte);
+            let token = inventory.lexical_tokens.get(at)?;
+            if token.span != span
+                || !inventory
+                    .lexical_tokens
+                    .get(at + 1)
+                    .is_some_and(|token| token.kind == TokenKind::Eq)
             {
+                return None;
+            }
+            let command = item.name.as_deref()?;
+            let option = syntax_intel::options(command)
+                .find(|option| option.name.eq_ignore_ascii_case(word))?;
+            let description =
+                shocks_overwrite_doc(text, byte, command, &option.name, &option.summary);
+            return Some(Some(markdown_hover(
+                format!("**`{command}` option**: `{word}`\n\n{description}"),
+                range,
+            )));
+        }
+        if item
+            .name
+            .as_deref()
+            .is_none_or(|name| !name.eq_ignore_ascii_case(word))
+        {
+            return None;
+        }
+        let matches: Vec<_> = syntax_intel::records(&context)
+            .into_iter()
+            .filter(|record| {
+                record.name.eq_ignore_ascii_case(word)
+                    || record
+                        .aliases
+                        .iter()
+                        .any(|alias| alias.eq_ignore_ascii_case(word))
+            })
+            .map(syntax_intel::documentation)
+            .collect();
+        (!matches.is_empty()).then(|| {
+            Some(markdown_hover(
+                format!("**`{word}`**\n\n{}", matches.join("\n\n")),
+                range,
+            ))
+        })
+    }
+
+    #[cfg(test)]
+    fn syntax_hover_at(&self, pos: &TextDocumentPositionParams) -> Option<Hover> {
+        self.written_hover_at(pos).flatten()
+    }
+
+    #[cfg(test)]
+    fn hover_at(&self, pos: &TextDocumentPositionParams) -> Option<Hover> {
+        self.written_hover_at(pos)
+            .unwrap_or_else(|| self.model_hover_at(pos))
+    }
+
+    #[cfg(test)]
+    fn hover_may_need_model(&self, pos: &TextDocumentPositionParams) -> bool {
+        let inner = self.lock_inner();
+        let Some(document) = inner.document(&pos.text_document.uri) else {
+            return false;
+        };
+        let Some(inventory) = inner
+            .workspace
+            .source_inventory(pos.text_document.uri.as_str())
+        else {
+            return true;
+        };
+        let index = LineIndex::new(&crate::engine::language::parser::normalize_newlines(
+            &document.text,
+        ));
+        let byte = index.offset_utf16(&document.text, span_pos(pos.position));
+        syntax_intel::hover_may_need_model(&inventory, &document.text, byte)
+    }
+
+    fn model_hover_at(&self, pos: &TextDocumentPositionParams) -> Option<Hover> {
+        let mut inner = self.lock_inner();
+        // Every provider reads one validated input snapshot. Retry once if a
+        // disk write or lazy acquisition changes it during projection.
+        for _ in 0..2 {
+            let read = inner.workspace.begin_input_read();
+            let hover = Self::model_hover_from_inputs(&mut inner, pos);
+            if read.is_current(&inner.workspace) {
+                return hover;
+            }
+        }
+        None
+    }
+
+    fn model_hover_from_inputs(
+        inner: &mut Inner,
+        pos: &TextDocumentPositionParams,
+    ) -> Option<Hover> {
+        if let Some(document) = inner.document(&pos.text_document.uri) {
+            let index = LineIndex::new(&crate::engine::language::parser::normalize_newlines(
+                &document.text,
+            ));
+            let byte = index.offset_utf16(&document.text, span_pos(pos.position));
+            if let Some(hover) = source_intelligence::hover(inner, &pos.text_document.uri, byte) {
                 return Some(hover);
             }
         }
-        if let Some(hover) = locals::hover(&mut inner, pos) {
+        if let Some(hover) = locals::hover(inner, pos) {
             return hover.map(|mut hover| {
-                source_intelligence::label(&inner, &pos.text_document.uri, &mut hover);
+                source_intelligence::label(inner, &pos.text_document.uri, &mut hover);
                 hover
             });
         }
@@ -900,9 +1131,9 @@ impl Backend {
         let normalized = crate::engine::language::parser::normalize_newlines(&text);
         let index = LineIndex::new(&normalized);
         let byte = index.offset_utf16(&text, span_pos(pos.position));
-        if let Some(hover) = typed_names::hover(&mut inner, pos) {
+        if let Some(hover) = typed_names::hover(inner, pos) {
             return hover.map(|mut hover| {
-                source_intelligence::label(&inner, &pos.text_document.uri, &mut hover);
+                source_intelligence::label(inner, &pos.text_document.uri, &mut hover);
                 hover
             });
         }
@@ -959,16 +1190,37 @@ impl Backend {
             }
         }
         let preferences = inner.presentation_for(&pos.text_document.uri);
-        let views = inner.name_views(&pos.text_document.uri)?;
-        let mut descriptions = views
-            .iter()
-            .map(|(model, _)| decl_hover_markdown(model, &word, &preferences));
-        let md = descriptions.next()??;
-        if !descriptions.all(|description| description.as_ref() == Some(&md)) {
-            return None;
-        }
+        let roots = inner.context_roots(&pos.text_document.uri);
+        let md = if !roots.is_empty() && !inner.context_ambiguous(&pos.text_document.uri) {
+            // Local and typed hover validated these same immutable snapshots
+            // above while this request held the lock. Borrow their model facts
+            // instead of cloning every expression and written-source map.
+            let views: Option<Vec<_>> = roots
+                .iter()
+                .map(|root| inner.semantic_views.get(root))
+                .collect();
+            let views = views?;
+            let mut descriptions = views
+                .iter()
+                .map(|view| decl_hover_markdown(&view.model, &word, &preferences));
+            let first = descriptions.next()??;
+            if !descriptions.all(|description| description.as_ref() == Some(&first)) {
+                return None;
+            }
+            first
+        } else {
+            let views = inner.name_views(&pos.text_document.uri)?;
+            let mut descriptions = views
+                .iter()
+                .map(|(model, _)| decl_hover_markdown(model, &word, &preferences));
+            let first = descriptions.next()??;
+            if !descriptions.all(|description| description.as_ref() == Some(&first)) {
+                return None;
+            }
+            first
+        };
         let mut hover = markdown_hover(md, range);
-        source_intelligence::label(&inner, &pos.text_document.uri, &mut hover);
+        source_intelligence::label(inner, &pos.text_document.uri, &mut hover);
         Some(hover)
     }
 
@@ -1622,11 +1874,23 @@ impl Backend {
         })
     }
 
-    fn apply_settings(&self, settings: &Value) -> Vec<String> {
+    fn apply_settings(&self, settings: &Value) -> (Vec<String>, settings::SettingsChange) {
         let mut inner = self.lock_inner();
+        let previous = inner.settings.clone();
         let explanations = inner.settings.apply(settings);
-        inner.workspace_reconfigure(true);
-        explanations
+        let hints = inner.docs.keys().any(|uri| {
+            inner
+                .settings
+                .resolve(uri)
+                .presentation
+                .parameter_value_hints
+                != previous.resolve(uri).presentation.parameter_value_hints
+        });
+        let analysis = inner.workspace_settings_changed(&previous);
+        if analysis {
+            inner.document_analysis.cancel();
+        }
+        (explanations, settings::SettingsChange { analysis, hints })
     }
 
     fn folding_ranges(&self, uri: &Url) -> Option<Vec<FoldingRange>> {
@@ -2901,6 +3165,8 @@ impl Backend {
 impl LanguageServer for Backend {
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.text_document.uri))
+            .await;
         Ok(Some(self.value_hints(&params)))
     }
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
@@ -2979,7 +3245,7 @@ impl LanguageServer for Backend {
                 .unwrap_or(false);
         }
         let explanations = if let Some(opts) = params.initialization_options {
-            self.apply_settings(&opts)
+            self.apply_settings(&opts).0
         } else {
             self.lock_inner().workspace_reconfigure(true);
             Vec::new()
@@ -3014,6 +3280,7 @@ impl LanguageServer for Backend {
         let _output = self.output_gate.lock().await;
         self.presentation_refresh.stop();
         let mut inner = self.lock_inner();
+        inner.document_analysis.cancel();
         inner.workspace_checks.shutdown = true;
         inner.workspace_checks.cancel_workers();
         inner.workspace_checks.epoch += 1;
@@ -3026,15 +3293,12 @@ impl LanguageServer for Backend {
         ordering::ready().await;
         let output = self.output_gate.lock().await;
         let doc = params.text_document;
-        let to_publish = self.upsert(doc.uri, doc.text, doc.version);
+        let uri = doc.uri.clone();
+        self.store_document(doc.uri, doc.text, doc.version);
+        self.lock_inner().queue_document_analysis(&uri);
         ordering::committed();
-        for (uri, version, diagnostics) in to_publish {
-            self.client
-                .publish_diagnostics(uri, diagnostics, version)
-                .await;
-        }
         drop(output);
-        self.refresh_presentation(false).await;
+        self.kick_document_analysis();
         self.kick_workspace();
     }
 
@@ -3054,19 +3318,16 @@ impl LanguageServer for Backend {
         if change.range.is_some() {
             return;
         }
-        let to_publish = self.upsert(
+        let uri = params.text_document.uri.clone();
+        self.store_document(
             params.text_document.uri,
             change.text.clone(),
             params.text_document.version,
         );
+        self.lock_inner().queue_document_analysis(&uri);
         ordering::committed();
-        for (uri, version, diagnostics) in to_publish {
-            self.client
-                .publish_diagnostics(uri, diagnostics, version)
-                .await;
-        }
         drop(output);
-        self.refresh_presentation(false).await;
+        self.kick_document_analysis();
         self.kick_workspace();
     }
 
@@ -3084,15 +3345,11 @@ impl LanguageServer for Backend {
             (None, Some((text, version))) => (text, version),
             (None, None) => return,
         };
-        let to_publish = self.upsert(uri, text, version);
+        self.store_document(uri.clone(), text, version);
+        self.lock_inner().queue_document_analysis(&uri);
         ordering::committed();
-        for (uri, version, diagnostics) in to_publish {
-            self.client
-                .publish_diagnostics(uri, diagnostics, version)
-                .await;
-        }
         drop(output);
-        self.refresh_presentation(false).await;
+        self.kick_document_analysis();
         self.kick_workspace();
     }
 
@@ -3102,6 +3359,7 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         let to_publish = {
             let mut inner = self.lock_inner();
+            inner.document_analysis.cancel();
             let key = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
             inner.docs.retain(|candidate, _| {
                 crate::engine::workspace::include_resolver::normalize_uri(candidate.as_str()) != key
@@ -3130,6 +3388,8 @@ impl LanguageServer for Backend {
         params: DocumentDiagnosticParams,
     ) -> Result<DocumentDiagnosticReportResult> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.text_document.uri))
+            .await;
         let items = self.pull_items(&params.text_document.uri);
         Ok(DocumentDiagnosticReportResult::Report(
             DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
@@ -3147,6 +3407,7 @@ impl LanguageServer for Backend {
         params: WorkspaceDiagnosticParams,
     ) -> Result<WorkspaceDiagnosticReportResult> {
         ordering::ready().await;
+        self.wait_document_analysis(None).await;
         let inner = self.lock_inner();
         let mut items: Vec<_> = inner
             .published
@@ -3189,6 +3450,7 @@ impl LanguageServer for Backend {
         let output = self.output_gate.lock().await;
         let to_publish = {
             let mut inner = self.lock_inner();
+            inner.document_analysis.cancel();
             for event in &params.changes {
                 inner.workspace_changed(&event.uri, event.typ == FileChangeType::DELETED);
                 inner.workspace.remove_document(event.uri.as_str());
@@ -3220,7 +3482,14 @@ impl LanguageServer for Backend {
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         ordering::ready().await;
-        Ok(self.hover_at(&params.text_document_position_params))
+        if let Some(hover) = self.written_hover_at(&params.text_document_position_params) {
+            return Ok(hover);
+        }
+        self.wait_document_analysis(Some(
+            &params.text_document_position_params.text_document.uri,
+        ))
+        .await;
+        Ok(self.model_hover_at(&params.text_document_position_params))
     }
 
     async fn document_symbol(
@@ -3228,6 +3497,8 @@ impl LanguageServer for Backend {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.text_document.uri))
+            .await;
         let result = self
             .doc_symbols(&params.text_document.uri)
             .map(DocumentSymbolResponse::Nested);
@@ -3241,6 +3512,7 @@ impl LanguageServer for Backend {
         params: WorkspaceSymbolParams,
     ) -> Result<Option<Vec<SymbolInformation>>> {
         ordering::ready().await;
+        self.wait_document_analysis(None).await;
         let result = self.workspace_symbols(&params.query);
         let uris: Vec<_> = self.lock_inner().docs.keys().cloned().collect();
         for uri in uris {
@@ -3254,6 +3526,10 @@ impl LanguageServer for Backend {
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(
+            &params.text_document_position_params.text_document.uri,
+        ))
+        .await;
         Ok(self.definition_at(&params.text_document_position_params))
     }
 
@@ -3262,6 +3538,10 @@ impl LanguageServer for Backend {
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(
+            &params.text_document_position_params.text_document.uri,
+        ))
+        .await;
         {
             let mut inner = self.lock_inner();
             if let Some(target) =
@@ -3280,6 +3560,10 @@ impl LanguageServer for Backend {
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(
+            &params.text_document_position_params.text_document.uri,
+        ))
+        .await;
         Ok(self
             .decl_location(&params.text_document_position_params)
             .map(GotoDefinitionResponse::Scalar))
@@ -3287,6 +3571,8 @@ impl LanguageServer for Backend {
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.text_document_position.text_document.uri))
+            .await;
         {
             let mut inner = self.lock_inner();
             if let Some(locations) = locals::references(
@@ -3309,11 +3595,17 @@ impl LanguageServer for Backend {
         params: DocumentHighlightParams,
     ) -> Result<Option<Vec<DocumentHighlight>>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(
+            &params.text_document_position_params.text_document.uri,
+        ))
+        .await;
         Ok(self.ident_highlights(&params.text_document_position_params))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.text_document_position.text_document.uri))
+            .await;
         let result = self.complete(&params.text_document_position, params.context.as_ref());
         self.report_source_inspection(&params.text_document_position.text_document.uri)
             .await;
@@ -3322,6 +3614,10 @@ impl LanguageServer for Backend {
 
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(
+            &params.text_document_position_params.text_document.uri,
+        ))
+        .await;
         let result = self.signature_at(&params.text_document_position_params);
         self.report_source_inspection(&params.text_document_position_params.text_document.uri)
             .await;
@@ -3333,6 +3629,8 @@ impl LanguageServer for Backend {
         params: TextDocumentPositionParams,
     ) -> Result<Option<PrepareRenameResponse>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.text_document.uri))
+            .await;
         Ok(self
             .prepare_rename_at(&params)
             .map(PrepareRenameResponse::Range)
@@ -3341,12 +3639,16 @@ impl LanguageServer for Backend {
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.text_document_position.text_document.uri))
+            .await;
         self.rename_at(&params.text_document_position, &params.new_name)
             .map(Some)
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.text_document.uri))
+            .await;
         let mut actions = self.quick_fixes(&params).unwrap_or_default();
         for action in self.shock_templates(&params) {
             actions.push(CodeActionOrCommand::CodeAction(action));
@@ -3363,6 +3665,10 @@ impl LanguageServer for Backend {
         params: LinkedEditingRangeParams,
     ) -> Result<Option<LinkedEditingRanges>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(
+            &params.text_document_position_params.text_document.uri,
+        ))
+        .await;
         Ok(self.linked_ranges(&params.text_document_position_params))
     }
 
@@ -3379,11 +3685,15 @@ impl LanguageServer for Backend {
         params: SelectionRangeParams,
     ) -> Result<Option<Vec<SelectionRange>>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.text_document.uri))
+            .await;
         Ok(self.selection_ranges(&params.text_document.uri, &params.positions))
     }
 
     async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.text_document.uri))
+            .await;
         Ok(self.document_links(&params.text_document.uri))
     }
 
@@ -3392,6 +3702,8 @@ impl LanguageServer for Backend {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.text_document.uri))
+            .await;
         Ok(self
             .semantic_tokens(&params.text_document.uri, None)
             .map(SemanticTokensResult::Tokens))
@@ -3402,6 +3714,8 @@ impl LanguageServer for Backend {
         params: SemanticTokensRangeParams,
     ) -> Result<Option<SemanticTokensRangeResult>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.text_document.uri))
+            .await;
         Ok(self
             .semantic_tokens(&params.text_document.uri, Some(params.range))
             .map(SemanticTokensRangeResult::Tokens))
@@ -3409,6 +3723,8 @@ impl LanguageServer for Backend {
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.text_document.uri))
+            .await;
         self.format_document(&params.text_document.uri)
     }
 
@@ -3417,6 +3733,8 @@ impl LanguageServer for Backend {
         params: DocumentRangeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.text_document.uri))
+            .await;
         self.format_line_range(&params.text_document.uri, params.range)
     }
 
@@ -3436,14 +3754,25 @@ impl LanguageServer for Backend {
         ) {
             return Ok(Some(self.workspace_command(&params.command).await));
         }
+        let requested_root = params
+            .arguments
+            .first()
+            .and_then(|argument| argument.get("root_uri"))
+            .and_then(Value::as_str)
+            .and_then(|uri| Url::parse(uri).ok());
+        self.wait_document_analysis(requested_root.as_ref()).await;
         Ok(Some(self.execute(&params.command, &params.arguments)))
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         ordering::ready().await;
         let output = self.output_gate.lock().await;
-        let explanations = self.apply_settings(&params.settings);
-        let to_publish = self.lock_inner().refresh_diagnostics(None);
+        let (explanations, changes) = self.apply_settings(&params.settings);
+        let to_publish = if changes.analysis {
+            self.lock_inner().refresh_diagnostics(None)
+        } else {
+            Vec::new()
+        };
         ordering::committed();
         for explanation in explanations {
             self.client
@@ -3456,7 +3785,13 @@ impl LanguageServer for Backend {
                 .await;
         }
         drop(output);
-        self.refresh_presentation(true).await;
+        if changes.analysis {
+            self.refresh_presentation(true).await;
+        } else {
+            let hints = changes.hints && self.lock_inner().hint_refresh;
+            self.presentation_refresh
+                .request(&self.client, false, hints);
+        }
         self.kick_workspace();
     }
 
@@ -3465,6 +3800,7 @@ impl LanguageServer for Backend {
         let output = self.output_gate.lock().await;
         let to_publish = {
             let mut inner = self.lock_inner();
+            let previous = inner.settings.clone();
             let removed: Vec<_> = params
                 .event
                 .removed
@@ -3485,7 +3821,8 @@ impl LanguageServer for Backend {
                 inner.analysis_configuration_committed(&root);
             }
             inner.document_contexts.clear();
-            inner.workspace_reconfigure(true);
+            inner.workspace_settings_changed(&previous);
+            inner.document_analysis.cancel();
             inner.refresh_diagnostics(None)
         };
         ordering::committed();
@@ -3504,6 +3841,10 @@ impl LanguageServer for Backend {
         params: CallHierarchyPrepareParams,
     ) -> Result<Option<Vec<CallHierarchyItem>>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(
+            &params.text_document_position_params.text_document.uri,
+        ))
+        .await;
         Ok(self.prepare_hierarchy(&params.text_document_position_params))
     }
 
@@ -3512,6 +3853,7 @@ impl LanguageServer for Backend {
         params: CallHierarchyIncomingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.item.uri)).await;
         Ok(self.incoming(&params.item))
     }
 
@@ -3520,6 +3862,7 @@ impl LanguageServer for Backend {
         params: CallHierarchyOutgoingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
         ordering::ready().await;
+        self.wait_document_analysis(Some(&params.item.uri)).await;
         Ok(self.outgoing(&params.item))
     }
 }
@@ -3744,6 +4087,9 @@ fn prepare_root_report(
         revision,
         errors,
         warnings,
+        reusable: false,
+        stamps: crate::engine::workspace::InputStamps::new(),
+        owner_files: HashSet::new(),
     }
 }
 
@@ -4533,8 +4879,20 @@ fn metadata_completion_item(inner: &mut Inner, uri: &Url, byte: u32) -> Option<C
 /// The macro scanner owns which written markers are directives. Completion
 /// reads only the name on that token's first line, without expanding the file.
 fn macro_directive_name_at(text: &str, byte: u32) -> Option<Span> {
-    crate::engine::language::macro_expand::scan_macro_tokens(text)
-        .into_iter()
+    macro_directive_name_with_tokens(
+        text,
+        byte,
+        &crate::engine::language::macro_expand::scan_macro_tokens(text),
+    )
+}
+
+fn macro_directive_name_with_tokens(
+    text: &str,
+    byte: u32,
+    tokens: &[crate::engine::language::lexer::Token],
+) -> Option<Span> {
+    tokens
+        .iter()
         .filter(|token| token.kind == TokenKind::MacroDir)
         .find_map(|token| {
             let start = token.span.start as usize + 2;
@@ -5008,6 +5366,57 @@ fn ch_equation_item(
 #[cfg(test)]
 mod diagnostic_revision_tests {
     use super::*;
+
+    #[test]
+    fn presentation_settings_preserve_model_and_analysis_context_revisions() {
+        // Guards a view change refusing an action whose source proof is still
+        // current. Analysis-setting changes must invalidate both tokens.
+        let root = Url::parse("file:///report-reuse/revision.mod").unwrap();
+        let mut inner = Inner::default();
+        inner
+            .workspace
+            .update_document(root.as_str(), "var y; model; y=0; end;");
+        let revision = inner.root_revision(&root).unwrap();
+        let context = analysis_configuration::context_revision(&mut inner, &root).unwrap();
+        inner
+            .settings
+            .apply(&json!({"outline":{"activity":"inactive"},"formatIndent":2}));
+        assert_eq!(inner.root_revision(&root).unwrap(), revision);
+        assert_eq!(
+            analysis_configuration::context_revision(&mut inner, &root).unwrap(),
+            context
+        );
+        inner.settings.apply(&json!({"macroWorkLimit":1000000}));
+        assert_ne!(inner.root_revision(&root).unwrap(), revision);
+        assert_ne!(
+            analysis_configuration::context_revision(&mut inner, &root).unwrap(),
+            context
+        );
+    }
+
+    #[tokio::test]
+    async fn unrelated_open_model_keeps_its_checked_report_after_an_edit() {
+        // Guards rebuilding every open root's diagnostics after one model
+        // changes. A changed root must still obtain a current report.
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        let first = Url::parse("file:///report-reuse/first.mod").unwrap();
+        let second = Url::parse("file:///report-reuse/second.mod").unwrap();
+        server.upsert(first.clone(), "var y; model; y=0; end;".to_owned(), 1);
+        server.upsert(second.clone(), "var x; model; x=0; end;".to_owned(), 1);
+        let (first_report, second_report) = {
+            let inner = server.lock_inner();
+            (
+                Arc::clone(&inner.reports[&first]),
+                Arc::clone(&inner.reports[&second]),
+            )
+        };
+        server.upsert(second.clone(), "var x; model; x=1; end;".to_owned(), 2);
+        let inner = server.lock_inner();
+        assert!(Arc::ptr_eq(&first_report, &inner.reports[&first]));
+        assert!(!Arc::ptr_eq(&second_report, &inner.reports[&second]));
+        assert_ne!(second_report.revision, inner.reports[&second].revision);
+    }
 
     #[test]
     fn model_change_announces_the_same_input_token_as_diagnostics() {

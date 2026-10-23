@@ -434,9 +434,30 @@ fn harvest_ident_helpers(
     resolve: &mut impl FnMut(&str, &[&str]) -> Option<PathBuf>,
     pending: &mut Vec<Pending>,
 ) {
+    // Declaration metadata has Ident(...) syntax but is not a native call.
+    // Use parser token receipts, not spelling or written spans: macro copies
+    // can share a span while a separate call with the same name remains real.
+    let declarations: HashSet<_> = model
+        .written_declarations
+        .iter()
+        .filter_map(|declaration| {
+            let order = declaration.token_range.start;
+            let original = model.expanded_token_origins.get(order)?;
+            let parsed = model.expanded_tokens.get(order)?;
+            let token = tokens.get(original.start)?;
+            (original.len() == 1
+                && token.kind == TokenKind::Ident
+                && token.span == parsed.span
+                && token.text(source) == model.name(declaration.declaration.name))
+            .then_some(original.start)
+        })
+        .collect();
     let mut call_name_spans = HashMap::new();
     for i in 0..tokens.len().saturating_sub(1) {
-        if tokens[i].kind != TokenKind::Ident || i > 0 && tokens[i - 1].kind == TokenKind::Dot {
+        if tokens[i].kind != TokenKind::Ident
+            || i > 0 && tokens[i - 1].kind == TokenKind::Dot
+            || declarations.contains(&i)
+        {
             continue;
         }
         let (name, named_in, end) = qualified_name(source, tokens, i);
@@ -484,7 +505,10 @@ fn harvest_ident_helpers(
     }
 
     for i in 0..tokens.len().saturating_sub(1) {
-        if tokens[i].kind != TokenKind::Ident || i > 0 && tokens[i - 1].kind == TokenKind::Dot {
+        if tokens[i].kind != TokenKind::Ident
+            || i > 0 && tokens[i - 1].kind == TokenKind::Dot
+            || declarations.contains(&i)
+        {
             continue;
         }
         let (name, named_in, end) = qualified_name(source, tokens, i);
@@ -639,5 +663,126 @@ fn record_key(p: &Pending, identity: CompanionIdentity) -> String {
             };
             format!("unresolved:{n}")
         }
+    }
+}
+
+#[cfg(test)]
+mod metadata_tests {
+    use super::{CompanionIdentity, harvest};
+    use crate::engine::language::{
+        lexer::{TokenKind, tokenize},
+        macro_expand::expand_macros,
+        parser::parse,
+    };
+    use crate::engine::workspace::Workspace;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn declaration_metadata_does_not_probe_a_helper_file() {
+        // Guards display metadata adding false related files and missing-file
+        // inputs that every later semantic request must validate.
+        for present in [false, true] {
+            let mut files = BTreeMap::from([(
+                "root.mod".into(),
+                "var sample(long_name='Sample'); model; sample=0; end;".into(),
+            )]);
+            if present {
+                files.insert("sample.m".into(), "function y=sample(x)\ny=x;\nend;".into());
+            }
+            let mut workspace = Workspace::overlay_documents(&files);
+            workspace.input_revision("root.mod").unwrap();
+            assert!(
+                !workspace
+                    .companion_records("root.mod")
+                    .unwrap()
+                    .iter()
+                    .any(|record| record.name == "sample"),
+                "metadata became a helper"
+            );
+            assert!(
+                !workspace
+                    .input_snapshots
+                    .get("root.mod")
+                    .expect("captured overlay inputs")
+                    .keys()
+                    .any(|path| matches!(
+                        std::path::Path::new(path)
+                            .file_name()
+                            .and_then(|name| name.to_str()),
+                        Some("sample" | "sample.m")
+                    )),
+                "metadata added lookup guards"
+            );
+        }
+    }
+
+    #[test]
+    fn metadata_filter_keeps_a_real_helper_with_the_same_name() {
+        // Guards filtering by spelling rather than a proven declaration site.
+        let source =
+            "var sample(long_name='Sample'); parameters p; p=sample(.5); model; sample=p; end;";
+        let files = BTreeMap::from([
+            ("root.mod".into(), source.into()),
+            ("sample.m".into(), "function y=sample(x)\ny=x;\nend;".into()),
+        ]);
+        let mut workspace = Workspace::overlay_documents(&files);
+        workspace.input_revision("root.mod").unwrap();
+        assert!(
+            workspace.input_snapshots["root.mod"].contains_key("sample.m"),
+            "real helper lost its file guard"
+        );
+        let record = workspace
+            .companion_records("root.mod")
+            .unwrap()
+            .iter()
+            .find(|record| record.name == "sample")
+            .expect("real helper call");
+        assert!(record.path.is_some());
+        assert_eq!(
+            &source[record.named_in.start as usize..record.named_in.end as usize],
+            "sample"
+        );
+        assert_eq!(
+            record.named_in.start as usize,
+            source.find("sample(.5)").unwrap()
+        );
+    }
+
+    #[test]
+    fn shared_written_span_keeps_native_call_after_a_declaration_copy() {
+        // Guards a span-based exclusion removing a real native call when a
+        // macro loop gives the same written Ident(...) two different roles.
+        let source = "@#for declare in [1,0]\n@#if declare\nvar\n@#endif\nsample(long_name='Sample');\n@#endfor\nmodel; sample=0; end;\n";
+        let model = parse(source);
+        let tokens = expand_macros(source, tokenize(source));
+        let copies: Vec<_> = tokens
+            .windows(2)
+            .filter(|pair| {
+                pair[0].kind == TokenKind::Ident
+                    && pair[0].text(source) == "sample"
+                    && pair[1].kind == TokenKind::LParen
+            })
+            .map(|pair| pair[0].span)
+            .collect();
+        assert_eq!(copies.len(), 2);
+        assert_eq!(copies[0], copies[1], "fixture must share the written span");
+        let mut probes = Vec::new();
+        let records = harvest(
+            source,
+            &model,
+            &[],
+            CompanionIdentity::Supplied,
+            |name, _| {
+                probes.push(name.to_owned());
+                Some(std::path::PathBuf::from("sample.m"))
+            },
+        );
+        assert_eq!(
+            probes,
+            ["sample"],
+            "only the native occurrence may probe a helper"
+        );
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "sample");
     }
 }

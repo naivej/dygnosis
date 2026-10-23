@@ -75,13 +75,12 @@ pub(super) fn context_revision(inner: &mut Inner, root: &Url) -> Option<String> 
         inner.workspace.set_unnamed_root(root.as_str());
     }
     inner.remember_request_root(root);
-    let settings = inner.prepare_root(root);
+    inner.prepare_root(root);
     let source = inner
         .workspace
         .source_context_revision(root.as_str())
         .ok()?;
     let mut hash = std::collections::hash_map::DefaultHasher::new();
-    settings.hash(&mut hash);
     source.hash(&mut hash);
     Some(format!("{:016x}", hash.finish()))
 }
@@ -539,7 +538,10 @@ impl Backend {
         let (result, publications) = {
             let mut inner = self.lock_inner();
             match set(&mut inner, arguments) {
-                Ok(result) => (result, inner.refresh_diagnostics(None)),
+                Ok(result) => {
+                    inner.document_analysis.cancel();
+                    (result, inner.refresh_diagnostics(None))
+                }
                 Err(refusal) => (refusal, Vec::new()),
             }
         };

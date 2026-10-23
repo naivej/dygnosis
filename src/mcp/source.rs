@@ -565,7 +565,7 @@ pub(super) fn resolve_source_configured_reusing(
         .map_err(|_| SourceError::failure("CANCELLED", "The request was cancelled"))?;
         let reasons: Vec<_> = causes.into_iter().map(|cause| {
             let mut reason = cause.outcome_json();
-            let mut location = |site: &crate::engine::workspace::IncludeSite| {
+            let location = |site: &crate::engine::workspace::IncludeSite| {
                 let raw = workspace.source_for_normalized_key(&site.file)?;
                 let normalized = crate::engine::language::parser::normalize_newlines(raw);
                 normalized.get(site.span.start as usize..site.span.end as usize)?;
@@ -575,7 +575,7 @@ pub(super) fn resolve_source_configured_reusing(
                 Some(json!({"file":if kind=="text" {Value::Null}else {json!(site.file)},
                     "range":{"line":start.line+1,"column":start.character+1,"end_line":end.line+1,"end_column":end.character+1}}))
             };
-            if let Some(source) = cause.origin.as_ref().and_then(&mut location) {
+            if let Some(source) = cause.origin.as_ref().and_then(location) {
                 reason["source"] = source;
             }
             let chain: Vec<_> = cause.include_chain.iter().filter_map(location).collect();

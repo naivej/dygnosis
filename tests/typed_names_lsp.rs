@@ -68,11 +68,20 @@ async fn inactive_command_hover_uses_the_requested_option_or_name() {
             let query = position(&document, &text, needle, offset + 2);
             let hover = help(server, query).await.expect("written token hover");
             let message = markdown(&hover);
-            assert!(
-                message.starts_with(&format!("**{name}**")),
-                "{name}: {message}"
-            );
-            assert!(message.contains("inactive"), "{name}: {message}");
+            if name == "pac_rent" {
+                assert!(message.starts_with("**pac_rent**"), "{message}");
+                assert!(message.contains("inactive"), "{message}");
+            } else {
+                assert!(message.contains(&format!("`{name}`")), "{message}");
+                assert!(
+                    if name == "model_name" {
+                        message.contains("option")
+                    } else {
+                        message.contains("Define a PAC expectation model")
+                    },
+                    "{message}"
+                );
+            }
             assert!(!message.contains("Timing:"), "{name}: {message}");
             assert_eq!(
                 hover.range,

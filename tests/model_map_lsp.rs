@@ -431,7 +431,7 @@ async fn model_info_shares_counts_keeps_metadata_and_supplies_exact_lens_anchors
     let hidden = info(server, &root, None).await;
     assert_eq!(hidden["declarations"], result["declarations"]);
     assert_eq!(hidden["n_equations"], 2);
-    assert_ne!(hidden["revision"], result["revision"]);
+    assert_eq!(hidden["revision"], result["revision"]);
 }
 
 #[tokio::test]
@@ -938,8 +938,8 @@ async fn ownerless_and_shared_includes_never_choose_an_arbitrary_model() {
     assert_eq!(info(server, &child, None).await["code"], "ROOT_REQUIRED");
     open(server, &a, text).await;
     open(server, &b, text).await;
-    assert_eq!(server.known_model_roots(&child).len(), 2);
     let rows = symbols(server, &child).await;
+    assert_eq!(server.known_model_roots(&child).len(), 2);
     assert_local_tree(&rows, child_text, None);
     assert!(rows.iter().any(|row| row.name == "shared"));
     assert!(rows.iter().all(|row| !row.name.contains('·')));

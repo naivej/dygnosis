@@ -852,10 +852,10 @@ test("a delayed root file observation after the initial proof requires Refresh b
   } finally { vscode.window.showTextDocument = show; await env.dispose(); }
 });
 
-test("unrelated root notifications during source loading obtain a bounded new proof for the unchanged preview", async context => {
+test("unrelated root notifications during source loading preserve the current preview proof", async context => {
   for (const interruptions of [1, 3, 4]) await context.test(`${interruptions} interruptions`, async () => {
     const env = await realClientSetup(), include = "file:///workspace/unopened.inc";
-    let interrupted = 0;
+    let interrupted = 0, proofRequests = 0;
     try {
       env.engine.value = payload({ effective_text: "model;\ny = 3;\nend;", navigation: [row({ written_locations: [target(include, new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, include] });
       const session = await env.show();
@@ -865,21 +865,21 @@ test("unrelated root notifications during source loading obtain a bounded new pr
         return loaded;
       };
       env.engine.infoHook = call => {
-        if (!env.host.documents.has(include) || interrupted >= interruptions) return false;
-        ++interrupted;
-        void Promise.resolve().then(() => { env.service.invalidate("file:///workspace/other.mod"); call.reply.resolve(env.engine.snapshot()); });
+        if (!env.host.documents.has(include)) return false;
+        ++proofRequests;
+        if (interrupted) return false;
+        void Promise.resolve().then(() => {
+          for (; interrupted < interruptions; ++interrupted) env.service.invalidate("file:///workspace/other.mod");
+          call.reply.resolve(env.engine.snapshot());
+        });
         return true;
       };
       await env.run("goToWrittenSource");
       assert.equal(interrupted, interruptions);
+      assert.equal(proofRequests, 1, "unrelated roots cannot discard a current source-jump proof");
       assert.equal(session.result.revision, "current");
-      if (interruptions < 4) {
-        assert.equal(env.host.editor.document.uri.toString(), include);
-        assert.deepEqual(env.host.shown.at(-1).options.selection, new Range(0, 0, 0, 3));
-      } else {
-        assert.equal(env.host.editor.document, session.document);
-        assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
-      }
+      assert.equal(env.host.editor.document.uri.toString(), include);
+      assert.deepEqual(env.host.shown.at(-1).options.selection, new Range(0, 0, 0, 3));
     } finally { await env.dispose(); }
   });
 });
@@ -1222,6 +1222,11 @@ test("macro tint toggles preserve source jumps and restore decoration without Re
   assert.equal(paints.at(-1).length, 1);
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
   assert.equal(env.service.requests.length, count);
+  for (const setting of ["outline.activity", "nameDetails.tex", "parameterValueHints", "formatIndent"]) {
+    env.host.configured.fire({ affectsConfiguration: key => ["dynare", `dynare.${setting}`, `dynare.${setting.split(".")[0]}`].includes(key) });
+    assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true, `${setting} preserves source navigation`);
+    assert.equal(env.service.requests.length, count, `${setting} needs no expansion`);
+  }
   env.host.configured.fire({ affectsConfiguration: key => ["dynare", "dynare.effectiveModel.macroTint", "dynare.searchPaths"].includes(key) });
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false, "simultaneous input changes still invalidate");
   env.registration.dispose(); env.previews.dispose();

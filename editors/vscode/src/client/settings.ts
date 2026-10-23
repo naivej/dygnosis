@@ -4,11 +4,14 @@ export const outlineSections = ["declarations", "blocks", "commands", "dimension
 export const outlineActivities = ["both", "active", "inactive"] as const;
 export type OutlineActivity = typeof outlineActivities[number];
 export type Log = (message: string) => void;
-/** Macro tint changes no server input; simultaneous engine-setting changes still do. */
-export function macroTintOnlyChange(event: vscode.ConfigurationChangeEvent, resource?: vscode.Uri): boolean {
-  return event.affectsConfiguration("dynare.effectiveModel.macroTint", resource) &&
-    !["serverPath", "searchPaths", "macroWorkLimit", "formatIndent", "workspaceDiagnostics", "workspaceExcludePaths", "nameDetails", "outline", "parameterValueHints"]
-      .some(key => event.affectsConfiguration(`dynare.${key}`, resource));
+/** Settings that can change model inputs or the set of workspace owners. */
+export function analysisSettingsChanged(event: vscode.ConfigurationChangeEvent, resource?: vscode.Uri): boolean {
+  return ["searchPaths", "macroWorkLimit", "workspaceDiagnostics", "workspaceExcludePaths"]
+    .some(key => event.affectsConfiguration(`dynare.${key}`, resource));
+}
+export function serverSettingsChanged(event: vscode.ConfigurationChangeEvent): boolean {
+  return analysisSettingsChanged(event) || ["formatIndent", "nameDetails", "outline", "parameterValueHints"]
+    .some(key => event.affectsConfiguration(`dynare.${key}`));
 }
 function valueSetting(key: string, resource: vscode.Uri | undefined, fallback: unknown): unknown {
   const config = vscode.workspace.getConfiguration("dynare", { uri: resource, languageId: "dynare" });

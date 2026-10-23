@@ -481,7 +481,8 @@ async fn model_info_revision_stays_current_when_opening_unchanged_included_text(
             settings: json!({"dynare":{"nameDetails":{"tex":false}}}),
         })
         .await;
-    assert_ne!(facts(backend, &root).await["revision"], closed["revision"]);
+    assert_eq!(facts(backend, &root).await["revision"], closed["revision"]);
+    assert!(!backend.presentation_settings(&root).name_details.tex);
 }
 
 #[tokio::test]
@@ -520,7 +521,7 @@ async fn snapshots_clear_removed_values_and_folder_events_reselect_settings() {
     let preferences = backend.presentation_settings(&uri);
     assert!(preferences.name_details.long_name);
     assert!(!preferences.name_details.tex);
-    assert_ne!(backend.model_input_revision(&uri).unwrap(), before);
+    assert_eq!(backend.model_input_revision(&uri).unwrap(), before);
     backend
         .did_change_workspace_folders(DidChangeWorkspaceFoldersParams {
             event: WorkspaceFoldersChangeEvent {
@@ -555,7 +556,7 @@ async fn legacy_single_folder_and_by_root_settings_remain_usable_and_isolated() 
         params.root_uri = Some(files.uri("folder"));
     }
     backend.initialize(params).await.unwrap();
-    let source = "@#include \"values.inc\"\nvar y; model; y=p; end;\n";
+    let source = "@#include \"values.inc\"\nvar y;\nmodel;\ny=p;\nend;\n";
     open(backend, a.clone(), source).await;
     assert!(!codes(backend, a.clone()).await.contains(&"E061".to_owned()));
     backend
@@ -574,7 +575,22 @@ async fn legacy_single_folder_and_by_root_settings_remain_usable_and_isolated() 
             settings: json!({"dynare":{"formatIndent":4}}),
         })
         .await;
-    assert_ne!(backend.model_input_revision(&a).unwrap(), revision);
+    assert_eq!(backend.model_input_revision(&a).unwrap(), revision);
+    let formatted = backend
+        .formatting(DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri: a.clone() },
+            options: FormattingOptions::default(),
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        formatted[0]
+            .new_text
+            .lines()
+            .any(|line| line == "    y = p;")
+    );
     assert!(!codes(backend, a).await.contains(&"E061".to_owned()));
 }
 
@@ -779,6 +795,18 @@ async fn include_owners_survive_cache_invalidation_and_remain_separate_from_pres
         )
         .await;
     }
+    // An editor request waits for ownership discovery after the input commits.
+    assert!(
+        backend
+            .document_symbol(DocumentSymbolParams {
+                text_document: TextDocumentIdentifier { uri: root.clone() },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .is_some()
+    );
     let owners = backend.known_model_roots(&include);
     assert_eq!(owners, [root.clone(), second.clone()]);
     assert!(!backend.presentation_settings(&root).name_details.long_name);
@@ -901,11 +929,26 @@ impl Wire {
             }}),
         )
         .await;
+        let mut published = false;
+        let mut hints_refreshed = false;
         loop {
             let message = self.read().await;
             if message["method"] == "textDocument/publishDiagnostics"
                 && message["params"]["uri"] == uri.as_str()
             {
+                published = true;
+            }
+            if message["method"] == "workspace/inlayHint/refresh" {
+                hints_refreshed = true;
+            }
+            if let Some(id) = message
+                .get("id")
+                .filter(|_| message.get("method").is_some())
+            {
+                self.send(json!({"jsonrpc":"2.0","id":id,"result":null}))
+                    .await;
+            }
+            if published && hints_refreshed {
                 break;
             }
         }
@@ -914,7 +957,7 @@ impl Wire {
     async fn settings_change(&mut self, uri: &Url) -> Vec<Value> {
         self.send(
             json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{
-                "settings":{"dynare":{"nameDetails":{"tex":false}}}
+                "settings":{"dynare":{"macroWorkLimit":1000000}}
             }}),
         )
         .await;

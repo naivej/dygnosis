@@ -4,6 +4,46 @@ use super::*;
 use crate::engine::workspace::include_resolver::normalize_uri;
 
 impl Inner {
+    pub(super) fn document_context_snapshot(&self) -> HashMap<Url, Vec<Url>> {
+        self.docs
+            .keys()
+            .map(|document| (document.clone(), self.context_roots(document)))
+            .collect()
+    }
+
+    /// A completed include walk can establish or remove an editor's owner.
+    /// The completed root already has current facts. Other newly required
+    /// units need their normal input validation before their reports are used.
+    pub(super) fn document_context_changes_after_check(
+        &mut self,
+        completed: &Url,
+        previous: HashMap<Url, Vec<Url>>,
+    ) -> Vec<Url> {
+        self.revalidate_selected_contexts(Some(completed));
+        let completed_key = normalize_uri(completed.as_str());
+        let mut changed = HashSet::new();
+        for (document, before) in previous {
+            if !self.docs.contains_key(&document) {
+                continue;
+            }
+            let mut roots = self.context_roots(&document);
+            if roots == before {
+                continue;
+            }
+            if roots.is_empty() && !self.context_ambiguous(&document) {
+                roots.push(document);
+            }
+            changed.extend(
+                roots
+                    .into_iter()
+                    .filter(|root| normalize_uri(root.as_str()) != completed_key),
+            );
+        }
+        let mut changed: Vec<_> = changed.into_iter().collect();
+        changed.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        changed
+    }
+
     pub(super) fn browsing_documents(&self, root: &Url) -> Vec<Url> {
         self.document_contexts
             .iter()
@@ -93,14 +133,26 @@ impl Inner {
     }
 
     pub(super) fn revalidate_document_contexts(&mut self) {
+        self.revalidate_selected_contexts(None);
+    }
+
+    fn revalidate_selected_contexts(&mut self, completed: Option<&Url>) {
+        let completed = completed.map(|root| normalize_uri(root.as_str()));
         let selections: Vec<_> = self
             .document_contexts
             .iter()
+            .filter(|(_, root)| {
+                completed
+                    .as_ref()
+                    .is_none_or(|completed| normalize_uri(root.as_str()) == *completed)
+            })
             .map(|(document, root)| (document.clone(), root.clone()))
             .collect();
         for (document, root) in selections {
             let identity = normalize_uri(root.as_str());
-            self.root_revision(&root);
+            if completed.is_none() {
+                self.root_revision(&root);
+            }
             if matches!(
                 self.workspace.analysis_selection(root.as_str()),
                 crate::engine::analysis_configuration::AnalysisSelectionState::Stale { .. }
@@ -124,6 +176,7 @@ impl Backend {
             let mut inner = self.lock_inner();
             match set_context(&mut inner, arguments) {
                 Ok(result) => {
+                    inner.document_analysis.cancel();
                     let publications = inner.refresh_diagnostics(None);
                     (result, publications)
                 }

@@ -12,6 +12,12 @@ use crate::engine::workspace::include_resolver::{normalize_uri, path_key};
 
 pub const CONFIGURATION_SCHEMA_VERSION: u32 = 1;
 pub const MODEL_INFO_SCHEMA_VERSION: u32 = 1;
+
+pub(super) struct SettingsChange {
+    pub analysis: bool,
+    pub hints: bool,
+}
+
 const OUTLINE_SECTIONS: &[&str] = &[
     "declarations",
     "blocks",
@@ -122,6 +128,27 @@ impl Default for SettingsStore {
 }
 
 impl SettingsStore {
+    pub(super) fn analysis_changed(
+        &self,
+        previous: &Self,
+        uri: &Url,
+        paths_selected: bool,
+    ) -> bool {
+        let current = self.resolve(uri);
+        let previous = previous.resolve(uri);
+        current.macro_work_limit != previous.macro_work_limit
+            || !paths_selected && current.search_paths != previous.search_paths
+    }
+
+    pub(super) fn discovery_changed(&self, previous: &Self) -> bool {
+        self.workspace_diagnostics != previous.workspace_diagnostics
+            || self.folders != previous.folders
+            || self.folders.iter().any(|folder| {
+                self.resolve(&folder.uri).workspace_exclude_paths
+                    != previous.resolve(&folder.uri).workspace_exclude_paths
+            })
+    }
+
     pub fn set_folders(&mut self, folders: Vec<WorkspaceFolder>) {
         self.folders = folders;
         self.folders

@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.11.34
+
+- Changing the Outline activity filter or other presentation settings keeps the
+  current model analysis. Outline presentation updates without rechecking the
+  model.
+- Editing a file rechecks the models that use it. Results for independent models
+  remain available during that check.
+- Literal command, macro-directive and explicit option help can appear while
+  model analysis runs.
+- Hover skips model lookups for equation labels, comments and other positions
+  that have no hover information.
+- Hover responds faster in models with many labelled declarations, and
+  declaration labels no longer produce false helper-file links.
+- Recently used model information stays available for faster repeated use.
+
 ## v0.11.33
 
 - Remove the **Jump to equation...** CodeLens and its setting. The Command

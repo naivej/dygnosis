@@ -12,6 +12,7 @@ mod configuration_refresh_tests;
 #[cfg(test)]
 mod configuration_tests;
 pub mod include_resolver;
+mod input_read;
 pub mod model_map;
 mod source_structure;
 
@@ -21,7 +22,7 @@ use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 static INPUT_GENERATION: AtomicU64 = AtomicU64::new(1);
 /// Input provenance keeps this fixed byte bound when macro work is increased.
@@ -504,6 +505,8 @@ pub(crate) struct SourceIncludeLookup {
 #[cfg(test)]
 thread_local! {
     pub(crate) static SOURCE_LOOKUP_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static INPUT_REVISION_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static INPUT_FILE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Checked source and lookup fact. Missing candidates and directories have no
@@ -542,6 +545,7 @@ impl InputStamps {
 /// URI/path-keyed document index plus include graph walks.
 #[derive(Default)]
 pub struct Workspace {
+    input_read: Weak<Mutex<input_read::ReadMemo>>,
     // Pair-local immutable body reuse. These keys do not enter include lookup
     // until that side independently selects them under its own source policy.
     comparison_reuse: HashMap<String, Arc<Doc>>,
@@ -1309,6 +1313,7 @@ impl Workspace {
         total_bytes: usize,
         files: usize,
     ) {
+        self.invalidate_read(None);
         self.source_limits = Some((file_bytes, total_bytes, files));
     }
 
@@ -1445,6 +1450,7 @@ impl Workspace {
 
     /// Store one overlay under `key` exactly. No disk and no path folding.
     fn insert_overlay(&mut self, key: &str, source: String) {
+        self.invalidate_read(None);
         let input_generation = self.overlay_generation(key, &source);
         let model = crate::engine::language::parser::parse_with_budget(
             &source,
@@ -1484,16 +1490,19 @@ impl Workspace {
             normalize_uri(uri)
         };
         let source = source.into();
+        if self
+            .docs
+            .get(&key)
+            .is_some_and(|doc| doc.overlay && *doc.source == source)
+        {
+            return;
+        }
         let input_generation = self.overlay_generation(&key, &source);
-        let model = crate::engine::language::parser::parse_with_budget(
-            &source,
-            &mut self.macro_budget(&key),
-        );
         self.docs.insert(
             key.clone(),
             Arc::new(Doc {
                 source: Arc::new(source),
-                model: OnceLock::from(Arc::new(model)),
+                model: OnceLock::new(),
                 source_inventory: Mutex::new(Vec::new()),
                 macro_source: Mutex::new(None),
                 work_limit: self.root_macro_work_limit(&key),
@@ -1501,18 +1510,37 @@ impl Workspace {
                 input_generation,
             }),
         );
-        // Other roots may have spliced this file.
-        self.effective.clear();
-        self.spliced.clear();
-        self.expand.clear();
-        self.records.clear();
-        self.companions.clear();
+        self.invalidate_document_input(&key);
+    }
+
+    fn invalidate_document_input(&mut self, key: &str) {
+        // A complete input snapshot proves which other roots can use this
+        // file. Unproven roots keep conservative invalidation.
+        let roots: HashSet<_> = self
+            .effective
+            .keys()
+            .chain(self.spliced.keys())
+            .chain(self.expand.keys())
+            .chain(self.records.keys())
+            .chain(self.companions.keys())
+            .cloned()
+            .collect();
+        for root in roots {
+            if root == key
+                || self
+                    .input_snapshots
+                    .get(&root)
+                    .is_none_or(|inputs| inputs.contains_key(key))
+            {
+                self.invalidate_root(&root);
+            }
+        }
     }
 
     /// Drop this document so a later load can read disk again.
     ///
-    /// Clears every cached effective model, include-record map, and companion
-    /// cache: other roots may have spliced this file.
+    /// Invalidates roots that used this input, including missing-file lookups.
+    /// Roots without a proven input snapshot remain conservative.
     pub fn remove_document(&mut self, uri: &str) {
         let key = if self.overlay_only {
             uri.to_owned()
@@ -1520,11 +1548,7 @@ impl Workspace {
             normalize_uri(uri)
         };
         self.docs.remove(&key);
-        self.effective.clear();
-        self.spliced.clear();
-        self.expand.clear();
-        self.records.clear();
-        self.companions.clear();
+        self.invalidate_document_input(&key);
     }
 
     /// Read `path` from disk (utf-8, then latin-1) unless an overlay exists.
@@ -1588,18 +1612,14 @@ impl Workspace {
                 input_generation: 0,
             }),
         );
-        // Other roots may have spliced this file.
-        self.effective.clear();
-        self.spliced.clear();
-        self.expand.clear();
-        self.records.clear();
-        self.companions.clear();
+        self.invalidate_document_input(&key);
         self.docs
             .get(&key)
             .and_then(|d| d.model(self.cancellation.clone()).map(Arc::as_ref))
     }
 
     pub fn add_search_path(&mut self, path: PathBuf) {
+        self.invalidate_read(None);
         if !self.search_paths.iter().any(|p| p == &path) {
             self.search_paths.push(path);
         }
@@ -1611,6 +1631,7 @@ impl Workspace {
     }
 
     pub fn set_search_paths(&mut self, paths: Vec<PathBuf>) {
+        self.invalidate_read(None);
         let mut deduped = Vec::new();
         for path in paths {
             if !deduped.iter().any(|p| p == &path) {
@@ -1644,11 +1665,77 @@ impl Workspace {
     }
 
     fn invalidate_root(&mut self, key: &str) {
+        self.invalidate_read(Some(key));
         self.effective.remove(key);
         self.spliced.remove(key);
         self.expand.remove(key);
         self.records.remove(key);
         self.companions.remove(key);
+    }
+
+    pub(crate) fn root_may_use(&self, root: &str, changed: &str) -> bool {
+        let root = normalize_uri(root);
+        let changed = normalize_uri(changed);
+        root == changed
+            || self
+                .input_snapshots
+                .get(&root)
+                .is_none_or(|inputs| inputs.contains_key(&changed))
+    }
+
+    pub(crate) fn has_joined_source(&self, root: &str) -> bool {
+        self.spliced.contains_key(&normalize_uri(root))
+    }
+
+    pub(crate) fn known_include_files(&self, root: &str) -> HashSet<String> {
+        self.include_owners
+            .get(&normalize_uri(root))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Import a completed editor snapshot after its caller validated current
+    /// overlay versions and settings. Disk guards were checked by the worker.
+    pub(crate) fn adopt_root_analysis(&mut self, root: &str, mut source: Self) {
+        let key = normalize_uri(root);
+        self.invalidate_read(Some(&key));
+        let files: HashSet<_> = source
+            .input_snapshots
+            .get(&key)
+            .into_iter()
+            .flat_map(|inputs| inputs.keys().cloned())
+            .collect();
+        for file in files {
+            if let Some(doc) = source.docs.remove(&file) {
+                if self.docs.get(&file).is_some_and(|current| current.overlay) {
+                    continue;
+                }
+                let work_limit = self.root_macro_work_limit(&file);
+                let doc = if doc.work_limit == work_limit {
+                    doc
+                } else {
+                    Arc::new(doc.with_work_limit(work_limit))
+                };
+                self.docs.insert(file, doc);
+            }
+        }
+        macro_rules! adopt {
+            ($($field:ident),+ $(,)?) => { $(
+                if let Some(value) = source.$field.remove(&key) {
+                    self.$field.insert(key.clone(), value);
+                }
+            )+ };
+        }
+        adopt!(
+            effective,
+            spliced,
+            expand,
+            records,
+            companions,
+            input_snapshots,
+            dependency_candidates,
+            include_owners
+        );
     }
 
     fn root_paths(&self, key: &str) -> &[PathBuf] {
@@ -1663,6 +1750,7 @@ impl Workspace {
         if self.default_macro_work_limit == work_limit {
             return;
         }
+        self.invalidate_read(None);
         self.default_macro_work_limit = work_limit;
         let changed: Vec<_> = self
             .docs
@@ -1719,11 +1807,19 @@ impl Workspace {
     /// Observe disk changes without replacing editor overlays. Missing search
     /// candidates are inputs too: creating one can change an include's owner.
     pub fn input_revision(&mut self, uri: &str) -> Option<String> {
+        if self.cancelled() || crate::engine::control::cancelled() {
+            return None;
+        }
         let key = if self.overlay_only {
             uri.to_owned()
         } else {
             normalize_uri(uri)
         };
+        if let Some(revision) = self.read_revision(&key) {
+            return Some(revision);
+        }
+        #[cfg(test)]
+        INPUT_REVISION_CHECKS.with(|checks| checks.set(checks.get() + 1));
         let previous = self.input_snapshots.get(&key);
         let mut changed: Vec<_> = previous
             .into_iter()
@@ -1899,8 +1995,10 @@ impl Workspace {
             state.modified.hash(&mut hash);
             state.overlay_generation.hash(&mut hash);
         }
-        self.input_snapshots.insert(key, snapshot);
-        Some(format!("{:016x}", hash.finish()))
+        let revision = format!("{:016x}", hash.finish());
+        self.input_snapshots.insert(key.clone(), snapshot);
+        self.remember_read_revision(key, revision.clone());
+        Some(revision)
     }
 
     /// Guards use the exact candidates already selected by the engine. Hosts
@@ -1988,6 +2086,8 @@ impl Workspace {
     }
 
     fn input_file(&self, key: &str) -> InputFile {
+        #[cfg(test)]
+        INPUT_FILE_READS.with(|reads| reads.set(reads.get() + 1));
         let identity = if self.overlay_only || is_virtual_uri(key) {
             None
         } else {
@@ -5546,5 +5646,70 @@ mod supplied_compare_revision_tests {
         std::fs::remove_file(path).unwrap();
         assert!(!state.exists && !state.directory);
         assert!(state.bytes.is_none() && state.identity.is_none() && state.length.is_none());
+    }
+}
+
+#[cfg(test)]
+mod editor_input_reuse_tests {
+    use super::*;
+    use crate::engine::language::parser::PARSE_EXPANDED_BUILDS;
+
+    #[test]
+    fn edited_overlays_defer_parse_and_preserve_independent_root_analysis() {
+        // Guards blocking input commits with a parse and discarding another
+        // root's valid model when the edited file is not one of its inputs.
+        let mut workspace = Workspace::new();
+        let a = "untitled:input-a.mod";
+        let b = "untitled:input-b.mod";
+        workspace.update_document(a, "var a; model; a=0; end;");
+        workspace.update_document(b, "var b; model; b=0; end;");
+        workspace.input_revision(a).unwrap();
+        workspace.input_revision(b).unwrap();
+        let before = Arc::clone(workspace.effective.get(b).unwrap());
+        PARSE_EXPANDED_BUILDS.with(|builds| builds.set(0));
+        workspace.update_document(a, "var changed; model; changed=1; end;");
+        assert_eq!(PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get), 0);
+        assert!(Arc::ptr_eq(&before, workspace.effective.get(b).unwrap()));
+        assert_eq!(workspace.get_model(a).unwrap().equations.len(), 1);
+        let model = workspace.get_model(a).unwrap();
+        assert_eq!(model.name(model.endogenous[0].name), "changed");
+    }
+
+    #[test]
+    fn removed_disk_input_preserves_independent_checked_root() {
+        // Guards a saved-file event/deletion discarding an unrelated model's
+        // parse, while the deleted source itself must no longer be available.
+        let folder =
+            std::env::temp_dir().join(format!("dygnosis-input-removal-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let a = folder.join("a.mod");
+        let b = folder.join("b.mod");
+        std::fs::write(&a, "var a; model; a=0; end;").unwrap();
+        std::fs::write(&b, "var b; model; b=0; end;").unwrap();
+        let mut workspace = Workspace::new();
+        workspace.input_revision(a.to_str().unwrap()).unwrap();
+        workspace.input_revision(b.to_str().unwrap()).unwrap();
+        let before = Arc::clone(workspace.effective.get(&path_key(&b)).unwrap());
+        std::fs::remove_file(&a).unwrap();
+        PARSE_EXPANDED_BUILDS.with(|builds| builds.set(0));
+        workspace.remove_document(a.to_str().unwrap());
+        assert!(workspace.effective.contains_key(&path_key(&b)));
+        assert!(workspace.input_revision(a.to_str().unwrap()).is_none());
+        workspace.input_revision(b.to_str().unwrap()).unwrap();
+        assert_eq!(PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get), 0);
+        assert!(Arc::ptr_eq(
+            &before,
+            workspace.effective.get(&path_key(&b)).unwrap()
+        ));
+        // Re-acquisition after a disk event must preserve the same proof too.
+        std::fs::write(&a, "var changed; model; changed=1; end;").unwrap();
+        workspace.input_revision(a.to_str().unwrap()).unwrap();
+        assert!(Arc::ptr_eq(
+            &before,
+            workspace.effective.get(&path_key(&b)).unwrap()
+        ));
+        let absolute = folder.canonicalize().unwrap();
+        assert!(absolute.starts_with(std::env::temp_dir().canonicalize().unwrap()));
+        std::fs::remove_dir_all(absolute).unwrap();
     }
 }

@@ -405,11 +405,10 @@ async fn analysis_choices_refresh_both_views_and_stale_source_browsing_over_stdi
             json!({"textDocument":{"uri":uri}}),
         )
         .await;
-    assert!(
-        outline_named(&symbols, "p").unwrap()["detail"]
-            .as_str()
-            .unwrap()
-            .contains("inactive"),
+    assert!(outline_named(&symbols, "p").is_some(), "{symbols}");
+    assert_eq!(
+        outline_named(&symbols, "@#else").unwrap()["detail"],
+        "inactive",
         "{symbols}"
     );
     let proof = wire.analysis_context(&uri).await;
@@ -820,6 +819,43 @@ async fn a_changed_closed_owner_rechecks_the_open_helpers_standalone_fallback_im
         .await;
     assert_eq!(info["owner_roots"], json!([]));
 }
+
+// Guards selected helper context and standalone diagnostics after a background
+// saved-root check removes an include, without a watched-file refresh.
+#[tokio::test]
+async fn workspace_recheck_removes_closed_owner_and_restores_open_helper_fallback() {
+    let files = Files::new();
+    let parent = "@#define supplied = 1\n@#include \"helper.inc\"\n";
+    let helper = "@#define accepted = supplied + 1\n";
+    files.write("parent.mod", parent);
+    files.write("helper.inc", helper);
+    let (p, h) = (files.uri("parent.mod"), files.uri("helper.inc"));
+    let mut wire = Wire::new();
+    wire.start_context(&files, true).await;
+    wire.complete().await;
+    wire.open(&h, helper, 1);
+    let selected = wire.choose_context(&h, 1, &p).await;
+    assert!(selected.get("error").is_none(), "{selected}");
+    assert_eq!(selected["root_uris"], json!([p]));
+    assert!(!has_code(&wire.pull(&h).await, "E063"));
+    wire.complete().await;
+
+    // The owner stays closed. Recheck must observe disk and repair the editor
+    // context through background adoption, without a didChangeWatchedFiles.
+    files.write("parent.mod", "@#define supplied = 1\n");
+    wire.command("dynare/recheckWorkspace").await;
+    wire.complete().await;
+    let notes = wire.pull(&h).await;
+    assert!(
+        has_code(&notes, "E063"),
+        "background owner removal did not restore standalone helper checks: {notes:?}"
+    );
+    let info = wire
+        .command_args("dynare/modelInfo", json!({"root_uri":h}))
+        .await;
+    assert_eq!(info["owner_roots"], json!([]));
+}
+
 fn has_code(items: &[Value], code: &str) -> bool {
     items.iter().any(|diag| diag["code"] == code)
 }
@@ -1593,6 +1629,79 @@ async fn directory_and_loader_reads_are_revision_inputs() {
 }
 
 #[tokio::test]
+async fn complete_presentation_snapshots_keep_checked_workspace_roots() {
+    // Guards native Outline filters and other view settings starting another
+    // workspace pass when the client sends a complete configuration snapshot.
+    let files = Files::new();
+    files.write("root.mod", MODEL);
+    let mut wire = Wire::new();
+    wire.start(vec![files.folder("")], json!({}), vec![], false)
+        .await;
+    let before = wire.complete().await;
+    for settings in [
+        json!({"outline":{"activity":"active"}}),
+        json!({"outline":{"activity":"inactive"},"nameDetails":{"longName":false},"parameterValueHints":false,"formatIndent":2}),
+    ] {
+        wire.notify("workspace/didChangeConfiguration", json!({"settings":{"dynare":{"configuration":{"schemaVersion":1,"loose":settings,"folders":[]}}}}));
+        let after = wire.complete().await;
+        assert_eq!(after["pass_revision"], before["pass_revision"], "{after}");
+        assert_eq!(after["roots"], before["roots"], "{after}");
+    }
+}
+
+#[tokio::test]
+async fn adding_workspace_folder_keeps_existing_checked_roots() {
+    // Guards folder discovery forcing another check of unchanged old folders.
+    let files = Files::new();
+    files.write("a/root.mod", MODEL);
+    files.write("b/root.mod", MODEL);
+    let mut wire = Wire::new();
+    wire.start(vec![files.folder("a")], json!({}), vec![], false)
+        .await;
+    let before = wire.complete().await;
+    wire.notify(
+        "workspace/didChangeWorkspaceFolders",
+        json!({"event":{"added":[files.folder("b")],"removed":[]}}),
+    );
+    let after = wire.complete().await;
+    assert_eq!(after["metrics"]["completed_jobs"], 1, "{after}");
+    assert_eq!(
+        root(&after, &files.uri("a/root.mod")),
+        root(&before, &files.uri("a/root.mod"))
+    );
+    assert_eq!(root(&after, &files.uri("b/root.mod"))["state"], "checked");
+}
+
+#[tokio::test]
+async fn scoped_analysis_settings_recheck_only_changed_roots() {
+    // Guards full settings snapshots discarding unrelated folder provenance.
+    let files = Files::new();
+    files.write("a/root.mod", MODEL);
+    files.write("b/root.mod", MODEL);
+    let mut wire = Wire::new();
+    wire.start(
+        vec![files.folder("a"), files.folder("b")],
+        json!({}),
+        vec![],
+        false,
+    )
+    .await;
+    let before = wire.complete().await;
+    wire.notify("workspace/didChangeConfiguration", json!({"settings":{"dynare":{"configuration":{"schemaVersion":1,"loose":{},"folders":[{"uri":files.uri("a"),"settings":{"macroWorkLimit":1000000}}]}}}}));
+    let after = wire.complete().await;
+    assert_eq!(after["metrics"]["completed_jobs"], 1, "{after}");
+    assert_eq!(after["metrics"]["reused_jobs"], 0, "{after}");
+    assert_ne!(
+        root(&after, &files.uri("a/root.mod"))["revision"],
+        root(&before, &files.uri("a/root.mod"))["revision"]
+    );
+    assert_eq!(
+        root(&after, &files.uri("b/root.mod")),
+        root(&before, &files.uri("b/root.mod"))
+    );
+}
+
+#[tokio::test]
 async fn unchanged_inputs_reuse_reports_but_explicit_recheck_computes_again() {
     let files = Files::new();
     files.write("root.mod", MODEL);
@@ -1991,6 +2100,15 @@ async fn explicit_owner_priority_survives_hidden_inputs_until_reroot_or_null_and
     restarted.request("initialize", json!({"workspaceFolders":[files.folder("")],"capabilities":{"experimental":{"dygnosis":{"workspaceStatusChanged":true}}}})).await;
     restarted.open(&files.uri("other.mod"), MODEL, 1);
     restarted.notify("initialized", json!({}));
+    let restarted_status = restarted.complete().await;
+    assert_eq!(
+        root(&restarted_status, &files.uri("other.mod"))["state"],
+        "checked"
+    );
+    // The editor worker can finish the active model before saved-root discovery.
+    // An explicit pass tests restart priority after that compatible work settles.
+    restarted.seen.clear();
+    restarted.command("dynare/recheckWorkspace").await;
     restarted.complete().await;
     assert_eq!(
         first_checking(&restarted.seen),

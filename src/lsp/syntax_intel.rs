@@ -13,15 +13,43 @@ pub(crate) struct Context {
     pub parent: Option<String>,
 }
 
+/// A point lookup only; retained source facts must prove its lexical context.
+pub(crate) fn candidate_word_at(text: &str, byte: u32) -> Option<(&str, Span)> {
+    let bytes = text.as_bytes();
+    let at = byte as usize;
+    let ident = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+    if !bytes.get(at).is_some_and(|byte| ident(*byte)) {
+        return None;
+    }
+    let mut start = at;
+    while start > 0 && ident(bytes[start - 1]) {
+        start -= 1;
+    }
+    let mut end = at + 1;
+    while end < bytes.len() && ident(bytes[end]) {
+        end += 1;
+    }
+    (!bytes[start].is_ascii_digit()).then(|| (&text[start..end], Span::new(start, end)))
+}
+
 pub(crate) fn word_at(text: &str, byte: u32) -> Option<(String, Span)> {
-    if let Some(token) = crate::engine::language::macro_expand::scan_macro_tokens(text)
-        .into_iter()
-        .find(|token| {
-            matches!(token.kind, TokenKind::MacroDir | TokenKind::MacroInterp)
-                && token.span.start <= byte
-                && byte < token.span.end
-        })
-    {
+    word_at_with_macros(
+        text,
+        byte,
+        &crate::engine::language::macro_expand::scan_macro_tokens(text),
+    )
+}
+
+pub(crate) fn word_at_with_macros(
+    text: &str,
+    byte: u32,
+    tokens: &[Token],
+) -> Option<(String, Span)> {
+    if let Some(token) = tokens.iter().find(|token| {
+        matches!(token.kind, TokenKind::MacroDir | TokenKind::MacroInterp)
+            && token.span.start <= byte
+            && byte < token.span.end
+    }) {
         let start = token.span.start + 2;
         let end = token.span.end;
         let (word, span) = crate::engine::editing::refs::ident_at(
@@ -68,6 +96,85 @@ pub(crate) fn source_context(
         language: context.language,
         parent: context.parent,
     })
+}
+
+/// A negative proof from the retained written lexer, before any model lookup.
+/// Unknown strings and incomplete structure stay eligible: quoted external
+/// names and semantic equation tags must still reach their binding owner.
+pub(crate) fn hover_may_need_model(inventory: &SourceInventory, text: &str, byte: u32) -> bool {
+    use crate::engine::analysis::source_inventory::SourceItemKind;
+    if !inventory.structure_complete() || macro_at(&inventory.macro_tokens, byte) {
+        return true;
+    }
+    let at = inventory
+        .lexical_tokens
+        .partition_point(|token| token.span.end <= byte);
+    let Some(token) = inventory
+        .lexical_tokens
+        .get(at)
+        .filter(|token| token.span.start <= byte && byte < token.span.end)
+    else {
+        // Comments and whitespace are lexer trivia. No name occurrence owns them.
+        return false;
+    };
+    if inventory.is_proven_native(token.span) {
+        return false;
+    }
+    if token.kind == TokenKind::Ident {
+        return true;
+    }
+    // Source items are ordered by start, with outer items first at equal
+    // starts. A local point lookup is sufficient for the exclusions below;
+    // uncertain nesting falls through to the existing model path.
+    let item = inventory
+        .items
+        .partition_point(|item| item.span.start <= byte)
+        .checked_sub(1)
+        .map(|at| &inventory.items[at]);
+    if token.kind == TokenKind::String {
+        let macro_at = inventory
+            .macro_tokens
+            .partition_point(|part| part.span.end <= token.span.start);
+        if inventory.macro_tokens.get(macro_at).is_some_and(|part| {
+            matches!(part.kind, TokenKind::MacroDir | TokenKind::MacroInterp)
+                && part.span.start < token.span.end
+        }) {
+            return true;
+        }
+        let key = at.checked_sub(2).and_then(|key| {
+            (inventory.lexical_tokens[key].kind == TokenKind::Ident
+                && inventory.lexical_tokens[key + 1].kind == TokenKind::Eq)
+                .then(|| inventory.lexical_tokens[key].text(text))
+        });
+        if let Some(key) = key {
+            if key.eq_ignore_ascii_case("long_name")
+                && item.is_some_and(|item| {
+                    item.kind == SourceItemKind::Declaration
+                        && item
+                            .declaration_metadata
+                            .as_ref()
+                            .is_some_and(|metadata| metadata.long_name.is_some())
+                })
+            {
+                return false;
+            }
+            if item.is_some_and(|item| {
+                item.kind == SourceItemKind::Equation
+                    && !item.template
+                    && item.span.start <= token.span.start
+                    && token.span.end <= item.span.end
+                    && item.tags.keys().any(|tag| tag.eq_ignore_ascii_case(key))
+            }) && !key.eq_ignore_ascii_case("endogenous")
+                && !key.eq_ignore_ascii_case("mcp")
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+    // Source inspection can describe the selection of a dormant item even
+    // when its selection is punctuation (for example an equation's opening [).
+    item.is_some_and(|item| item.selection.start <= byte && byte < item.selection.end)
 }
 
 fn macro_at(tokens: &[Token], byte: u32) -> bool {

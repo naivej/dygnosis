@@ -2,7 +2,7 @@ import { refuse, runCommand } from "../client/refusal";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { record } from "../client/protocol";
-import { workspaceDiagnosticsSetting } from "../client/settings";
+import { analysisSettingsChanged, workspaceDiagnosticsSetting } from "../client/settings";
 import type { ModelSnapshot } from "../client/client";
 
 const states = ["pending", "checking", "checked", "incomplete", "failed", "excluded"] as const;
@@ -540,7 +540,7 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
     vscode.workspace.onDidChangeWorkspaceFolders(reconfigure),
     vscode.workspace.onDidChangeTextDocument(event => { if (event.contentChanges.length) documentChanged(event.document); }),
     vscode.workspace.onDidCloseTextDocument(documentChanged),
-    vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration("dynare")) reconfigure(); }),
+    vscode.workspace.onDidChangeConfiguration(event => { if (analysisSettingsChanged(event)) reconfigure(); }),
     vscode.commands.registerCommand("dygnosis.workspaceStatus", () => vscode.commands.executeCommand("dygnosis.workspace.focus")),
     vscode.commands.registerCommand("dygnosis.showNotFullyCheckedModels", async () => { await filterModels(true); await vscode.commands.executeCommand("dygnosis.workspace.focus"); }),
     vscode.commands.registerCommand("dygnosis.showAllWorkspaceFiles", async () => { await filterModels(false); await vscode.commands.executeCommand("dygnosis.workspace.focus"); }),

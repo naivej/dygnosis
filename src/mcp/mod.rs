@@ -953,7 +953,7 @@ fn comparison_incomplete_reasons(
             .into_iter()
             .map(|cause| {
                 let mut reason = cause.outcome_json();
-                let mut location = |site: &crate::engine::workspace::IncludeSite| {
+                let location = |site: &crate::engine::workspace::IncludeSite| {
                     let text = workspace.source_for_normalized_key(&site.file)?;
                     let mut result = json!({"range":range_json(site.span, text)});
                     if let Some(files) = files {
@@ -961,7 +961,7 @@ fn comparison_incomplete_reasons(
                     }
                     Some(result)
                 };
-                if let Some(Value::Object(source)) = cause.origin.as_ref().and_then(&mut location) {
+                if let Some(Value::Object(source)) = cause.origin.as_ref().and_then(location) {
                     reason.as_object_mut().unwrap().extend(source);
                 }
                 let chain: Vec<_> = cause.include_chain.iter().filter_map(location).collect();

@@ -111,6 +111,101 @@ function service(options = {}) {
   });
 }
 
+test("Outline presentation changes retain model snapshots and still refresh symbols", async () => {
+  // Guards a filter click discarding checked model information and starting analysis requests.
+  reset(); const client = service(); await client.ensureStarted();
+  const root = Uri.parse("file:///workspace/root.mod");
+  host.documents.push({ uri: root, languageId: "dynare", version: 1 });
+  try {
+    const before = await client.modelInfo(root), symbols = host.symbols;
+    let invalidations = 0;
+    client.onDidInvalidate(() => { ++invalidations; });
+    host.settings["outline.activity"] = "inactive";
+    host.config.fire({ affectsConfiguration: key => ["dynare", "dynare.outline", "dynare.outline.activity"].includes(key) });
+    await flush();
+    assert.equal(await client.modelInfo(root), before);
+    assert.equal(invalidations, 0);
+    assert.ok(host.symbols > symbols);
+    assert.equal(host.notifications.at(-1).params.settings.dynare.configuration.loose.outline.activity, "inactive");
+  } finally { await client.shutdown(); }
+});
+
+test("editing one root retains an independent cache and cancels unproven pending inputs", async () => {
+  // Guards an unrelated edit cancelling a valid response or checking every open model again.
+  reset(); const client = service(); await client.ensureStarted();
+  const roots = ["a", "b", "c"].map(name => Uri.parse(`file:///workspace/${name}.mod`));
+  host.documents.push(...roots.map(uri => ({ uri, languageId: "dynare", version: 1 })));
+  const pending = deferred(), calls = [];
+  client.client.sendRequest = (_method, params) => {
+    const root = params.arguments[0].root_uri; calls.push(root);
+    if (root === roots[2].toString()) return pending.promise;
+    return Promise.resolve({ ...model(root), dependency_candidates: [root] });
+  };
+  try {
+    await client.modelInfo(roots[0]); const retained = await client.modelInfo(roots[1]);
+    const inFlight = client.modelInfo(roots[2]); await flush();
+    host.documents[0].version = 2;
+    host.edit.fire({ document: host.documents[0], contentChanges: [{ text: "var y;" }] });
+    pending.resolve({ ...model(roots[2].toString()), dependency_candidates: [roots[2].toString()] });
+    assert.equal(await client.modelInfo(roots[1]), retained);
+    // An input with no dependency proof is conservatively cancelled, even on another root.
+    assert.equal(await inFlight, undefined);
+    assert.equal(calls.filter(root => root === roots[1].toString()).length, 1);
+  } finally { await client.shutdown(); }
+});
+
+test("an unrelated edit preserves a fresh proof with known dependency coverage", async () => {
+  // Guards root-scoped invalidation still cancelling every serialized fresh caller.
+  reset(); const client = service(); await client.ensureStarted();
+  const a = Uri.parse("file:///workspace/a.mod"), b = Uri.parse("file:///workspace/b.mod"), pending = deferred();
+  host.documents.push({ uri: a, languageId: "dynare", version: 1 }, { uri: b, languageId: "dynare", version: 1 });
+  let response = () => Promise.resolve({ ...model(b.toString()), dependency_candidates: [b.toString()] });
+  client.client.sendRequest = () => response();
+  try {
+    await client.modelInfo(b); response = () => pending.promise;
+    const proof = client.modelInfo(b, b, true); await flush();
+    host.documents[0].version = 2;
+    host.edit.fire({ document: host.documents[0], contentChanges: [{ text: "var y;" }] });
+    pending.resolve({ ...model(b.toString()), dependency_candidates: [b.toString()] });
+    assert.equal((await proof).root_uri, b.toString());
+  } finally { await client.shutdown(); }
+});
+
+test("closed model snapshots retain recent results within the idle cache bound", async () => {
+  // Guards persistent model information retaining every previously visited closed model.
+  reset(); const client = service(); await client.ensureStarted();
+  const roots = Array.from({ length: 12 }, (_, index) => Uri.parse(`file:///workspace/closed${index}.mod`)), calls = [];
+  client.client.sendRequest = (_method, params) => {
+    const root = params.arguments[0].root_uri; calls.push(root);
+    return Promise.resolve({ ...model(root), document_version: null, dependency_candidates: [root] });
+  };
+  try {
+    for (const root of roots) await client.modelInfo(root);
+    await client.modelInfo(roots.at(-1));
+    assert.equal(calls.length, roots.length, "a recent closed model reuses its result");
+    await client.modelInfo(roots[0]);
+    assert.equal(calls.length, roots.length + 1, "the oldest idle result was evicted");
+  } finally { await client.shutdown(); }
+});
+
+test("shared include edits invalidate all proven owners but retain independent roots", async () => {
+  // Guards stale shared-include facts when cache invalidation becomes root-scoped.
+  reset(); const client = service(); await client.ensureStarted();
+  const roots = ["a", "b", "c"].map(name => Uri.parse(`file:///workspace/${name}.mod`));
+  const include = Uri.parse("file:///workspace/shared.inc"), calls = [];
+  host.documents.push(...roots.map(uri => ({ uri, languageId: "dynare", version: 1 })));
+  client.client.sendRequest = (_method, params) => {
+    const root = params.arguments[0].root_uri; calls.push(root);
+    return Promise.resolve({ ...model(root), dependency_candidates: [root, ...(root === roots[2].toString() ? [] : [include.toString()])] });
+  };
+  try {
+    await Promise.all(roots.map(root => client.modelInfo(root)));
+    host.edit.fire({ document: { uri: include, languageId: "dynare", version: 2 }, contentChanges: [{ text: "var y;" }] });
+    await Promise.all(roots.map(root => client.modelInfo(root)));
+    assert.deepEqual(roots.map(root => calls.filter(value => value === root.toString()).length), [2, 2, 1]);
+  } finally { await client.shutdown(); }
+});
+
 test("macro requests and native providers share activity that restart, server stop and shutdown clear", async context => {
   // Guards activity missing direct executeCommand calls or surviving a retired server instance.
   context.mock.timers.enable({ apis: ["setTimeout"] });

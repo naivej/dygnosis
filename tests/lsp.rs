@@ -1274,7 +1274,7 @@ async fn hover_stoch_simul_option() {
 }
 
 #[tokio::test]
-async fn document_symbols_keep_written_declarations_with_timing_details() {
+async fn document_symbols_keep_written_declarations_with_metadata() {
     let text = read_mod("trend_rbc_gov_inv");
     let uri = archive_url("trend_rbc_gov_inv");
     let (service, _socket) = new_service();
@@ -1285,7 +1285,7 @@ async fn document_symbols_keep_written_declarations_with_timing_details() {
     let resp = service
         .inner()
         .document_symbol(DocumentSymbolParams {
-            text_document: TextDocumentIdentifier { uri },
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         })
@@ -1307,17 +1307,40 @@ async fn document_symbols_keep_written_declarations_with_timing_details() {
         .children
         .as_ref()
         .unwrap();
+    // Written Outline rows retain declared metadata. Timing remains a model
+    // fact shown by hover and does not become a written declaration detail.
+    for (name, metadata) in [
+        ("k", "private capital, detrended"),
+        ("c", "consumption, detrended"),
+        ("y", "output, detrended"),
+    ] {
+        let row = declarations.iter().find(|row| row.name == name).unwrap();
+        assert!(row.detail.as_deref().unwrap().contains(metadata), "{row:?}");
+    }
     for (name, class) in [
         ("k", "predetermined"),
-        ("ig", "predetermined"),
-        ("kg", "predetermined"),
-        ("z", "predetermined"),
         ("c", "forward-looking"),
-        ("rk", "forward-looking"),
         ("y", "static"),
     ] {
         let row = declarations.iter().find(|row| row.name == name).unwrap();
-        assert!(row.detail.as_deref().unwrap().contains(class), "{row:?}");
+        let hover = service
+            .inner()
+            .hover(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: archive_url("trend_rbc_gov_inv"),
+                    },
+                    position: row.selection_range.start,
+                },
+                work_done_progress_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            hover_markdown(hover).contains(class),
+            "{name} hover lost {class}"
+        );
     }
     assert!(nested.iter().any(|row| row.name == "steady_state_model"));
     assert!(nested.iter().any(|row| row.name == "stoch_simul"));
@@ -1359,16 +1382,23 @@ async fn document_symbols_show_blocks_commands_and_uncounted_rows() {
         .children
         .as_ref()
         .unwrap();
-    for (name, class) in [
-        ("y", "predetermined"),
-        ("k", "mixed"),
-        ("w", "static"),
-        ("a", "static"),
-        ("u", "static"),
-    ] {
-        let row = declarations.iter().find(|row| row.name == name).unwrap();
-        assert_eq!(row.detail.as_deref(), Some(class), "{row:?}");
-    }
+    assert!(declarations.iter().all(|row| row.detail.is_none()));
+    let mixed = declarations.iter().find(|row| row.name == "k").unwrap();
+    let hover = service
+        .inner()
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_url(&path),
+                },
+                position: mixed.selection_range.start,
+            },
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(hover_markdown(hover).contains("mixed"));
     // The parent supplies the type; plain names must not repeat it as a detail.
     for category in ["varexo", "parameters"] {
         let declarations = nested

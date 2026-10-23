@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.33",
+  "version": "0.11.34",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -622,8 +622,16 @@
           },
           "dynare.outline.activity": {
             "type": "string",
-            "enum": ["both", "active", "inactive"],
-            "enumDescriptions": ["Show active and inactive entries.", "Show active entries.", "Show inactive entries."],
+            "enum": [
+              "both",
+              "active",
+              "inactive"
+            ],
+            "enumDescriptions": [
+              "Show active and inactive entries.",
+              "Show active entries.",
+              "Show inactive entries."
+            ],
             "default": "both",
             "scope": "resource",
             "description": "Filter Outline and breadcrumbs by macro activity in the selected configuration. Mixed and unknown entries remain visible in each mode. Containers remain when needed to show matching children."
