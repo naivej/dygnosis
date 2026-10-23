@@ -14,10 +14,6 @@ checks** from the Command Palette. Use **Show not fully checked models**
 Exclude folders with **Ignore this folder** on a folder row, or configure
 [Dynare: Workspace Exclude Paths](settings:dynare.workspaceExcludePaths).
 
-Patterns are relative to each workspace folder: `*` and `?` match within a folder
-or file name, `**` matches across subdirectories, and a trailing `/` matches
-everything inside that folder.
-
 Exclusions apply only to background model roots. Open files and dependencies of
 other models remain checked. Saved `.inc` files are not separate workspace
 checks and do not contribute to the model counts.

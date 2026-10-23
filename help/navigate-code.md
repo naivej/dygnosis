@@ -50,16 +50,12 @@ expression continues through includes. Equations written entirely inside an
 include appear in that include's Outline.
 
 Each `@#if`, `@#elseif` and `@#else` arm has a separate Outline entry and folding
-range. Collapsing one arm keeps the next arm visible.
-Activity labels appear on these arm entries and `@#for` entries. They describe
-the selected arm or loop body; entries inside do not repeat the label.
+range. Activity labels on macro arms and `@#for` loops reflect the [selected
+analysis configuration](effective-model.md#choose-the-analysis-configuration).
 
-Click **Filter Outline by macro activity...** (the filter icon in the Outline
-toolbar) to choose **Active**, **Inactive** or **Both**. You can also use
-[Dynare › Outline: Activity](settings:dynare.outline.activity). Containers stay
-visible when needed for matching children. Repeated code can be active in
-some loop iterations or include visits and inactive in others; these mixed
-entries match both filters. Entries with unknown activity stay visible.
+Use the Outline toolbar filter or [Dynare › Outline:
+Activity](settings:dynare.outline.activity) to show **Active**, **Inactive** or
+**Both** entries.
 
 ## Inactive source
 
@@ -67,11 +63,8 @@ The Outline can show recognizable entries written in inactive macro branches
 and loop bodies, without active equation numbers.
 
 For a name that appears only in inactive source, place the cursor on the name
-and choose **Go to Source Candidate**. The picker labels each result
-**source candidate · unverified**. Choosing one opens its written location.
-You can also follow literal include links to browse unused files. Browsing
-these locations does not add them to the active model.
-To analyze a different branch, see [Choose the analysis configuration](effective-model.md#choose-the-analysis-configuration).
+and run **Dynare: Go to Source Candidate**. To analyze a different branch,
+see [Choose the analysis configuration](effective-model.md#choose-the-analysis-configuration).
 
 ## Model-local variables
 

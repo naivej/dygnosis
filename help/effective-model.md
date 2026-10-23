@@ -26,10 +26,8 @@ To change one written macro definition, place the cursor on it in the source
 editor and run **Dynare: Override Macro Definition for Analysis**. Enter a
 replacement expression or choose **Skip this definition**. To inspect another
 arm of a conditional, place the cursor in its chain and run **Dynare: Preview
-Macro Branch**; choose a listed arm or **No branch**. These choices affect the
-analysis and preview. They do not change the `.mod` or include file. When idle,
-the model status hover shows the selected macro choices. The preview title
-identifies the selected configuration and labels previews.
+Macro Branch**; choose a listed arm or **No branch**. These choices affect the analysis and preview. They do not change the `.mod` or
+include file.
 
 Run **Dynare: Reset Analysis Configuration** to return to **Source**. To save
 the current choices for later, run **Dynare: Save Analysis Configuration**
@@ -49,7 +47,7 @@ written code outside that selection, see [Inactive source](navigate-code.md#inac
 Both actions also appear as buttons in the preview's top-right editor title bar
 and in the editor right-click menu.
 
-- [Dynare › Effective Model: Macro Tint](settings:dynare.effectiveModel.macroTint) shades macro-expanded ranges in the preview (hovering over shaded text confirms it is macro-expanded).
+- [Dynare › Effective Model: Macro Tint](settings:dynare.effectiveModel.macroTint) shades macro-expanded ranges in the preview.
 - [Dynare: Editor Actions](settings:dynare.editorActions) controls whether model actions appear in the editor `toolbar` and `contextMenu`.
 - [Dynare: Macro Work Limit](settings:dynare.macroWorkLimit) increases the macro evaluation budget for large macro programs.
 
