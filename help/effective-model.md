@@ -27,9 +27,9 @@ editor and run **Dynare: Override Macro Definition for Analysis**. Enter a
 replacement expression or choose **Skip this definition**. To inspect another
 arm of a conditional, place the cursor in its chain and run **Dynare: Preview
 Macro Branch**; choose a listed arm or **No branch**. These choices affect the
-analysis and preview. They do not change the `.mod` or include file. The model
-status hover shows the selected macro choices; the preview title identifies
-the selected configuration and labels previews.
+analysis and preview. They do not change the `.mod` or include file. When idle,
+the model status hover shows the selected macro choices. The preview title
+identifies the selected configuration and labels previews.
 
 Run **Dynare: Reset Analysis Configuration** to return to **Source**. To save
 the current choices for later, run **Dynare: Save Analysis Configuration**

@@ -123,15 +123,9 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
   const render = (): void => {
     if (!displayed?.current()) return;
     const activity = service.modelActivity(displayed.document.uri, displayed.root);
-    const tooltip = activity && new vscode.MarkdownString().appendText(activity.detail).appendMarkdown("\n\n");
-    if (tooltip) {
-      if (typeof displayed.value.tooltip === "string") tooltip.appendMarkdown("[Current config](command:dygnosis.selectAnalysisConfiguration)\n\n").appendText(displayed.value.tooltip);
-      else tooltip.appendMarkdown(displayed.value.tooltip.value);
-      tooltip.isTrusted = { enabledCommands: ["dygnosis.selectAnalysisConfiguration"] };
-    }
     content(activity ? {
       text: `$(sync~spin) Dynare: ${activity.label}…`,
-      tooltip: tooltip!,
+      tooltip: activity.detail,
       accessibilityLabel: `Dynare: ${activity.label}. ${activity.pending} pending model request${activity.pending === 1 ? "" : "s"}. Choose the analysis configuration.`,
     } : displayed.value);
   };

@@ -353,6 +353,7 @@ test("edit invalidation removes numbers immediately and superseded versions cann
   ++env.doc.version;
   env.host.edited.fire({ document: env.doc });
   assert.equal(env.host.items[0].text, "$(sync~spin) Dynare: updating");
+  assert.equal(env.host.items[0].tooltip, "Refreshing model counts…");
   await flush();
   env.service.modelInfo = () => second.promise;
   ++env.doc.version;
@@ -460,7 +461,7 @@ test("a failed request remains quiet apart from Output and shows unavailable sta
 });
 
 test("pending model actions reuse the count item and restore configuration counts without another request", async context => {
-  // Guards a separate activity item, lost action feedback, and a redundant modelInfo refresh on completion.
+  // Guards configuration details leaking into the busy hover, lost action feedback, and a redundant modelInfo refresh on completion.
   const env = setup(), tracked = trackActivity(context, env);
   env.service.modelInfo = async () => {
     env.service.requests.push("modelInfo");
@@ -474,9 +475,7 @@ test("pending model actions reuse the count item and restore configuration count
   tracked.clock.tick(249); assert.equal(item.text, counts);
   tracked.clock.tick(1); assert.match(item.text, /sync~spin.*Expanding macros/);
   assert.match(tooltipText(item.tooltip), /Loading hover/); assert.equal(env.host.items.length, 1);
-  assert.match(tooltipText(item.tooltip), /N = 2/);
-  assert.match(item.tooltip.value, /\[Current config\]\(command:dygnosis.selectAnalysisConfiguration\)/);
-  assert.deepEqual(item.tooltip.isTrusted, { enabledCommands: ["dygnosis.selectAnalysisConfiguration"] });
+  assert.doesNotMatch(tooltipText(item.tooltip), /Current config|N = 2/);
   assert.equal(item.command, "dygnosis.selectAnalysisConfiguration");
   expansion.resolve(); await first; assert.match(item.text, /Loading hover/);
   hover.resolve(); await second;
@@ -493,9 +492,11 @@ test("activity before owner resolution keeps the latest incomplete result undern
   const pending = tracked.request("workspace/executeCommand", { command: "dynare/showEffectiveModel", arguments: [{ root_uri: env.doc.uri.toString() }] }, expansion);
   const registration = registerStatus(env.service);
   tracked.clock.tick(250); assert.match(env.host.items[0].text, /Expanding macros/);
+  assert.doesNotMatch(tooltipText(env.host.items[0].tooltip), /Current config/);
   owner.resolve(env.doc.uri); await flush();
   model.resolve(facts(env.doc, { complete: false, incomplete_reasons: [{ message: "The selected branch cannot be expanded." }] }));
   await flush(); assert.match(env.host.items[0].text, /Expanding macros/);
+  assert.doesNotMatch(tooltipText(env.host.items[0].tooltip), /Current config/);
   expansion.resolve(); await pending;
   assert.equal(env.host.items[0].text, "$(info) Source: incomplete");
   assert.match(tooltipText(env.host.items[0].tooltip), /selected branch cannot be expanded/);

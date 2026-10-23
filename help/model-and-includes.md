@@ -39,7 +39,8 @@ macro choices and separate counts. Click **Current config** in the hover to
 select a configuration or reset to **Source**.
 
 While a model action is pending, the same item shows its activity, such as
-**Expanding macros…**. It returns to model counts when the action finishes.
+**Expanding macros…**. Its hover lists the pending requests. It returns to model
+counts and the configuration hover when the action finishes.
 
 Toggle the status bar item with [Dynare › Status Bar:
 Enabled](settings:dynare.statusBar.enabled) and choose which counts appear (and
@@ -76,7 +77,7 @@ numbered.
 | Forward-looking | Leads only, no lags. |
 | Mixed | Both leads and lags. |
 
-Variable hover and **Outline** show each endogenous variable's timing class.
+Variable hover shows each endogenous variable's timing class.
 When a variable is listed in `predetermined_variables k;`, its hover adds:
 
 Timing: **predetermined**, end-of-period convention
