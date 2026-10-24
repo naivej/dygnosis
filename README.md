@@ -1,6 +1,6 @@
 ![Dygnosis](media/logo_s.png)
 
-Dygnosis adds independent Dynare language support to VS Code with zero dependency. 
+Dygnosis adds Dynare language support to VS Code with zero dependency. 
 
 Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis) or download packages and standalone binaries from [GitHub Releases](https://github.com/naivej/dygnosis/releases), then run **Dygnosis: Open Help** in VS Code to explore.
 
@@ -13,7 +13,7 @@ Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/item
 - **Write and refactor faster**: Get context-aware completion and option signature hints across Dynare commands and blocks (including heterogeneous-agent `heterogeneity_dimension`, semi-structural VAR/PAC, OccBin, Ramsey/discretionary policy, and method of moments), format documents, auto-generate commented `shocks` templates, and bulk-fill missing `[name='...']` tags or `long_name` labels.
 - **Compare models structurally**: Diff your working model against Git commits, branches, another `.mod` file, or another analysis configuration in **Dygnosis Changes**—grouped by equations, parameters, priors, and shocks rather than raw line diffs.
 - **Audit workspace models**: Monitor check status across all saved `.mod` and `.dyn` root models in your project from Explorer's **Dynare workspace checks** view.
-- **Work with AI coding agents**: Connect GitHub Copilot, Claude Code, Cursor, or other MCP clients to Dygnosis's 12 [MCP tools](https://github.com/naivej/dygnosis/blob/main/help/agents.md) (model inspection, equation extraction, structural diff, safe rename, formatting, and diagnostics) and install the [`use-dynare` agent skill](https://github.com/naivej/dygnosis/blob/main/.agents/skills/use-dynare/SKILL.md) via `npx skills add naivej/dygnosis`.
+- **Work with AI coding agents**: Connect GitHub Copilot and other MCP clients to Dygnosis's 12 [MCP tools](https://github.com/naivej/dygnosis/blob/main/help/agents.md) (model inspection, equation extraction, structural diff, safe rename, formatting, and diagnostics) and install the [`use-dynare` agent skill](https://github.com/naivej/dygnosis/blob/main/.agents/skills/use-dynare/SKILL.md) via `npx skills add naivej/dygnosis`.
 
 ## Running Models
 
