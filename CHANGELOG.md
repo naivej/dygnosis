@@ -16,7 +16,8 @@
 - Choose a baseline under **Compare filename with**: **.mod file…**, **config…**, recent commits, branches and tags, or enter a revision such as `HEAD~2`. A single changed file with captured text opens directly in Text diff.
 - Comparison headers show filenames and configuration choices. Revision details
   and model counts are in the hover.
-- **Explain a check** uses the diagnostic at the cursor, offers a choice when checks overlap, and asks for a code when none is there. Clicking model counts opens **Outline**; the **Current config** hover link still opens configuration choices.
+- Remove **Explain a check** and **Explain this check**. Use **Dygnosis: Open Help** and search for the diagnostic code.
+- Clicking model counts opens **Outline**; the **Current config** hover link still opens configuration choices.
 - Dygnosis editor right-click actions appear together in one group.
 - Workspace diagnostics update faster after edits in large models.
 

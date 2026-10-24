@@ -64,7 +64,6 @@
   "dynare.blockTint.priors": "appearance",
   "dynare.blockTint.heterogeneousModels": "appearance",
   "dynare.diagnosticActions.ignore": "diagnostics",
-  "dynare.diagnosticActions.explain": "diagnostics",
   "dynare.diff.defaultChangeKinds": "structural-diff",
   "dynare.workspaceDiagnostics": "workspace-checks",
   "dynare.workspaceExcludePaths": "workspace-checks"

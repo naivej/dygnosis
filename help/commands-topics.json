@@ -9,7 +9,6 @@
   "dygnosis.jumpToEquation": "model-and-includes",
   "dygnosis.chooseModelOwner": "model-and-includes",
   "dygnosis.filterOutline": "navigate-code",
-  "dygnosis.explainDiagnostic": "diagnostics",
   "dygnosis.showDiagnostic": "diagnostics",
   "dygnosis.showAllDiagnostics": "diagnostics",
   "dygnosis.goToWrittenSource": "effective-model",

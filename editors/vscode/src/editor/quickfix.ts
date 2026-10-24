@@ -1,17 +1,10 @@
 import { refuse, runCommand } from "../client/refusal";
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
-import type { MarkedToken, Token } from "marked" with { "resolution-mode": "import" };
 import { DocumentDiagnosticRequest, Middleware, WorkspaceDiagnosticRequest, WorkspaceDocumentDiagnosticReport, vsdiag } from "vscode-languageclient/node";
 import { DygnosisClient, isAnalysisDocument } from "../client/client";
 import { record } from "../client/protocol";
 import { booleanSetting } from "../client/settings";
-
-// Static require lets the package bundle include these ESM dependencies.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { Lexer } = require("marked") as { Lexer: { lex(markdown: string): Token[] } };
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const entities = require("entities") as { decodeHTML(html: string): string };
 
 type PushNext = NonNullable<Middleware["handleDiagnostics"]> extends
   (uri: vscode.Uri, diagnostics: vscode.Diagnostic[], next: infer Next) => void ? Next : never;
@@ -22,10 +15,6 @@ interface RawSet {
 interface ActionContext {
   uri: vscode.Uri; version: number; instance: number; diagnostic: vscode.Diagnostic;
 }
-type DiagnosticChoice = vscode.QuickPickItem & {
-  choiceType: "diagnostic"; document: vscode.TextDocument; version: number; diagnostic: vscode.Diagnostic;
-};
-type ManualCodeChoice = vscode.QuickPickItem & { choiceType: "manual" };
 interface PendingEdit {
   edit: vscode.WorkspaceEdit; versions: Map<string, number | null>; instance: number; folder: number;
   documentUri: string; documentVersion: number; diagnostics: vscode.Diagnostic[];
@@ -59,52 +48,6 @@ function overlapping(left: vscode.Range, right: vscode.Range): boolean {
   return left.start.isBeforeOrEqual(right.end) && right.start.isBeforeOrEqual(left.end);
 }
 
-/** Native Markdown previews are untrusted; never pass executable links or HTML through. */
-export function safeExplanation(markdown: string): string {
-  const safeTarget = (target: string): boolean => {
-    let decoded = entities.decodeHTML(target.trim());
-    try { decoded = decodeURIComponent(decoded); } catch { /* Keep malformed escapes literal. */ }
-    decoded = decoded.replace(/\s/g, "");
-    return !decoded.includes(":") || /^(?:https?:\/\/|mailto:)/i.test(decoded);
-  };
-  const plain = (text: string): string => text.replace(/[\\`*_[\]<>!#+-]/g, "\\$&");
-  // Prevent a second Markdown parse from decoding entities or escapes in a href.
-  const destination = (href: string): string => `<${href.replace(/[\\<>\s]/g, character => encodeURIComponent(character))}>`;
-  const serialize = (tokens: Token[]): string => tokens.map(value => {
-    // A default lexer has only built-in tokens; no extension tokens are enabled.
-    const token = value as MarkedToken;
-    switch (token.type) {
-      case "html": case "def": return "";
-      case "space": case "hr": case "code": case "codespan": case "escape": case "br": return token.raw;
-      case "text": return token.tokens ? serialize(token.tokens) : plain(token.text);
-      case "paragraph": return `${serialize(token.tokens)}\n\n`;
-      case "heading": return `${"#".repeat(token.depth)} ${serialize(token.tokens)}\n\n`;
-      case "strong": return `**${serialize(token.tokens)}**`;
-      case "em": return `*${serialize(token.tokens)}*`;
-      case "del": return `~~${serialize(token.tokens)}~~`;
-      case "link": case "image": {
-        if (!safeTarget(token.href)) return plain(token.text);
-        const label = token.type === "image" ? plain(token.text) : serialize(token.tokens);
-        const title = token.title ? ` "${token.title.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : "";
-        return `${token.type === "image" ? "!" : ""}[${label}](${destination(token.href)}${title})`;
-      }
-      case "blockquote": return `${serialize(token.tokens).trimEnd().split("\n").map(line => `> ${line}`).join("\n")}\n\n`;
-      case "list": return `${token.items.map((item, index) => {
-        const prefix = token.ordered ? `${Number(token.start) + index}. ` : "- ";
-        const content = serialize(item.tokens).trimEnd();
-        return `${prefix}${item.task ? `[${item.checked ? "x" : " "}] ` : ""}${content.split("\n").join(`\n${" ".repeat(prefix.length)}`)}`;
-      }).join(token.loose ? "\n\n" : "\n")}\n\n`;
-      case "list_item": return serialize(token.tokens);
-      case "checkbox": return "";
-      case "table": {
-        const row = (cells: { tokens: Token[] }[]): string => `| ${cells.map(cell => serialize(cell.tokens).replace(/\|/g, "\\|")).join(" | ")} |\n`;
-        return `${row(token.header)}| ${token.align.map(align => align === "center" ? ":---:" : align === "right" ? "---:" : align === "left" ? ":---" : "---").join(" | ")} |\n${token.rows.map(row).join("")}\n`;
-      }
-    }
-  }).join("");
-  return serialize(Lexer.lex(markdown));
-}
-
 /** Register before startup so push paint and Ignore share one window filter; pull stays empty here. */
 export function registerDiagnosticActions(service: DygnosisClient): vscode.Disposable {
   const hiddenCodes = new Set<string>();
@@ -127,8 +70,6 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     vscode.workspace.textDocuments.find(document => document.uri.toString() === uri.toString());
   const versionFor = (uri: vscode.Uri): number | null => documentFor(uri)?.version ?? null;
   const visible = (items: vscode.Diagnostic[]): vscode.Diagnostic[] => items.filter(diagnostic => !hiddenCodes.has(diagnosticCode(diagnostic) ?? ""));
-  const containsPosition = (range: vscode.Range, position: vscode.Position): boolean =>
-    range.start.isBeforeOrEqual(position) && position.isBeforeOrEqual(range.end);
   const updateStatus = (): void => {
     if (hiddenCodes.size === 0) { status.hide(); return; }
     status.text = `$(eye-closed) ${hiddenCodes.size} hidden ${hiddenCodes.size === 1 ? "check" : "checks"}`;
@@ -282,7 +223,6 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     }
     if (context.only && !context.only.contains(vscode.CodeActionKind.QuickFix)) return retained;
     const ignore = booleanSetting("diagnosticActions.ignore", document.uri, true, service.log);
-    const explain = booleanSetting("diagnosticActions.explain", document.uri, true, service.log);
     for (const [key, saved] of actionContexts) if (saved.uri.toString() === document.uri.toString()) actionContexts.delete(key);
     const current = raw?.version === version ? raw.items : [];
     const visibleOwner = (diagnostic: vscode.Diagnostic): boolean =>
@@ -308,14 +248,11 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
       }
       const key = String(++actionSequence);
       actionContexts.set(key, { uri: document.uri, version, instance, diagnostic });
-      for (const [enabled, title, command] of [
-        [ignore, "Ignore this check", "dygnosis.ignoreDiagnostic"],
-        [explain, "Explain this check", "dygnosis.explainDiagnostic"],
-      ] as const) {
-        if (!enabled) continue;
+      if (ignore) {
+        const title = "Ignore this check";
         const action = new vscode.CodeAction(`${title} (${code})`, vscode.CodeActionKind.QuickFix);
         action.diagnostics = [diagnostic];
-        action.command = { title, command, arguments: [{ diagnosticAction: key }] };
+        action.command = { title, command: "dygnosis.ignoreDiagnostic", arguments: [{ diagnosticAction: key }] };
         retained.push(action);
       }
     }
@@ -375,84 +312,6 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
       if (disposed) return;
       hiddenCodes.clear(); refresh();
     }),
-    vscode.commands.registerCommand("dygnosis.explainDiagnostic", (argument: unknown) => runCommand(service, async () => {
-      const startFolder = folderGeneration, startInstance = service.currentInstance, startInput = inputGeneration;
-      const saved = savedAction(argument);
-      if (argument !== undefined && !saved) { refuse("The selected diagnostic expired. Request its explanation again."); }
-      if (saved && !booleanSetting("diagnosticActions.explain", saved.uri, true, service.log)) { refuse("Explain check is disabled by dynare.diagnosticActions.explain."); }
-      // Palette invocation can start the first client. Establish that instance before
-      // capturing the preview guard, while rejecting a superseded existing client.
-      await service.ensureStarted();
-      if (disposed) return;
-      if (startFolder !== folderGeneration || (saved && !savedAction(argument)) ||
-        (startInstance > 0 && (startInstance !== service.currentInstance || startInput !== inputGeneration))) refuse("The diagnostic, source inputs, or server changed. Request Explain again.");
-      const generation = folderGeneration, requestInstance = service.currentInstance, input = inputGeneration;
-      const current = (): boolean => !disposed && generation === folderGeneration && requestInstance === service.currentInstance &&
-        input === inputGeneration && (!saved || !!savedAction(argument));
-      type InferredDiagnostic = { document: vscode.TextDocument; version: number; diagnostic: vscode.Diagnostic };
-      let inferred: InferredDiagnostic | undefined;
-      let paletteSourceCurrent: (() => boolean) | undefined;
-      const stillCurrent = (candidate: InferredDiagnostic | undefined): boolean => {
-        if (!candidate) return current();
-        if (!current() || candidate.document.version !== candidate.version ||
-          vscode.window.activeTextEditor?.document !== candidate.document) return false;
-        const raw = currentRaw(candidate.document.uri);
-        return raw?.version === candidate.version && raw.items.some(diagnostic => sameDiagnostic(diagnostic, candidate.diagnostic) &&
-          diagnostic.source === "dygnosis" && !hiddenCodes.has(diagnosticCode(diagnostic) ?? ""));
-      };
-      let code: string | undefined;
-      if (saved) code = diagnosticCode(saved.diagnostic);
-      else {
-        const editor = vscode.window.activeTextEditor;
-        if (editor && isAnalysisDocument(editor.document)) {
-          const document = editor.document, version = document.version, raw = currentRaw(document.uri);
-          const explainEnabled = booleanSetting("diagnosticActions.explain", document.uri, true, service.log);
-          const candidates = explainEnabled && raw?.version === version
-            ? raw.items.filter(diagnostic => diagnostic.source === "dygnosis" && diagnosticCode(diagnostic) &&
-              !hiddenCodes.has(diagnosticCode(diagnostic) ?? "") && containsPosition(diagnostic.range, editor.selection.active))
-            : [];
-          const offered: DiagnosticChoice[] = candidates.map(diagnostic => ({
-            choiceType: "diagnostic",
-            label: diagnosticCode(diagnostic)!, description: diagnostic.message,
-            diagnostic, document, version,
-          }));
-          if (offered.length > 0) paletteSourceCurrent = () => current() && document.version === version &&
-            vscode.window.activeTextEditor?.document === document && currentRaw(document.uri)?.version === version &&
-            offered.every(item => currentRaw(document.uri)?.items.some(diagnostic => sameDiagnostic(diagnostic, item.diagnostic) &&
-              diagnostic.source === "dygnosis" && !hiddenCodes.has(diagnosticCode(diagnostic) ?? "")));
-          if (offered.length === 1) {
-            const candidate: InferredDiagnostic = { document, version, diagnostic: offered[0].diagnostic };
-            inferred = candidate;
-            code = diagnosticCode(candidate.diagnostic);
-          } else if (offered.length > 1) {
-            const enterCode: ManualCodeChoice = { choiceType: "manual", label: "Enter code…", description: "Explain a diagnostic code manually" };
-            const selected = await vscode.window.showQuickPick<DiagnosticChoice | ManualCodeChoice>([...offered, enterCode], {
-              title: "Dygnosis: Explain a check", placeHolder: "Choose the check at the caret",
-            });
-            if (!selected) return;
-            if (selected.choiceType === "diagnostic") {
-              const candidate: InferredDiagnostic = { document: selected.document, version: selected.version, diagnostic: selected.diagnostic };
-              if (!stillCurrent(candidate)) refuse("The diagnostic, source inputs, or server changed. Request Explain again.");
-              inferred = candidate;
-              code = diagnosticCode(candidate.diagnostic);
-            } else {
-              if (!current() || !paletteSourceCurrent?.()) refuse("The diagnostic, source inputs, or server changed. Request Explain again.");
-            }
-          }
-        }
-        if (!code) {
-          if (!current() || (paletteSourceCurrent && !paletteSourceCurrent())) refuse("The diagnostic, source inputs, or server changed. Request Explain again.");
-          code = (await vscode.window.showInputBox({ title: "Dygnosis: Explain a check", prompt: "Enter a diagnostic code, for example W010" }))?.trim();
-        }
-      }
-      if (!code) return;
-      const explanationCurrent = (): boolean => stillCurrent(inferred) && (!paletteSourceCurrent || paletteSourceCurrent());
-      if (!explanationCurrent()) { if (!disposed) refuse("The diagnostic, source inputs, or server changed. Request Explain again."); return; }
-      const markdown = await service.execute("dynare/explainDiagnostic", [code]);
-      if (!explanationCurrent()) { if (!disposed) refuse("The diagnostic, source inputs, or server changed. Request Explain again."); return; }
-      if (typeof markdown !== "string") throw new Error("The selected engine returned no diagnostic explanation. Use the bundled binary or update dynare.serverPath.");
-      await vscode.commands.executeCommand("dygnosis.openHelp", { code, markdown: safeExplanation(markdown), engineVersion: service.client?.initializeResult?.serverInfo?.version });
-    }, () => !disposed)),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       ++folderGeneration;
       pushed.clear(); pulled.clear();

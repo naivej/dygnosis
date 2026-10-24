@@ -4,7 +4,6 @@ const test = require("node:test");
 const Module = require("node:module");
 const { URL } = require("node:url");
 const protocol = require("vscode-languageserver-protocol/node");
-const { Lexer, marked } = require("marked");
 class Disposable {
   constructor(callback = () => {}) { this.callback = callback; }
   dispose() { this.callback(); this.callback = () => {}; }
@@ -93,7 +92,7 @@ Module._load = function(id, ...args) {
   if (importedModule(id, args[0]) === "client" && args[0].filename.endsWith("quickfix.js")) return { isAnalysisDocument: document => document.languageId === "dynare" && ["file", "untitled"].includes(document.uri.scheme) };
   return originalLoad.call(this, id, ...args);
 };
-const { registerDiagnosticActions, diagnosticCode, safeExplanation } = require(compiledModule("quickfix"));
+const { registerDiagnosticActions, diagnosticCode } = require(compiledModule("quickfix"));
 // Exercise the installed v9 converters: data survives only on ProtocolDiagnostic instances.
 const p2c = require("vscode-languageclient/lib/common/protocolConverter").createConverter();
 const c2p = require("vscode-languageclient/lib/common/codeConverter").createConverter();
@@ -117,7 +116,6 @@ function reset() {
   return service;
 }
 function document(name = "a.mod") { const doc = { uri: Uri.parse(`file:///workspace/${name}`), version: 1, languageId: "dynare" }; host.documents.push(doc); return doc; }
-function editor(document, line = 0, character = 2) { host.activeEditor = { document, selection: { active: new Position(line, character) } }; }
 function wire(code = "W010", root = "file:///workspace/a.mod", severity = 2) {
   return { range: { start: { line: 0, character: 2 }, end: { line: 0, character: 3 } }, message: `Check ${code}`, source: "dygnosis", code,
     severity, data: { root, input_revision: "checked-1", related_context: [{ origin_frames: [{ kind: "macro", value: "1" }] }] },
@@ -138,10 +136,10 @@ async function hide(service, doc, diagnostic) {
 }
 function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
 
-test("macro work stop offers its setting even with Ignore and Explain disabled", async () => {
+test("macro work stop offers its setting even with Ignore disabled", async () => {
   // Guards the recovery action being absent or opening unrelated settings.
   const service = reset(), registration = registerDiagnosticActions(service), doc = document();
-  host.settings[doc.uri.toString()] = { "diagnosticActions.ignore": false, "diagnosticActions.explain": false };
+  host.settings[doc.uri.toString()] = { "diagnosticActions.ignore": false };
   const diagnostic = note("I211", undefined, 3);
   diagnostic.message = "Macro expansion stopped at the iteration work limit; some model checks were withheld.";
   push(service, doc, [diagnostic]);
@@ -170,7 +168,7 @@ test("push hide applies across files/classes and restoration replays the latest 
   const displayed = push(service, a, [original, error, info]);
   for (const diagnostic of [original, error, info]) {
     const actions = await offers(service, a, [diagnostic]);
-    assert.equal(actions.filter(action => action.diagnostics?.includes(diagnostic)).length, 2);
+    assert.deepEqual(actions.filter(action => action.diagnostics?.includes(diagnostic)).map(action => action.command?.command), ["dygnosis.ignoreDiagnostic"]);
   }
   await hide(service, a, original);
   assert.deepEqual(displayed.at(-1), [error, info]);
@@ -187,6 +185,7 @@ test("push hide applies across files/classes and restoration replays the latest 
   assert.equal(c2p.asDiagnostic(original).relatedInformation[0].location.uri, "file:///workspace/first.inc");
   // Replaying the second push restores exactly that newer diagnostic.
   assert.equal(latestDisplay.at(-1)[0], next);
+  assert.equal(diagnosticCode(p2c.asDiagnostic({ ...wire(), code: 100, codeDescription: { href: "https://example.org/check" } })), "100");
   registration.dispose();
 });
 
@@ -293,7 +292,7 @@ test("a selected check does not adopt another check, stripped ownership, or a fo
   assert.equal(host.actionContext.diagnostics.length, 1);
   assert.equal(host.actionContext.diagnostics[0], steady);
   assert.ok(selected.every(action => !action.diagnostics?.includes(naming)));
-  assert.equal(selected.filter(action => action.diagnostics?.includes(steady)).length, 2);
+  assert.deepEqual(selected.filter(action => action.diagnostics?.includes(steady)).map(action => action.command?.command), ["dygnosis.ignoreDiagnostic"]);
   const empty = await offers(service, doc, []);
   assert.ok(empty.some(action => action.diagnostics?.includes(steady)));
   assert.ok(empty.some(action => action.diagnostics?.includes(naming)));
@@ -396,7 +395,6 @@ test("push then pull and pull then push keep one painted list and push-owned act
   assert.equal(host.actionContext.diagnostics[0], first);
   assert.equal((await c2p.asCodeActionContext(host.actionContext)).diagnostics[0].data.root, "file:///workspace/a.mod");
   assert.ok(actions.some(action => action.command?.command === "dygnosis.ignoreDiagnostic"));
-  assert.ok(actions.some(action => action.command?.command === "dygnosis.explainDiagnostic"));
   // Pull first at the same version creates no painted list; the later push owns display and actions.
   const other = document("order.mod");
   const pullFirst = note("W010", other.uri.toString());
@@ -446,33 +444,29 @@ test("Show restores one of several codes; server restart retains hiding and disp
   assert.equal(host.status[0].shown, false);
 });
 
-test("pending action/Explain/workspace results cannot reopen UI after edits or disposal", async () => {
+test("pending action/workspace results cannot reopen UI after edits or disposal", async () => {
   const service = reset(), registration = registerDiagnosticActions(service), doc = document(), diagnostic = note();
   push(service, doc, [diagnostic]);
   const delayed = deferred();
   const pendingAction = service.middleware.provideCodeActions(doc, diagnostic.range, { diagnostics: [diagnostic] }, token, () => delayed.promise);
   host.changed.fire(); delayed.resolve([new CodeAction("Old fix", Kind.QuickFix)]);
   assert.deepEqual(await pendingAction, []);
-  const actions = await offers(service, doc, [diagnostic]);
-  const explain = actions.find(action => action.command.command === "dygnosis.explainDiagnostic");
-  const explanation = deferred(); service.execute = () => explanation.promise;
-  const pendingExplain = command("dygnosis.explainDiagnostic", ...explain.command.arguments);
   const workspace = deferred(); host.workspaceRequest = () => workspace.promise;
   const chunks = [];
   const pendingWorkspace = service.middleware.provideWorkspaceDiagnostics([], token, chunk => chunks.push(chunk), () => undefined);
   assert.equal(host.progress.size, 1); registration.dispose(); assert.equal(host.progress.size, 0);
-  explanation.resolve("# Old explanation"); workspace.resolve({ items: [] });
-  await pendingExplain; assert.equal(await pendingWorkspace, undefined);
+  workspace.resolve({ items: [] });
+  assert.equal(await pendingWorkspace, undefined);
   assert.deepEqual(host.opened, []); assert.deepEqual(chunks, []);
 });
 
 test("resource settings disable only offers; invalid values fall back; foreign diagnostics stay untouched", async () => {
   const service = reset(), registration = registerDiagnosticActions(service), doc = document(), diagnostic = note();
   const displayed = push(service, doc, [diagnostic]); await hide(service, doc, diagnostic);
-  host.settings[doc.uri.toString()] = { "diagnosticActions.ignore": false, "diagnosticActions.explain": false };
+  host.settings[doc.uri.toString()] = { "diagnosticActions.ignore": false };
   command("dygnosis.showAllDiagnostics"); assert.equal(displayed.at(-1)[0], diagnostic);
   assert.deepEqual(await offers(service, doc, [diagnostic]), []);
-  host.settings[doc.uri.toString()] = { "diagnosticActions.ignore": "no", "diagnosticActions.explain": false };
+  host.settings[doc.uri.toString()] = { "diagnosticActions.ignore": "no" };
   assert.equal((await offers(service, doc, [diagnostic])).length, 1); assert.ok(host.logs[0].includes("Invalid dynare.diagnosticActions.ignore"));
   const foreign = note(); foreign.source = "Other extension";
   const other = document("foreign.mod");
@@ -490,121 +484,6 @@ test("folder changes clear hidden codes and stale commands cannot hide after an 
   assert.equal(displayed.at(-1)[0], diagnostic);
   registration.dispose(); assert.equal(host.commands.size, 0); assert.equal(host.providers.size, 0); assert.equal(host.status[0].disposed, true);
   assert.equal(service.middleware.handleDiagnostics, undefined);
-});
-
-test("Explain requests backend Markdown, opens exact-code Help, and strips command links", async () => {
-  const service = reset(), registration = registerDiagnosticActions(service), doc = document(), diagnostic = note();
-  push(service, doc, [diagnostic]); host.markdown = "# W010\n[Run](command:danger)\n<img src=x onerror=alert(1)>\n[Docs](https://www.dynare.org/)";
-  const actions = await offers(service, doc, [diagnostic]);
-  const explain = actions.find(action => action.command.command === "dygnosis.explainDiagnostic");
-  await command("dygnosis.explainDiagnostic", ...explain.command.arguments);
-  assert.deepEqual(host.calls[0], { command: "dynare/explainDiagnostic", args: ["W010"] });
-  assert.equal(host.executed[0].name, "dygnosis.openHelp");
-  assert.equal(host.executed[0].args[0].code, "W010");
-  assert.equal(host.executed[0].args[0].markdown.includes("command:"), false);
-  assert.equal(host.opened.length, 0);
-  host.input = "E001"; await command("dygnosis.explainDiagnostic"); assert.equal(host.calls[1].args[0], "E001");
-  assert.doesNotMatch(marked.parse(safeExplanation("[bad](command%3Adanger)\n[bad][ref]\n[ref]: command:danger\n<a href='command:danger'>x</a>")), /(?:href|src)="(?:command|javascript|data|vscode):/i);
-  assert.equal(diagnosticCode(p2c.asDiagnostic({ ...wire(), code: 100, codeDescription: { href: "https://example.org/check" } })), "100");
-  registration.dispose();
-});
-
-test("palette Explain uses one current visible diagnostic at the caret and respects the setting", async () => {
-  const service = reset(), registration = registerDiagnosticActions(service), doc = document(), diagnostic = note();
-  push(service, doc, [diagnostic]); editor(doc);
-  await command("dygnosis.explainDiagnostic");
-  assert.deepEqual(host.calls[0].args, ["W010"]);
-  assert.equal(host.quickPicks.length, 0);
-  assert.equal(host.inputBoxes.length, 0);
-
-  host.calls.length = 0;
-  host.settings[doc.uri.toString()] = { "diagnosticActions.explain": false };
-  host.input = "E001";
-  await command("dygnosis.explainDiagnostic");
-  assert.deepEqual(host.calls[0].args, ["E001"]);
-  assert.equal(host.inputBoxes.length, 1);
-  registration.dispose();
-});
-
-test("overlapping palette diagnostics require a choice, offer manual code, and allow cancellation", async () => {
-  const service = reset(), registration = registerDiagnosticActions(service), doc = document();
-  const first = note("W010"), second = note("E001"); push(service, doc, [first, second]); editor(doc);
-  host.selection = "E001";
-  await command("dygnosis.explainDiagnostic");
-  assert.deepEqual(host.calls[0].args, ["E001"]);
-  assert.deepEqual(host.quickPicks[0].items.slice(0, 2).map(item => [item.label, item.description]), [["W010", "Check W010"], ["E001", "Check E001"]]);
-  assert.equal(host.quickPicks[0].items.at(-1).label, "Enter code…");
-
-  host.calls.length = 0; host.selection = undefined; host.input = "I211";
-  host.pick = items => items.at(-1);
-  await command("dygnosis.explainDiagnostic");
-  assert.deepEqual(host.calls[0].args, ["I211"]);
-  assert.equal(host.inputBoxes.length, 1);
-
-  host.calls.length = 0; host.pick = () => undefined;
-  await command("dygnosis.explainDiagnostic");
-  assert.equal(host.calls.length, 0);
-  assert.equal(host.inputBoxes.length, 1);
-  registration.dispose();
-});
-
-test("palette Explain ignores hidden or stale diagnostics and refuses a late stale picker choice", async () => {
-  const service = reset(), registration = registerDiagnosticActions(service), doc = document(), diagnostic = note();
-  push(service, doc, [diagnostic]); editor(doc);
-  await hide(service, doc, diagnostic);
-  host.input = "E001";
-  await command("dygnosis.explainDiagnostic");
-  assert.deepEqual(host.calls[0].args, ["E001"]);
-  assert.equal(host.quickPicks.length, 0);
-
-  host.calls.length = 0; host.inputBoxes.length = 0; host.input = "E001";
-  command("dygnosis.showAllDiagnostics");
-  host.settings[doc.uri.toString()] = { "diagnosticActions.explain": true };
-  const second = note("E001"); push(service, doc, [diagnostic, second]);
-  const waiting = deferred(); host.pick = () => waiting.promise;
-  const pending = command("dygnosis.explainDiagnostic");
-  await new Promise(resolve => setImmediate(resolve));
-  ++doc.version;
-  waiting.resolve(host.quickPicks[0].items[0]);
-  await pending;
-  assert.equal(host.calls.length, 0);
-  assert.equal(host.inputBoxes.length, 0, "a stale selection must not become manual code entry");
-  assert.match(host.messages.at(-1), /source inputs, or server changed/);
-
-  push(service, doc, [diagnostic, second]);
-  const fallbackWaiting = deferred(); host.pick = () => fallbackWaiting.promise;
-  const fallbackPending = command("dygnosis.explainDiagnostic");
-  await new Promise(resolve => setImmediate(resolve));
-  ++doc.version;
-  fallbackWaiting.resolve(host.quickPicks.at(-1).items.at(-1));
-  await fallbackPending;
-  assert.equal(host.calls.length, 0);
-  assert.equal(host.inputBoxes.length, 0, "a stale diagnostic set must not fall through to manual code entry");
-  registration.dispose();
-});
-
-test("Markdown destinations are normalized by the parser; safe formatting and literal code survive", () => {
-  const attacks = [
-    "[Run](command\\:danger)",
-    "[Run](\ncommand:danger\n)",
-    "[Run](<command:danger>)",
-    "[Run][ref]\n\n[ref]:\n  command\\:danger",
-    "[Run](command&colon;danger)",
-    "[Run](command%3Adanger)",
-    "[Run](command&#58;danger)",
-    "[Run]<i></i>(command:danger)",
-    "[Run](javascript:alert(1))",
-    "![Run](command:danger)",
-  ];
-  for (const attack of attacks) {
-    const safe = safeExplanation(attack);
-    const links = [];
-    marked.walkTokens(Lexer.lex(safe), token => { if (token.type === "link" || token.type === "image") links.push(token.href); });
-    assert.deepEqual(links, [], `${attack} became ${safe}`);
-    assert.doesNotMatch(marked.parse(safe), /<(?:script|img)|(?:href|src)="(?:command|javascript|data|vscode):/i);
-  }
-  const ordinary = "# Heading\n\n**Bold** and *italic*. [Docs](https://www.dynare.org/manual/)\n\n- First\n- Second\n\n> A quote\n\n```dynare\nvar y;\n```\n\n`[Run](command:literal)`";
-  assert.equal(marked.parse(safeExplanation(ordinary)), marked.parse(ordinary));
 });
 
 function engineEdit(uri, text = ";") {
@@ -785,40 +664,4 @@ test("revision, withdrawal, ignore, and owner changes retire unproved captured e
   const currentOwner = await sealedFix(service, doc, rooted, "Current owner semicolon");
   assert.equal(await command(currentOwner.command.command, ...currentOwner.command.arguments), true);
   registration.dispose();
-});
-
-test("palette Explain starts the first engine and rejects a restart during its backend reply", async () => {
-  const service = reset(), registration = registerDiagnosticActions(service);
-  service.currentInstance = 0;
-  service.ensureStarted = () => { service.currentInstance = 1; host.changed.fire(); return Promise.resolve(); };
-  host.input = "W010";
-  await command("dygnosis.explainDiagnostic");
-  assert.equal(host.executed[0].name, "dygnosis.openHelp");
-  host.executed.length = 0; host.opened.length = 0;
-  service.ensureStarted = () => Promise.resolve();
-  const pending = deferred(); service.execute = () => pending.promise;
-  const result = command("dygnosis.explainDiagnostic");
-  await new Promise(resolve => setImmediate(resolve));
-  ++service.currentInstance; host.changed.fire(); pending.resolve("# Old engine");
-  await result;
-  assert.deepEqual(host.executed, []); assert.deepEqual(host.opened, []);
-  registration.dispose();
-});
-
-test("palette Explain drops a pending reply when its inferred diagnostic is hidden or replaced", async () => {
-  for (const change of ["hidden", "replaced"]) {
-    const service = reset(), registration = registerDiagnosticActions(service), doc = document(), diagnostic = note();
-    push(service, doc, [diagnostic]); editor(doc);
-    const reply = deferred(), executed = []; service.execute = (command, args) => { executed.push({ command, args }); return reply.promise; };
-    const pending = command("dygnosis.explainDiagnostic");
-    await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(executed, [{ command: "dynare/explainDiagnostic", args: ["W010"] }], "palette inferred the visible diagnostic");
-    if (change === "hidden") await hide(service, doc, diagnostic);
-    else { const replacement = note("E001"); push(service, doc, [replacement]); }
-    reply.resolve("# Explanation"); await pending;
-    assert.deepEqual(host.executed, [], `${change} diagnostic must not open Help after the explanation reply`);
-    assert.equal(host.opened.length, 0);
-    assert.match(host.messages.at(-1), /diagnostic, source inputs, or server changed/, "the rejected palette action explains why it stopped");
-    registration.dispose();
-  }
 });

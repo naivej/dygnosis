@@ -155,11 +155,6 @@
         "icon": "$(filter)"
       },
       {
-        "command": "dygnosis.explainDiagnostic",
-        "title": "Explain a check",
-        "category": "Dygnosis"
-      },
-      {
         "command": "dygnosis.showDiagnostic",
         "title": "Show a hidden check",
         "category": "Dygnosis"
@@ -1480,12 +1475,6 @@
             "default": true,
             "scope": "resource",
             "description": "Offer Ignore this check in diagnostic quick fixes. Hidden checks can still be restored with Show a hidden check or Show all hidden checks."
-          },
-          "dynare.diagnosticActions.explain": {
-            "type": "boolean",
-            "default": true,
-            "scope": "resource",
-            "description": "Offer Explain this check in diagnostic quick fixes. The Command Palette command remains available."
           }
         }
       },
@@ -1715,7 +1704,6 @@
     "yauzl": "3.4.0"
   },
   "dependencies": {
-    "entities": "8.1.0",
     "marked": "18.0.14",
     "vscode-languageclient": "^9.0.1"
   }
