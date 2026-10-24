@@ -2,20 +2,19 @@ import * as vscode from "vscode";
 import type { PinnedCommit } from "./git_source";
 
 export interface BaselinePick extends vscode.QuickPickItem {
-  mode?: "previous" | "revision" | "ref" | "expression" | "file" | "config";
+  mode?: "revision" | "ref" | "expression" | "file" | "config";
   revision?: PinnedCommit;
   expression?: string;
-  available?: boolean;
   action?: "more";
 }
 
 /** One native picker accepts a local ref or a listed baseline; typing never queries Git. */
-export function pickBaseline(after: string, actions: BaselinePick[], load: (more: boolean, publish: (items: BaselinePick[]) => void) => Promise<BaselinePick[]>, token: vscode.CancellationToken): Promise<BaselinePick | undefined> {
+export function pickBaseline(title: string, actions: BaselinePick[], load: (more: boolean, publish: (items: BaselinePick[]) => void) => Promise<BaselinePick[]>, token: vscode.CancellationToken): Promise<BaselinePick | undefined> {
   if (token.isCancellationRequested) return Promise.resolve(undefined);
   return new Promise(resolve => {
     const picker = vscode.window.createQuickPick<BaselinePick>();
-    picker.title = `Show mod changes · After: ${after}`;
-    picker.placeholder = "Choose Before, or type a local Git revision";
+    picker.title = title;
+    picker.placeholder = "Choose a file, config, or Git revision";
     picker.matchOnDescription = true;
     picker.matchOnDetail = true;
     let closed = false, revisions: BaselinePick[] = [{ label: "Loading local Git revisions…" }];
@@ -34,8 +33,8 @@ export function pickBaseline(after: string, actions: BaselinePick[], load: (more
       const expression = picker.value.trim();
       picker.items = [
         ...(expression ? [{ label: `Use revision: ${expression}`, mode: "expression" as const, expression }] : []),
-        ...revisions.filter(item => item.mode === "previous" || !item.mode && !item.action),
-        ...actions, ...revisions.filter(item => item.mode !== "previous" && (item.mode || item.action)),
+        ...revisions.filter(item => !item.mode && !item.action),
+        ...actions, ...revisions.filter(item => item.mode || item.action),
       ];
       if (active) {
         const retained = picker.items.find(item => item.mode === active.mode && item.action === active.action && item.label === active.label &&

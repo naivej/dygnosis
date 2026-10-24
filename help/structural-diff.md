@@ -3,10 +3,10 @@
 Compare your model against Git history, another `.mod`/`.dyn` file, or another
 analysis configuration with **Dygnosis: Show mod changes** from the Command
 Palette, the editor title bar (`$(diff)`), or **Show mod changes** on a model
-file in **Source Control**. The baseline chooser searches previous revision,
-recent commits, branches and tags. Type a revision such as `HEAD~2` and choose
-**Use revision: HEAD~2** to compare it. Choose **With .mod file…** to select
-another model file. For a Working model, choose **With config…** to compare its
+file in **Source Control**. The baseline chooser searches recent commits,
+branches and tags. Type a revision such as `HEAD~2` and choose
+**Use revision: HEAD~2** to compare it. Choose **.mod file…** to select
+another model file. For a Working model, choose **config…** to compare its
 current configuration with **Source** or a saved configuration.
 
 Your active model appears under **After** (`Working` includes saved files plus
@@ -14,11 +14,10 @@ any open unsaved edits) and the baseline you select appears under **Before**.
 
 | Baseline choice | Comparison input for Before |
 |---|---|
-| **With previous revision** | `HEAD` for a `Working` model, or the parent commit for an open historical revision. |
 | Recent commits, branches and tags | The selected local commit or ref. Use **Load more commits…** for older history. |
 | **Use revision: …** | The local revision named in the chooser, for example `HEAD~2`. |
-| **With .mod file…** | Another `.mod` or `.dyn` file on disk. |
-| **With config…** | **Source** or a saved configuration for the same model. The current configuration is **After**. |
+| **.mod file…** | Another `.mod` or `.dyn` file on disk. |
+| **config…** | **Source** or a saved configuration for the same model. The current configuration is **After**. |
 
 ## Available views and actions
 
@@ -39,7 +38,7 @@ by side.
 
 ## Comparison scope
 
-The **With config…** comparison can show changed model facts when source text
+The **config…** comparison can show changed model facts when source text
 is the same. It compares structural model information; it does not run Dynare
 or compare numerical results.
 

@@ -270,7 +270,7 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
 
   const frozenGeneration = (await context()).analysis.selection_generation;
   const comparing = vscode.commands.executeCommand("dygnosis.openChanges");
-  await chooseAnyPicker("With config…", waitFor);
+  await chooseAnyPicker("config…", waitFor);
   await choose("Source", waitFor, false, "Choose a configuration for Before from this model"); await comparing;
   await waitFor(() => vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input?.viewType === "dygnosis.changes")), "analysis comparison opens existing Model Diff");
   await waitFor(async () => {

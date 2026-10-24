@@ -51,7 +51,7 @@ diagnostic fixes are unavailable.
 **Dynare: Reset Analysis Configuration** returns to **Source**. **Dynare: Save
 Analysis Configuration** stores the current choices for a model in a workspace
 folder (they do not auto-apply in a new session). To compare configurations
-for a Working model, run **Show mod changes** and choose **With config…**. See
+for a Working model, run **Show mod changes** and choose **config…**. See
 [Review model changes](structural-diff.md).
 
 Counts and other model facts follow the selected configuration. For written

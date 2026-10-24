@@ -1083,6 +1083,7 @@ test("field limits do not mark budget-unavailable values as added or removed", (
 });
 test("reference actions and single-file captured diffs use exact retained text and stale guards", async t => {
   const { host, service, vscode } = createHost(); host.install(); t.after(() => host.registration.dispose());
+  host.baselineValue = "HEAD";
   host.capture = (resource, cancel, history) => {
     const result = captured(resource, history, host, service.currentInstance), row = result.snapshot.rows[0];
     result.snapshot.references = [{ pointer: "/semantic/references/0", side: "after", navigation: { ...row.navigation, id: "/semantic/references/0" } }];

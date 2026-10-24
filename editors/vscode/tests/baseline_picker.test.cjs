@@ -33,15 +33,15 @@ Module._load = originalLoad;
 function cancellation() { const changed = new Event(); return { isCancellationRequested: false, onCancellationRequested: changed.subscribe,
   cancel() { this.isCancellationRequested = true; changed.fire(); } }; }
 
-test("an available previous revision can be accepted while other Git reads remain pending", async () => {
-  // Guards delaying the ready Previous choice until history and refs both finish.
+test("an available ref can be accepted while other Git reads remain pending", async () => {
+  // Guards allowing a ready Git ref while history is still loading.
   const pending = deferred(), token = cancellation(); let publish;
-  const result = pickBaseline("main.mod", [{ label: "With config…", mode: "config" }], (_more, update) => { publish = update; return pending.promise; }, token);
+  const result = pickBaseline("Compare main.mod with", [{ label: "config…", mode: "config" }], (_more, update) => { publish = update; return pending.promise; }, token);
   assert.equal(picker.busy, true);
-  const previous = { label: "With previous revision", mode: "previous", revision: { hash: "a".repeat(40) } };
-  publish([previous]);
-  picker.choose(picker.items.find(item => item.mode === "previous"));
-  assert.equal(await result, previous);
+  const ref = { label: "main", mode: "ref", revision: { hash: "a".repeat(40) } };
+  publish([ref]);
+  picker.choose(picker.items.find(item => item.mode === "ref"));
+  assert.equal(await result, ref);
   publish([{ label: "late history" }]);
   pending.resolve([{ label: "late refs" }]);
   await new Promise(resolve => setImmediate(resolve));
@@ -70,7 +70,7 @@ test("arriving history retains the active ref rather than selecting the new firs
   const ref = { label: "policy", mode: "ref", revision: { hash: "b".repeat(40), requested_ref: "policy" } };
   publish([ref]); picker.activeItems = [ref];
   const refreshedRef = { ...ref };
-  publish([{ label: "With previous revision", mode: "previous", revision: { hash: "a".repeat(40) } }, refreshedRef]);
+  publish([{ label: "earlier ref", mode: "ref", revision: { hash: "a".repeat(40) } }, refreshedRef]);
   assert.equal(picker.activeItems[0], refreshedRef);
   picker.choose(picker.activeItems[0]);
   assert.equal((await result).revision.hash, ref.revision.hash);
@@ -83,25 +83,25 @@ test("cancellation closes the picker and ignores late Git completion", async () 
   const result = pickBaseline("main.mod", [], () => pending.promise, token);
   token.cancel();
   assert.equal(await result, undefined);
-  pending.resolve([{ label: "late previous revision", mode: "previous" }]);
+  pending.resolve([{ label: "late revision", mode: "revision" }]);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(picker.acceptEvent.listeners.size, 0);
 });
 
 test("a failed older page keeps loaded choices and permits a successful retry", async () => {
   // Guards losing valid revisions, retry state, or retaining an obsolete failure after loading more.
-  const previous = { label: "With previous revision", mode: "previous", revision: { hash: "a".repeat(40) } };
+  const revision = { label: "aaaaaaa", mode: "revision", revision: { hash: "a".repeat(40) } };
   const more = { label: "Load more commits…", action: "more" };
   const older = { label: "Older commit", mode: "revision", revision: { hash: "b".repeat(40) } };
   let attempts = 0;
   const result = pickBaseline("main.mod", [], async loadingMore => {
-    if (!loadingMore) return [previous, more];
+    if (!loadingMore) return [revision, more];
     if (++attempts === 1) throw new Error("older page unavailable");
-    return [previous, older];
+    return [revision, older];
   }, cancellation());
   await new Promise(resolve => setImmediate(resolve));
   picker.choose(more); await new Promise(resolve => setImmediate(resolve));
-  assert.ok(picker.items.includes(previous));
+  assert.ok(picker.items.includes(revision));
   assert.ok(picker.items.includes(more), "the failed page can be retried");
   assert.equal(picker.items.find(item => item.label === "More commits unavailable").description, "older page unavailable");
   picker.choose(more); await new Promise(resolve => setImmediate(resolve));

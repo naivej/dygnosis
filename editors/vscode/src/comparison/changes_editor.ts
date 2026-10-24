@@ -285,13 +285,9 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       const repository = await sources.repositoryFor(modelUri(anchor), discoverySignal); checkSelection(token);
       return { sources, repository };
     })();
-    let previous: Awaited<ReturnType<GitSources["previous"]>> | undefined, previousCause = "";
     let commits: PinnedCommit[] = [], refs: RevisionRef[] = [], cursor: HistoryCursor | undefined;
     let historyCause = "", refsCause = "";
     const revisionRows = (): BaselinePick[] => [
-      ...(previous || previousCause
-        ? [{ label: "With previous revision", description: previous?.description ?? previousCause, mode: "previous" as const, available: !!previous, revision: previous?.revision }]
-        : [{ label: "Loading previous revision…" }]),
       ...refs.map(ref => ({ label: ref.name, description: `${ref.kind === "remote" ? "Remote-tracking branch" : ref.kind === "tag" ? "Tag" : "Branch"} · ${ref.revision.hash.slice(0, 7)}`, mode: "ref" as const, revision: ref.revision })),
       ...commits.map(revision => ({ label: revision.hash.slice(0, 7), description: revision.message.split("\n")[0], detail: (revision.commitDate ?? revision.authorDate)?.toLocaleDateString(), mode: "revision" as const, revision })),
       ...(cursor && commits.length < 4096 ? [{ label: "Load more commits…", action: "more" as const }] : []),
@@ -310,9 +306,6 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
         }
       } else {
         const results = await Promise.allSettled([
-          sources.previous(repository, anchor.kind === "git" ? anchor.commit : undefined, pickerSignal).then(value => {
-            previous = { ...value, revision: pickerRevision(value.revision) }; publish(revisionRows());
-          }, (error: unknown) => { previousCause = String(error); publish(revisionRows()); throw error; }),
           sources.history(repository, undefined, pickerSignal).then(page => {
             commits = page.commits.map(pickerRevision); cursor = page.next; publish(revisionRows());
           }, (error: unknown) => { historyCause = String(error); publish(revisionRows()); throw error; }),
@@ -328,9 +321,11 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     };
     let choice: BaselinePick | undefined;
     try {
-      choice = fileOnly ? { mode: "file", label: "With .mod file…" } : await pickBaseline(inputLabel(anchor), [
-        { label: "With .mod file…", mode: "file" },
-        { label: "With config…", mode: "config", description: anchor.kind === "working" ? "Same model · current configuration is After" : "Open the written model to compare configurations" },
+      const modelName = sourceName(modelUri(anchor).path);
+      const title = `Compare ${modelName}${anchor.kind === "git" ? ` (${anchor.commit.slice(0, 7)})` : ""} with`;
+      choice = fileOnly ? { mode: "file", label: ".mod file…" } : await pickBaseline(title, [
+        { label: ".mod file…", mode: "file" },
+        { label: "config…", mode: "config", description: anchor.kind === "working" ? "Same model · current configuration is After" : "Open the written model to compare configurations" },
       ], load, token);
     } finally {
       pickerWork.abort();
@@ -344,7 +339,7 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       return files?.[0] ? { before: { kind: "working", root_uri: files[0].toString() }, after: anchor } : undefined;
     }
     if (choice.mode === "config") {
-      if (anchor.kind !== "working") refuse("Configuration comparison uses the current written model. Open its written source or macro expansion, then choose With config again.");
+      if (anchor.kind !== "working") refuse("Configuration comparison uses the current written model. Open its written source or macro expansion, then choose config… again.");
       await service.ensureStarted(); checkSelection(token);
       if (!service.supportsAnalysisConfiguration) refuse("This engine does not support configuration comparison. Use the bundled engine or update dynare.serverPath.");
       const after = await freezeWorkingSelector(service, anchor, token);
@@ -355,7 +350,6 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       return { before, after };
     }
     const { sources, repository } = await repositoryReady().finally(() => discoveryWork.abort()); checkSelection(token);
-    if (choice.available === false) throw new Error(choice.description || "This baseline is unavailable. Choose another revision.");
     const commit = choice.mode === "expression" ? await sources.resolve(repository, choice.expression!, signal) : choice.revision;
     checkSelection(token);
     if (!commit) return undefined;

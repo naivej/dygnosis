@@ -150,7 +150,7 @@ function createHost() {
       try {
         if (host.baselineValue !== undefined && !values.value) { const typed = host.baselineValue; host.baselineValue = undefined; picker.value = typed; }
         const selected = host.pick ? await host.pick(picker.items, { title: picker.title, placeHolder: picker.placeholder }, activeToken) :
-          (values.value ? picker.items.find(item => item.mode === "expression") : undefined) ?? picker.items.find(item => item.mode === "previous" && item.available !== false) ?? picker.items.find(item => item.mode === "file" && item.available !== false) ?? picker.items.find(item => item.mode === "config") ?? picker.items[0];
+          (values.value ? picker.items.find(item => item.mode === "expression") : undefined) ?? picker.items.find(item => item.mode === "revision" || item.mode === "ref") ?? picker.items.find(item => item.mode === "file") ?? picker.items.find(item => item.mode === "config") ?? picker.items[0];
         if (!shown || disposed) return;
         if (!selected) { picker.hide(); return; }
         picker.accept(selected);
@@ -204,7 +204,7 @@ function createHost() {
       tabGroups: { activeTabGroup: { get activeTab() { return host.activeTab; } }, onDidChangeTabs: host.tabsChanged.event, onDidChangeTabGroups: host.tabGroupsChanged.event },
       onDidChangeActiveTextEditor: host.editorChanged.event,
       registerCustomEditorProvider(viewType, provider, options) { host.provider = provider; host.providerOptions = options; host.viewType = viewType; return new Disposable(() => { host.provider = undefined; }); },
-      async showQuickPick(items, options, cancel) { host.picks.push({ items, options, cancel }); return host.pick ? host.pick(items, options, cancel) : items.find(item => item.mode === "previous") ?? items[0]; },
+      async showQuickPick(items, options, cancel) { host.picks.push({ items, options, cancel }); return host.pick ? host.pick(items, options, cancel) : items[0]; },
       createQuickPick() { return createQuickPick(); },
       async showOpenDialog(options) { host.dialogs.push(options); return host.select ? host.select(options) : [baselineUri]; },
       async showInputBox(options, cancel) { host.inputs.push({ ...options, cancel }); return host.input ? host.input(options, cancel) : "HEAD~1"; },
