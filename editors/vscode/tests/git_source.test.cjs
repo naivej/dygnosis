@@ -258,3 +258,25 @@ test("NUL manifests and source decoding preserve exact Git keys and Rust text ru
   assert.equal(decodeGitText(Buffer.from("😀 café\r\n")), "😀 café\r\n");
   assert.equal(decodeGitText(Buffer.from([0xe9, 0x0d, 0x41])), "é\nA");
 });
+
+test("concurrent history and refs share a pending ref read only in the same cancellation scope", async () => {
+  // Guards duplicate ref scans in the unified picker without caching stale refs or coupling cancellation.
+  let release, reads = 0;
+  const pending = new Promise(resolve => { release = resolve; });
+  const repo = { rootUri: fileUri(process.cwd()), getRefs: () => { ++reads; return pending; } };
+  const sources = new GitSources({ git: { path: "git" }, repositories: [repo] }, fileUri);
+  sources.resolve = async () => { throw new GitSourceError("no_head", "Empty repository"); };
+  const signal = new globalThis.AbortController().signal;
+  const history = sources.history(repo, undefined, signal), refs = sources.refs(repo, signal);
+  assert.equal(reads, 1);
+  release([]);
+  assert.deepEqual(await history, { commits: [] });
+  assert.deepEqual(await refs, []);
+  await sources.refs(repo, signal);
+  assert.equal(reads, 2, "a completed read is not reused after refs can move");
+  let finish;
+  repo.getRefs = () => { ++reads; return new Promise(resolve => { const previous = finish; finish = () => { previous?.([]); resolve([]); }; }); };
+  const left = sources.refs(repo, new globalThis.AbortController().signal), right = sources.refs(repo, new globalThis.AbortController().signal);
+  assert.equal(reads, 4, "independent cancellation scopes do not share pending reads");
+  finish(); await Promise.all([left, right]);
+});

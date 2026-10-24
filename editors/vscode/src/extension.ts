@@ -30,9 +30,9 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
   service = client;
   context.subscriptions.push(registerWorkspaceMcp(context, client));
   const previews = registerEffectivePreview(client);
-  const changes = registerChanges(client, context.extensionUri);
+  const changes = registerChanges(client, context.extensionUri, previews);
   context.subscriptions.push(client, registerDiagnosticActions(client), registerWorkspaceStatus(client), registerLenses(client), registerStatus(client, previews), registerModelNavigation(client), registerColors(client), registerMcp(context, client.log), previews, registerOriginJumps(client, previews), changes,
-    registerAnalysisConfigurations(client, previews, changes.compareAnalysis), registerSourceCandidates(client), registerOutlineFilter(client),
+    registerAnalysisConfigurations(client, previews), registerSourceCandidates(client), registerOutlineFilter(client),
     vscode.commands.registerCommand("dygnosis.restartServer", () => runCommand(client, () => client.restart())),
     vscode.commands.registerCommand("dygnosis.showOutput", () => client.output.show()),
     vscode.commands.registerCommand("dygnosis.openSettings", () => vscode.commands.executeCommand("workbench.action.openSettings", "@ext:CoconutWater.dygnosis")),
@@ -48,6 +48,7 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
     const generation = ++contextGeneration;
     const document = vscode.window.activeTextEditor?.document;
     const ordinary = document ? isAnalysisDocument(document) : false;
+    const expanded = document ? previews.get(document.uri) : undefined;
     const tab = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
     const custom = tab instanceof vscode.TabInputCustom && tab.viewType === changesViewType;
     const gitPath = document?.uri.scheme === "git" ? (() => {
@@ -62,7 +63,7 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
     const historical = !!document && (document.uri.scheme === historyScheme || !ordinary && !document.uri.scheme.startsWith("dygnosis-") &&
       (document.languageId === "dynare" || gitPath !== undefined &&
         (/\.(mod|dyn)$/i.test(gitPath) || client.knownOwners(vscode.Uri.file(gitPath)).length > 0)));
-    void vscode.commands.executeCommand("setContext", "dygnosis.changesContext", custom || historical);
+    void vscode.commands.executeCommand("setContext", "dygnosis.changesContext", custom || historical || !!expanded);
     void vscode.commands.executeCommand("setContext", "dygnosis.knownIncludedPaths", client.knownIncludedFiles());
     const actions = listSetting("editorActions", document?.uri, ["toolbar", "contextMenu"], ["toolbar", "contextMenu"], client.log);
     void vscode.commands.executeCommand("setContext", "dygnosis.analysisDocument", ordinary);

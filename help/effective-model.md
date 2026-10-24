@@ -13,33 +13,46 @@ structure.
 ## Choose the analysis configuration
 
 The source editor and macro expansion preview share one analysis configuration
-for the model root. Change it with **Dynare: Select Analysis Configuration**
-(or the model status):
+for the model root. Choose **Dynare: Select Analysis Configuration** from the
+editor title gear, Command Palette or editor context menu:
 
 | Choice | Effect |
 |---|---|
 | **Source** | Macro inputs as written in the model. |
-| **Set macro inputs…** | Enter initial macro values for this root. |
-| **Select equations by tag…** | Include or exclude equations by explicit values for one tag. Values are comma-separated; values cannot contain commas. |
+| A `NAME=value` macro row | Edit this macro assignment. |
+| **Add macro input…** | Enter a complete assignment, such as `FLAG=true`. |
+| **Include equations…** / **Exclude equations…** | Enter a Dynare tag expression to select equations. |
 | A saved configuration | Reuse presets listed in [Dynare: Analysis Configurations](settings:dynare.analysisConfigurations). |
 
-For one definition, place the cursor on it and run **Dynare: Override Macro
-Definition for Analysis** (replacement expression, or **Skip this definition**).
+To stop selecting equations while keeping other choices, choose **Clear equation
+selection**. To replace one macro definition for analysis, place the cursor on
+it and run **Dynare: Override Macro Definition for Analysis**; enter the
+replacement expression in the prompt, which starts with your current
+replacement when one exists. To skip the definition instead, run
+**Dynare: Skip Macro Definition for Analysis**.
 For another conditional arm, place the cursor in its chain and run **Dynare:
 Preview Macro Branch**. These choices affect analysis and preview only; they do
 not edit the files.
 
-Equation selection uses a tag name (default `name`) and one or more tag
-values. It changes the equations and endogenous/exogenous counts used by later
+Enter a tag expression such as `name='policy'` or `endogenous='rate'`.
+For several values, use `name=('policy','resource')`. Tag strings use single
+quotes; a comma inside quotes is part of the value. You can also paste the
+surrounding brackets, such as `[name='policy']`. These controls correspond to
+Dynare's `include_eqs` and `exclude_eqs` options; see [Running Dynare in the
+Dynare Reference Manual](https://www.dynare.org/manual/running-dynare.html).
+
+Equation selection changes the equations and endogenous/exogenous counts used by later
 checks and model facts. Parse and Check diagnostics still cover the complete
-model. The expansion text continues to show the source before equation
-selection. Selector files are not supported. Equation-selected analysis is a
-preview, so Rename and diagnostic fixes are unavailable.
+model. The macro expansion preview shows the expanded model before equation
+selection; model counts use the selected equations. Selector files
+are not supported. Equation-selected analysis is a preview, so Rename and
+diagnostic fixes are unavailable.
 
 **Dynare: Reset Analysis Configuration** returns to **Source**. **Dynare: Save
 Analysis Configuration** stores the current choices for a model in a workspace
-folder (they do not auto-apply in a new session). To compare two configurations,
-see [Review model changes](structural-diff.md).
+folder (they do not auto-apply in a new session). To compare configurations
+for a Working model, run **Show mod changes** and choose **With config…**. See
+[Review model changes](structural-diff.md).
 
 Counts and other model facts follow the selected configuration. For written
 code outside that selection, see [Inactive source](navigate-code.md#inactive-source).

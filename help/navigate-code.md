@@ -3,7 +3,8 @@
 Navigation works across the active model and its known `@#include` files.
 
 Place the cursor on a symbol and right-click in the editor, or press `F1` to
-run a command from the Command Palette.
+run a command from the Command Palette. Dygnosis editor actions appear together
+in one context-menu group.
 
 | Action | What you see |
 |---|---|

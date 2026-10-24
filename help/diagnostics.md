@@ -49,7 +49,7 @@ or choose **Quick Fix...** from the editor context menu.
 |---|---|
 | Repair action | Applies an available source fix for the selected diagnostic. |
 | **Explain this check (`<code>`)** | Opens the check's explanation in **Dygnosis Help** ([Dynare › Diagnostic Actions: Explain](settings:dynare.diagnosticActions.explain)). |
-| **Dygnosis: Explain a check** (Command Palette) | Prompts for a check code (such as `W031`) and opens its explanation from the active engine. |
+| **Dygnosis: Explain a check** (Command Palette) | Explains the current diagnostic at the cursor. If diagnostics overlap, choose one by code and message; if none is at the cursor, enter a check code such as `W031`. |
 | **Ignore this check (`<code>`)** | Hides all diagnostics with that code in the current window ([Dynare › Diagnostic Actions: Ignore](settings:dynare.diagnosticActions.ignore)). |
 | **Dygnosis: Show a hidden check** / **Dygnosis: Show all hidden checks** (Command Palette) | Restores one hidden check code or all hidden check codes. |
 

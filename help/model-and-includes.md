@@ -34,9 +34,10 @@ loose file).
 
 Status bar model counts combine the aggregate model and all heterogeneous
 dimensions. The label is **Source** for the model's written macro inputs and
-**Current config** when you select other analysis choices. Hover to see the
-macro choices and separate counts. Click **Current config** in the hover to
-select a configuration or reset to **Source**.
+**Current config** when you select other analysis choices. Click the counts to
+open **Outline** for the active model or macro expansion preview. Hover to see
+the macro choices and separate counts, then click **Current config** to select
+a configuration or reset to **Source**.
 
 While a model action is pending, the same item shows its activity, such as
 **Expanding macros…**. It returns to model counts when the action finishes.

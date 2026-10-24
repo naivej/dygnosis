@@ -1,12 +1,11 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
 import { DygnosisClient } from "../client/client";
-import { AnalysisConfiguration, AnalysisContext, AnalysisMetadata, AnalysisOverride, PresetBinding, analysisConfiguration, parseAnalysisMetadata, record } from "../client/protocol";
+import { AnalysisConfiguration, AnalysisContext, AnalysisMetadata, AnalysisOverride, EquationSelection, PresetBinding, analysisConfiguration, parseAnalysisMetadata, record } from "../client/protocol";
 import { CommandCancelled, refuse, runCommand } from "../client/refusal";
 import type { EffectivePreviewRegistry } from "./preview";
 
 export interface AnalysisSide { analysis: AnalysisConfiguration; include_paths: string[] | null; preset_bindings?: PresetBinding[] }
-export type CompareAnalysis = (root: vscode.Uri, left: AnalysisSide, right: AnalysisSide) => Promise<void>;
 interface Preset { name: string; root: string; analysis: AnalysisConfiguration; includePaths?: string[]; bindings: PresetBinding[] }
 interface Target { root: vscode.Uri; document: vscode.Uri; current(): boolean }
 
@@ -21,9 +20,36 @@ export function resultAnalysis(result: unknown): AnalysisMetadata | undefined {
   if (!record(result) || result.analysis === undefined) return undefined;
   try { return parseAnalysisMetadata(result.analysis); } catch { return undefined; }
 }
-export function parseEquationSelectionValues(raw: string): string[] | undefined {
-  const values = raw.split(",").map(value => value.trim());
-  return values.length && values.every(Boolean) && new Set(values).size === values.length ? values : undefined;
+export function parseMacroInput(raw: string): { name: string; expression: string } | undefined {
+  const match = /^\s*([A-Za-z_]\w*)\s*=(?!=)([\s\S]+)$/.exec(raw);
+  const expression = match?.[2].trim();
+  return match && expression ? { name: match[1], expression } : undefined;
+}
+export function parseEquationSelection(raw: string): Omit<EquationSelection, "mode"> | undefined {
+  let text = raw.trim();
+  if (text.startsWith("[") && text.endsWith("]")) text = text.slice(1, -1).trim();
+  const assignment = /^([A-Za-z_]\w*)\s*=\s*([\s\S]+)$/.exec(text);
+  if (!assignment) return undefined;
+  let remaining = assignment[2].trim();
+  const multiple = remaining.startsWith("(") && remaining.endsWith(")");
+  if (multiple) remaining = remaining.slice(1, -1).trim();
+  const values: string[] = [];
+  while (remaining) {
+    // Dynare tag strings use single quotes; commas inside them are literal.
+    const value = /^(?:'([^']+)'|([^\s,'"()[\]=]+))\s*/.exec(remaining);
+    if (!value) return undefined;
+    values.push(value[1] ?? value[2]);
+    remaining = remaining.slice(value[0].length);
+    if (!remaining) break;
+    if (!multiple || !remaining.startsWith(",")) return undefined;
+    remaining = remaining.slice(1).trimStart();
+    if (!remaining) return undefined;
+  }
+  return values.length && new Set(values).size === values.length ? { tag: assignment[1], values } : undefined;
+}
+function equationSelectionExpression(selection: EquationSelection): string {
+  const values = selection.values.map(value => `'${value}'`);
+  return `${selection.tag ?? "name"}=${values.length === 1 ? values[0] : `(${values.join(", ")})`}`;
 }
 
 function fileUri(file: string): vscode.Uri {
@@ -54,6 +80,16 @@ function presetSide(value: Preset, folder: vscode.WorkspaceFolder): AnalysisSide
   return { analysis, include_paths: value.includePaths?.map(path => resolved(folder, path)) ?? null,
     preset_bindings: value.bindings.map(binding => ({ ...binding, file: binding.file === null ? null : resolved(folder, binding.file) })) };
 }
+
+/** Choose Before without changing or saving the current configuration. */
+export async function chooseAnalysisBaseline(root: vscode.Uri, after: string, token: vscode.CancellationToken): Promise<AnalysisSide | undefined> {
+  const saved = presets(root);
+  const pick = await vscode.window.showQuickPick([
+    { label: "Source", description: "Use the written macro inputs", side: { analysis: {}, include_paths: null } },
+    ...saved.values.map(value => ({ label: value.name, description: "Saved configuration", side: presetSide(value, saved.folder!) })),
+  ], { title: `Before configuration · After: ${after}`, placeHolder: "Choose a configuration for Before from this model" }, token);
+  return token.isCancellationRequested ? undefined : pick?.side;
+}
 function modified(context: AnalysisContext): AnalysisConfiguration {
   const choices = structuredClone(context.analysis.configuration);
   const name = context.analysis.selection.name;
@@ -65,7 +101,7 @@ function replaceOverride(choices: AnalysisConfiguration, operation: AnalysisOver
 }
 
 /** Native commands share the same root client state in source and expansion. */
-export function registerAnalysisConfigurations(service: DygnosisClient, previews: EffectivePreviewRegistry, compare?: CompareAnalysis): vscode.Disposable {
+export function registerAnalysisConfigurations(service: DygnosisClient, previews: EffectivePreviewRegistry): vscode.Disposable {
   let disposed = false;
   const target = async (written = false): Promise<Target> => {
     const document = vscode.window.activeTextEditor?.document;
@@ -89,17 +125,22 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     if (!invocation.current()) refuse("The source or chosen root changed. Request the analysis action again.");
     await service.setAnalysisConfiguration(invocation.root, side.analysis, proof, side.include_paths, side.preset_bindings, () => invocation.current());
   };
-  const choose = async (invocation: Target, proof: AnalysisContext, placeHolder: string, actions = false): Promise<AnalysisSide | "save" | "inputs" | "equations"> => {
+  type Choice = vscode.QuickPickItem & { side?: AnalysisSide; action?: "save" | "input" | "include" | "exclude" | "clearEquations"; index?: number };
+  const choose = async (invocation: Target, proof: AnalysisContext): Promise<Choice> => {
     const saved = presets(invocation.root);
-    const entries: (vscode.QuickPickItem & { side?: AnalysisSide; action?: "save" | "inputs" | "equations" })[] = [
-      { label: "Source", description: actions ? "Reset analysis configuration" : "Use the written macro inputs", side: { analysis: {}, include_paths: null } },
+    const entries: Choice[] = [
+      { label: "Source", description: "Reset analysis configuration", side: { analysis: {}, include_paths: null } },
       ...saved.values.map(value => ({ label: value.name, description: "Saved configuration", side: presetSide(value, saved.folder!) })),
+      ...(proof.analysis.configuration.defines ?? []).map((input, index) => ({ label: `${input.name}=${input.expression}`, description: "Edit macro input", action: "input" as const, index })),
+      { label: "Add macro input…", action: "input", index: -1 },
+      { label: "Include equations…", action: "include" }, { label: "Exclude equations…", action: "exclude" },
+      ...(proof.analysis.configuration.equation_selection ? [{ label: "Clear equation selection", action: "clearEquations" as const }] : []),
+      { label: "Save current configuration…", action: "save" },
     ];
-    if (actions) entries.push({ label: "Set macro inputs…", action: "inputs" }, { label: "Select equations by tag…", action: "equations" }, { label: "Save current configuration…", action: "save" });
-    const pick = await vscode.window.showQuickPick(entries, { placeHolder, title: `Dynare: ${analysisLabel(proof.analysis)}` });
+    const pick = await vscode.window.showQuickPick(entries, { placeHolder: "Choose an analysis configuration or edit its inputs", title: `Dynare: ${analysisLabel(proof.analysis)}` });
     if (!pick) throw new CommandCancelled();
     if (!invocation.current()) refuse("The source or chosen root changed. Open the selector again.");
-    return pick.action ?? pick.side!;
+    return pick;
   };
   const save = async (invocation?: Target): Promise<void> => {
     invocation ??= await target();
@@ -126,57 +167,59 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     if (!invocation.current()) refuse("The source or server changed. Save the configuration again.");
     await configuration.update("analysisConfigurations", [...existing.filter(saved => saved.root !== value.root || saved.name !== value.name), value], vscode.ConfigurationTarget.WorkspaceFolder);
   };
-  const inputs = async (invocation: Target, proof: AnalysisContext): Promise<void> => {
+  const inputs = async (invocation: Target, proof: AnalysisContext, index: number): Promise<void> => {
     const choices = modified(proof), current = choices.defines ?? [];
     if (!proof.analysis.selection.name) choices.name = "Macro inputs";
-    const pick = await vscode.window.showQuickPick([{ label: "Add macro input", index: -1 }, ...current.map((input, index) => ({ label: input.name, description: input.expression, index }))], { placeHolder: "Set an initial macro value" });
-    if (!pick) throw new CommandCancelled();
-    const previous = current[pick.index];
-    const name = previous?.name ?? await vscode.window.showInputBox({ prompt: "Macro input name", validateInput: value => /^[A-Za-z_][A-Za-z_\d]*$/.test(value) ? undefined : "Enter a macro identifier." });
-    if (name === undefined) throw new CommandCancelled();
-    const expression = await vscode.window.showInputBox({ prompt: "Dynare macro expression; leave empty to remove this input", value: previous?.expression ?? "" });
-    if (expression === undefined) throw new CommandCancelled();
+    const previous = current[index];
+    const invalid = 'Enter a macro assignment, such as FLAG=true, N=2 or COUNTRY="US".';
+    const raw = await vscode.window.showInputBox({
+      title: "Set macro input", prompt: `Dynare macro assignment, for example FLAG=true or COUNTRY="US"${previous ? "; clear to remove this input" : ""}`,
+      placeHolder: "FLAG=true", value: previous ? `${previous.name}=${previous.expression}` : "",
+      validateInput: value => previous && !value.trim() || parseMacroInput(value) ? undefined : invalid,
+    });
+    if (raw === undefined) throw new CommandCancelled();
+    const input = parseMacroInput(raw);
+    if (!input && (!previous || raw.trim())) refuse(invalid);
     choices.defines = previous
-      ? current.flatMap((input, index) => index === pick.index ? expression.trim() ? [{ name, expression }] : [] : [input])
-      : [...current, ...(expression.trim() ? [{ name, expression }] : [])];
+      ? current.flatMap((entry, position) => position === index ? input ? [input] : [] : [entry])
+      : [...current, ...(input ? [input] : [])];
     await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });
   };
-  const equations = async (invocation: Target, proof: AnalysisContext): Promise<void> => {
+  const equations = async (invocation: Target, proof: AnalysisContext, mode: "include" | "exclude"): Promise<void> => {
     const choices = modified(proof), previous = choices.equation_selection;
-    const mode = await vscode.window.showQuickPick([{ label: "Include matching equations", value: "include" as const }, { label: "Exclude matching equations", value: "exclude" as const }], { placeHolder: "Choose which tagged equations to analyze" });
-    if (!mode) throw new CommandCancelled();
-    const tag = await vscode.window.showInputBox({ prompt: "Equation tag name", value: previous?.tag ?? "name", validateInput: value => /^[A-Za-z_]\w*$/.test(value.trim()) ? undefined : "Enter a tag name using letters, digits, and underscores." });
-    if (tag === undefined) throw new CommandCancelled();
-    const rawValues = await vscode.window.showInputBox({ prompt: "Tag values, separated by commas (values cannot contain commas)", value: previous?.values.join(", ") ?? "", validateInput: value => {
-      return parseEquationSelectionValues(value) ? undefined : "Enter one or more distinct, non-empty tag values separated by commas.";
-    } });
-    if (rawValues === undefined) throw new CommandCancelled();
-    const values = parseEquationSelectionValues(rawValues);
-    if (!values) refuse("Enter one or more distinct, non-empty tag values separated by commas.");
-    choices.equation_selection = { mode: mode.value, tag: tag.trim(), values };
+    const invalid = "Enter a tag expression, such as name='policy', endogenous='rate' or name=('policy','demand'). Use single quotes for tag values and give each value once.";
+    const raw = await vscode.window.showInputBox({
+      title: mode === "include" ? "Include equations" : "Exclude equations", prompt: "Dynare tag expression, for example name='policy', endogenous='rate' or name=('policy','demand')",
+      placeHolder: "name='policy'", value: previous ? equationSelectionExpression(previous) : "",
+      validateInput: value => parseEquationSelection(value) ? undefined : invalid,
+    });
+    if (raw === undefined) throw new CommandCancelled();
+    const selection = parseEquationSelection(raw);
+    if (!selection) refuse(invalid);
+    choices.equation_selection = { mode, ...selection };
     await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });
   };
-  const override = async (branch: boolean): Promise<void> => {
+  const override = async (branch: boolean, skip = false): Promise<void> => {
     const invocation = await target(true), proof = await context(invocation);
     const position = vscode.window.activeTextEditor!.selection.active;
     const sites = proof.sites.filter(site => (branch ? site.kind === "conditional" : site.kind !== "conditional") &&
       site.location.uri === invocation.document.toString() && (site.location.range.start.line <= position.line && position.line <= site.location.range.end.line ||
         branch && site.branches.some(arm => arm.location.range.start.line <= position.line && position.line <= arm.location.range.end.line)));
     const site = sites.length === 1 ? sites[0] : (await vscode.window.showQuickPick(sites.map(site => ({ label: site.expected_text, site })), { placeHolder: branch ? "Select the controlling conditional" : "Select the written macro definition" }))?.site;
-    if (!site) refuse(branch ? "Place the cursor on a conditional opener before previewing one of its branches." : "Place the cursor on a macro definition before overriding it for analysis.");
+    if (!site) refuse(branch ? "Place the cursor on a conditional opener before previewing one of its branches." : `Place the cursor on a macro definition before ${skip ? "skipping" : "overriding"} it for analysis.`);
     const choices = modified(proof);
     if (branch) {
       const pick = await vscode.window.showQuickPick([{ label: "No branch", branch_id: null as string | null }, ...site.branches.map(arm => ({ label: arm.expected_text, branch_id: arm.branch_id }))], { placeHolder: "Preview one written branch; enclosing loops and conditions still apply" });
       if (!pick) throw new CommandCancelled();
       replaceOverride(choices, { kind: "branch", target: site.target, branch_id: pick.branch_id });
     } else {
-      if (site.kind === "function_definition") refuse("Function-like macro definitions cannot be overridden for analysis. Select a value definition.");
-      const pick = await vscode.window.showQuickPick(["Replacement expression", "Skip this definition"], { placeHolder: site.expected_text });
-      if (!pick) throw new CommandCancelled();
-      if (pick === "Skip this definition") replaceOverride(choices, { kind: "skip_definition", target: site.target });
+      if (site.kind === "function_definition") refuse(`Function-like macro definitions cannot be ${skip ? "skipped" : "overridden"} for analysis. Select a value definition.`);
+      if (skip) replaceOverride(choices, { kind: "skip_definition", target: site.target });
       else {
-        const expression = await vscode.window.showInputBox({ prompt: "Dynare macro expression for this written definition" });
+        const previous = choices.overrides?.find(operation => operation.target.file === site.target.file && operation.target.site_id === site.target.site_id);
+        const expression = await vscode.window.showInputBox({ prompt: "Dynare macro expression for this written definition, for example 2 or false", value: previous?.kind === "definition" ? previous.expression : "", validateInput: value => value.trim() ? undefined : "Enter a Dynare macro expression." });
         if (expression === undefined) throw new CommandCancelled();
+        if (!expression.trim()) refuse("Enter a Dynare macro expression. Use Skip Macro Definition for Analysis to skip this definition.");
         replaceOverride(choices, { kind: "definition", target: site.target, expression });
       }
     }
@@ -185,20 +228,20 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
   const registrations = [
     vscode.commands.registerCommand("dygnosis.selectAnalysisConfiguration", () => runCommand(service, async () => {
       const invocation = await target(), proof = await context(invocation);
-      const selected = await choose(invocation, proof, "Select the analysis configuration for this model root", true);
-      if (selected === "save") await save(invocation); else if (selected === "inputs") await inputs(invocation, proof); else if (selected === "equations") await equations(invocation, proof); else await apply(invocation, proof, selected);
+      const selected = await choose(invocation, proof);
+      if (selected.action === "save") await save(invocation);
+      else if (selected.action === "input") await inputs(invocation, proof, selected.index!);
+      else if (selected.action === "include" || selected.action === "exclude") await equations(invocation, proof, selected.action);
+      else if (selected.action === "clearEquations") {
+        const choices = modified(proof); delete choices.equation_selection;
+        await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });
+      } else await apply(invocation, proof, selected.side!);
     }, () => !disposed)),
     vscode.commands.registerCommand("dygnosis.resetAnalysisConfiguration", () => runCommand(service, async () => { const invocation = await target(); await apply(invocation, await context(invocation), { analysis: {}, include_paths: null }); }, () => !disposed)),
     vscode.commands.registerCommand("dygnosis.saveAnalysisConfiguration", () => runCommand(service, () => save(), () => !disposed)),
     vscode.commands.registerCommand("dygnosis.overrideMacroDefinition", () => runCommand(service, () => override(false), () => !disposed)),
+    vscode.commands.registerCommand("dygnosis.skipMacroDefinition", () => runCommand(service, () => override(false, true), () => !disposed)),
     vscode.commands.registerCommand("dygnosis.previewMacroBranch", () => runCommand(service, () => override(true), () => !disposed)),
-    vscode.commands.registerCommand("dygnosis.compareAnalysisConfigurations", () => runCommand(service, async () => {
-      if (!compare) refuse("This engine cannot capture analysis-configuration comparisons. Use the bundled engine and restart the server.");
-      const invocation = await target(), proof = await context(invocation);
-      const left = await choose(invocation, proof, "Choose configuration A"), right = await choose(invocation, proof, "Choose configuration B");
-      if (typeof left === "string" || typeof right === "string") return;
-      await compare(invocation.root, left, right);
-    }, () => !disposed)),
   ];
   return new vscode.Disposable(() => { disposed = true; for (const registration of registrations) registration.dispose(); });
 }

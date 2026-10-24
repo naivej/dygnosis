@@ -7,13 +7,14 @@ const { createHost, load, captured, snapshotResponse, deferred, flush, working, 
 const { resourceData, resourceQuery, resourceName, selector } = require(compiledModule("changes_resource"));
 
 function setup(t) { const env = createHost(); env.host.install(); t.after(() => env.host.registration.dispose()); return env; }
-const fourChoices = ["With previous revision", "With revision…", "With branch or tag…", "With .mod file…"];
+const baselineActions = ["With previous revision", "With .mod file…", "With config…"];
 function activateHost(env) {
   const { host, service, vscode } = env; host.registeredChanges = 0;
   const registrations = { "changes_editor": { registerChanges: value => { assert.equal(value, service); host.registeredChanges++; return new Disposable(); } },
     "client": { DygnosisClient: class { constructor() { return service; } }, isAnalysisDocument: document => document.uri.scheme === "file" },
   };
-  for (const [module, name] of [["workspace_status", "registerWorkspaceStatus"], ["workspace_mcp", "registerWorkspaceMcp"], ["origin_jumps", "registerOriginJumps"], ["quickfix", "registerDiagnosticActions"], ["lenses", "registerLenses"], ["color", "registerColors"], ["model_navigation", "registerModelNavigation"], ["status", "registerStatus"], ["mcp", "registerMcp"], ["preview", "registerEffectivePreview"], ["help", "registerHelp"]]) registrations[module] = { [name]: () => new Disposable() };
+  for (const [module, name] of [["workspace_status", "registerWorkspaceStatus"], ["workspace_mcp", "registerWorkspaceMcp"], ["origin_jumps", "registerOriginJumps"], ["quickfix", "registerDiagnosticActions"], ["lenses", "registerLenses"], ["color", "registerColors"], ["model_navigation", "registerModelNavigation"], ["status", "registerStatus"], ["mcp", "registerMcp"], ["help", "registerHelp"]]) registrations[module] = { [name]: () => new Disposable() };
+  registrations.preview = { registerEffectivePreview: () => Object.assign(new Disposable(), { get: () => undefined }) };
   const { activate } = load("extension", vscode, registrations), context = { subscriptions: [] };
   assert.equal(activate(context), service); return context;
 }
@@ -29,11 +30,14 @@ test("Diff webviews load assets from the extension installation", async t => {
   }
 });
 
-test("Open changes offers exactly four choices in order and retains the Working anchor", async t => {
+test("Open changes offers a loaded previous revision, file and configuration actions, then retains the Working anchor", async t => {
   const { host, vscode } = setup(t); await host.open();
   assert.deepEqual(host.calls.find(call => call.id === "vscode.openWith").args[2], { viewColumn: vscode.ViewColumn.Active, preview: false });
-  assert.deepEqual(host.picks[0].items.map(item => item.label), fourChoices);
-  assert.equal(host.picks[0].items[0].description, "Last committed model · ccccccc");
+  const choices = host.picks[0].items;
+  assert.deepEqual(choices.slice(0, baselineActions.length).map(item => item.label), baselineActions);
+  assert.equal(choices[0].description, "Last committed model · ccccccc");
+  assert.ok(choices.some(item => item.mode === "revision" && item.revision.hash === commits.opened), "recent commits are rows in the same picker");
+  assert.ok(choices.some(item => item.mode === "ref" && item.label === "release"), "branches and tags are rows in the same picker");
   assert.deepEqual(host.captures[0].resource.before, historical(commits.head, "main.mod", "HEAD"));
   assert.deepEqual(host.captures[0].resource.after, working()); assert.deepEqual(host.captures[0].resource.anchor, working());
   assert.equal(host.last().status, "ready"); assert.equal(host.viewType, changesViewType);
@@ -43,9 +47,11 @@ test("Open changes offers exactly four choices in order and retains the Working 
 
 test("unavailable Git keeps all choices visible and file comparison uses selected Before and anchored After", async t => {
   const { host } = setup(t); host.gitUnavailable = true; host.pick = items => items.find(item => item.mode === "file");
-  await host.open(); const choices = host.picks[0].items;
-  assert.deepEqual(choices.map(item => item.label), fourChoices); assert.deepEqual(choices.map(item => item.available), [false, false, false, true]);
-  assert.match(choices[0].description, /Git is unavailable/); assert.deepEqual(host.captures[0].resource.before, working(baselineUri));
+  await host.open(); const choices = host.picks[0]?.items;
+  assert.ok(choices, JSON.stringify({ picks: host.picks.length, failures: host.failures, notifications: host.notifications }));
+  assert.ok(choices.some(item => item.label === "With .mod file…")); assert.ok(choices.some(item => item.label === "With config…"));
+  assert.ok(choices.some(item => /Git revisions unavailable/.test(item.label)), "unavailable Git is explained without hiding file/config options");
+  assert.deepEqual(host.captures[0].resource.before, working(baselineUri));
   assert.deepEqual(host.captures[0].resource.after, working()); assert.match(host.dialogs[0].title, /Before.*After/);
 });
 
@@ -151,20 +157,54 @@ test("superseded Git preparation cannot display an obsolete picker after a newer
   }
 });
 
-test("superseded baseline and revision-expression pickers receive cancellation and cannot replace the newer anchor", async t => {
+test("superseded baseline and typed-revision pickers receive cancellation and cannot replace the newer anchor", async t => {
   for (const operation of ["baseline", "expression"]) {
     const { host } = createHost(); host.install(); t.after(() => host.registration.dispose()); const pending = deferred(); let older;
     if (operation === "baseline") host.pick = (items, _options, cancel) => { older = { cancel, value: items.find(item => item.mode === "previous") }; return pending.promise; };
-    else {
-      host.pick = items => items.find(item => item.mode === "revision") ?? items.find(item => item.action === "enter");
-      host.input = (_options, cancel) => { older = { cancel, value: "HEAD~1" }; return pending.promise; };
-    }
+    else { host.baselineValue = "HEAD~1"; host.pick = (items, _options, cancel) => { const value = items.find(item => item.mode === "expression"); if (value) older = { cancel, value }; return pending.promise; }; }
     const obsolete = host.open(); await flush(); assert.ok(older, operation);
-    const selected = Uri.joinPath(rootUri, "new-anchor.mod"); host.editor.document = host.document(selected); host.input = undefined; host.pick = items => items.find(item => item.mode === "file") ?? items[0];
+    const selected = Uri.joinPath(rootUri, "new-anchor.mod"); host.editor.document = host.document(selected); host.baselineValue = undefined; host.pick = items => items.find(item => item.mode === "file") ?? items.find(item => item.mode === "previous");
     await host.open(); assert.equal(older.cancel.isCancellationRequested, true); const pickCount = host.picks.length;
     pending.resolve(older.value); await obsolete; await flush();
     assert.equal(host.picks.length, pickCount); assert.equal(host.captures.length, 1); assert.deepEqual(host.panels[0].document.resource.after, working(selected));
   }
+});
+
+test("baseline picker cancels pending repository discovery on hide or file choice, but keeps typed revisions alive", async t => {
+  for (const closeMode of ["hide", "file"]) {
+    const { host, git } = createHost(); host.install(); t.after(() => host.registration.dispose());
+    const pendingRepository = deferred(); let discoverySignal;
+    git.repositoryFor = (_uri, signal) => { discoverySignal = signal; return pendingRepository.promise; };
+    const opening = host.open(); await flush();
+    const picker = host.nativePickers.at(-1)?.picker;
+    assert.ok(picker, "native baseline picker is visible while Git discovery is pending");
+    assert.ok(discoverySignal && !discoverySignal.aborted);
+    if (closeMode === "hide") picker.hide();
+    else picker.accept(picker.items.find(item => item.mode === "file"));
+    await flush();
+    assert.equal(discoverySignal.aborted, true, `${closeMode} ends pending repository discovery`);
+    pendingRepository.resolve({ rootUri }); await opening; await flush();
+    if (closeMode === "file") assert.deepEqual(host.captures[0].resource.before, working(baselineUri));
+    else assert.equal(host.captures.length, 0);
+  }
+
+  const { host, git } = createHost(); host.install(); t.after(() => host.registration.dispose());
+  const pendingRepository = deferred(); let discoverySignal;
+  git.repositoryFor = (_uri, signal) => { discoverySignal = signal; return pendingRepository.promise; };
+  const opening = host.open(); await flush();
+  const picker = host.nativePickers.at(-1)?.picker;
+  assert.ok(picker, "native baseline picker is visible while Git discovery is pending");
+  picker.value = "HEAD~1";
+  const expression = picker.items.find(item => item.mode === "expression");
+  assert.ok(expression, "typed revision is offered before repository discovery completes");
+  picker.accept(expression);
+  await flush();
+  assert.equal(discoverySignal.aborted, false, "accepting a typed revision keeps required repository discovery alive");
+  pendingRepository.resolve({ rootUri });
+  await opening; await flush();
+  assert.equal(discoverySignal.aborted, true, "discovery signal is cleaned up after repository resolution");
+  assert.equal(host.captures.length, 1);
+  assert.equal(host.captures[0].resource.before.commit, commits.opened, "HEAD~1 resolves to the fixture's opened commit");
 });
 
 test("superseded unknown-source recovery and historical owner choices cannot continue after newer explicit selection", async t => {
@@ -225,15 +265,19 @@ test("Swap opens a reversed resource while Change comparison restores baseline-t
   assert.deepEqual(changed.after, original.anchor); assert.deepEqual(changed.before, working(baselineUri)); assert.equal(panel.disposed, false);
 });
 
-test("revision picker loads bounded pages, accepts an explicit expression, and branch groups preserve the anchor", async t => {
+test("baseline picker loads bounded pages, accepts a typed expression without another input, and exposes branch/tag rows", async t => {
   const { host, git } = setup(t); let pages = 0;
   git.history = async (_repository, cursor) => { pages++; return cursor ? { commits: [{ hash: commits.old, requested_ref: commits.old, message: "old include-only commit", commitDate: new Date("2026-10-01") }] } : { commits: [{ hash: commits.opened, requested_ref: commits.opened, message: "recent include-only commit", commitDate: new Date("2026-10-08") }], next: { commits: [commits.head], offset: 1 } }; };
-  let more = true; host.pick = items => items.find(item => item.mode === "revision") ?? (more ? (more = false, items.find(item => item.action === "more")) : items.find(item => item.revision?.hash === commits.old));
+  let more = true; host.pick = items => {
+    if (more && items.some(item => item.action === "more")) { more = false; return items.find(item => item.action === "more"); }
+    return items.find(item => item.mode === "revision" && item.revision?.hash === commits.old);
+  };
   await host.open(); assert.equal(pages, 2); assert.equal(host.captures[0].resource.before.commit, commits.old); assert.deepEqual(host.captures[0].resource.after, working());
-  host.pick = items => items.find(item => item.mode === "revision") ?? items.find(item => item.action === "enter"); host.input = () => "HEAD~1"; await host.open();
+  host.baselineValue = "HEAD~1"; host.pick = items => items.find(item => item.mode === "expression"); await host.open();
+  assert.equal(host.inputs.length, 0, "typing a Git revision does not open a second input box");
   assert.equal(host.panels.at(-1).document.resource.before.requested_ref, "HEAD~1"); assert.equal(host.panels.at(-1).document.resource.before.commit, commits.opened);
-  host.pick = items => items.find(item => item.mode === "ref") ?? items.find(item => item.label === "release"); await host.open();
-  const groups = host.picks.at(-1).items.filter(item => item.kind === -1).map(item => item.label); assert.deepEqual(groups, ["Local branches", "Remote-tracking branches", "Tags"]);
+  host.pick = items => items.find(item => item.mode === "ref" && item.label === "main"); await host.open();
+  assert.equal(host.panels.at(-1).document.resource.before.requested_ref, "main");
   assert.deepEqual(host.panels.at(-1).document.resource.after, working());
 });
 
@@ -452,6 +496,43 @@ test("reference, root text, captured text and Swap failures each show their caus
   }
 });
 
+test("Text diff opens the sole exact captured file directly and keeps unavailable files in a multi-file picker", async t => {
+  const { host } = setup(t);
+  host.capture = (resource, _cancel, history) => {
+    const result = captured(resource, history, host);
+    const beforeKey = result.inputs.before.root_file, afterKey = result.inputs.after.root_file;
+    const changedFile = (pointer, oldKey, newKey, available = true) => ({ pointer, change: "modified", correspondence: "selected_roots",
+      before: { file_key: oldKey, exact_text_available: available }, after: { file_key: newKey, exact_text_available: available } });
+    result.snapshot.sourceChanges = { files: [changedFile("/file/only", beforeKey, afterKey)] };
+    return result;
+  };
+  await host.openSaved(comparison());
+  const baselinePicks = host.picks.length;
+  host.message({ type: "capturedTextDiff", token: host.last().token }); await flush();
+  assert.equal(host.picks.length, baselinePicks, "one total changed file with exact captured text needs no file-selection step");
+  assert.equal(host.calls.filter(call => call.id === "vscode.diff").length, 1);
+
+  host.capture = (resource, _cancel, history) => {
+    const result = captured(resource, history, host);
+    const beforeKey = result.inputs.before.root_file, afterKey = result.inputs.after.root_file;
+    const changedFile = (pointer, oldKey, newKey, available = true) => ({ pointer, change: "modified", correspondence: "selected_roots",
+      before: { file_key: oldKey, exact_text_available: available }, after: { file_key: newKey, exact_text_available: available } });
+    result.snapshot.sourceChanges = { files: [
+      changedFile("/file/available", beforeKey, afterKey),
+      changedFile("/file/unavailable", "missing.data", "missing.data", false),
+    ] };
+    return result;
+  };
+  host.message({ type: "refresh" }); await flush();
+  const priorDiffs = host.calls.filter(call => call.id === "vscode.diff").length;
+  host.pick = items => items.find(item => item.available);
+  host.message({ type: "capturedTextDiff", token: host.last().token }); await flush();
+  const files = host.picks.at(-1).items;
+  assert.equal(files.length, 2, "the picker retains every changed file");
+  assert.ok(files.some(item => /Text diff unavailable/.test(item.description)), "the unavailable row remains visible with its reason");
+  assert.equal(host.calls.filter(call => call.id === "vscode.diff").length, priorDiffs + 1);
+});
+
 test("historical source tabs retain captured bytes after the comparison closes and restore through a fresh provider", async t => {
   const { host } = setup(t); await host.openSaved(comparison(historical(commits.old), historical())); host.source(); await flush();
   const written = host.shown[0].document, provider = host.providers.get(historyScheme), text = written.getText(); host.close(host.panels[0]);
@@ -510,29 +591,31 @@ test("equation selection is part of saved comparison identity and its visible la
   assert.equal(selector({ ...working(), analysis: { equation_selection: { mode: "include", values: [] } } }), false);
 });
 
-test("Compare Analysis prepares both presets without changing the live selection", async t => {
+test("With config fixes the current unsaved configuration as After and chooses one saved Before", async t => {
   const { host, service } = setup(t);
   service.supportsAnalysisConfiguration = true;
   const proof = { schema_version: 1, root_uri: anchorUri.toString(), document_uri: anchorUri.toString(), document_version: null, revision: "current-source",
-    analysis: { state: "selected", selection: { configuration_id: "live", name: "Live policy", preview: false, invocation_scope: "explicit_macro_inputs" }, configuration: {}, selection_generation: 3, include_paths: null, macro_complete: true, model_complete: true, overrides: [] }, sites: [], source_coverage: { complete: true } };
+    analysis: { state: "selected", selection: { configuration_id: "live", name: "Unsaved policy", preview: true, invocation_scope: "explicit_macro_inputs" }, configuration: { defines: [{ name: "N", expression: "2" }] }, selection_generation: 3, include_paths: ["/active"], macro_complete: true, model_complete: true, overrides: [] }, sites: [], source_coverage: { complete: true } };
   service.analysisContext = async () => proof;
   let changes = 0; service.setAnalysisConfiguration = async () => { changes++; };
+  host.savedConfigurations = [{ name: "Policy A", root: "main.mod", analysis: { defines: [{ name: "N", expression: "1" }] }, includePaths: ["chosen/a"], bindings: [] }];
   host.engine = (command, [request]) => {
     assert.equal(command, "dynare/analysisContext"); assert.equal(request.expected_revision, proof.revision);
     return { ...proof, prepared_analysis: request.prepare_analysis, prepared_include_paths: request.include_paths ?? ["/inherited"] };
   };
-  const left = { analysis: { name: "Policy A", defines: [{ name: "N", expression: "1" }] }, include_paths: ["/chosen/a"] };
-  const right = { analysis: {}, include_paths: null };
-  await host.registration.compareAnalysis(anchorUri, left, right);
+  host.pick = items => items.find(item => item.mode === "config") ?? items.find(item => item.label === "Policy A");
+  await host.open();
   assert.equal(changes, 0);
   assert.equal(host.captures.length, 1);
-  assert.deepEqual(host.captures[0].resource.before.analysis, left.analysis);
-  assert.deepEqual(host.captures[0].resource.before.search_paths, ["/chosen/a"]);
-  assert.deepEqual(host.captures[0].resource.after.analysis, {});
-  assert.deepEqual(host.captures[0].resource.after.search_paths, ["/inherited"]);
+  assert.deepEqual(host.captures[0].resource.before.analysis.defines, [{ name: "N", expression: "1" }]);
+  assert.deepEqual(host.captures[0].resource.before.search_paths, [path.resolve(rootUri.fsPath, "chosen/a")]);
+  assert.deepEqual(host.captures[0].resource.after.analysis.defines, [{ name: "N", expression: "2" }]);
+  assert.deepEqual(host.captures[0].resource.after.search_paths, ["/active"]);
   assert.equal(host.last().status, "ready");
   const saved = resourceData(JSON.parse(host.panels[0].document.uri.query));
-  assert.deepEqual(saved.before.analysis, left.analysis);
+  assert.deepEqual(saved.before.analysis.defines, [{ name: "N", expression: "1" }]);
+  assert.deepEqual(saved.after.analysis.defines, [{ name: "N", expression: "2" }]);
+  assert.deepEqual(host.picks[0].items.slice(0, 3).map(item => item.label), ["With previous revision", "With .mod file…", "With config…"]);
 });
 
 test("explicit comparison choices can complete while the live root is incomplete", async t => {

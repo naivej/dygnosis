@@ -22,6 +22,10 @@ interface RawSet {
 interface ActionContext {
   uri: vscode.Uri; version: number; instance: number; diagnostic: vscode.Diagnostic;
 }
+type DiagnosticChoice = vscode.QuickPickItem & {
+  choiceType: "diagnostic"; document: vscode.TextDocument; version: number; diagnostic: vscode.Diagnostic;
+};
+type ManualCodeChoice = vscode.QuickPickItem & { choiceType: "manual" };
 interface PendingEdit {
   edit: vscode.WorkspaceEdit; versions: Map<string, number | null>; instance: number; folder: number;
   documentUri: string; documentVersion: number; diagnostics: vscode.Diagnostic[];
@@ -123,6 +127,8 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     vscode.workspace.textDocuments.find(document => document.uri.toString() === uri.toString());
   const versionFor = (uri: vscode.Uri): number | null => documentFor(uri)?.version ?? null;
   const visible = (items: vscode.Diagnostic[]): vscode.Diagnostic[] => items.filter(diagnostic => !hiddenCodes.has(diagnosticCode(diagnostic) ?? ""));
+  const containsPosition = (range: vscode.Range, position: vscode.Position): boolean =>
+    range.start.isBeforeOrEqual(position) && position.isBeforeOrEqual(range.end);
   const updateStatus = (): void => {
     if (hiddenCodes.size === 0) { status.hide(); return; }
     status.text = `$(eye-closed) ${hiddenCodes.size} hidden ${hiddenCodes.size === 1 ? "check" : "checks"}`;
@@ -383,13 +389,69 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
       const generation = folderGeneration, requestInstance = service.currentInstance, input = inputGeneration;
       const current = (): boolean => !disposed && generation === folderGeneration && requestInstance === service.currentInstance &&
         input === inputGeneration && (!saved || !!savedAction(argument));
-      const code = saved ? diagnosticCode(saved.diagnostic) : (await vscode.window.showInputBox({ title: "Dygnosis: Explain a check", prompt: "Enter a diagnostic code, for example W010" }))?.trim();
+      type InferredDiagnostic = { document: vscode.TextDocument; version: number; diagnostic: vscode.Diagnostic };
+      let inferred: InferredDiagnostic | undefined;
+      let paletteSourceCurrent: (() => boolean) | undefined;
+      const stillCurrent = (candidate: InferredDiagnostic | undefined): boolean => {
+        if (!candidate) return current();
+        if (!current() || candidate.document.version !== candidate.version ||
+          vscode.window.activeTextEditor?.document !== candidate.document) return false;
+        const raw = currentRaw(candidate.document.uri);
+        return raw?.version === candidate.version && raw.items.some(diagnostic => sameDiagnostic(diagnostic, candidate.diagnostic) &&
+          diagnostic.source === "dygnosis" && !hiddenCodes.has(diagnosticCode(diagnostic) ?? ""));
+      };
+      let code: string | undefined;
+      if (saved) code = diagnosticCode(saved.diagnostic);
+      else {
+        const editor = vscode.window.activeTextEditor;
+        if (editor && isAnalysisDocument(editor.document)) {
+          const document = editor.document, version = document.version, raw = currentRaw(document.uri);
+          const explainEnabled = booleanSetting("diagnosticActions.explain", document.uri, true, service.log);
+          const candidates = explainEnabled && raw?.version === version
+            ? raw.items.filter(diagnostic => diagnostic.source === "dygnosis" && diagnosticCode(diagnostic) &&
+              !hiddenCodes.has(diagnosticCode(diagnostic) ?? "") && containsPosition(diagnostic.range, editor.selection.active))
+            : [];
+          const offered: DiagnosticChoice[] = candidates.map(diagnostic => ({
+            choiceType: "diagnostic",
+            label: diagnosticCode(diagnostic)!, description: diagnostic.message,
+            diagnostic, document, version,
+          }));
+          if (offered.length > 0) paletteSourceCurrent = () => current() && document.version === version &&
+            vscode.window.activeTextEditor?.document === document && currentRaw(document.uri)?.version === version &&
+            offered.every(item => currentRaw(document.uri)?.items.some(diagnostic => sameDiagnostic(diagnostic, item.diagnostic) &&
+              diagnostic.source === "dygnosis" && !hiddenCodes.has(diagnosticCode(diagnostic) ?? "")));
+          if (offered.length === 1) {
+            const candidate: InferredDiagnostic = { document, version, diagnostic: offered[0].diagnostic };
+            inferred = candidate;
+            code = diagnosticCode(candidate.diagnostic);
+          } else if (offered.length > 1) {
+            const enterCode: ManualCodeChoice = { choiceType: "manual", label: "Enter code…", description: "Explain a diagnostic code manually" };
+            const selected = await vscode.window.showQuickPick<DiagnosticChoice | ManualCodeChoice>([...offered, enterCode], {
+              title: "Dygnosis: Explain a check", placeHolder: "Choose the check at the caret",
+            });
+            if (!selected) return;
+            if (selected.choiceType === "diagnostic") {
+              const candidate: InferredDiagnostic = { document: selected.document, version: selected.version, diagnostic: selected.diagnostic };
+              if (!stillCurrent(candidate)) refuse("The diagnostic, source inputs, or server changed. Request Explain again.");
+              inferred = candidate;
+              code = diagnosticCode(candidate.diagnostic);
+            } else {
+              if (!current() || !paletteSourceCurrent?.()) refuse("The diagnostic, source inputs, or server changed. Request Explain again.");
+            }
+          }
+        }
+        if (!code) {
+          if (!current() || (paletteSourceCurrent && !paletteSourceCurrent())) refuse("The diagnostic, source inputs, or server changed. Request Explain again.");
+          code = (await vscode.window.showInputBox({ title: "Dygnosis: Explain a check", prompt: "Enter a diagnostic code, for example W010" }))?.trim();
+        }
+      }
       if (!code) return;
-      if (!current()) { if (!disposed) refuse("The diagnostic, source inputs, or server changed. Request Explain again."); return; }
-        const markdown = await service.execute("dynare/explainDiagnostic", [code]);
-        if (!current()) { if (!disposed) refuse("The diagnostic, source inputs, or server changed. Request Explain again."); return; }
-        if (typeof markdown !== "string") throw new Error("The selected engine returned no diagnostic explanation. Use the bundled binary or update dynare.serverPath.");
-        await vscode.commands.executeCommand("dygnosis.openHelp", { code, markdown: safeExplanation(markdown), engineVersion: service.client?.initializeResult?.serverInfo?.version });
+      const explanationCurrent = (): boolean => stillCurrent(inferred) && (!paletteSourceCurrent || paletteSourceCurrent());
+      if (!explanationCurrent()) { if (!disposed) refuse("The diagnostic, source inputs, or server changed. Request Explain again."); return; }
+      const markdown = await service.execute("dynare/explainDiagnostic", [code]);
+      if (!explanationCurrent()) { if (!disposed) refuse("The diagnostic, source inputs, or server changed. Request Explain again."); return; }
+      if (typeof markdown !== "string") throw new Error("The selected engine returned no diagnostic explanation. Use the bundled binary or update dynare.serverPath.");
+      await vscode.commands.executeCommand("dygnosis.openHelp", { code, markdown: safeExplanation(markdown), engineVersion: service.client?.initializeResult?.serverInfo?.version });
     }, () => !disposed)),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       ++folderGeneration;

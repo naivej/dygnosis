@@ -53,8 +53,13 @@ const vscode = {
   CodeActionTriggerKind: { Invoke: 1, Automatic: 2 },
   window: {
     createStatusBarItem: () => { const item = { shown: false, show() { this.shown = true; }, hide() { this.shown = false; }, dispose() { this.shown = false; this.disposed = true; } }; host.status.push(item); return item; },
-    showQuickPick: items => Promise.resolve(items.find(item => item.code === host.selection) ?? items[0]),
-    showInputBox: () => Promise.resolve(host.input),
+    get activeTextEditor() { return host.activeEditor; },
+    showQuickPick: (items, options) => {
+      host.quickPicks.push({ items, options });
+      if (host.pick) return Promise.resolve(host.pick(items, options));
+      return Promise.resolve(items.find(item => item.code === host.selection || item.label === host.selection) ?? items[0]);
+    },
+    showInputBox: options => { host.inputBoxes.push(options); return host.inputPromise ?? Promise.resolve(host.input); },
     showInformationMessage: message => { host.messages.push(message); return Promise.resolve(); },
   },
   commands: {
@@ -95,7 +100,7 @@ const c2p = require("vscode-languageclient/lib/common/codeConverter").createConv
 Module._load = originalLoad;
 const token = { isCancellationRequested: false };
 function reset() {
-  host = { messages: [], status: [], commands: new Map(), executed: [], providers: new Map(), documents: [], settings: {}, folder: new Emitter(), close: new Emitter(), changed: new Emitter(), opened: [], refreshes: 0, calls: [], logs: [], progress: new Map(), applied: [] };
+  host = { messages: [], status: [], commands: new Map(), executed: [], providers: new Map(), documents: [], settings: {}, folder: new Emitter(), close: new Emitter(), changed: new Emitter(), opened: [], refreshes: 0, calls: [], logs: [], progress: new Map(), applied: [], quickPicks: [], inputBoxes: [] };
   const provider = { onDidChangeDiagnosticsEmitter: { fire() { ++host.refreshes; } } };
   host.invalidated = new Emitter();
   const service = { middleware: {}, currentInstance: 1, onDidChange: host.changed.event, onDidInvalidate: host.invalidated.event,
@@ -112,6 +117,7 @@ function reset() {
   return service;
 }
 function document(name = "a.mod") { const doc = { uri: Uri.parse(`file:///workspace/${name}`), version: 1, languageId: "dynare" }; host.documents.push(doc); return doc; }
+function editor(document, line = 0, character = 2) { host.activeEditor = { document, selection: { active: new Position(line, character) } }; }
 function wire(code = "W010", root = "file:///workspace/a.mod", severity = 2) {
   return { range: { start: { line: 0, character: 2 }, end: { line: 0, character: 3 } }, message: `Check ${code}`, source: "dygnosis", code,
     severity, data: { root, input_revision: "checked-1", related_context: [{ origin_frames: [{ kind: "macro", value: "1" }] }] },
@@ -503,6 +509,80 @@ test("Explain requests backend Markdown, opens exact-code Help, and strips comma
   registration.dispose();
 });
 
+test("palette Explain uses one current visible diagnostic at the caret and respects the setting", async () => {
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document(), diagnostic = note();
+  push(service, doc, [diagnostic]); editor(doc);
+  await command("dygnosis.explainDiagnostic");
+  assert.deepEqual(host.calls[0].args, ["W010"]);
+  assert.equal(host.quickPicks.length, 0);
+  assert.equal(host.inputBoxes.length, 0);
+
+  host.calls.length = 0;
+  host.settings[doc.uri.toString()] = { "diagnosticActions.explain": false };
+  host.input = "E001";
+  await command("dygnosis.explainDiagnostic");
+  assert.deepEqual(host.calls[0].args, ["E001"]);
+  assert.equal(host.inputBoxes.length, 1);
+  registration.dispose();
+});
+
+test("overlapping palette diagnostics require a choice, offer manual code, and allow cancellation", async () => {
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document();
+  const first = note("W010"), second = note("E001"); push(service, doc, [first, second]); editor(doc);
+  host.selection = "E001";
+  await command("dygnosis.explainDiagnostic");
+  assert.deepEqual(host.calls[0].args, ["E001"]);
+  assert.deepEqual(host.quickPicks[0].items.slice(0, 2).map(item => [item.label, item.description]), [["W010", "Check W010"], ["E001", "Check E001"]]);
+  assert.equal(host.quickPicks[0].items.at(-1).label, "Enter code…");
+
+  host.calls.length = 0; host.selection = undefined; host.input = "I211";
+  host.pick = items => items.at(-1);
+  await command("dygnosis.explainDiagnostic");
+  assert.deepEqual(host.calls[0].args, ["I211"]);
+  assert.equal(host.inputBoxes.length, 1);
+
+  host.calls.length = 0; host.pick = () => undefined;
+  await command("dygnosis.explainDiagnostic");
+  assert.equal(host.calls.length, 0);
+  assert.equal(host.inputBoxes.length, 1);
+  registration.dispose();
+});
+
+test("palette Explain ignores hidden or stale diagnostics and refuses a late stale picker choice", async () => {
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document(), diagnostic = note();
+  push(service, doc, [diagnostic]); editor(doc);
+  await hide(service, doc, diagnostic);
+  host.input = "E001";
+  await command("dygnosis.explainDiagnostic");
+  assert.deepEqual(host.calls[0].args, ["E001"]);
+  assert.equal(host.quickPicks.length, 0);
+
+  host.calls.length = 0; host.inputBoxes.length = 0; host.input = "E001";
+  command("dygnosis.showAllDiagnostics");
+  host.settings[doc.uri.toString()] = { "diagnosticActions.explain": true };
+  const second = note("E001"); push(service, doc, [diagnostic, second]);
+  const waiting = deferred(); host.pick = () => waiting.promise;
+  const pending = command("dygnosis.explainDiagnostic");
+  await new Promise(resolve => setImmediate(resolve));
+  ++doc.version;
+  waiting.resolve(host.quickPicks[0].items[0]);
+  await pending;
+  assert.equal(host.calls.length, 0);
+  assert.equal(host.inputBoxes.length, 0, "a stale selection must not become manual code entry");
+  assert.match(host.messages.at(-1), /source inputs, or server changed/);
+
+  push(service, doc, [diagnostic, second]);
+  const fallbackWaiting = deferred(); host.pick = () => fallbackWaiting.promise;
+  const fallbackPending = command("dygnosis.explainDiagnostic");
+  await new Promise(resolve => setImmediate(resolve));
+  ++doc.version;
+  fallbackWaiting.resolve(host.quickPicks.at(-1).items.at(-1));
+  await fallbackPending;
+  assert.equal(host.calls.length, 0);
+  assert.equal(host.inputBoxes.length, 0, "a stale diagnostic set must not fall through to manual code entry");
+  registration.dispose();
+});
+
 test("Markdown destinations are normalized by the parser; safe formatting and literal code survive", () => {
   const attacks = [
     "[Run](command\\:danger)",
@@ -723,4 +803,22 @@ test("palette Explain starts the first engine and rejects a restart during its b
   await result;
   assert.deepEqual(host.executed, []); assert.deepEqual(host.opened, []);
   registration.dispose();
+});
+
+test("palette Explain drops a pending reply when its inferred diagnostic is hidden or replaced", async () => {
+  for (const change of ["hidden", "replaced"]) {
+    const service = reset(), registration = registerDiagnosticActions(service), doc = document(), diagnostic = note();
+    push(service, doc, [diagnostic]); editor(doc);
+    const reply = deferred(), executed = []; service.execute = (command, args) => { executed.push({ command, args }); return reply.promise; };
+    const pending = command("dygnosis.explainDiagnostic");
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(executed, [{ command: "dynare/explainDiagnostic", args: ["W010"] }], "palette inferred the visible diagnostic");
+    if (change === "hidden") await hide(service, doc, diagnostic);
+    else { const replacement = note("E001"); push(service, doc, [replacement]); }
+    reply.resolve("# Explanation"); await pending;
+    assert.deepEqual(host.executed, [], `${change} diagnostic must not open Help after the explanation reply`);
+    assert.equal(host.opened.length, 0);
+    assert.match(host.messages.at(-1), /diagnostic, source inputs, or server changed/, "the rejected palette action explains why it stopped");
+    registration.dispose();
+  }
 });

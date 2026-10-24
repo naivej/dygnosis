@@ -520,8 +520,15 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
     const opening = vscode.commands.executeCommand("dygnosis.openChanges");
     await new Promise(resolve => setTimeout(resolve, 800));
     if (process.env.DYGNOSIS_HOST_CDP_PORT) await hostDevtools(async send => {
-      const response = await send("Runtime.evaluate", { expression: 'JSON.stringify(Array.from(document.querySelectorAll(".quick-input-list .label-name")).filter(row => row.getClientRects().length > 0).map(row => row.textContent))', returnByValue: true });
-      assert.deepEqual(JSON.parse(response.result.value), ["With previous revision", "With revision…", "With branch or tag…", "With .mod file…"]);
+      const response = await send("Runtime.evaluate", { expression: 'JSON.stringify({labels:Array.from(document.querySelectorAll(".quick-input-list .label-name")).filter(row => row.getClientRects().length > 0).map(row => row.textContent),placeholder:document.querySelector(".quick-input-widget input")?.placeholder})', returnByValue: true });
+      const picker = JSON.parse(response.result.value);
+      assert.equal(picker.placeholder, "Choose Before, or type a local Git revision");
+      assert.equal(picker.labels[0], "With previous revision");
+      assert.ok(picker.labels.includes("With .mod file…"));
+      assert.ok(picker.labels.includes("With config…"));
+      assert.ok(picker.labels.some(label => /^[0-9a-f]{7}$/.test(label)), "the picker shows local commit rows");
+      assert.equal(picker.labels.includes("With revision…"), false);
+      assert.equal(picker.labels.includes("With branch or tag…"), false);
     });
     await historyScreenshot("picker", evidence);
     await vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem"); await opening;

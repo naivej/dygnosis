@@ -69,3 +69,41 @@ test("equation navigation manifest replaces old commands and removes the model p
     assert.equal(contributes.menus.commandPalette.some(row => row.command === command && row.when === "dygnosis.analysisDocument"), true, command);
   }
 });
+test("editor context commands share one ordered Dygnosis block and retain their contexts", () => {
+  // Guards split menu groups, lost context clauses/shortcuts, missing Skip, or restored Compare command.
+  const { contributes } = require("../package.json");
+  const commands = contributes.commands;
+  const context = contributes.menus["editor/context"].filter(row => row.command.startsWith("dygnosis."));
+  const expected = [
+    ["dygnosis.renameSymbol", "dygnosis.analysisDocument && !editorReadonly"],
+    ["dygnosis.showEffectiveModel", "dygnosis.modelContext && dygnosis.contextActions"],
+    ["dygnosis.openChanges", "dygnosis.changesContext && dygnosis.contextActions"],
+    ["dygnosis.selectAnalysisConfiguration", "(dygnosis.analysisDocument && dygnosis.contextActions) || (dygnosis.effectivePreview && dygnosis.previewContextActions)"],
+    ["dygnosis.overrideMacroDefinition", "dygnosis.analysisDocument && dygnosis.contextActions"],
+    ["dygnosis.skipMacroDefinition", "dygnosis.analysisDocument && dygnosis.contextActions"],
+    ["dygnosis.previewMacroBranch", "dygnosis.analysisDocument && dygnosis.contextActions"],
+    ["dygnosis.goToSourceCandidate", "dygnosis.analysisDocument && dygnosis.contextActions"],
+    ["dygnosis.goToWrittenSource", "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions"],
+    ["dygnosis.refreshEffectiveModel", "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions"],
+    ["dygnosis.openHelp", "resourceScheme == dygnosis-effective"],
+  ];
+  assert.deepEqual(context.map(row => row.command), expected.map(([command]) => command));
+  assert.deepEqual(context.map(row => row.group), expected.map((_, index) => `dygnosis@${index + 1}`));
+  assert.deepEqual(context.map(row => row.when), expected.map(([, when]) => when));
+
+  const skip = commands.find(row => row.command === "dygnosis.skipMacroDefinition");
+  assert.deepEqual({ title: skip?.title, category: skip?.category, enablement: skip?.enablement }, {
+    title: "Skip Macro Definition for Analysis", category: "Dynare", enablement: "dygnosis.analysisDocument",
+  });
+  assert.equal(commands.some(row => row.command === "dygnosis.compareAnalysisConfigurations"), false);
+  assert.equal(Object.values(contributes.menus).flat().some(row => row.command === "dygnosis.compareAnalysisConfigurations"), false);
+
+  const bindings = contributes.keybindings;
+  assert.deepEqual(bindings.filter(row => ["dygnosis.renameSymbol", "dygnosis.goToWrittenSource", "dygnosis.refreshEffectiveModel"].includes(row.command)), [
+    { command: "dygnosis.renameSymbol", key: "f2", when: "dygnosis.analysisDocument && editorTextFocus && !editorReadonly" },
+    { command: "dygnosis.goToWrittenSource", key: "ctrl+alt+g", mac: "cmd+alt+g", when: "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && editorTextFocus && dygnosis.previewWrittenSource" },
+    { command: "dygnosis.refreshEffectiveModel", key: "ctrl+alt+r", mac: "cmd+alt+r", when: "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && editorTextFocus" },
+  ]);
+  assert.equal(contributes.menus["view/item/context"].some(row => row.command === "dygnosis.ignoreWorkspaceFolder"), true);
+  assert.equal(contributes.menus["scm/resourceState/context"].some(row => row.command === "dygnosis.openChanges"), true);
+});

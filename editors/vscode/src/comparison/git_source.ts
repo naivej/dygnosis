@@ -89,6 +89,7 @@ export class GitSources {
   readonly limits: GitLimits;
   private readonly manifests = new Map<string, { value: Record<string, TreeEntry>; bytes: number }>();
   private readonly blobs = new Map<string, { text: string; bytes: number }>();
+  private pendingRefs = new WeakMap<GitRepository, { signal?: AbortSignal; result: Promise<GitRef[]> }>();
   private cacheSize = 0;
   private manifestSize = 0;
 
@@ -196,7 +197,7 @@ export class GitSources {
   }
 
   private async refTips(repository: GitRepository, signal?: AbortSignal): Promise<string[]> {
-    const values = await repository.getRefs({ count: this.limits.refs, sort: "alphabetically" });
+    const values = await this.readRefs(repository, signal);
     cancelled(signal);
     const commits = new Set<string>();
     try { commits.add((await this.resolve(repository, "HEAD", signal)).hash); }
@@ -212,7 +213,7 @@ export class GitSources {
   }
 
   async refs(repository: GitRepository, signal?: AbortSignal): Promise<RevisionRef[]> {
-    const refs = await repository.getRefs({ count: this.limits.refs, sort: "alphabetically" });
+    const refs = await this.readRefs(repository, signal);
     cancelled(signal);
     const result: RevisionRef[] = [];
     for (const ref of refs.slice(0, this.limits.refs)) {
@@ -221,6 +222,17 @@ export class GitSources {
       catch (error) { if (error instanceof GitSourceError && error.code === "cancelled") throw error; }
     }
     return result.sort((a, b) => ["branch", "remote", "tag"].indexOf(a.kind) - ["branch", "remote", "tag"].indexOf(b.kind) || a.name.localeCompare(b.name));
+  }
+
+  private readRefs(repository: GitRepository, signal?: AbortSignal): Promise<GitRef[]> {
+    cancelled(signal);
+    const current = this.pendingRefs.get(repository);
+    if (current && current.signal === signal) return current.result;
+    const pending = { signal, result: repository.getRefs({ count: this.limits.refs, sort: "alphabetically" }) };
+    this.pendingRefs.set(repository, pending);
+    const release = (): void => { if (this.pendingRefs.get(repository) === pending) this.pendingRefs.delete(repository); };
+    void pending.result.then(release, release);
+    return pending.result;
   }
 
   async capture(repository: GitRepository, commit: PinnedCommit, rootFile: string, signal?: AbortSignal): Promise<HistoricalCapture> {
@@ -266,7 +278,7 @@ export class GitSources {
   cacheStats(): { blobEntries: number; blobBytes: number; manifestEntries: number; manifestBytes: number } {
     return { blobEntries: this.blobs.size, blobBytes: this.cacheSize, manifestEntries: this.manifests.size, manifestBytes: this.manifestSize };
   }
-  clear(): void { this.blobs.clear(); this.manifests.clear(); this.cacheSize = 0; this.manifestSize = 0; }
+  clear(): void { this.blobs.clear(); this.manifests.clear(); this.pendingRefs = new WeakMap(); this.cacheSize = 0; this.manifestSize = 0; }
 
   async provenance(document: Pick<vscode.TextDocument, "uri" | "getText">, signal?: AbortSignal): Promise<{ repository: GitRepository; commit: PinnedCommit; file_key: string; capture: HistoricalCapture }> {
     const decoded = decodeGitDocument(document.uri);

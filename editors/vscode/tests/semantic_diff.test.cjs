@@ -1081,7 +1081,7 @@ test("field limits do not mark budget-unavailable values as added or removed", (
   env.render(snapshot); assert.match(env.elements.results.textContent, /This value could not be compared/);
   assert.equal(descendants(env.elements.results).some(e => e.className === "token added" || e.className === "token removed"), false);
 });
-test("reference and captured-file picker actions use exact retained text and stale guards", async t => {
+test("reference actions and single-file captured diffs use exact retained text and stale guards", async t => {
   const { host, service, vscode } = createHost(); host.install(); t.after(() => host.registration.dispose());
   host.capture = (resource, cancel, history) => {
     const result = captured(resource, history, host, service.currentInstance), row = result.snapshot.rows[0];
@@ -1091,15 +1091,16 @@ test("reference and captured-file picker actions use exact retained text and sta
     return result;
   };
   await host.open();
+  const initialPickCount = host.picks.length;
   host.message({ type: "openReference", token: host.last().token, pointer: "/semantic/references/0", side: "after" }); await flush();
   assert.equal(host.shown.length, 1);
   host.message({ type: "capturedTextDiff", token: host.last().token }); await flush();
   const diff = host.calls.findLast(call => call.id === "vscode.diff"); assert.ok(diff);
   assert.equal(diff.args[2], "main.mod (Working Tree)");
-  assert.equal(host.picks.at(-1).items[0].label, "main.mod");
+  assert.equal(host.picks.length, initialPickCount, "one exact changed file opens without an additional picker");
   assert.equal(diff.args[0].scheme, "dygnosis-history"); assert.equal(diff.args[1].scheme, "dygnosis-captured");
   assert.equal((await vscode.workspace.openTextDocument(diff.args[1])).getText(), host.panels[0].document.result.texts.after[host.panels[0].document.result.inputs.after.root_file]);
-  assert.match(host.picks.at(-1).options.placeHolder, /captured file/);
+  assert.equal(host.calls.filter(call => call.id === "vscode.diff").length, 1);
   const count = host.calls.filter(call => call.id === "vscode.diff").length;
   host.changed.fire({ reason: "lifecycle" }); host.message({ type: "capturedTextDiff", token: host.last().token }); await flush();
   assert.equal(host.calls.filter(call => call.id === "vscode.diff").length, count);
@@ -1110,7 +1111,7 @@ test("a captured-file picker cannot open an old capture after refresh or engine 
     const { host, service } = createHost(); host.install(); t.after(() => host.registration.dispose());
     host.capture = (resource, cancel, history) => {
       const result = captured(resource, history, host, service.currentInstance);
-      result.snapshot.sourceChanges = { files: [{ pointer: "/source_changes/files/0", change: "added", correspondence: "unpaired", after: { input_id: "after", file_key: result.inputs.after.root_file, exact_text_available: true } }] };
+      result.snapshot.sourceChanges = { files: [result.inputs.after.file_keys[0], result.inputs.after.file_keys[1]].map((file_key, index) => ({ pointer: `/source_changes/files/${index}`, change: "added", correspondence: "unpaired", after: { input_id: "after", file_key, exact_text_available: true } })) };
       return result;
     };
     await host.open(); const pending = deferred(); let selected;

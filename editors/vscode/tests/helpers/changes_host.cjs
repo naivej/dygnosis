@@ -18,7 +18,13 @@ class Emitter {
 }
 class CancellationTokenSource {
   changed = new Emitter();
-  token = { isCancellationRequested: false, onCancellationRequested: this.changed.event };
+  token;
+  constructor() {
+    const source = this;
+    this.token = { isCancellationRequested: false, onCancellationRequested(listener) { CancellationTokenSource.lastSubscribed = this; return source.changed.event(listener); } };
+    CancellationTokenSource.latest = this;
+    CancellationTokenSource.lastSubscribed = undefined;
+  }
   cancel() { if (!this.token.isCancellationRequested) { this.token.isCancellationRequested = true; this.changed.fire(); } }
   dispose() { this.changed.dispose(); }
 }
@@ -89,7 +95,8 @@ function snapshotResponse(request, changed = true) {
 }
 
 function load(name, vscode, injections = {}) {
-  for (const moduleName of ["changes_editor", "snapshot_compare", "history_sources", "captured_text", "diff", "settings", "extension", "refusal"]) delete require.cache[require.resolve(compiledModule(moduleName))];
+  for (const moduleName of ["changes_editor", "analysis_configuration", "snapshot_compare", "history_sources", "captured_text", "diff", "settings", "extension", "refusal"]) delete require.cache[require.resolve(compiledModule(moduleName))];
+  delete require.cache[require.resolve(path.join(path.dirname(compiledModule("changes_editor")), "baseline_picker.js"))];
   const originalLoad = Module._load;
   Module._load = function(id, ...args) {
     if (id === "vscode") return vscode;
@@ -100,7 +107,7 @@ function load(name, vscode, injections = {}) {
   try { return require(compiledModule(name)); } finally { Module._load = originalLoad; }
 }
 function createHost() {
-  const host = { commands: new Map(), calls: [], providers: new Map(), texts: new Map(), custom: new Map(), panels: [], picks: [], dialogs: [], inputs: [], progress: [], shown: [], logs: [], failures: [], notifications: [], watchers: [], settings: new Map(), scopes: [], captures: [], revalidations: [], owners: [], changed: new Emitter(), modelUpdated: new Emitter(), configChanged: new Emitter(), closedText: new Emitter(), editorChanged: new Emitter(), tabsChanged: new Emitter(), tabGroupsChanged: new Emitter(), editor: undefined, activeTab: undefined };
+  const host = { commands: new Map(), calls: [], providers: new Map(), texts: new Map(), custom: new Map(), panels: [], picks: [], nativePickers: [], dialogs: [], inputs: [], progress: [], shown: [], logs: [], failures: [], notifications: [], watchers: [], settings: new Map(), savedConfigurations: [], scopes: [], captures: [], revalidations: [], owners: [], changed: new Emitter(), modelUpdated: new Emitter(), configChanged: new Emitter(), closedText: new Emitter(), editorChanged: new Emitter(), tabsChanged: new Emitter(), tabGroupsChanged: new Emitter(), editor: undefined, activeTab: undefined };
   host.document = (uri, text = "var y; model; y=2; end;\n") => {
     const found = host.texts.get(uri.toString()); if (found) { found.text = text; return found; }
     const document = { uri, version: 1, languageId: "dynare", isClosed: false, text, getText() { return this.text; } }; host.texts.set(uri.toString(), document); return document;
@@ -114,6 +121,45 @@ function createHost() {
     host.panels.push(panel); return panel;
   };
   const token = () => new CancellationTokenSource().token;
+  const createQuickPick = () => {
+    const values = { value: "", items: [], activeItems: [], selectedItems: [], busy: false };
+    const changed = new Emitter(), hidden = new Emitter(), accepted = new Emitter();
+    let shown = false, disposed = false, selectionInFlight = false, initialLoadComplete = false, pickerRecord;
+    const picker = {
+      title: "", placeholder: "", matchOnDescription: false, matchOnDetail: false,
+      get value() { return values.value; }, set value(value) { values.value = value; changed.fire(value); },
+      get items() { return values.items; }, set items(items) { values.items = items; if (pickerRecord) pickerRecord.items = items; },
+      get activeItems() { return values.activeItems; }, set activeItems(items) { values.activeItems = items; },
+      get selectedItems() { return values.selectedItems; }, set selectedItems(items) { values.selectedItems = items; },
+      get busy() { return values.busy; }, set busy(value) {
+        values.busy = value;
+        if (value) initialLoadComplete = true;
+        else if (initialLoadComplete) { initialLoadComplete = false; globalThis.queueMicrotask(choose); }
+      },
+      onDidChangeValue: changed.event, onDidHide: hidden.event, onDidAccept: accepted.event,
+      show() { shown = true; activeToken = CancellationTokenSource.lastSubscribed; pickerRecord = { get items() { return picker.items; }, picker, options: { title: picker.title, placeHolder: picker.placeholder }, cancel: activeToken }; host.picks.push(pickerRecord); host.nativePickers.push(pickerRecord); globalThis.queueMicrotask(choose); },
+      hide() { if (shown) { shown = false; hidden.fire(); } },
+      dispose() { if (disposed) return; disposed = true; changed.dispose(); hidden.dispose(); accepted.dispose(); },
+      accept(item) { values.selectedItems = item ? [item] : []; values.activeItems = item ? [item] : []; accepted.fire(); },
+    };
+    let activeToken;
+    async function choose() {
+      if (!shown || disposed || selectionInFlight || values.busy) return;
+      if (!initialLoadComplete && !pickerRecord) return;
+      selectionInFlight = true;
+      try {
+        if (host.baselineValue !== undefined && !values.value) { const typed = host.baselineValue; host.baselineValue = undefined; picker.value = typed; }
+        const selected = host.pick ? await host.pick(picker.items, { title: picker.title, placeHolder: picker.placeholder }, activeToken) :
+          (values.value ? picker.items.find(item => item.mode === "expression") : undefined) ?? picker.items.find(item => item.mode === "previous" && item.available !== false) ?? picker.items.find(item => item.mode === "file" && item.available !== false) ?? picker.items.find(item => item.mode === "config") ?? picker.items[0];
+        if (!shown || disposed) return;
+        if (!selected) { picker.hide(); return; }
+        picker.accept(selected);
+      } finally { selectionInFlight = false; }
+    }
+    picker._setToken = token => { activeToken = token; };
+    picker.onDidChangeValue(() => { if (shown && !values.busy) globalThis.queueMicrotask(choose); });
+    return picker;
+  };
   const vscode = { Disposable, EventEmitter: Emitter, CancellationTokenSource, Uri, Range, RelativePattern, TabInputCustom, QuickPickItemKind: { Separator: -1 }, ProgressLocation: { Window: 10 }, ViewColumn: { Active: -1, Beside: 2 },
     commands: {
       registerCommand(id, callback) { host.commands.set(id, callback); return new Disposable(() => host.commands.delete(id)); },
@@ -145,7 +191,7 @@ function createHost() {
       getWorkspaceFolder: () => ({ uri: rootUri }), asRelativePath: uri => uri.path,
       getConfiguration(_section, scope) {
         host.scopes.push(scope); const settings = host.settings.get(scope?.uri?.toString()) ?? {};
-        return { get: (key, fallback) => settings[key] ?? fallback, inspect: () => undefined };
+        return { get: (key, fallback) => settings[key] ?? fallback, inspect: key => key === "analysisConfigurations" ? { workspaceFolderValue: host.savedConfigurations } : undefined };
       },
       createFileSystemWatcher(pattern) {
         const change = new Emitter(), create = new Emitter(), remove = new Emitter();
@@ -159,6 +205,7 @@ function createHost() {
       onDidChangeActiveTextEditor: host.editorChanged.event,
       registerCustomEditorProvider(viewType, provider, options) { host.provider = provider; host.providerOptions = options; host.viewType = viewType; return new Disposable(() => { host.provider = undefined; }); },
       async showQuickPick(items, options, cancel) { host.picks.push({ items, options, cancel }); return host.pick ? host.pick(items, options, cancel) : items.find(item => item.mode === "previous") ?? items[0]; },
+      createQuickPick() { return createQuickPick(); },
       async showOpenDialog(options) { host.dialogs.push(options); return host.select ? host.select(options) : [baselineUri]; },
       async showInputBox(options, cancel) { host.inputs.push({ ...options, cancel }); return host.input ? host.input(options, cancel) : "HEAD~1"; },
       showInformationMessage: async message => { host.notifications.push(message); },

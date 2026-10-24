@@ -264,6 +264,12 @@
         "enablement": "dygnosis.analysisDocument"
       },
       {
+        "command": "dygnosis.skipMacroDefinition",
+        "title": "Skip Macro Definition for Analysis",
+        "category": "Dynare",
+        "enablement": "dygnosis.analysisDocument"
+      },
+      {
         "command": "dygnosis.previewMacroBranch",
         "title": "Preview Macro Branch",
         "category": "Dynare",
@@ -272,12 +278,6 @@
       {
         "command": "dygnosis.saveAnalysisConfiguration",
         "title": "Save Analysis Configuration",
-        "category": "Dynare",
-        "enablement": "dygnosis.analysisDocument || dygnosis.effectivePreview"
-      },
-      {
-        "command": "dygnosis.compareAnalysisConfigurations",
-        "title": "Compare Analysis Configurations",
         "category": "Dynare",
         "enablement": "dygnosis.analysisDocument || dygnosis.effectivePreview"
       },
@@ -325,52 +325,57 @@
         {
           "command": "dygnosis.renameSymbol",
           "when": "dygnosis.analysisDocument && !editorReadonly",
-          "group": "1_modification@1.1"
+          "group": "dygnosis@1"
         },
         {
           "command": "dygnosis.showEffectiveModel",
           "when": "dygnosis.modelContext && dygnosis.contextActions",
-          "group": "navigation"
-        },
-        {
-          "command": "dygnosis.goToWrittenSource",
-          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions",
-          "group": "navigation@1"
-        },
-        {
-          "command": "dygnosis.refreshEffectiveModel",
-          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions",
-          "group": "navigation@2"
+          "group": "dygnosis@2"
         },
         {
           "command": "dygnosis.openChanges",
           "when": "dygnosis.changesContext && dygnosis.contextActions",
-          "group": "navigation@2"
-        },
-        {
-          "command": "dygnosis.openHelp",
-          "when": "resourceScheme == dygnosis-effective",
-          "group": "navigation@99"
+          "group": "dygnosis@3"
         },
         {
           "command": "dygnosis.selectAnalysisConfiguration",
           "when": "(dygnosis.analysisDocument && dygnosis.contextActions) || (dygnosis.effectivePreview && dygnosis.previewContextActions)",
-          "group": "dygnosis_analysis"
+          "group": "dygnosis@4"
         },
         {
           "command": "dygnosis.overrideMacroDefinition",
           "when": "dygnosis.analysisDocument && dygnosis.contextActions",
-          "group": "dygnosis_analysis"
+          "group": "dygnosis@5"
+        },
+        {
+          "command": "dygnosis.skipMacroDefinition",
+          "when": "dygnosis.analysisDocument && dygnosis.contextActions",
+          "group": "dygnosis@6"
         },
         {
           "command": "dygnosis.previewMacroBranch",
           "when": "dygnosis.analysisDocument && dygnosis.contextActions",
-          "group": "dygnosis_analysis"
+          "group": "dygnosis@7"
         },
         {
           "command": "dygnosis.goToSourceCandidate",
           "when": "dygnosis.analysisDocument && dygnosis.contextActions",
-          "group": "dygnosis_analysis"
+          "group": "dygnosis@8"
+        },
+        {
+          "command": "dygnosis.goToWrittenSource",
+          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions",
+          "group": "dygnosis@9"
+        },
+        {
+          "command": "dygnosis.refreshEffectiveModel",
+          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions",
+          "group": "dygnosis@10"
+        },
+        {
+          "command": "dygnosis.openHelp",
+          "when": "resourceScheme == dygnosis-effective",
+          "group": "dygnosis@11"
         }
       ],
       "commandPalette": [

@@ -6,11 +6,13 @@ import { diffHtml, diffPreferences } from "./diff";
 import { ComparisonResource, changesScheme, changesViewType, GitSelector, historyScheme, inputLabel, ModelSelector, resourceData, resourceName, resourceQuery } from "./changes_resource";
 import { DiffChoices, DiffRow, DiffSide, normalizeChoices, parseDiff, sameTarget } from "./diff_view";
 import { createGitSources } from "./git_source_host";
-import { GitRepository, GitSources, HistoryCursor, PinnedCommit } from "./git_source";
+import { GitRepository, GitSources, HistoryCursor, PinnedCommit, RevisionRef } from "./git_source";
 import { decodeGitDocument, normalizeGitText } from "./git_provenance";
 import { HistoricalSources, historicalSource } from "./history_sources";
 import { AnalysisSummary, captureComparison, CapturedComparison, ComparisonFailure, freezeWorkingSelector, prepareAnalysisSide, validateCapturedInputs } from "./snapshot_compare";
-import type { CompareAnalysis } from "../editor/analysis_configuration";
+import { chooseAnalysisBaseline } from "../editor/analysis_configuration";
+import type { EffectivePreviewRegistry } from "../editor/preview";
+import { BaselinePick, pickBaseline } from "./baseline_picker";
 import { record } from "../client/protocol";
 import { CapturedTextSources } from "./captured_text";
 import { SourceFile } from "./semantic_view";
@@ -18,6 +20,8 @@ import { SourceFile } from "./semantic_view";
 interface EditorView { panel: vscode.WebviewPanel; choices: DiffChoices; subscriptions: vscode.Disposable[] }
 interface InputSelection { token: vscode.CancellationToken; signal: AbortSignal; dispose(): void }
 const sourceName = (key: string): string => path.posix.basename(key.startsWith("file:") ? vscode.Uri.parse(key).path : key.replaceAll("\\", "/"));
+// The picker displays only a bounded subject; full commit bodies are not retained.
+const pickerRevision = (revision: PinnedCommit): PinnedCommit => ({ ...revision, message: revision.message.split("\n", 1)[0].slice(0, 512) });
 function textDiffTitle(resource: ComparisonResource, beforeKey?: string, afterKey?: string): string {
   const before = sourceName(beforeKey ?? afterKey!), after = sourceName(afterKey ?? beforeKey!);
   if (before === after && resource.before.kind === "git" && resource.before.requested_ref === "HEAD" && resource.after.kind === "working") return `${after} (Working Tree)`;
@@ -63,7 +67,7 @@ class ChangesDocument implements vscode.CustomDocument {
 }
 
 /** A custom document owns capture state; each split owns its display choices. */
-export function registerChanges(service: DygnosisClient, extensionUri: vscode.Uri): vscode.Disposable & { compareAnalysis: CompareAnalysis } {
+export function registerChanges(service: DygnosisClient, extensionUri: vscode.Uri, previews?: EffectivePreviewRegistry): vscode.Disposable {
   let gitSources: Promise<GitSources> | undefined, disposed = false, opening = 0;
   let invocation: vscode.CancellationTokenSource | undefined;
   const documents = new Map<string, ChangesDocument>(), remembered = new Map<string, DiffChoices>();
@@ -181,6 +185,8 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
   };
   const anchorForDocument = async (document: vscode.TextDocument, token: vscode.CancellationToken, signal: AbortSignal): Promise<ModelSelector | undefined> => {
     checkSelection(token);
+    const preview = previews?.get(document.uri);
+    if (preview) return { kind: "working", root_uri: preview.root.toString() };
     if (document.uri.scheme === "file" || document.uri.scheme === "untitled") {
       let root = await service.rootForDocument(document, true, token); checkSelection(token);
       if (!root) {
@@ -270,65 +276,87 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     checkSelection(token);
     return anchor ? { anchor, context_uri: modelUri(anchor).toString() } : undefined;
   };
-  const revisionPicker = async (sources: GitSources, repository: GitRepository, token: vscode.CancellationToken, signal: AbortSignal): Promise<PinnedCommit | undefined> => {
-    let cursor: HistoryCursor | undefined, commits: PinnedCommit[] = [];
-    for (;;) {
-      checkSelection(token);
-      const page = await sources.history(repository, cursor, signal); checkSelection(token);
-      commits = [...commits, ...page.commits]; cursor = page.next;
-      const items: (vscode.QuickPickItem & { revision?: PinnedCommit; action?: string })[] = [
-        { label: "Enter revision…", action: "enter" },
-        ...commits.map(revision => ({ label: revision.hash.slice(0, 7), description: revision.message.split("\n")[0], detail: (revision.commitDate ?? revision.authorDate)?.toLocaleDateString(), revision })),
-        ...(cursor ? [{ label: "Load more", action: "more" }] : []),
-      ];
-      const choice = await vscode.window.showQuickPick(items, { placeHolder: "Choose a repository revision for Before" }, token);
-      checkSelection(token);
-      if (!choice) return undefined;
-      if (choice.revision) return choice.revision;
-      if (choice.action === "enter") {
-        const ref = await vscode.window.showInputBox({ prompt: "Enter a local Git revision for Before", placeHolder: "HEAD~2, a commit, branch, tag, or stash@{0}" }, token);
-        checkSelection(token); return ref ? sources.resolve(repository, ref, signal) : undefined;
+  const chooseBaseline = async (anchor: ModelSelector, fileOnly: boolean, token: vscode.CancellationToken, signal: AbortSignal): Promise<{ before: ModelSelector; after: ModelSelector } | undefined> => {
+    checkSelection(token);
+    const discoveryWork = new AbortController(), discoverySignal = AbortSignal.any([signal, discoveryWork.signal]);
+    let available: Promise<{ sources: GitSources; repository: GitRepository }> | undefined;
+    const repositoryReady = (): Promise<{ sources: GitSources; repository: GitRepository }> => available ??= (async () => {
+      const sources = await git(); checkSelection(token);
+      const repository = await sources.repositoryFor(modelUri(anchor), discoverySignal); checkSelection(token);
+      return { sources, repository };
+    })();
+    let previous: Awaited<ReturnType<GitSources["previous"]>> | undefined, previousCause = "";
+    let commits: PinnedCommit[] = [], refs: RevisionRef[] = [], cursor: HistoryCursor | undefined;
+    let historyCause = "", refsCause = "";
+    const revisionRows = (): BaselinePick[] => [
+      ...(previous || previousCause
+        ? [{ label: "With previous revision", description: previous?.description ?? previousCause, mode: "previous" as const, available: !!previous, revision: previous?.revision }]
+        : [{ label: "Loading previous revision…" }]),
+      ...refs.map(ref => ({ label: ref.name, description: `${ref.kind === "remote" ? "Remote-tracking branch" : ref.kind === "tag" ? "Tag" : "Branch"} · ${ref.revision.hash.slice(0, 7)}`, mode: "ref" as const, revision: ref.revision })),
+      ...commits.map(revision => ({ label: revision.hash.slice(0, 7), description: revision.message.split("\n")[0], detail: (revision.commitDate ?? revision.authorDate)?.toLocaleDateString(), mode: "revision" as const, revision })),
+      ...(cursor && commits.length < 4096 ? [{ label: "Load more commits…", action: "more" as const }] : []),
+      ...(cursor && commits.length >= 4096 ? [{ label: "History display limit reached", description: "Showing 4,096 commits. Type a local revision to select an older commit." }] : []),
+      ...(historyCause ? [{ label: "Recent commits unavailable", description: historyCause }] : []),
+      ...(refsCause ? [{ label: "Branches and tags unavailable", description: refsCause }] : []),
+    ];
+    const pickerWork = new AbortController(), pickerSignal = AbortSignal.any([signal, pickerWork.signal]);
+    const load = async (more: boolean, publish: (items: BaselinePick[]) => void): Promise<BaselinePick[]> => {
+      const { sources, repository } = await repositoryReady();
+      if (pickerSignal.aborted) throw new ComparisonFailure("CANCELLED", "Baseline selection was cancelled.");
+      if (more) {
+        if (cursor && commits.length < 4096) {
+          const page = await sources.history(repository, cursor, pickerSignal);
+          commits = [...commits, ...page.commits.map(pickerRevision)].slice(0, 4096); cursor = page.next;
+        }
+      } else {
+        const results = await Promise.allSettled([
+          sources.previous(repository, anchor.kind === "git" ? anchor.commit : undefined, pickerSignal).then(value => {
+            previous = { ...value, revision: pickerRevision(value.revision) }; publish(revisionRows());
+          }, (error: unknown) => { previousCause = String(error); publish(revisionRows()); throw error; }),
+          sources.history(repository, undefined, pickerSignal).then(page => {
+            commits = page.commits.map(pickerRevision); cursor = page.next; publish(revisionRows());
+          }, (error: unknown) => { historyCause = String(error); publish(revisionRows()); throw error; }),
+          sources.refs(repository, pickerSignal).then(value => {
+            refs = value.map(ref => ({ ...ref, revision: pickerRevision(ref.revision) })); publish(revisionRows());
+          }, (error: unknown) => { refsCause = String(error); publish(revisionRows()); throw error; }),
+        ]);
+        const failures = results.flatMap(result => result.status === "rejected" ? [String(result.reason)] : []);
+        if (failures.length && !pickerSignal.aborted) service.log(`Comparison baseline choices: ${failures.join("; ")}`);
       }
-      if (commits.length >= 4096) throw new Error("History display reached its limit. Use Enter revision to select an older commit.");
+      checkSelection(token);
+      return revisionRows();
+    };
+    let choice: BaselinePick | undefined;
+    try {
+      choice = fileOnly ? { mode: "file", label: "With .mod file…" } : await pickBaseline(inputLabel(anchor), [
+        { label: "With .mod file…", mode: "file" },
+        { label: "With config…", mode: "config", description: anchor.kind === "working" ? "Same model · current configuration is After" : "Open the written model to compare configurations" },
+      ], load, token);
+    } finally {
+      pickerWork.abort();
+      if (!choice || choice.mode === "file" || choice.mode === "config") discoveryWork.abort();
     }
-  };
-  const chooseBaseline = async (anchor: ModelSelector, fileOnly: boolean, token: vscode.CancellationToken, signal: AbortSignal): Promise<ModelSelector | undefined> => {
-    checkSelection(token);
-    let repository: GitRepository | undefined, sources: GitSources | undefined, previous: Awaited<ReturnType<GitSources["previous"]>> | undefined;
-    let unavailable = "", previousUnavailable = "";
-    if (!fileOnly) try {
-      sources = await git(); checkSelection(token); repository = await sources.repositoryFor(modelUri(anchor), signal); checkSelection(token);
-      try { previous = await sources.previous(repository, anchor.kind === "git" ? anchor.commit : undefined, signal); }
-      catch (error) { checkSelection(token); previousUnavailable = String(error); }
-    } catch (error) { checkSelection(token); unavailable = String(error); previousUnavailable = unavailable; }
-    checkSelection(token);
-    const choice = fileOnly ? "file" : (await vscode.window.showQuickPick([
-      { label: "With previous revision", description: previous?.description ?? previousUnavailable, mode: "previous", available: !!previous },
-      { label: "With revision…", description: unavailable, mode: "revision", available: !!repository },
-      { label: "With branch or tag…", description: unavailable, mode: "ref", available: !!repository },
-      { label: "With .mod file…", mode: "file", available: true },
-    ], { placeHolder: `Choose Before · After is ${inputLabel(anchor)}` }, token))?.mode;
     checkSelection(token);
     if (!choice) return undefined;
-    if (choice === "file") {
+    if (choice.mode === "file") {
       const files = await vscode.window.showOpenDialog({ title: "Open changes: choose Before (open model is After)", openLabel: "Compare as Before", filters: { "Dynare models": ["mod", "dyn"] }, canSelectMany: false, canSelectFiles: true, canSelectFolders: false });
       checkSelection(token);
-      if (!files?.[0]) return undefined;
-      return { kind: "working", root_uri: files[0].toString() };
+      return files?.[0] ? { before: { kind: "working", root_uri: files[0].toString() }, after: anchor } : undefined;
     }
-    if (!sources || !repository || choice === "previous" && !previous) throw new Error(choice === "previous" ? previousUnavailable : unavailable);
-    let commit: PinnedCommit | undefined;
-    if (choice === "previous") commit = previous!.revision;
-    else if (choice === "revision") commit = await revisionPicker(sources, repository, token, signal);
-    else {
-      const refs = await sources.refs(repository, signal); checkSelection(token);
-      const items: (vscode.QuickPickItem & { revision?: PinnedCommit })[] = [];
-      for (const [kind, label] of [["branch", "Local branches"], ["remote", "Remote-tracking branches"], ["tag", "Tags"]] as const) {
-        items.push({ label, kind: vscode.QuickPickItemKind.Separator });
-        items.push(...refs.filter(ref => ref.kind === kind).map(ref => ({ label: ref.name, description: ref.revision.hash.slice(0, 7), revision: ref.revision })));
-      }
-      commit = (await vscode.window.showQuickPick(items, { placeHolder: "Choose a branch or tag for Before" }, token))?.revision;
+    if (choice.mode === "config") {
+      if (anchor.kind !== "working") refuse("Configuration comparison uses the current written model. Open its written source or macro expansion, then choose With config again.");
+      await service.ensureStarted(); checkSelection(token);
+      if (!service.supportsAnalysisConfiguration) refuse("This engine does not support configuration comparison. Use the bundled engine or update dynare.serverPath.");
+      const after = await freezeWorkingSelector(service, anchor, token);
+      const root = vscode.Uri.parse(anchor.root_uri);
+      const side = await chooseAnalysisBaseline(root, inputLabel(after), token); checkSelection(token);
+      if (!side) return undefined;
+      const before = await prepareAnalysisSide(service, root, side, token); checkSelection(token);
+      return { before, after };
     }
+    const { sources, repository } = await repositoryReady().finally(() => discoveryWork.abort()); checkSelection(token);
+    if (choice.available === false) throw new Error(choice.description || "This baseline is unavailable. Choose another revision.");
+    const commit = choice.mode === "expression" ? await sources.resolve(repository, choice.expression!, signal) : choice.revision;
     checkSelection(token);
     if (!commit) return undefined;
     let root_file = sources.fileKey(repository, modelUri(anchor));
@@ -336,17 +364,17 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     if (!Object.hasOwn(capture.manifest, root_file)) {
       const rename = await sources.rename(repository, commit.hash, anchor.kind === "git" ? anchor.commit : undefined, root_file, signal); checkSelection(token);
       if (rename) {
-        const choice = await vscode.window.showQuickPick([{ label: `Use ${rename.before} → ${rename.after}`, key: rename.before }, { label: "Choose model path at this revision", key: "" }], { placeHolder: "Git found a root rename. Choose the Before path." }, token);
+        const pick = await vscode.window.showQuickPick([{ label: `Use ${rename.before} → ${rename.after}`, key: rename.before }, { label: "Choose model path at this revision", key: "" }], { placeHolder: "Git found a root rename. Choose the Before path." }, token);
         checkSelection(token);
-        if (!choice) return undefined;
-        if (choice.key) root_file = choice.key;
+        if (!pick) return undefined;
+        if (pick.key) root_file = pick.key;
         else {
           const selected = await vscode.window.showQuickPick(capture.modelPaths(), { placeHolder: "Choose the Before model at this revision" }, token);
           checkSelection(token); if (!selected) return undefined; root_file = selected;
         }
       }
     }
-    return { kind: "git", repository_uri: repository.rootUri.toString(), commit: commit.hash, root_file, requested_ref: commit.requested_ref };
+    return { before: { kind: "git", repository_uri: repository.rootUri.toString(), commit: commit.hash, root_file, requested_ref: commit.requested_ref }, after: anchor };
   };
   const start = async (argument?: unknown, fileOnly = false, from?: ChangesDocument, view?: EditorView): Promise<void> => {
     const originating = from ?? (argument === undefined ? activeComparison() : undefined);
@@ -354,9 +382,9 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     try {
       const context = originating ? { anchor: originating.resource.anchor, context_uri: originating.resource.context_uri } : await anchorAtInvocation(argument, token, signal);
       if (!context || token.isCancellationRequested) return;
-      const before = await chooseBaseline(context.anchor, fileOnly, token, signal);
-      if (!before || disposed || request !== opening || token.isCancellationRequested) return;
-      await openResource({ schema_version: 1, before, after: context.anchor, ...context }, view?.panel.viewColumn, view?.choices);
+      const selected = await chooseBaseline(context.anchor, fileOnly, token, signal);
+      if (!selected || disposed || request !== opening || token.isCancellationRequested) return;
+      await openResource({ schema_version: 1, ...context, ...selected, anchor: selected.after }, view?.panel.viewColumn, view?.choices);
     } catch (error) { if (!disposed && request === opening && !token.isCancellationRequested) await explainFailure(service, error); }
     finally { selection.dispose(); }
   };
@@ -425,8 +453,11 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     if (!files.length) { refuse("This comparison has no captured file changes to show."); }
     await validateWorking(doc);
     if (!current(doc, generation, instance)) return;
+    const textAvailable = (file: SourceFile): boolean => (["before", "after"] as const).every(side => !file[side] ||
+      file[side].exact_text_available && Object.hasOwn(doc.result!.texts[side], file[side].file_key));
+    if (files.length === 1 && textAvailable(files[0])) { await openCaptured(doc, files[0]); return; }
     const selected = await vscode.window.showQuickPick(files.map(file => {
-      const available = (["before", "after"] as const).every(side => !file[side] || file[side].exact_text_available && Object.hasOwn(doc.result!.texts[side], file[side].file_key));
+      const available = textAvailable(file);
       return {
         label: sourceName(file.after?.file_key ?? file.before!.file_key),
         description: available ? `${file.change}${file.correspondence === "unpaired" ? " · file correspondence not established" : ""}` : "Text diff unavailable: complete captured text is missing",
@@ -539,14 +570,5 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     vscode.commands.registerCommand("dygnosis.openChanges", (argument?: unknown) => start(argument)),
     vscode.commands.registerCommand("dygnosis.diffWith", (argument?: unknown) => start(argument, true)),
     new vscode.Disposable(() => { disposed = true; ++opening; invocation?.cancel(); invocation?.dispose(); for (const doc of [...documents.values()]) doc.dispose(); remembered.clear(); void gitSources?.then(sources => sources.clear()); }));
-  const compareAnalysis: CompareAnalysis = async (root, left, right) => {
-    const selection = beginSelection(), request = opening;
-    try {
-      const before = await prepareAnalysisSide(service, root, left, selection.token);
-      const after = await prepareAnalysisSide(service, root, right, selection.token);
-      if (disposed || opening !== request || selection.token.isCancellationRequested) return;
-      await openResource({ schema_version: 1, before, after, anchor: after, context_uri: root.toString() });
-    } finally { selection.dispose(); }
-  };
-  return Object.assign(registration, { compareAnalysis });
+  return registration;
 }

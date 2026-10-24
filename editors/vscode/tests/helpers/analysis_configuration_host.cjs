@@ -39,6 +39,21 @@ async function choose(label, waitFor, keyboard = false, placeholder = "Select th
     await send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, ...point });
   });
 }
+async function chooseAnyPicker(label, waitFor) {
+  let point;
+  await waitFor(async () => {
+    point = await nativeWorkbench(async send => {
+      const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+        `(() => { const input=document.querySelector('.quick-input-widget input'); if(input!==document.activeElement) return null; const row=[...document.querySelectorAll('.quick-input-list .monaco-list-row')].find(row=>row.querySelector('.label-name')?.textContent===${JSON.stringify(label)} && row.getBoundingClientRect().width && row.getBoundingClientRect().height); const box=row?.getBoundingClientRect(); return box ? {x:box.x+box.width/2,y:box.y+box.height/2} : null; })()` });
+      return result.result.value;
+    });
+    return point;
+  }, `native picker offers ${label}`);
+  await nativeWorkbench(async send => {
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", clickCount: 1, ...point });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, ...point });
+  });
+}
 async function input(text, waitFor) {
   await waitFor(async () => nativeWorkbench(async send => {
     const result = await send("Runtime.evaluate", { expression: "(() => { const widget=document.querySelector('.quick-input-widget'), input=widget?.querySelector('input'), box=input?.getBoundingClientRect(); return Boolean(box?.width && box.height && input===document.activeElement && widget.textContent.includes('Save Analysis Configuration')); })()", returnByValue: true });
@@ -254,9 +269,9 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   evidence.checks.push("Source and expanded native selectors share one root and successful refresh replaces the URI and configuration title");
 
   const frozenGeneration = (await context()).analysis.selection_generation;
-  const comparing = vscode.commands.executeCommand("dygnosis.compareAnalysisConfigurations");
-  await choose("Source", waitFor, false, "Choose configuration A");
-  await choose("Else preview", waitFor, false, "Choose configuration B"); await comparing;
+  const comparing = vscode.commands.executeCommand("dygnosis.openChanges");
+  await chooseAnyPicker("With config…", waitFor);
+  await choose("Source", waitFor, false, "Choose a configuration for Before from this model"); await comparing;
   await waitFor(() => vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input?.viewType === "dygnosis.changes")), "analysis comparison opens existing Model Diff");
   await waitFor(async () => {
     try {

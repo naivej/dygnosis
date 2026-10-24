@@ -132,10 +132,10 @@ test("total icons and separate count blocks retain every class and dimension in 
     "100 endogenous (1 static, 0 predetermined, 0 forward-looking, 0 mixed)",
     "10 exogenous", "90 equations",
   ];
-  assert.equal(tooltipText(value.tooltip), `[Current config](command:dygnosis.selectAnalysisConfiguration)\nSource\n${report.join("\n")}`);
+  assert.equal(tooltipText(value.tooltip), `[Current config](command:dygnosis.selectAnalysisConfiguration)\nSource\nClick the status item to open Outline.\n${report.join("\n")}`);
   assert.match(value.tooltip.value, /\*\*Aggregate model\*\*/);
-  assert.doesNotMatch(tooltipText(value.tooltip), /main\.mod|before transformation|Click/);
-  assert.equal(value.accessibilityLabel, `Dynare model counts. Total: 104 endogenous, 12 exogenous, 93 equations. ${report.join(". ")}. Choose the analysis configuration.`);
+  assert.doesNotMatch(tooltipText(value.tooltip), /main\.mod|before transformation/);
+  assert.equal(value.accessibilityLabel, `Dynare model counts. Total: 104 endogenous, 12 exogenous, 93 equations. ${report.join(". ")}. Click the status item to open Outline.`);
   assert.doesNotMatch(value.text, /warning|error/);
 });
 
@@ -263,6 +263,7 @@ test("incomplete expansion withholds even supplied old numbers", () => {
   assert.match(tooltipText(value.tooltip), /Counts are unavailable/);
   assert.match(tooltipText(value.tooltip), /Model expansion is incomplete/);
   assert.doesNotMatch(tooltipText(value.tooltip), /Endogenous:|households|Timing:/);
+  assert.match(value.accessibilityLabel, /Click the status item to open Outline\./);
 });
 test("incomplete reasons appear in the hover without reading diagnostics", () => {
   const value = modelStatus(facts(document(), {
@@ -292,16 +293,19 @@ test("ignored diagnostic codes do not remove incomplete hover reasons", () => {
   }), ["equations"]);
   assert.match(tooltipText(value.tooltip), /Macro expression '1 in 1:3' could not be evaluated/);
 });
-test("default status is native, accessible, and selects the shared analysis configuration", async () => {
+test("default status opens Outline and retains the Current config hover link", async () => {
   const env = setup();
   const registration = registerStatus(env.service);
   await flush();
   const item = env.host.items[0];
   assert.equal(item.id, "dygnosis.modelCounts");
-  assert.equal(item.command, "dygnosis.selectAnalysisConfiguration");
+  assert.equal(item.command, "outline.focus");
   assert.equal(item.name, "Dynare model counts");
   assert.equal(item.visible, true);
   assert.match(item.accessibilityInformation.label, /Total: 104 endogenous/);
+  assert.match(item.accessibilityInformation.label, /Click the status item to open Outline\./);
+  assert.match(tooltipText(item.tooltip), /^\[Current config\]\(command:dygnosis\.selectAnalysisConfiguration\)/);
+  assert.match(tooltipText(item.tooltip), /Click the status item to open Outline\./);
   assert.equal(item.backgroundColor, undefined);
   assert.equal(item.color, undefined);
   registration.dispose();
@@ -365,6 +369,18 @@ test("dyn and untitled model roots are supported", async () => {
     registration.dispose();
   }
 });
+test("a registered macro-expansion editor keeps the model-count Outline action", async () => {
+  // Guards preview editors losing the status item or routing its click to configuration.
+  const doc = document("dygnosis-effective:/main.mod");
+  const env = setup(doc);
+  const preview = { root: uri("file:///workspace/main.mod") };
+  const registration = registerStatus(env.service, { get: () => preview });
+  await flush();
+  assert.equal(env.host.items[0].visible, true);
+  assert.equal(env.host.items[0].command, "outline.focus");
+  assert.match(env.host.items[0].accessibilityInformation.label, /Click the status item to open Outline\./);
+  registration.dispose();
+});
 test("a mod opened as an include uses its chosen root while preferences use the displayed file", async () => {
   const env = setup(document("file:///other-folder/part.mod"));
   env.service.root = uri("file:///workspace/owner.mod");
@@ -396,7 +412,8 @@ test("edit invalidation removes numbers immediately and superseded versions cann
   ++env.doc.version;
   env.host.edited.fire({ document: env.doc });
   assert.equal(env.host.items[0].text, "$(sync~spin) Dynare: updating");
-  assert.equal(env.host.items[0].tooltip, "Refreshing model counts…");
+  assert.equal(env.host.items[0].tooltip, "Refreshing model counts…\n\nClick the status item to open Outline.");
+  assert.match(env.host.items[0].accessibilityInformation.label, /Click the status item to open Outline\./);
   await flush();
   env.service.modelInfo = () => second.promise;
   ++env.doc.version;
@@ -491,6 +508,8 @@ test("unavailable, incomplete and unsupported engines replace previous numbers",
   env.changed.fire();
   await flush();
   assert.match(env.host.items[0].tooltip, /bundled binary/);
+  assert.match(env.host.items[0].tooltip, /Click the status item to open Outline\./);
+  assert.match(env.host.items[0].accessibilityInformation.label, /Click the status item to open Outline\./);
   registration.dispose();
 });
 test("a failed request remains quiet apart from Output and shows unavailable state", async () => {
@@ -518,8 +537,10 @@ test("pending model actions reuse the count item and restore configuration count
   tracked.clock.tick(249); assert.equal(item.text, counts);
   tracked.clock.tick(1); assert.match(item.text, /sync~spin.*Expanding macros/);
   assert.match(tooltipText(item.tooltip), /Loading hover/); assert.equal(env.host.items.length, 1);
+  assert.match(tooltipText(item.tooltip), /Click the status item to open Outline\./);
   assert.doesNotMatch(tooltipText(item.tooltip), /Current config|N = 2/);
-  assert.equal(item.command, "dygnosis.selectAnalysisConfiguration");
+  assert.equal(item.command, "outline.focus");
+  assert.match(item.accessibilityInformation.label, /Click the status item to open Outline\./);
   expansion.resolve(); await first; assert.match(item.text, /Loading hover/);
   hover.resolve(); await second;
   assert.equal(item.text, counts); assert.match(item.text, /^Current config:/); assert.equal(item.tooltip, tooltip);

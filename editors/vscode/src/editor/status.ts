@@ -7,6 +7,7 @@ import type { EffectivePreviewRegistry } from "./preview";
 export const statusCounts = ["endogenous", "exogenous", "equations"];
 export type StatusCount = "endogenous" | "exogenous" | "equations";
 interface StatusContent { text: string; tooltip: string | vscode.MarkdownString; accessibilityLabel: string }
+const outlineClickInstruction = "Click the status item to open Outline.";
 const countDetails: Record<StatusCount, { field: "n_endogenous" | "n_exogenous" | "n_equations"; icon: string; label: string }> = {
   endogenous: { field: "n_endogenous", icon: "symbol-variable", label: "endogenous" },
   exogenous: { field: "n_exogenous", icon: "symbol-field", label: "exogenous" },
@@ -61,6 +62,7 @@ function configurationHover(info: ModelInfo): vscode.MarkdownString {
   if (analysis?.include_paths !== null && analysis?.include_paths !== undefined)
     tooltip.appendMarkdown("  \n").appendText(`Include paths: ${analysis.include_paths.join(", ") || "none"}`);
   if (info.complete && analysis?.cause) tooltip.appendMarkdown("\n\n").appendText(analysis.cause.message);
+  tooltip.appendMarkdown("\n\n").appendText(outlineClickInstruction);
   tooltip.isTrusted = { enabledCommands: ["dygnosis.selectAnalysisConfiguration"] };
   return tooltip;
 }
@@ -77,7 +79,7 @@ export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusConte
     return {
       text: `$(info) ${label}: ${analysis?.state === "stale" ? "source only" : "incomplete"}`,
       tooltip: tooltip.appendMarkdown("\n\n").appendText(`${detail}\nCounts are unavailable.`),
-      accessibilityLabel: "Dynare model expansion is incomplete. Counts are unavailable. Choose the analysis configuration.",
+      accessibilityLabel: `Dynare model expansion is incomplete. Counts are unavailable. ${outlineClickInstruction}`,
     };
   }
   const groups = [
@@ -92,7 +94,7 @@ export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusConte
   if (shown.some(count => !validCount(count.value))) return {
     text: `$(info) ${label}: unavailable`,
     tooltip: tooltip.appendMarkdown("\n\n").appendText("Model counts are unavailable."),
-    accessibilityLabel: "Dynare model counts are unavailable. Choose the analysis configuration.",
+    accessibilityLabel: `Dynare model counts are unavailable. ${outlineClickInstruction}`,
   };
   const report: string[] = [];
   for (const group of groups) {
@@ -108,7 +110,7 @@ export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusConte
   return {
     text: `${label}: ${shown.map(count => `$(${count.icon}) ${String(count.value)}`).join("  ")}`,
     tooltip,
-    accessibilityLabel: `Dynare model counts. Total: ${shown.map(count => `${String(count.value)} ${count.label}`).join(", ")}. ${report.join(". ")}. Choose the analysis configuration.`,
+    accessibilityLabel: `Dynare model counts. Total: ${shown.map(count => `${String(count.value)} ${count.label}`).join(", ")}. ${report.join(". ")}. ${outlineClickInstruction}`,
   };
 }
 
@@ -116,7 +118,7 @@ export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusConte
 export function registerStatus(service: DygnosisClient, previews?: EffectivePreviewRegistry): vscode.Disposable {
   const item = vscode.window.createStatusBarItem("dygnosis.modelCounts", vscode.StatusBarAlignment.Left, 40);
   item.name = "Dynare model counts";
-  item.command = "dygnosis.selectAnalysisConfiguration";
+  item.command = "outline.focus";
   let generation = 0;
   let disposed = false;
   let displayed: { document: vscode.TextDocument; root?: vscode.Uri; value: StatusContent; current(): boolean } | undefined;
@@ -131,8 +133,8 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
     const activity = service.modelActivity(displayed.document.uri, displayed.root);
     content(activity ? {
       text: `$(sync~spin) Dynare: ${activity.label}…`,
-      tooltip: activity.detail,
-      accessibilityLabel: `Dynare: ${activity.label}. ${activity.pending} pending model request${activity.pending === 1 ? "" : "s"}. Choose the analysis configuration.`,
+      tooltip: `${activity.detail}\n\n${outlineClickInstruction}`,
+      accessibilityLabel: `Dynare: ${activity.label}. ${activity.pending} pending model request${activity.pending === 1 ? "" : "s"}. ${outlineClickInstruction}`,
     } : displayed.value);
   };
   const preferences = (document: vscode.TextDocument): { enabled: boolean; counts: StatusCount[] } => ({
@@ -161,8 +163,8 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
     };
     displayed = { document, current, value: {
       text: "$(sync~spin) Dynare: updating",
-      tooltip: "Refreshing model counts…",
-      accessibilityLabel: "Dynare model counts are updating. Choose the analysis configuration.",
+      tooltip: `Refreshing model counts…\n\n${outlineClickInstruction}`,
+      accessibilityLabel: `Dynare model counts are updating. ${outlineClickInstruction}`,
     } };
     const updateContent = (value: StatusContent): void => {
       if (!current() || !displayed) return;
@@ -172,10 +174,10 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
     render();
     const unavailable = (): void => updateContent({
       text: "$(info) Dynare: unavailable",
-      tooltip: service.supportsModelInfo
+      tooltip: `${service.supportsModelInfo
         ? "Model counts are unavailable. Choose a model root, or open Dygnosis Output for details."
-        : "Model counts are unavailable. Restart the Dygnosis language server, or use the bundled binary in Settings.",
-      accessibilityLabel: "Dynare model counts are unavailable. Choose the analysis configuration.",
+        : "Model counts are unavailable. Restart the Dygnosis language server, or use the bundled binary in Settings."}\n\n${outlineClickInstruction}`,
+      accessibilityLabel: `Dynare model counts are unavailable. ${outlineClickInstruction}`,
     });
     const update = async (): Promise<void> => {
       const root = preview?.root ?? await service.rootForDocument(document);
@@ -183,8 +185,8 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
       if (!root) {
         updateContent({
           text: "$(info) Dynare: choose model owner",
-          tooltip: "This file needs a model owner for model counts. Run Dygnosis: Choose model owner from the Command Palette. Open its parent model first if no owner is listed.",
-          accessibilityLabel: "Dynare model counts need a model owner. Run Dygnosis: Choose model owner from the Command Palette.",
+          tooltip: `This file needs a model owner for model counts. Run Dygnosis: Choose model owner from the Command Palette. Open its parent model first if no owner is listed.\n\n${outlineClickInstruction}`,
+          accessibilityLabel: `Dynare model counts need a model owner. Run Dygnosis: Choose model owner from the Command Palette. ${outlineClickInstruction}`,
         });
         return;
       }
