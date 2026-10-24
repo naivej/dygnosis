@@ -246,19 +246,26 @@ test("late picker stops after a document change and untitled Save has an explain
   env.registration.dispose();
 });
 
-test("baseline picker returns one saved Before side with paths and bindings without changing live selection", async () => {
+test("baseline picker always offers written source and saved choices without changing live selection", async () => {
   const env = setup();
   const binding = { operation_index: 0, file: "main.mod", kind: "definition", name: "FLAG", expected_text: "@#define FLAG=0", target_text: "@#define FLAG=0", branch_index: null, branch_text: null };
   host.saved = [{ name: "Alternative", root: "main.mod", analysis: { defines: [{ name: "FLAG", expression: "1" }] }, includePaths: ["models"], bindings: [binding] }];
-  host.answers.push(items => items.find(item => item.label === "Alternative"));
+  host.answers.push(items => { assert.equal(items[0].label, "Written source"); assert.equal(items[0].description, undefined); return items.find(item => item.label === "Alternative"); });
   const token = { isCancellationRequested: false };
-  const baseline = await chooseAnalysisBaseline(env.document.uri, "Current preview", token);
+  const baseline = await chooseAnalysisBaseline(env.document.uri, token);
   assert.equal(host.picks.length, 1);
-  assert.equal(host.picks[0].options.title, "Before configuration · After: Current preview");
+  assert.equal(host.picks[0].options.title, "Compare main.mod with");
+  assert.equal(host.picks[0].options.placeHolder, "Choose written source or a saved configuration");
   assert.equal(baseline.analysis.name, "Alternative");
   assert.deepEqual(baseline.analysis.defines, [{ name: "FLAG", expression: "1" }]);
   assert.equal(baseline.include_paths[0], path.resolve("/workspace", "models"));
   assert.equal(baseline.preset_bindings[0].file, path.resolve("/workspace", "main.mod"));
+  host.saved = [];
+  host.answers.push(items => { assert.deepEqual(items.map(item => item.label), ["Written source"]); return items[0]; });
+  const written = await chooseAnalysisBaseline(env.document.uri, token);
+  assert.deepEqual(written, { analysis: {}, include_paths: null });
+  host.answers.push(() => undefined);
+  assert.equal(await chooseAnalysisBaseline(env.document.uri, token), undefined, "cancellation leaves the comparison baseline unset");
   assert.equal(env.service.calls.length, 0, "choosing Before does not change the active After configuration");
   assert.equal(analysisLabel({ ...metadata(), state: "stale", selection: { ...metadata().selection, name: "Alternative", preview: true } }), "Alternative (preview) (stale)");
   env.registration.dispose();

@@ -12,7 +12,7 @@
   are unavailable for it.
 - The **Current config** hover shows each macro input and equation tag choice on its own line, without generic configuration labels, and lists each selection failure cause once.
 - Select a current macro input to edit it, or choose **Add macro input**. Choose **Include equations** or **Exclude equations** and enter the tag expression directly. **Clear equation selection** keeps the other configuration choices.
-- Compare the current configuration with **Source** or a saved configuration for the same model from **Show mod changes** > **config…**. The current configuration is **After**.
+- Compare the current configuration with **Written source** or a saved configuration for the same model from **Show mod changes** > **config…**. Written source is always available. The current configuration is **After**.
 - Choose a baseline under **Compare filename with**: **.mod file…**, **config…**, recent commits, branches and tags, or enter a revision such as `HEAD~2`. A single changed file with captured text opens directly in Text diff.
 - Comparison headers show filenames and configuration choices. Revision details
   and model counts are in the hover.

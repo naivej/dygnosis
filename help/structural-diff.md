@@ -7,7 +7,7 @@ file in **Source Control**. The baseline chooser searches recent commits,
 branches and tags. Type a revision such as `HEAD~2` and choose
 **Use revision: HEAD~2** to compare it. Choose **.mod file…** to select
 another model file. For a Working model, choose **config…** to compare its
-current configuration with **Source** or a saved configuration.
+current configuration with **Written source** or a saved configuration.
 
 Your active model appears under **After** (`Working` includes saved files plus
 any open unsaved edits) and the baseline you select appears under **Before**.
@@ -19,7 +19,7 @@ for its revision and model counts.
 | Recent commits, branches and tags | The selected local commit or ref. Use **Load more commits…** for older history. |
 | **Use revision: …** | The local revision named in the chooser, for example `HEAD~2`. |
 | **.mod file…** | Another `.mod` or `.dyn` file on disk. |
-| **config…** | **Source** or a saved configuration for the same model. The current configuration is **After**. |
+| **config…** | **Written source** or a saved configuration for the same model. Written source is always available. The current configuration is **After**. |
 
 ## Available views and actions
 

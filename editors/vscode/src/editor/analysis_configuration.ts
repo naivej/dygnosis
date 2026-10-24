@@ -82,12 +82,12 @@ function presetSide(value: Preset, folder: vscode.WorkspaceFolder): AnalysisSide
 }
 
 /** Choose Before without changing or saving the current configuration. */
-export async function chooseAnalysisBaseline(root: vscode.Uri, after: string, token: vscode.CancellationToken): Promise<AnalysisSide | undefined> {
+export async function chooseAnalysisBaseline(root: vscode.Uri, token: vscode.CancellationToken): Promise<AnalysisSide | undefined> {
   const saved = presets(root);
   const pick = await vscode.window.showQuickPick([
-    { label: "Source", description: "Use the written macro inputs", side: { analysis: {}, include_paths: null } },
+    { label: "Written source", side: { analysis: {}, include_paths: null } },
     ...saved.values.map(value => ({ label: value.name, description: "Saved configuration", side: presetSide(value, saved.folder!) })),
-  ], { title: `Before configuration · After: ${after}`, placeHolder: "Choose a configuration for Before from this model" }, token);
+  ], { title: `Compare ${path.posix.basename(root.path)} with`, placeHolder: "Choose written source or a saved configuration" }, token);
   return token.isCancellationRequested ? undefined : pick?.side;
 }
 function modified(context: AnalysisContext): AnalysisConfiguration {

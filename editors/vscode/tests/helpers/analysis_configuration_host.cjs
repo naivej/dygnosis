@@ -271,18 +271,21 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   const frozenGeneration = (await context()).analysis.selection_generation;
   const comparing = vscode.commands.executeCommand("dygnosis.openChanges");
   await chooseAnyPicker("config…", waitFor);
-  await choose("Source", waitFor, false, "Choose a configuration for Before from this model"); await comparing;
+  await choose("Written source", waitFor, false, "Choose written source or a saved configuration"); await comparing;
   await waitFor(() => vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input?.viewType === "dygnosis.changes")), "analysis comparison opens existing Model Diff");
   await waitFor(async () => {
     try {
-      const state = await nativeChanges(async ({ evaluate }) => evaluate('({status:document.getElementById("status").className,names:[...document.querySelectorAll(".analysis-name")].map(row=>row.textContent),details:[...document.querySelectorAll(".analysis-detail")].map(row=>row.textContent),counts:[...document.querySelectorAll(".analysis-counts")].map(row=>row.textContent)})'));
+      const state = await nativeChanges(async ({ evaluate }) => evaluate('({status:document.getElementById("status").className, sides:[...document.querySelectorAll(".input-side")].map(row=>({heading:[...row.querySelector(".input-heading").children].map(child=>child.textContent),detail:row.querySelector(".analysis-detail")?.textContent,title:row.title}))})'));
       evidence.analysis_comparison = state;
       return state.status === "ready";
     } catch (error) { if (error.code === "NATIVE_FRAME_PENDING") return false; throw error; }
   }, "frozen comparison summaries are rendered");
-  assert.deepEqual(evidence.analysis_comparison.names, ["Source · Complete", "Else preview (preview) · Complete"]);
-  assert.ok(evidence.analysis_comparison.details.some(text => /Selected branch.*applied 1 time/.test(text)));
-  assert.deepEqual(evidence.analysis_comparison.counts, ["1 equation · 1 endogenous variable", "1 equation · 1 endogenous variable"]);
+  assert.deepEqual(evidence.analysis_comparison.sides.map(side => [side.heading, side.detail]), [
+    [["Before", "main.mod"], "Source"], [["After", "main.mod"], "Forced branch preview"],
+  ]);
+  assert.ok(evidence.analysis_comparison.sides.every(side => side.title.includes("1 endogenous · 1 equation")),
+    "captured model counts remain available in each input-side hover title");
+  assert.match(evidence.analysis_comparison.sides[1].title, /Else preview/);
   assert.equal((await context()).analysis.selection_generation, frozenGeneration, "comparison never sets a live choice");
   evidence.checks.push("native two-side analysis comparison uses the existing frozen Model Diff without changing live selection");
 

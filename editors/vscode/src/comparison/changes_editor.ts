@@ -345,7 +345,7 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       if (!service.supportsAnalysisConfiguration) refuse("This engine does not support configuration comparison. Use the bundled engine or update dynare.serverPath.");
       const after = await freezeWorkingSelector(service, anchor, token);
       const root = vscode.Uri.parse(anchor.root_uri);
-      const side = await chooseAnalysisBaseline(root, inputLabel(after), token); checkSelection(token);
+      const side = await chooseAnalysisBaseline(root, token); checkSelection(token);
       if (!side) return undefined;
       const before = await prepareAnalysisSide(service, root, side, token); checkSelection(token);
       return { before, after };
