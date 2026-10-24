@@ -1,6 +1,6 @@
 ![Dygnosis](media/logo_s.png)
 
-Dygnosis brings Dynare 7.2 language intelligence, static model checking, and structural comparison to VS Code for `.mod`, `.dyn`, and `.inc` files—no MATLAB, Octave, or Dynare installation required for editing and source analysis.
+Dygnosis adds independent Dynare language support to VS Code with zero dependency. 
 
 Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis) or download packages and standalone binaries from [GitHub Releases](https://github.com/naivej/dygnosis/releases), then run **Dygnosis: Open Help** in VS Code to explore.
 
