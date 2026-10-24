@@ -157,7 +157,7 @@ test("comparison headers summarize choices, abnormal receipts and heterogeneous 
   const text = env.elements.models.textContent;
   assert.match(text, /Macro: N=2/);
   assert.match(text, /Equation: name='policy' \(excluded\)/);
-  assert.match(text, /Definition override = 1/);
+  assert.match(text, /Macro: 1/);
   assert.match(text, /Include paths: includes/);
   assert.match(text, /Definition override in main.mod · not reached.*parent branch was not reached/);
   assert.match(text, /Model counts are unavailable for this captured input/);

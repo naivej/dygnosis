@@ -47,7 +47,7 @@ function configurationHover(info: ModelInfo): vscode.MarkdownString {
     ...(equations ? equations.values.map(value =>
       `Equation: ${equations.tag ?? "name"}='${value}' (${equations.mode === "include" ? "included" : "excluded"})`) : []),
     ...(analysis?.configuration.overrides ?? []).map(operation => operation.kind === "definition"
-      ? `Definition override = ${operation.expression}`
+      ? `Macro: ${operation.expression}`
       : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview"),
   ];
   const tooltip = new vscode.MarkdownString("[Current config](command:dygnosis.selectAnalysisConfiguration)");

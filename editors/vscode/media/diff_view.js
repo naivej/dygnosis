@@ -440,7 +440,7 @@
           ...(configuration?.defines ?? []).map(input => `Macro: ${input.name}=${input.expression}`),
           ...(configuration?.equation_selection ? configuration.equation_selection.values.map(value => `Equation: ${configuration.equation_selection.tag ?? "name"}='${value}' (${configuration.equation_selection.mode === "include" ? "included" : "excluded"})`) : []),
           ...(configuration?.overrides ?? []).map(operation => operation.kind === "definition"
-            ? `Definition override = ${operation.expression}`
+            ? `Macro: ${operation.expression}`
             : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview"),
         ];
         const presetName = analysis?.selection?.name ?? configuration?.name;

@@ -217,7 +217,7 @@ test("preview values and stale or incomplete outcomes keep configuration access"
     const value = modelStatus(facts(document(), { analysis: metadata, complete, n_equations: undefined }), ["equations"]);
     assert.equal(value.text, complete ? "$(info) Current config: unavailable" : "$(info) Current config: source only");
     assert.match(value.tooltip.value, /^\[Current config\]\(command:dygnosis.selectAnalysisConfiguration\)/);
-    assert.match(tooltipText(value.tooltip), /Definition override = "\[link\]\(command:untrusted\)"/);
+    assert.match(tooltipText(value.tooltip), /Macro: "\[link\]\(command:untrusted\)"/);
     assert.ok(value.tooltip.value.includes('\\[link\\]\\(command:untrusted\\)'));
     assert.match(tooltipText(value.tooltip), /\(stale\)/);
     assert.doesNotMatch(tooltipText(value.tooltip), /\(preview\)/);
