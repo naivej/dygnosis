@@ -129,6 +129,23 @@ pub fn run_preprocessor(
     timeout: Duration,
     stage: JsonStage,
 ) -> PreprocessorResult {
+    run_preprocessor_with_options(text, preprocessor_path, source_dir, timeout, stage, &[])
+}
+
+/// Run the official preprocessor with additional invocation options.
+///
+/// Each option is passed as one argument after the stage flags and before
+/// `nopreprocessoroutput`. This supports option-sensitive honesty probes such
+/// as `include_eqs=[name=(...)]` without changing the established runner API.
+#[doc(hidden)]
+pub fn run_preprocessor_with_options(
+    text: &str,
+    preprocessor_path: &Path,
+    source_dir: Option<&Path>,
+    timeout: Duration,
+    stage: JsonStage,
+    options: &[String],
+) -> PreprocessorResult {
     let mut text = text.to_string();
     if let Some(stripped) = text.strip_prefix('\u{feff}') {
         text = stripped.to_string();
@@ -186,6 +203,7 @@ pub fn run_preprocessor(
     if let Some(json) = stage.as_arg() {
         cmd.arg(json).arg("onlyjson");
     }
+    cmd.args(options);
     cmd.arg("nopreprocessoroutput");
     for dir in &include_dirs {
         cmd.arg(format!("-I{}", dir.display()));

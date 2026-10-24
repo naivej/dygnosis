@@ -12,12 +12,18 @@ interface Target { root: vscode.Uri; document: vscode.Uri; current(): boolean }
 
 export function analysisLabel(analysis: AnalysisMetadata): string {
   const selection = analysis.selection;
-  const name = selection.name ?? (selection.preview ? "Analysis preview" : (analysis.configuration.defines?.length ?? 0) ? "Macro inputs" : "Source");
+  const equationSelection = analysis.configuration.equation_selection;
+  const equationLabel = equationSelection ? `${equationSelection.mode === "include" ? "Include" : "Exclude"} ${equationSelection.tag ?? "name"}=${equationSelection.values.join(",")}` : undefined;
+  const name = selection.name ?? (equationLabel ?? (selection.preview ? "Analysis preview" : (analysis.configuration.defines?.length ?? 0) ? "Macro inputs" : "Source"));
   return `${name}${selection.preview ? " (preview)" : ""}${analysis.state === "stale" ? " (stale)" : ""}`;
 }
 export function resultAnalysis(result: unknown): AnalysisMetadata | undefined {
   if (!record(result) || result.analysis === undefined) return undefined;
   try { return parseAnalysisMetadata(result.analysis); } catch { return undefined; }
+}
+export function parseEquationSelectionValues(raw: string): string[] | undefined {
+  const values = raw.split(",").map(value => value.trim());
+  return values.length && values.every(Boolean) && new Set(values).size === values.length ? values : undefined;
 }
 
 function fileUri(file: string): vscode.Uri {
@@ -83,13 +89,13 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     if (!invocation.current()) refuse("The source or chosen root changed. Request the analysis action again.");
     await service.setAnalysisConfiguration(invocation.root, side.analysis, proof, side.include_paths, side.preset_bindings, () => invocation.current());
   };
-  const choose = async (invocation: Target, proof: AnalysisContext, placeHolder: string, actions = false): Promise<AnalysisSide | "save" | "inputs"> => {
+  const choose = async (invocation: Target, proof: AnalysisContext, placeHolder: string, actions = false): Promise<AnalysisSide | "save" | "inputs" | "equations"> => {
     const saved = presets(invocation.root);
-    const entries: (vscode.QuickPickItem & { side?: AnalysisSide; action?: "save" | "inputs" })[] = [
+    const entries: (vscode.QuickPickItem & { side?: AnalysisSide; action?: "save" | "inputs" | "equations" })[] = [
       { label: "Source", description: actions ? "Reset analysis configuration" : "Use the written macro inputs", side: { analysis: {}, include_paths: null } },
       ...saved.values.map(value => ({ label: value.name, description: "Saved configuration", side: presetSide(value, saved.folder!) })),
     ];
-    if (actions) entries.push({ label: "Set macro inputs…", action: "inputs" }, { label: "Save current configuration…", action: "save" });
+    if (actions) entries.push({ label: "Set macro inputs…", action: "inputs" }, { label: "Select equations by tag…", action: "equations" }, { label: "Save current configuration…", action: "save" });
     const pick = await vscode.window.showQuickPick(entries, { placeHolder, title: `Dynare: ${analysisLabel(proof.analysis)}` });
     if (!pick) throw new CommandCancelled();
     if (!invocation.current()) refuse("The source or chosen root changed. Open the selector again.");
@@ -135,6 +141,21 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
       : [...current, ...(expression.trim() ? [{ name, expression }] : [])];
     await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });
   };
+  const equations = async (invocation: Target, proof: AnalysisContext): Promise<void> => {
+    const choices = modified(proof), previous = choices.equation_selection;
+    const mode = await vscode.window.showQuickPick([{ label: "Include matching equations", value: "include" as const }, { label: "Exclude matching equations", value: "exclude" as const }], { placeHolder: "Choose which tagged equations to analyze" });
+    if (!mode) throw new CommandCancelled();
+    const tag = await vscode.window.showInputBox({ prompt: "Equation tag name", value: previous?.tag ?? "name", validateInput: value => /^[A-Za-z_]\w*$/.test(value.trim()) ? undefined : "Enter a tag name using letters, digits, and underscores." });
+    if (tag === undefined) throw new CommandCancelled();
+    const rawValues = await vscode.window.showInputBox({ prompt: "Tag values, separated by commas (values cannot contain commas)", value: previous?.values.join(", ") ?? "", validateInput: value => {
+      return parseEquationSelectionValues(value) ? undefined : "Enter one or more distinct, non-empty tag values separated by commas.";
+    } });
+    if (rawValues === undefined) throw new CommandCancelled();
+    const values = parseEquationSelectionValues(rawValues);
+    if (!values) refuse("Enter one or more distinct, non-empty tag values separated by commas.");
+    choices.equation_selection = { mode: mode.value, tag: tag.trim(), values };
+    await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });
+  };
   const override = async (branch: boolean): Promise<void> => {
     const invocation = await target(true), proof = await context(invocation);
     const position = vscode.window.activeTextEditor!.selection.active;
@@ -165,7 +186,7 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     vscode.commands.registerCommand("dygnosis.selectAnalysisConfiguration", () => runCommand(service, async () => {
       const invocation = await target(), proof = await context(invocation);
       const selected = await choose(invocation, proof, "Select the analysis configuration for this model root", true);
-      if (selected === "save") await save(invocation); else if (selected === "inputs") await inputs(invocation, proof); else await apply(invocation, proof, selected);
+      if (selected === "save") await save(invocation); else if (selected === "inputs") await inputs(invocation, proof); else if (selected === "equations") await equations(invocation, proof); else await apply(invocation, proof, selected);
     }, () => !disposed)),
     vscode.commands.registerCommand("dygnosis.resetAnalysisConfiguration", () => runCommand(service, async () => { const invocation = await target(); await apply(invocation, await context(invocation), { analysis: {}, include_paths: null }); }, () => !disposed)),
     vscode.commands.registerCommand("dygnosis.saveAnalysisConfiguration", () => runCommand(service, () => save(), () => !disposed)),

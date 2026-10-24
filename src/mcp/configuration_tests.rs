@@ -19,6 +19,87 @@ fn alternative() -> Value {
 }
 
 #[test]
+fn equation_selection_reaches_mcp_facts_comparisons_and_edit_guards() {
+    // Guards a transport dropping invocation choices, comparing Source twice,
+    // or offering edits whose full-source binding proof is unavailable.
+    let input = source("var a b; model; [name='a'] a=b; [name='b'] b=b(-1); end;");
+    let analysis = json!({"equation_selection":{"mode":"include","values":["a"]}});
+    let result = call(
+        "dynare_model_info",
+        json!({"source":input,"analysis":analysis,"sections":["summary","analysis"]}),
+    );
+    assert_eq!(result["data"]["summary"]["equation_count"], 1, "{result}");
+    assert_eq!(
+        result["inputs"][0]["analysis"]["selection"]["invocation_scope"],
+        "explicit_macro_and_equation_inputs"
+    );
+    assert_eq!(
+        result["inputs"][0]["analysis"]["selection"]["preview"],
+        true
+    );
+    let compared = call(
+        "dynare_compare_models",
+        json!({"comparison":{"kind":"sources","before":input,"after":input},"analysis_b":analysis}),
+    );
+    let inputs = compared["inputs"].as_array().unwrap();
+    assert!(
+        inputs.iter().any(
+            |input| input["analysis"]["configuration"]["equation_selection"]["values"][0] == "a"
+        )
+    );
+    assert!(
+        inputs
+            .iter()
+            .any(|input| input["analysis"]["configuration"]["equation_selection"].is_null())
+    );
+    let rows = &compared["data"]["semantic"]["rows"];
+    assert!(
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["family"] == "equations"),
+        "{rows}"
+    );
+    let refused = call(
+        "dynare_rename",
+        json!({"source":input,"analysis":analysis,"symbol":{"kind":"name","name":"a"},"new_name":"output"}),
+    );
+    assert_eq!(
+        refused["outcome"]["reasons"][0]["code"],
+        "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED"
+    );
+    assert!(refused["proposal"].is_null());
+}
+
+#[test]
+fn failed_equation_selection_is_explained_without_source_counts() {
+    // Guards a failed selector being presented as a successful Source result.
+    let result = call(
+        "dynare_model_info",
+        json!({"source":source("var a; model; [name='a'] a=a(-1); end;"),"analysis":{"equation_selection":{"mode":"include","values":["absent"]}},"sections":["summary","analysis"]}),
+    );
+    assert_eq!(result["coverage"][0]["complete"], false);
+    assert!(result["data"]["summary"]["equation_count"].is_null());
+    assert!(
+        result
+            .to_string()
+            .contains("Equation selection was not applied")
+    );
+    assert!(!result["outcome"]["reasons"].as_array().unwrap().is_empty());
+    let expanded = call(
+        "dynare_expand",
+        json!({"source":source("var a; model; [name='a'] a=a(-1); end;"),"analysis":{"equation_selection":{"mode":"include","values":["absent"]}}}),
+    );
+    assert_eq!(expanded["data"]["n_equations"], 0);
+    assert!(
+        expanded["data"]["origins"]
+            .as_array()
+            .is_none_or(|origins| origins.is_empty())
+    );
+    assert!(expanded["data"].to_string().contains("a"));
+}
+
+#[test]
 fn request_choices_change_effective_facts_without_leaking_to_the_next_request() {
     // A false definition is present; request-local state must not leak to Source.
     let configured = call(

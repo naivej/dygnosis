@@ -201,6 +201,25 @@ fn dedupe_macro_diagnostics(diagnostics: impl IntoIterator<Item = Diagnostic>) -
 /// Keep analysis positions through every selection and suppression decision.
 /// Only the completed collection receives display ranges.
 fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
+    if let Some(analysis) = &model.invocation_analysis {
+        return analysis.diagnostics.as_ref().clone();
+    }
+    analyze_positions_impl(model, None)
+}
+
+/// Invocation selectors run after Parse and Check, before Transform.
+pub(crate) fn before_equation_selection<'a>(
+    model: &'a Model,
+    usage: &std::cell::OnceCell<usage::Usage<'a>>,
+) -> Vec<Diagnostic> {
+    analyze_positions_impl(model, Some(usage))
+}
+
+fn analyze_positions_impl<'a>(
+    model: &'a Model,
+    shared_usage: Option<&std::cell::OnceCell<usage::Usage<'a>>>,
+) -> Vec<Diagnostic> {
+    let before_selection = shared_usage.is_some();
     // Macro processing runs before the .mod parser. A failed definition may
     // otherwise turn its later interpolation into a spurious equation error.
     if !model.macro_type_errors.is_empty() {
@@ -278,7 +297,11 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     if crate::engine::control::cancelled() {
         return Vec::new();
     }
-    let ms_diags = crate::engine::diagnostics::check_d_ms::check_d_ms(model);
+    let ms_diags = if before_selection {
+        check_d_ms::before_equation_selection(model)
+    } else {
+        check_d_ms::check_d_ms(model)
+    };
     let recorded_syntax: Vec<Diagnostic> = ms_diags
         .iter()
         .filter(|d| d.code == "E001")
@@ -323,7 +346,7 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     }
     let path_parse_incomplete = model.shock_paths.iter().any(|block| !block.completed);
     let mut clashes = Vec::new();
-    if !path_parse_incomplete {
+    if !path_parse_incomplete && !before_selection {
         clashes.extend(crate::engine::diagnostics::check_clash::check_clash(model));
         clashes.extend(crate::engine::diagnostics::check_d_pac::check_transform(
             model,
@@ -368,7 +391,9 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     if crate::engine::control::cancelled() {
         return Vec::new();
     }
-    out.extend(crate::engine::diagnostics::e010::check_e010(model));
+    if !before_selection {
+        out.extend(crate::engine::diagnostics::e010::check_e010(model));
+    }
     if crate::engine::control::cancelled() {
         return Vec::new();
     }
@@ -393,8 +418,9 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     if crate::engine::control::cancelled() {
         return Vec::new();
     }
-    out.extend(crate::engine::diagnostics::check_w010::check_w010_family(
+    out.extend(check_w010::check_w010_family_with_usage(
         model,
+        shared_usage.map(|usage| usage.get_or_init(|| usage::Usage::new(model))),
     ));
     if crate::engine::control::cancelled() {
         return Vec::new();
@@ -540,6 +566,31 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
                 .any(|clash| clash.code == d.code && clash.span == d.span)
         });
     }
+    if before_selection {
+        return out;
+    }
+    finish_model_checks(model, out, &clashes, path_parse_incomplete)
+}
+
+pub(crate) fn after_equation_selection(model: &Model, mut out: Vec<Diagnostic>) -> Vec<Diagnostic> {
+    let path_parse_incomplete = model.shock_paths.iter().any(|block| !block.completed);
+    let mut clashes = check_clash::check_clash(model);
+    clashes.extend(check_d_pac::check_transform(model));
+    out.extend(clashes.iter().cloned());
+    out.extend(e010::check_e010(model));
+    let mut out = finish_model_checks(model, out, &clashes, path_parse_incomplete);
+    if !out.iter().any(|d| d.severity == Severity::Error) {
+        check_d_ms::check_subsample_writer(model, &mut out);
+    }
+    out
+}
+
+fn finish_model_checks(
+    model: &Model,
+    mut out: Vec<Diagnostic>,
+    clashes: &[Diagnostic],
+    path_parse_incomplete: bool,
+) -> Vec<Diagnostic> {
     if !out.iter().any(|d| d.severity == Severity::Error) {
         out.extend(crate::engine::diagnostics::check_d_surgery::check_w212(
             model,

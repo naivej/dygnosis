@@ -57,6 +57,14 @@ pub fn check_d_ms(model: &Model) -> Vec<Diagnostic> {
     out
 }
 
+pub(crate) fn before_equation_selection(model: &Model) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    if check_parse_phase(model, &mut out, None).is_none() {
+        check_check_phase(model, &mut out);
+    }
+    out
+}
+
 /// Preserve a completed Parse action before a later source-lexer refusal.
 /// Check and Write actions cannot precede a failure to finish parsing.
 pub(crate) fn check_parse_before(model: &Model, syntax: &[Diagnostic]) -> Vec<Diagnostic> {
@@ -936,7 +944,7 @@ fn check_dotted_head_and_subsample(
     false
 }
 
-fn check_subsample_writer(model: &Model, out: &mut Vec<Diagnostic>) {
+pub(crate) fn check_subsample_writer(model: &Model, out: &mut Vec<Diagnostic>) {
     for stmt in &model.subsamples {
         if crate::engine::control::cancelled() {
             return Default::default();

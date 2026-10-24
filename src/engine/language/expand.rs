@@ -354,16 +354,17 @@ fn expand_spliced(
         .as_ref()
         .is_some_and(|inputs| inputs.analysis.selection.preview);
     let evaluations = splice_evaluations_configured(map, retain_overrides);
+    let mut expansion_budget = crate::engine::language::macro_expr::MacroBudget::with_limit(
+        work_limit,
+        cancellation.clone(),
+    );
     let (tokens, traces, arena, incomplete, macro_navigation_complete, messages, discarded) =
         crate::engine::language::macro_expand::expand_macros_traced_configured(
             &source,
             raw,
             &line_segments,
             &evaluations,
-            &mut crate::engine::language::macro_expr::MacroBudget::with_limit(
-                work_limit,
-                cancellation.clone(),
-            ),
+            &mut expansion_budget,
             inputs.clone(),
             cached.as_deref(),
         );
@@ -378,14 +379,40 @@ fn expand_spliced(
             && same_completed_parser_input(model, &source, &tokens, work_limit)
     });
     let owned_parse = reusable.is_none().then(|| {
-        crate::engine::language::parser::parse_expanded_context_controlled(
-            &source,
-            tokens.clone(),
-            cancellation.clone(),
-            work_limit,
-            inputs.clone(),
-            (!discarded.is_empty()).then(|| Arc::from(discarded)),
-        )
+        let (mut model, mut ranges) =
+            crate::engine::language::parser::parse_expanded_context_controlled(
+                &source,
+                tokens.clone(),
+                cancellation.clone(),
+                work_limit,
+                inputs.clone(),
+                (!discarded.is_empty()).then(|| Arc::from(discarded)),
+            );
+        // This is the existing fallback for a different parser stream. Its
+        // model facts cannot reuse the original input's selection proof.
+        if !incomplete
+            && parsed_model.is_none_or(|model| {
+                model
+                    .invocation_analysis
+                    .as_ref()
+                    .is_none_or(|analysis| analysis.failure.is_none())
+            })
+            && let Some(selection) = inputs
+                .as_ref()
+                .and_then(|inputs| inputs.analysis.choices.equation_selection.as_ref())
+        {
+            crate::engine::analysis::equation_selection::apply(
+                &mut model,
+                selection,
+                &mut expansion_budget,
+            );
+            ranges.aggregate = model
+                .equations
+                .iter()
+                .map(|equation| equation.active_tokens.clone())
+                .collect();
+        }
+        (model, ranges)
     });
     let reused_ranges;
     let (model, ranges) = if let Some((model, ranges)) = &owned_parse {
@@ -418,8 +445,14 @@ fn expand_spliced(
     if crate::engine::control::cancelled() {
         return ExpandReport::default();
     }
-    let map_complete = reusable.is_some()
-        || (!incomplete && crate::engine::workspace::model_map::parser_complete(model));
+    let map_complete = (reusable.is_some()
+        || (!incomplete && crate::engine::workspace::model_map::parser_complete(model)))
+        && parsed_model.is_none_or(|model| {
+            model
+                .invocation_analysis
+                .as_ref()
+                .is_none_or(|analysis| analysis.failure.is_none())
+        });
     let parsed_tokens = &model.expanded_tokens;
     let parsed_traces =
         project_token_traces(parsed_tokens, ranges, &traces, &arena, retain_overrides);
@@ -432,7 +465,17 @@ fn expand_spliced(
     let effective_text = join_lexemes_recorded(&source, render_tokens, |index, span| {
         emitted[index] = Some(span);
     });
-    let model_map = build_model_map(
+    let invocation_unavailable = model
+        .invocation_analysis
+        .as_ref()
+        .is_some_and(|analysis| analysis.failure.is_some())
+        || parsed_model.is_some_and(|model| {
+            model
+                .invocation_analysis
+                .as_ref()
+                .is_some_and(|analysis| analysis.failure.is_some())
+        });
+    let mut model_map = build_model_map(
         model,
         ranges,
         parsed_tokens,
@@ -441,6 +484,12 @@ fn expand_spliced(
         map,
         map_complete,
     );
+    if invocation_unavailable {
+        for row in &mut model_map.equations {
+            row.active = false;
+            row.number = None;
+        }
+    }
     // Compare with an independently proven active-include projection. Matching
     // lexemes alone is insufficient: kinds and order must agree too. It uses
     // the same expander and parser; each projection is parsed once.
@@ -613,7 +662,7 @@ fn expand_spliced(
     } else {
         Vec::new()
     };
-    if incomplete {
+    if incomplete || invocation_unavailable {
         return ExpandReport {
             model_map,
             complete: false,
@@ -796,7 +845,7 @@ fn same_completed_parser_input(
             _ => return false,
         }
     }
-    crate::engine::workspace::model_map::parser_complete(model)
+    crate::engine::workspace::model_map::source_parser_complete(model)
 }
 
 fn same_emitted_source(
@@ -980,9 +1029,15 @@ fn build_model_map(
     };
     let mut numbered = HashMap::new();
     let mut active = std::collections::HashSet::new();
+    let membership_available = model
+        .invocation_analysis
+        .as_ref()
+        .is_none_or(|analysis| analysis.failure.is_none());
     let mut number = 0;
     for (equation, range) in model.equations.iter().zip(&ranges.aggregate) {
-        active.insert(range.start);
+        if membership_available {
+            active.insert(range.start);
+        }
         if !equation.is_local && !equation.static_tag {
             number += 1;
             numbered.insert(range.start, number);
@@ -992,7 +1047,9 @@ fn build_model_map(
     for (block, block_ranges) in model.heterogeneous_models.iter().zip(&ranges.heterogeneous) {
         let number = dimension_numbers.entry(block.dimension).or_insert(0);
         for (equation, range) in block.equations.iter().zip(block_ranges) {
-            active.insert(range.start);
+            if membership_available {
+                active.insert(range.start);
+            }
             if !equation.is_local && !equation.static_tag {
                 *number += 1;
                 numbered.insert(range.start, *number);

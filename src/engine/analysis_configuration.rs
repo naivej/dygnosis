@@ -19,6 +19,29 @@ pub struct AnalysisConfiguration {
     pub defines: Vec<InitialDefinition>,
     #[serde(default)]
     pub overrides: Vec<AnalysisOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equation_selection: Option<EquationSelection>,
+}
+
+/// Explicit invocation tag values. This input never performs a file lookup.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EquationSelection {
+    pub mode: EquationSelectionMode,
+    #[serde(default = "default_equation_tag")]
+    pub tag: String,
+    pub values: Vec<String>,
+}
+
+fn default_equation_tag() -> String {
+    "name".into()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EquationSelectionMode {
+    Include,
+    Exclude,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -137,11 +160,11 @@ impl std::error::Error for ConfigurationError {}
 
 impl AnalysisConfiguration {
     pub fn is_preview(&self) -> bool {
-        !self.overrides.is_empty()
+        !self.overrides.is_empty() || self.equation_selection.is_some()
     }
 
     pub fn is_source(&self) -> bool {
-        self.defines.is_empty() && self.overrides.is_empty()
+        self.defines.is_empty() && self.overrides.is_empty() && self.equation_selection.is_none()
     }
 
     /// Site choices have no request-order effect; initial definitions do.
@@ -154,8 +177,21 @@ impl AnalysisConfiguration {
             let right = right.target();
             (&left.file, &left.site_id).cmp(&(&right.file, &right.site_id))
         });
-        let bytes = serde_json::to_vec(&(&self.defines, overrides))
-            .expect("typed macro choices are serializable");
+        let bytes = if let Some(selection) = &self.equation_selection {
+            let mut values: Vec<_> = selection.values.iter().collect();
+            values.sort();
+            values.dedup();
+            serde_json::to_vec(&(
+                &self.defines,
+                overrides,
+                selection.mode,
+                &selection.tag,
+                values,
+            ))
+        } else {
+            serde_json::to_vec(&(&self.defines, overrides))
+        }
+        .expect("typed macro choices are serializable");
         source_revision(std::str::from_utf8(&bytes).expect("JSON is UTF-8"))
     }
 }
@@ -541,6 +577,30 @@ impl AnalysisConfiguration {
                 .map_or(1, |name| name.len().saturating_add(1)),
         )?;
         let mut names = HashSet::new();
+        if let Some(selection) = &self.equation_selection {
+            charge(budget, selection.tag.len().saturating_add(1))?;
+            let mut bytes = selection.tag.bytes();
+            if !bytes
+                .next()
+                .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+                || !bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                || selection.values.is_empty()
+            {
+                return Err(ConfigurationError::new(
+                    "ANALYSIS_INVALID_EQUATION_SELECTION",
+                    "Equation selection requires a tag name and at least one explicit tag value. Selector files are not supported; supply tag values directly.",
+                ));
+            }
+            for value in &selection.values {
+                charge(budget, value.len().saturating_add(1))?;
+                if value.is_empty() {
+                    return Err(ConfigurationError::new(
+                        "ANALYSIS_INVALID_EQUATION_SELECTION",
+                        "Equation selection contains an empty tag value. Supply nonempty explicit tag values; no selection was changed.",
+                    ));
+                }
+            }
+        }
         let mut targets = HashSet::new();
         let mut initial = HashMap::new();
         for define in &self.defines {
@@ -776,6 +836,7 @@ mod tests {
                     target: site.target.clone(),
                 })
                 .collect(),
+            equation_selection: None,
         };
         let first = config.configuration_id();
         config.name = Some("Renamed label".into());

@@ -37,6 +37,141 @@ fn names(ws: &mut Workspace) -> Vec<String> {
         .collect()
 }
 
+fn equation_choices(mode: &str, values: &[&str]) -> AnalysisConfiguration {
+    serde_json::from_value(serde_json::json!({"equation_selection":{"mode":mode,"values":values}}))
+        .unwrap()
+}
+
+#[test]
+fn equation_selection_reuses_source_parse_and_restores_guarded_results() {
+    // Guards an extra parse for a selector-only change, stale worker adoption,
+    // and different equation membership sharing one configuration revision.
+    let mut ws = workspace(
+        "var a b; model; [name='a'] a=a(-1); [name='b'] b=b(-1); end;",
+        &[],
+    );
+    let source = ws.effective_model_snapshot("main.mod").unwrap();
+    let source_revision = ws.input_revision("main.mod").unwrap();
+    let parses = crate::engine::language::parser::PARSE_EXPANDED_BUILDS.with(|count| count.get());
+    let old_worker =
+        ws.snapshot_for_root_with_limit("main.mod", vec![], ws.root_macro_work_limit("main.mod"));
+    ws.set_root_analysis_configuration("main.mod", equation_choices("include", &["a"]))
+        .unwrap();
+    let selected = ws.effective_model_snapshot("main.mod").unwrap();
+    assert_eq!(selected.equations.len(), 1);
+    assert_eq!(
+        crate::engine::language::parser::PARSE_EXPANDED_BUILDS.with(|count| count.get()),
+        parses
+    );
+    let selected_revision = ws.input_revision("main.mod").unwrap();
+    assert_ne!(source_revision, selected_revision);
+    ws.adopt_root_analysis("main.mod", old_worker);
+    assert!(Arc::ptr_eq(
+        &selected,
+        &ws.effective_model_snapshot("main.mod").unwrap()
+    ));
+    ws.set_root_analysis_configuration("main.mod", AnalysisConfiguration::default())
+        .unwrap();
+    assert!(Arc::ptr_eq(
+        &source,
+        &ws.effective_model_snapshot("main.mod").unwrap()
+    ));
+    ws.set_root_analysis_configuration("main.mod", equation_choices("include", &["a"]))
+        .unwrap();
+    assert!(Arc::ptr_eq(
+        &selected,
+        &ws.effective_model_snapshot("main.mod").unwrap()
+    ));
+    ws.update_document(
+        "main.mod",
+        "var a b; model; [name='renamed'] a=a(-1); [name='b'] b=b(-1); end;",
+    );
+    assert!(!ws.analysis_metadata("main.mod").unwrap().model_complete);
+    assert_ne!(ws.input_revision("main.mod").unwrap(), selected_revision);
+}
+
+#[test]
+fn equation_selection_keeps_include_origins_and_pretransform_source_text() {
+    // Guards selection moving an included equation's source identity or
+    // filtering the expansion text instead of only effective membership.
+    let mut ws = workspace(
+        "var a b;\nmodel;\n@#include \"body.inc\"\nend;\n",
+        &[("body.inc", "[name='a'] a=b;\n[name='b'] b=b(-1);\n")],
+    );
+    ws.set_root_analysis_configuration("main.mod", equation_choices("include", &["a"]))
+        .unwrap();
+    let report = ws.expand_report_snapshot("main.mod").unwrap();
+    assert!(report.complete && report.model_map.complete);
+    assert!(report.effective_text.contains("b(-1)"));
+    let active: Vec<_> = report
+        .model_map
+        .equations
+        .iter()
+        .filter(|row| row.active && !row.local)
+        .collect();
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].name, "a");
+    assert!(
+        active[0]
+            .source
+            .segments
+            .iter()
+            .all(|segment| segment.file.as_deref() == Some("body.inc"))
+    );
+}
+
+#[test]
+fn equation_selection_composes_with_macro_inputs_and_forced_branch_origins() {
+    // Guards selecting tags from Source instead of the configured execution,
+    // and losing branch-preview origin frames after filtering model rows.
+    let source = "@#ifndef ALT\n@#define ALT=0\n@#endif\nvar a b;\nmodel;\n@#if ALT\n[name='alternative'] a=b;\n@#else\n[name='base'] a=a(-1);\n@#endif\n[name='b'] b=b(-1);\nend;\n";
+    let mut ws = workspace(source, &[]);
+    let mut choices = equation_choices("include", &["alternative"]);
+    choices.defines = vec![InitialDefinition {
+        name: "ALT".into(),
+        expression: "1".into(),
+    }];
+    ws.set_root_analysis_configuration("main.mod", choices)
+        .unwrap();
+    let model = ws.get_effective_model("main.mod").unwrap();
+    assert_eq!(model.equations[0].name, "alternative");
+    assert_eq!(model.endogenous.len(), 1);
+    assert_eq!(model.exogenous.len(), 1);
+    ws.set_root_analysis_configuration("main.mod", AnalysisConfiguration::default())
+        .unwrap();
+    let site = ws
+        .source_structure("main.mod", &SourceStructureQuery::default())
+        .unwrap()
+        .files[0]
+        .sites
+        .iter()
+        .find(|site| site.expected_text == "@#if ALT")
+        .unwrap()
+        .clone();
+    let mut preview = equation_choices("include", &["alternative"]);
+    preview.overrides = vec![AnalysisOverride::Branch {
+        target: site.target,
+        branch_id: Some(site.branches[0].branch_id.clone()),
+    }];
+    ws.set_root_analysis_configuration("main.mod", preview)
+        .unwrap();
+    let report = ws.expand_report_snapshot("main.mod").unwrap();
+    assert!(report.complete && report.navigation_complete);
+    let row = report
+        .model_map
+        .equations
+        .iter()
+        .find(|row| row.active && row.name == "alternative")
+        .unwrap();
+    assert_eq!(row.number, Some(1));
+    assert!(
+        row.source
+            .origin_frames
+            .iter()
+            .any(|frame| frame.kind == "override_branch")
+    );
+}
+
 #[test]
 fn worker_snapshots_do_not_reuse_effective_models_from_another_configuration() {
     // Guards a background snapshot keeping Source parser facts after the root

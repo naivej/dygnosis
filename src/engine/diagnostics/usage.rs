@@ -268,6 +268,33 @@ impl<'a> Usage<'a> {
     }
 
     pub(crate) fn names(&self, roots: impl IntoIterator<Item = ExprId>) -> HashSet<Name> {
+        self.collect_names(roots, || {
+            if crate::engine::control::cancelled() {
+                Err(
+                    crate::engine::language::macro_expand::MacroEvalError::Limit(
+                        "request cancelled",
+                    ),
+                )
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_or_default()
+    }
+
+    pub(crate) fn names_budgeted(
+        &self,
+        roots: impl IntoIterator<Item = ExprId>,
+        budget: &mut crate::engine::language::macro_expr::MacroBudget,
+    ) -> Result<HashSet<Name>, crate::engine::language::macro_expand::MacroEvalError> {
+        self.collect_names(roots, || budget.spend_work(1))
+    }
+
+    fn collect_names(
+        &self,
+        roots: impl IntoIterator<Item = ExprId>,
+        mut visit: impl FnMut() -> Result<(), crate::engine::language::macro_expand::MacroEvalError>,
+    ) -> Result<HashSet<Name>, crate::engine::language::macro_expand::MacroEvalError> {
         let mut names = HashSet::new();
         let mut seen = HashSet::new();
         let mut pending: Vec<_> = roots
@@ -275,9 +302,7 @@ impl<'a> Usage<'a> {
             .filter_map(|id| self.normalized.get(&id).copied())
             .collect();
         while let Some(id) = pending.pop() {
-            if crate::engine::control::cancelled() {
-                return Default::default();
-            }
+            visit()?;
             if !seen.insert(id) {
                 continue;
             }
@@ -300,7 +325,7 @@ impl<'a> Usage<'a> {
                 Node::Number(_) | Node::Opaque(_) | Node::PathNamespace(_) => {}
             }
         }
-        names
+        Ok(names)
     }
 }
 

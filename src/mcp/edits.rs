@@ -28,7 +28,7 @@ pub(super) fn edit_request(
     if snapshot.model.is_analysis_preview() && tool == "dynare_auto_fix" {
         return Ok(ToolResult::refused(
             "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED",
-            "Diagnostic fixes are unavailable for a definition or branch analysis preview. No edits were proposed. Reset the overrides to use source editing actions.",
+            "Diagnostic fixes are unavailable for a definition, branch or equation-selection analysis preview. No edits were proposed. Reset Analysis Configuration to use source editing actions.",
         ));
     }
     if snapshot.model.is_analysis_preview()
@@ -37,7 +37,7 @@ pub(super) fn edit_request(
     {
         return Ok(ToolResult::refused(
             "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED",
-            "Source action proposals are unavailable for a definition or branch analysis preview. No edits were proposed. Reset the overrides to use source editing actions.",
+            "Source action proposals are unavailable for a definition, branch or equation-selection analysis preview. No edits were proposed. Reset Analysis Configuration to use source editing actions.",
         ));
     }
     crate::engine::control::run(snapshot.workspace.cancellation(), || match tool {
@@ -910,9 +910,9 @@ fn actions_request(
     let (set, rows) = owned_diagnostics(snapshot)?;
     let selected = select_diagnostics(params, snapshot, &rows)?;
     if snapshot.model.is_analysis_preview() {
-        let omitted: Vec<_> = selected.iter().filter(|row|row.diagnostic.fix.is_some() || matches!(row.diagnostic.code.as_str(),"I208"|"I209")).map(|row|json!({"diagnostic_id":row.id,"code":"ANALYSIS_PREVIEW_EDIT_UNSUPPORTED","reason":"Source action proposals are unavailable for a definition or branch analysis preview. Reset the overrides to use source editing actions."})).collect();
+        let omitted: Vec<_> = selected.iter().filter(|row|row.diagnostic.fix.is_some() || matches!(row.diagnostic.code.as_str(),"I208"|"I209")).map(|row|json!({"diagnostic_id":row.id,"code":"ANALYSIS_PREVIEW_EDIT_UNSUPPORTED","reason":"Source action proposals are unavailable for a definition, branch or equation-selection analysis preview. Reset Analysis Configuration to use source editing actions."})).collect();
         let mut result = ToolResult::new(json!({"actions":[],"omitted_actions":omitted}));
-        result.cause("partial","ANALYSIS_PREVIEW_EDIT_UNSUPPORTED","The analysis preview is read-only for source actions. No edit proposals were returned. Reset the overrides to use source editing actions.");
+        result.cause("partial","ANALYSIS_PREVIEW_EDIT_UNSUPPORTED","The analysis preview is read-only for source actions. No edit proposals were returned. Reset Analysis Configuration to use source editing actions.");
         return Ok(result);
     }
     let unsafe_macro = macro_unsafe(snapshot);

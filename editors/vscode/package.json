@@ -542,7 +542,20 @@
                 },
                 "analysis": {
                   "type": "object",
-                  "description": "Macro inputs and preview choices saved by Dygnosis."
+                  "description": "Macro inputs and preview choices saved by Dygnosis.",
+                  "properties": {
+                    "equation_selection": {
+                      "type": "object",
+                      "description": "Select equations by explicit tag values for analysis.",
+                      "required": ["mode", "values"],
+                      "additionalProperties": false,
+                      "properties": {
+                        "mode": { "enum": ["include", "exclude"] },
+                        "tag": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "default": "name" },
+                        "values": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+                      }
+                    }
+                  }
                 },
                 "includePaths": {
                   "type": "array",

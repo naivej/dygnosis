@@ -35,7 +35,8 @@ export type AnalysisOverride =
   { kind: "definition"; target: GuardedTarget; expression: string } |
   { kind: "skip_definition"; target: GuardedTarget } |
   { kind: "branch"; target: GuardedTarget; branch_id: string | null };
-export interface AnalysisConfiguration { name?: string; defines?: { name: string; expression: string }[]; overrides?: AnalysisOverride[] }
+export interface EquationSelection { mode: "include" | "exclude"; tag?: string; values: string[] }
+export interface AnalysisConfiguration { name?: string; defines?: { name: string; expression: string }[]; overrides?: AnalysisOverride[]; equation_selection?: EquationSelection }
 export interface OverrideReceipt {
   operation: AnalysisOverride; application: "applied" | "not_reached" | "unknown";
   known_execution_count: number; execution_count: number | null; cause: string | null;
@@ -117,7 +118,12 @@ export function analysisOverride(value: unknown): value is AnalysisOverride {
 export function analysisConfiguration(value: unknown): value is AnalysisConfiguration {
   return record(value) && (value.name === undefined || typeof value.name === "string") &&
     (value.defines === undefined || rows(value.defines, row => typeof row.name === "string" && typeof row.expression === "string")) &&
-    (value.overrides === undefined || Array.isArray(value.overrides) && value.overrides.every(analysisOverride));
+    (value.overrides === undefined || Array.isArray(value.overrides) && value.overrides.every(analysisOverride)) &&
+    (value.equation_selection === undefined || record(value.equation_selection) &&
+      ["include", "exclude"].includes(String(value.equation_selection.mode)) &&
+      (value.equation_selection.tag === undefined || typeof value.equation_selection.tag === "string" && /^[A-Za-z_]\w*$/.test(value.equation_selection.tag)) &&
+      Array.isArray(value.equation_selection.values) && value.equation_selection.values.length > 0 &&
+      value.equation_selection.values.every(item => typeof item === "string" && item.trim().length > 0));
 }
 export function parseAnalysisMetadata(value: unknown): AnalysisMetadata {
   if (!record(value) || !["selected", "stale"].includes(String(value.state)) || !record(value.selection) ||

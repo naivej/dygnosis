@@ -45,8 +45,9 @@ export function resourceName(resource: ComparisonResource): string {
 }
 export function configurationLabel(analysis: AnalysisConfiguration): string {
   const preview = !!analysis.overrides?.length;
-  const name = analysis.name ?? (preview ? "Analysis preview" : analysis.defines?.length ? "Macro inputs" : "Source");
-  return `${name}${preview ? " (preview)" : ""}`;
+  const selection = analysis.equation_selection;
+  const name = analysis.name ?? (selection ? `${selection.mode === "include" ? "Include" : "Exclude"} ${selection.tag ?? "name"}=${selection.values.join(",")}` : preview ? "Analysis preview" : analysis.defines?.length ? "Macro inputs" : "Source");
+  return `${name}${preview ? " (preview)" : selection ? " (equation selection)" : ""}`;
 }
 export function inputLabel(input: ModelSelector): string {
   const analysis = input.analysis ? ` · ${configurationLabel(input.analysis)}` : "";

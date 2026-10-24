@@ -1622,7 +1622,7 @@ impl Backend {
             {
                 actions.push(CodeActionOrCommand::CodeAction(CodeAction {
                     title: fix_title(lib), kind: Some(CodeActionKind::QUICKFIX),
-                    disabled: Some(CodeActionDisabled { reason: "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED: Diagnostic fixes are unavailable while a definition or branch preview is selected. Reset Analysis Configuration before requesting this edit.".into() }),
+                    disabled: Some(CodeActionDisabled { reason: "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED: Diagnostic fixes are unavailable while a definition, branch or equation-selection preview is selected. Reset Analysis Configuration before requesting this edit.".into() }),
                     diagnostics: Some(vec![row.lsp_diagnostic.clone()]), ..CodeAction::default()
                 }));
                 continue;
@@ -4166,7 +4166,7 @@ fn naming_action_for_root(
             _ => return None,
         };
         return Some(CodeAction {title:title.into(),kind:Some(CodeActionKind::QUICKFIX),diagnostics:Some(vec![note]),
-            disabled:Some(CodeActionDisabled{reason:"ANALYSIS_PREVIEW_EDIT_UNSUPPORTED: Diagnostic fixes are unavailable while a definition or branch preview is selected. Reset Analysis Configuration before requesting this edit.".into()}),..CodeAction::default()});
+            disabled:Some(CodeActionDisabled{reason:"ANALYSIS_PREVIEW_EDIT_UNSUPPORTED: Diagnostic fixes are unavailable while a definition, branch or equation-selection preview is selected. Reset Analysis Configuration before requesting this edit.".into()}),..CodeAction::default()});
     }
     if params
         .context

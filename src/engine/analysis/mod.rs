@@ -1,6 +1,7 @@
 //! Shared facts derived from the retained model.
 
 pub mod assignment_values;
+pub(crate) mod equation_selection;
 pub mod equations;
 pub(crate) mod folding;
 pub mod model_info;

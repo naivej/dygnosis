@@ -39,6 +39,7 @@ function configurationHover(info: ModelInfo): vscode.MarkdownString {
   const analysis = info.analysis;
   const choices = [
     ...(analysis?.configuration.defines ?? []).map(input => `${input.name} = ${input.expression}`),
+    ...(analysis?.configuration.equation_selection ? [`${analysis.configuration.equation_selection.mode === "include" ? "Include" : "Exclude"} ${analysis.configuration.equation_selection.tag ?? "name"}: ${analysis.configuration.equation_selection.values.join(", ")}`] : []),
     ...(analysis?.configuration.overrides ?? []).map(operation => operation.kind === "definition"
       ? `Definition override = ${operation.expression}`
       : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview"),
@@ -63,7 +64,7 @@ function configurationHover(info: ModelInfo): vscode.MarkdownString {
 export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusContent {
   const analysis = info.analysis;
   const configured = analysis && (analysis.selection.name || analysis.configuration.defines?.length ||
-    analysis.configuration.overrides?.length || analysis.include_paths !== null);
+    analysis.configuration.overrides?.length || analysis.configuration.equation_selection || analysis.include_paths !== null);
   const label = configured ? "Current config" : "Source";
   const tooltip = configurationHover(info);
   if (!info.complete) {

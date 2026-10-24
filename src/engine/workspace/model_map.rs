@@ -5,6 +5,16 @@ use crate::engine::language::span::Span;
 /// Complete recovered Dynare structure. Native MATLAB lines do not require
 /// Dynare's statement semicolon; their arithmetic proof is a separate concern.
 pub fn parser_complete(model: &crate::engine::language::model::Model) -> bool {
+    model
+        .invocation_analysis
+        .as_ref()
+        .is_none_or(|analysis| analysis.failure.is_none())
+        && source_parser_complete(model)
+}
+
+/// Physical parser-input proof is independent of invocation selection. Source
+/// expansion can reuse it while withholding unavailable selected model facts.
+pub(crate) fn source_parser_complete(model: &crate::engine::language::model::Model) -> bool {
     model.parse_issues.is_empty()
         && model.mom_syntax.is_empty()
         && model.shape_refuses.is_empty()

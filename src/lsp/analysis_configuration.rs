@@ -94,16 +94,43 @@ pub(super) fn metadata(inner: &mut Inner, root: &Url) -> Value {
             .map(|path| path.to_string_lossy().into_owned())
             .collect::<Vec<_>>()
     });
-    let (selection, cause) = match state {
-        AnalysisSelectionState::Selected(selection) => (selection, None),
-        AnalysisSelectionState::Stale { selection, cause } => (selection, Some(cause)),
+    let (selection, mut is_stale, mut cause) = match state {
+        AnalysisSelectionState::Selected(selection) => (selection, false, None),
+        AnalysisSelectionState::Stale { selection, cause } => (selection, true, Some(cause)),
     };
     let facts = if cause.is_none() {
-        inner.workspace.analysis_metadata(root.as_str()).ok()
+        match inner.workspace.analysis_metadata(root.as_str()) {
+            Ok(facts) => Some(facts),
+            Err(error) => {
+                is_stale = true;
+                cause = Some(error);
+                None
+            }
+        }
     } else {
         None
     };
-    json!({"state":if cause.is_some() {"stale"} else {"selected"},"selection":selection,
+    if cause.is_none()
+        && configuration.equation_selection.is_some()
+        && facts.as_ref().is_some_and(|facts| !facts.model_complete)
+    {
+        let failure = inner
+            .workspace
+            .get_effective_model(root.as_str())
+            .and_then(|model| model.invocation_analysis.as_ref())
+            .and_then(|analysis| analysis.failure.clone());
+        if let Some(message) = failure {
+            cause = Some(
+                crate::engine::analysis_configuration::ConfigurationError::new(
+                    "ANALYSIS_EQUATION_SELECTION_UNAVAILABLE",
+                    message,
+                ),
+            );
+        }
+    }
+    let cause =
+        cause.map(|cause| json!({"code":cause.code,"message":cause.message,"target":cause.target}));
+    json!({"state":if is_stale {"stale"} else {"selected"},"selection":selection,
         "configuration":configuration.as_ref(),"selection_generation":inner.analysis_configuration.generation(root),
         "include_paths":paths,"macro_complete":facts.as_ref().map(|facts|facts.macro_complete),
         "model_complete":facts.as_ref().map(|facts|facts.model_complete),
@@ -635,6 +662,12 @@ fn set(inner: &mut Inner, arguments: &[Value]) -> std::result::Result<Value, Val
         "analysis":metadata(inner,&root),"sites":[],"source_coverage":{"complete":false,"cause":cause.get("error")},
         "partial":true,"message":"The analysis configuration was accepted, but its current source context could not be guarded. Refresh the selector before another action."}));
     result["accepted"] = json!(true);
+    if let Some(cause) = result["analysis"]["cause"].as_object().cloned() {
+        let message = cause.get("message").and_then(Value::as_str).unwrap_or("The analysis configuration was accepted, but equation selection could not be applied. Selected model facts are unavailable.");
+        result["partial"] = json!(true);
+        result["message"] = json!(message);
+        result["cause"] = json!(cause);
+    }
     Ok(result)
 }
 

@@ -54,7 +54,7 @@ pub(crate) const BINDING_CAPTURE: Refusal = Refusal::new(
 );
 pub(crate) const ANALYSIS_PREVIEW: Refusal = Refusal::new(
     "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED",
-    "Rename is unavailable while a written macro definition or branch is overridden. Select Source or an initial-definition configuration before renaming. No edits were proposed.",
+    "Rename is unavailable while a definition, branch or equation-selection analysis preview is selected. Reset Analysis Configuration before renaming. No edits were proposed.",
 );
 pub(crate) const CONDITIONAL_EDIT: Refusal = Refusal::new(
     "CONDITIONAL_EDIT_UNPROVEN",

@@ -174,6 +174,13 @@ pub fn check_w020(model: &Model) -> Vec<Diagnostic> {
 }
 
 pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
+    check_w021_with_usage(model, None)
+}
+
+fn check_w021_with_usage(
+    model: &Model,
+    shared: Option<&super::usage::Usage<'_>>,
+) -> Vec<Diagnostic> {
     if !has_usage_model_or_complete_root(model) {
         return Vec::new();
     }
@@ -181,7 +188,13 @@ pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
     // (a plain exogenous used only there accepts at check). A
     // heterogeneous-declared exogenous is exempt: the binary accepts one that
     // no tree, block, or shock row uses at all.
-    let usage = crate::engine::diagnostics::usage::Usage::new(model);
+    let owned;
+    let usage = if let Some(usage) = shared {
+        usage
+    } else {
+        owned = super::usage::Usage::new(model);
+        &owned
+    };
     let mut referenced = usage.model_names();
     referenced.extend(usage.exogenous_exemptions());
     // `Model::exogenous` holds `varexo_det` names too; 7.1's unused check covers
@@ -282,10 +295,24 @@ fn exclusion_still_final(model: &Model, name: Name) -> bool {
 }
 
 pub fn check_w022(model: &Model) -> Vec<Diagnostic> {
+    check_w022_with_usage(model, None)
+}
+
+fn check_w022_with_usage(
+    model: &Model,
+    shared: Option<&super::usage::Usage<'_>>,
+) -> Vec<Diagnostic> {
     if !has_usage_model_or_complete_root(model) {
         return Vec::new();
     }
-    let referenced = crate::engine::diagnostics::usage::Usage::new(model).parameter_names();
+    let owned;
+    let usage = if let Some(usage) = shared {
+        usage
+    } else {
+        owned = super::usage::Usage::new(model);
+        &owned
+    };
+    let referenced = usage.parameter_names();
 
     let mut diagnostics = Vec::new();
     for p in model.final_parameters() {
@@ -307,12 +334,19 @@ pub fn check_w022(model: &Model) -> Vec<Diagnostic> {
 }
 
 pub fn check_w010_family(model: &Model) -> Vec<Diagnostic> {
+    check_w010_family_with_usage(model, None)
+}
+
+pub(crate) fn check_w010_family_with_usage(
+    model: &Model,
+    usage: Option<&super::usage::Usage<'_>>,
+) -> Vec<Diagnostic> {
     let mut out = check_w010(model);
     out.extend(check_w011(model));
     out.extend(check_w012(model));
     out.extend(check_w020(model));
-    out.extend(check_w021(model));
-    out.extend(check_w022(model));
+    out.extend(check_w021_with_usage(model, usage));
+    out.extend(check_w022_with_usage(model, usage));
     out
 }
 

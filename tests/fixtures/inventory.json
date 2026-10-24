@@ -2,6 +2,7 @@
   "schema": 1,
   "readme": "tests/fixtures/README.md",
   "rows": [
+    {"id":"invocation_e483_static_dynamic","codes":["E483"],"kind":"harness","package":"equation_selection","fixture":"tests/equation_selection.rs","source":"equation_selection.rs::selector_induced_static_dynamic_imbalance_matches_pinned_preprocessor","cluster":"invocation/e483","notes":"Explicit invocation setup is consumed by the option-aware Transform harness; there is no .mod statement for this selector-induced refusal."},
     {
       "id": "e001_clean_trend_rbc_gov_inv",
       "codes": [

@@ -30,7 +30,7 @@ const vscode = {
 };
 const originalLoad = Module._load;
 Module._load = function (id, ...args) { return id === "vscode" ? vscode : originalLoad.call(this, id, ...args); };
-const { registerAnalysisConfigurations, analysisLabel } = require(compiledModule("analysis_configuration"));
+const { registerAnalysisConfigurations, analysisLabel, parseEquationSelectionValues } = require(compiledModule("analysis_configuration"));
 Module._load = originalLoad;
 
 function metadata(configuration = {}) {
@@ -81,6 +81,30 @@ test("editing an earlier macro input preserves the order needed by dependent exp
   await env.run("selectAnalysisConfiguration");
   assert.deepEqual(env.service.calls[0][1].defines, [{ name: "N", expression: "2" }, { name: "M", expression: "N+1" }]);
   env.registration.dispose();
+});
+
+test("equation selection composes with macro inputs, is saved in presets, and Source clears it", async () => {
+  const env = setup();
+  env.proof.analysis.configuration = { defines: [{ name: "FLAG", expression: "1" }], equation_selection: { mode: "exclude", tag: "role", values: ["aux"] } };
+  host.answers.push(items => items.find(item => item.action === "equations"), items => items.find(item => item.value === "include"));
+  host.inputAnswers.push("name", "eq1, eq 2");
+  await env.run("selectAnalysisConfiguration");
+  assert.deepEqual(env.service.calls[0][1].equation_selection, { mode: "include", tag: "name", values: ["eq1", "eq 2"] });
+  assert.deepEqual(env.service.calls[0][1].defines, [{ name: "FLAG", expression: "1" }]);
+  env.proof.analysis.configuration = globalThis.structuredClone(env.service.calls[0][1]);
+  host.inputAnswers.push("Selected equations");
+  await env.run("saveAnalysisConfiguration");
+  assert.deepEqual(host.updates[0].value[0].analysis.equation_selection, { mode: "include", tag: "name", values: ["eq1", "eq 2"] });
+  host.answers.push(items => items.find(item => item.label === "Source"));
+  await env.run("selectAnalysisConfiguration");
+  assert.deepEqual(env.service.calls[1][1], {});
+  env.registration.dispose();
+});
+
+test("equation tag values reject empty and duplicate entries", () => {
+  assert.deepEqual(parseEquationSelectionValues("eq1, eq 2"), ["eq1", "eq 2"]);
+  assert.equal(parseEquationSelectionValues("eq1,,eq2"), undefined);
+  assert.equal(parseEquationSelectionValues("eq1, eq1"), undefined);
 });
 
 test("definition and branch commands retain exact server targets and support Skip and No branch", async () => {

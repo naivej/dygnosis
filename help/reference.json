@@ -165,7 +165,7 @@
     },
     {
       "name": "dynare_diagnose",
-      "description": "Check one source with optional analysis choices, or an explicit batch. configured_sources.jobs contains source and analysis for each job and permits repeated roots. job:1, job:2 and later identities key expected_revisions; each job spends the finite root-job allowance. Other batches cannot share analysis. Results distinguish jobs from distinct roots, and retain each partial, failed or unfinished cause. An incomplete zero count is not a clean-model claim. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Check one source with optional analysis choices, or an explicit batch. configured_sources.jobs contains source and analysis for each job and permits repeated roots. job:1, job:2 and later identities key expected_revisions; each job spends the finite root-job allowance. Other batches cannot share analysis. Results distinguish jobs from distinct roots, and retain each partial, failed or unfinished cause. An incomplete zero count is not a clean-model claim. Optional analysis supplies ordered defines, guarded definition/skip_definition/branch overrides, and equation_selection with mode=include or exclude, tag (default name), and a nonempty values list. Omission selects Source. Equation selection accepts explicit tag values only; selector files are unsupported and no selector causes a file lookup. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides or equation selection mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Equation selection follows full-source Parse and Check, then changes model membership and variable types before Transform checks. A failed selection returns its cause and withholds selected model facts. Inputs.analysis retains configuration identity, invocation scope (explicit_macro_and_equation_inputs with equation selection, explicit_macro_inputs otherwise), completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion text preserves pre-transform source; equation counts and origins describe the selected model only when available. Extracted fragments describe the selected configuration. No invocation settings or hooks are imported automatically. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -180,6 +180,16 @@
                   "$ref": "#/definitions/InitialDefinition"
                 },
                 "type": "array"
+              },
+              "equation_selection": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/EquationSelection"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "name": {
                 "type": [
@@ -402,6 +412,37 @@
             "enum": [
               "full",
               "compact"
+            ],
+            "type": "string"
+          },
+          "EquationSelection": {
+            "additionalProperties": false,
+            "description": "Explicit invocation tag values. This input never performs a file lookup.",
+            "properties": {
+              "mode": {
+                "$ref": "#/definitions/EquationSelectionMode"
+              },
+              "tag": {
+                "default": "name",
+                "type": "string"
+              },
+              "values": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "mode",
+              "values"
+            ],
+            "type": "object"
+          },
+          "EquationSelectionMode": {
+            "enum": [
+              "include",
+              "exclude"
             ],
             "type": "string"
           },
@@ -703,7 +744,7 @@
     },
     {
       "name": "dynare_model_info",
-      "description": "Give a configured model overview or inspect written source. Default summary has effective counts and model kind before transformations. Select analysis for explicit choices and override receipts; source_structure returns written items, guarded directive targets and branch IDs, availability and separate source coverage. Optional file selects one source under the same input policy, without making it an executed include. Other sections are structure, declarations, assignments, model_locals, statements, blocks, sources, includes and scope. Written source-item counts are not effective equation counts. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Give a configured model overview or inspect written source. Default summary has effective counts and model kind before transformations. Select analysis for explicit choices and override receipts; source_structure returns written items, guarded directive targets and branch IDs, availability and separate source coverage. Optional file selects one source under the same input policy, without making it an executed include. Other sections are structure, declarations, assignments, model_locals, statements, blocks, sources, includes and scope. Written source-item counts are not effective equation counts. Optional analysis supplies ordered defines, guarded definition/skip_definition/branch overrides, and equation_selection with mode=include or exclude, tag (default name), and a nonempty values list. Omission selects Source. Equation selection accepts explicit tag values only; selector files are unsupported and no selector causes a file lookup. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides or equation selection mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Equation selection follows full-source Parse and Check, then changes model membership and variable types before Transform checks. A failed selection returns its cause and withholds selected model facts. Inputs.analysis retains configuration identity, invocation scope (explicit_macro_and_equation_inputs with equation selection, explicit_macro_inputs otherwise), completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion text preserves pre-transform source; equation counts and origins describe the selected model only when available. Extracted fragments describe the selected configuration. No invocation settings or hooks are imported automatically. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -718,6 +759,16 @@
                   "$ref": "#/definitions/InitialDefinition"
                 },
                 "type": "array"
+              },
+              "equation_selection": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/EquationSelection"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "name": {
                 "type": [
@@ -805,6 +856,37 @@
             "enum": [
               "full",
               "compact"
+            ],
+            "type": "string"
+          },
+          "EquationSelection": {
+            "additionalProperties": false,
+            "description": "Explicit invocation tag values. This input never performs a file lookup.",
+            "properties": {
+              "mode": {
+                "$ref": "#/definitions/EquationSelectionMode"
+              },
+              "tag": {
+                "default": "name",
+                "type": "string"
+              },
+              "values": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "mode",
+              "values"
+            ],
+            "type": "object"
+          },
+          "EquationSelectionMode": {
+            "enum": [
+              "include",
+              "exclude"
             ],
             "type": "string"
           },
@@ -1055,7 +1137,7 @@
     },
     {
       "name": "dynare_symbol_info",
-      "description": "Inspect a resolved binding with view=effective (default), using a unique name, written target or returned binding identity. Default sections are definition, metadata and references; assignments and expanded occurrences are optional. References-only works directly. view=source instead accepts a literal name or written target and returns labelled source candidates with availability and coverage, without binding identities or accepted references. An inactive written target need not have an effective binding. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Inspect a resolved binding with view=effective (default), using a unique name, written target or returned binding identity. Default sections are definition, metadata and references; assignments and expanded occurrences are optional. References-only works directly. view=source instead accepts a literal name or written target and returns labelled source candidates with availability and coverage, without binding identities or accepted references. An inactive written target need not have an effective binding. Optional analysis supplies ordered defines, guarded definition/skip_definition/branch overrides, and equation_selection with mode=include or exclude, tag (default name), and a nonempty values list. Omission selects Source. Equation selection accepts explicit tag values only; selector files are unsupported and no selector causes a file lookup. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides or equation selection mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Equation selection follows full-source Parse and Check, then changes model membership and variable types before Transform checks. A failed selection returns its cause and withholds selected model facts. Inputs.analysis retains configuration identity, invocation scope (explicit_macro_and_equation_inputs with equation selection, explicit_macro_inputs otherwise), completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion text preserves pre-transform source; equation counts and origins describe the selected model only when available. Extracted fragments describe the selected configuration. No invocation settings or hooks are imported automatically. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -1117,6 +1199,16 @@
                   "$ref": "#/definitions/InitialDefinition"
                 },
                 "type": "array"
+              },
+              "equation_selection": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/EquationSelection"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "name": {
                 "type": [
@@ -1204,6 +1296,37 @@
             "enum": [
               "full",
               "compact"
+            ],
+            "type": "string"
+          },
+          "EquationSelection": {
+            "additionalProperties": false,
+            "description": "Explicit invocation tag values. This input never performs a file lookup.",
+            "properties": {
+              "mode": {
+                "$ref": "#/definitions/EquationSelectionMode"
+              },
+              "tag": {
+                "default": "name",
+                "type": "string"
+              },
+              "values": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "mode",
+              "values"
+            ],
+            "type": "object"
+          },
+          "EquationSelectionMode": {
+            "enum": [
+              "include",
+              "exclude"
             ],
             "type": "string"
           },
@@ -1570,7 +1693,7 @@
     },
     {
       "name": "dynare_equations",
-      "description": "Inspect view=effective equations (default), tags, timing and verified locations under the requested analysis. Name, tag, scope/dimension and resolved-symbol filters combine with AND; scoped indices are zero-based. Incomplete analysis withholds authoritative counts. view=source returns written equation templates filtered by name, tags or file, with source_id, conditions, availability and separate coverage. Source-item counts are not equation counts; source IDs cannot select expansion or extraction. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Inspect view=effective equations (default), tags, timing and verified locations under the requested analysis. Name, tag, scope/dimension and resolved-symbol filters combine with AND; scoped indices are zero-based. Incomplete analysis withholds authoritative counts. view=source returns written equation templates filtered by name, tags or file, with source_id, conditions, availability and separate coverage. Source-item counts are not equation counts; source IDs cannot select expansion or extraction. Optional analysis supplies ordered defines, guarded definition/skip_definition/branch overrides, and equation_selection with mode=include or exclude, tag (default name), and a nonempty values list. Omission selects Source. Equation selection accepts explicit tag values only; selector files are unsupported and no selector causes a file lookup. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides or equation selection mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Equation selection follows full-source Parse and Check, then changes model membership and variable types before Transform checks. A failed selection returns its cause and withholds selected model facts. Inputs.analysis retains configuration identity, invocation scope (explicit_macro_and_equation_inputs with equation selection, explicit_macro_inputs otherwise), completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion text preserves pre-transform source; equation counts and origins describe the selected model only when available. Extracted fragments describe the selected configuration. No invocation settings or hooks are imported automatically. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -1625,6 +1748,16 @@
                   "$ref": "#/definitions/InitialDefinition"
                 },
                 "type": "array"
+              },
+              "equation_selection": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/EquationSelection"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "name": {
                 "type": [
@@ -1712,6 +1845,37 @@
             "enum": [
               "full",
               "compact"
+            ],
+            "type": "string"
+          },
+          "EquationSelection": {
+            "additionalProperties": false,
+            "description": "Explicit invocation tag values. This input never performs a file lookup.",
+            "properties": {
+              "mode": {
+                "$ref": "#/definitions/EquationSelectionMode"
+              },
+              "tag": {
+                "default": "name",
+                "type": "string"
+              },
+              "values": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "mode",
+              "values"
+            ],
+            "type": "object"
+          },
+          "EquationSelectionMode": {
+            "enum": [
+              "include",
+              "exclude"
             ],
             "type": "string"
           },
@@ -2139,7 +2303,7 @@
     },
     {
       "name": "dynare_expand",
-      "description": "Show include/macro-expanded text with verified written origins. Focus with inclusive line_range, exclusive-end expanded_range or an equation identity. A range cutting a row omits its origin and states why. Partial expansion retains available text and its causes. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Show include/macro-expanded text with verified written origins. Focus with inclusive line_range, exclusive-end expanded_range or an equation identity. A range cutting a row omits its origin and states why. Partial expansion retains available text and its causes. Optional analysis supplies ordered defines, guarded definition/skip_definition/branch overrides, and equation_selection with mode=include or exclude, tag (default name), and a nonempty values list. Omission selects Source. Equation selection accepts explicit tag values only; selector files are unsupported and no selector causes a file lookup. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides or equation selection mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Equation selection follows full-source Parse and Check, then changes model membership and variable types before Transform checks. A failed selection returns its cause and withholds selected model facts. Inputs.analysis retains configuration identity, invocation scope (explicit_macro_and_equation_inputs with equation selection, explicit_macro_inputs otherwise), completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion text preserves pre-transform source; equation counts and origins describe the selected model only when available. Extracted fragments describe the selected configuration. No invocation settings or hooks are imported automatically. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -2154,6 +2318,16 @@
                   "$ref": "#/definitions/InitialDefinition"
                 },
                 "type": "array"
+              },
+              "equation_selection": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/EquationSelection"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "name": {
                 "type": [
@@ -2241,6 +2415,37 @@
             "enum": [
               "full",
               "compact"
+            ],
+            "type": "string"
+          },
+          "EquationSelection": {
+            "additionalProperties": false,
+            "description": "Explicit invocation tag values. This input never performs a file lookup.",
+            "properties": {
+              "mode": {
+                "$ref": "#/definitions/EquationSelectionMode"
+              },
+              "tag": {
+                "default": "name",
+                "type": "string"
+              },
+              "values": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "mode",
+              "values"
+            ],
+            "type": "object"
+          },
+          "EquationSelectionMode": {
+            "enum": [
+              "include",
+              "exclude"
             ],
             "type": "string"
           },
@@ -2609,7 +2814,7 @@
     },
     {
       "name": "dynare_actions",
-      "description": "Discover source action summaries or request a complete verified proposal. Select action_id with its expected_revision for one alternative. Set fixes=true to propose compatible proven diagnostic fixes, optionally by code, target or diagnostic_ids, without a discovery call. Alternatives are never combined automatically. Skipped and remaining work is explained. No file is written. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Discover source action summaries or request a complete verified proposal. Select action_id with its expected_revision for one alternative. Set fixes=true to propose compatible proven diagnostic fixes, optionally by code, target or diagnostic_ids, without a discovery call. Alternatives are never combined automatically. Skipped and remaining work is explained. No file is written. Optional analysis supplies ordered defines, guarded definition/skip_definition/branch overrides, and equation_selection with mode=include or exclude, tag (default name), and a nonempty values list. Omission selects Source. Equation selection accepts explicit tag values only; selector files are unsupported and no selector causes a file lookup. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides or equation selection mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Equation selection follows full-source Parse and Check, then changes model membership and variable types before Transform checks. A failed selection returns its cause and withholds selected model facts. Inputs.analysis retains configuration identity, invocation scope (explicit_macro_and_equation_inputs with equation selection, explicit_macro_inputs otherwise), completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion text preserves pre-transform source; equation counts and origins describe the selected model only when available. Extracted fragments describe the selected configuration. No invocation settings or hooks are imported automatically. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -2624,6 +2829,16 @@
                   "$ref": "#/definitions/InitialDefinition"
                 },
                 "type": "array"
+              },
+              "equation_selection": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/EquationSelection"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "name": {
                 "type": [
@@ -2711,6 +2926,37 @@
             "enum": [
               "full",
               "compact"
+            ],
+            "type": "string"
+          },
+          "EquationSelection": {
+            "additionalProperties": false,
+            "description": "Explicit invocation tag values. This input never performs a file lookup.",
+            "properties": {
+              "mode": {
+                "$ref": "#/definitions/EquationSelectionMode"
+              },
+              "tag": {
+                "default": "name",
+                "type": "string"
+              },
+              "values": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "mode",
+              "values"
+            ],
+            "type": "object"
+          },
+          "EquationSelectionMode": {
+            "enum": [
+              "include",
+              "exclude"
             ],
             "type": "string"
           },
@@ -3016,7 +3262,7 @@
     },
     {
       "name": "dynare_rename",
-      "description": "Propose a complete rename of one resolved binding. A unique name works directly; a target or binding identity can disambiguate. Incomplete sources, collisions, generated names or incompatible checked owners withhold the complete proposal with a cause. No file is written. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Propose a complete rename of one resolved binding. A unique name works directly; a target or binding identity can disambiguate. Incomplete sources, collisions, generated names or incompatible checked owners withhold the complete proposal with a cause. No file is written. Optional analysis supplies ordered defines, guarded definition/skip_definition/branch overrides, and equation_selection with mode=include or exclude, tag (default name), and a nonempty values list. Omission selects Source. Equation selection accepts explicit tag values only; selector files are unsupported and no selector causes a file lookup. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides or equation selection mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Equation selection follows full-source Parse and Check, then changes model membership and variable types before Transform checks. A failed selection returns its cause and withholds selected model facts. Inputs.analysis retains configuration identity, invocation scope (explicit_macro_and_equation_inputs with equation selection, explicit_macro_inputs otherwise), completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion text preserves pre-transform source; equation counts and origins describe the selected model only when available. Extracted fragments describe the selected configuration. No invocation settings or hooks are imported automatically. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -3031,6 +3277,16 @@
                   "$ref": "#/definitions/InitialDefinition"
                 },
                 "type": "array"
+              },
+              "equation_selection": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/EquationSelection"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "name": {
                 "type": [
@@ -3118,6 +3374,37 @@
             "enum": [
               "full",
               "compact"
+            ],
+            "type": "string"
+          },
+          "EquationSelection": {
+            "additionalProperties": false,
+            "description": "Explicit invocation tag values. This input never performs a file lookup.",
+            "properties": {
+              "mode": {
+                "$ref": "#/definitions/EquationSelectionMode"
+              },
+              "tag": {
+                "default": "name",
+                "type": "string"
+              },
+              "values": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "mode",
+              "values"
+            ],
+            "type": "object"
+          },
+          "EquationSelectionMode": {
+            "enum": [
+              "include",
+              "exclude"
             ],
             "type": "string"
           },
@@ -3462,7 +3749,7 @@
     },
     {
       "name": "dynare_format",
-      "description": "Propose whitespace formatting for the root or selected source file. Optional whole-line line_range is one-based and inclusive. formatIndent is tab or one to eight spaces. Native text and source outside the selected lines retain their layout. No file is written. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Propose whitespace formatting for the root or selected source file. Optional whole-line line_range is one-based and inclusive. formatIndent is tab or one to eight spaces. Native text and source outside the selected lines retain their layout. No file is written. Optional analysis supplies ordered defines, guarded definition/skip_definition/branch overrides, and equation_selection with mode=include or exclude, tag (default name), and a nonempty values list. Omission selects Source. Equation selection accepts explicit tag values only; selector files are unsupported and no selector causes a file lookup. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides or equation selection mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Equation selection follows full-source Parse and Check, then changes model membership and variable types before Transform checks. A failed selection returns its cause and withholds selected model facts. Inputs.analysis retains configuration identity, invocation scope (explicit_macro_and_equation_inputs with equation selection, explicit_macro_inputs otherwise), completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion text preserves pre-transform source; equation counts and origins describe the selected model only when available. Extracted fragments describe the selected configuration. No invocation settings or hooks are imported automatically. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -3477,6 +3764,16 @@
                   "$ref": "#/definitions/InitialDefinition"
                 },
                 "type": "array"
+              },
+              "equation_selection": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/EquationSelection"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "name": {
                 "type": [
@@ -3564,6 +3861,37 @@
             "enum": [
               "full",
               "compact"
+            ],
+            "type": "string"
+          },
+          "EquationSelection": {
+            "additionalProperties": false,
+            "description": "Explicit invocation tag values. This input never performs a file lookup.",
+            "properties": {
+              "mode": {
+                "$ref": "#/definitions/EquationSelectionMode"
+              },
+              "tag": {
+                "default": "name",
+                "type": "string"
+              },
+              "values": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "mode",
+              "values"
+            ],
+            "type": "object"
+          },
+          "EquationSelectionMode": {
+            "enum": [
+              "include",
+              "exclude"
             ],
             "type": "string"
           },
@@ -3838,7 +4166,7 @@
     },
     {
       "name": "dynare_extract",
-      "description": "Produce a selected equation fragment with required declarations, local definitions and model context. Names combine with OR; tags combine with AND. Select a returned identity or scoped zero-based index for unnamed equations. Omitted setup is explicit; no numerical or runnable-model claim is inferred. Optional analysis supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Produce a selected equation fragment with required declarations, local definitions and model context. Names combine with OR; tags combine with AND. Select a returned identity or scoped zero-based index for unnamed equations. Omitted setup is explicit; no numerical or runnable-model claim is inferred. Optional analysis supplies ordered defines, guarded definition/skip_definition/branch overrides, and equation_selection with mode=include or exclude, tag (default name), and a nonempty values list. Omission selects Source. Equation selection accepts explicit tag values only; selector files are unsupported and no selector causes a file lookup. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides or equation selection mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Equation selection follows full-source Parse and Check, then changes model membership and variable types before Transform checks. A failed selection returns its cause and withholds selected model facts. Inputs.analysis retains configuration identity, invocation scope (explicit_macro_and_equation_inputs with equation selection, explicit_macro_inputs otherwise), completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion text preserves pre-transform source; equation counts and origins describe the selected model only when available. Extracted fragments describe the selected configuration. No invocation settings or hooks are imported automatically. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -3853,6 +4181,16 @@
                   "$ref": "#/definitions/InitialDefinition"
                 },
                 "type": "array"
+              },
+              "equation_selection": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/EquationSelection"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "name": {
                 "type": [
@@ -3940,6 +4278,37 @@
             "enum": [
               "full",
               "compact"
+            ],
+            "type": "string"
+          },
+          "EquationSelection": {
+            "additionalProperties": false,
+            "description": "Explicit invocation tag values. This input never performs a file lookup.",
+            "properties": {
+              "mode": {
+                "$ref": "#/definitions/EquationSelectionMode"
+              },
+              "tag": {
+                "default": "name",
+                "type": "string"
+              },
+              "values": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "mode",
+              "values"
+            ],
+            "type": "object"
+          },
+          "EquationSelectionMode": {
+            "enum": [
+              "include",
+              "exclude"
             ],
             "type": "string"
           },
@@ -4256,7 +4625,7 @@
     },
     {
       "name": "dynare_compare_models",
-      "description": "Compare two model snapshots with independent analysis_a and analysis_b choices. Same source text can produce different model facts; both choices and revisions remain explicit. Sources use text/map/disk inputs; current disk inputs share validated positive and negative file facts. Repository input selects local Git or saved Working versions on the server host; no fetch or editor-buffer read occurs. Historical targets use that side's source revisions, not current target identities. Filters select semantic families and change kinds; coverage and navigation retain both captured identities. No numerical equivalence is inferred. Optional analysis_a and analysis_b supplies ordered defines and guarded definition, skip_definition or branch overrides; omission selects Source. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Inputs.analysis retains configuration identity, explicit_macro_inputs invocation scope, completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion and extracted fragments describe the selected configuration. No external invocation options or hooks are imported. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
+      "description": "Compare two model snapshots with independent analysis_a and analysis_b choices. Same source text can produce different model facts; both choices and revisions remain explicit. Sources use text/map/disk inputs; current disk inputs share validated positive and negative file facts. Repository input selects local Git or saved Working versions on the server host; no fetch or editor-buffer read occurs. Historical targets use that side's source revisions, not current target identities. Filters select semantic families and change kinds; coverage and navigation retain both captured identities. No numerical equivalence is inferred. Optional analysis_a and analysis_b supplies ordered defines, guarded definition/skip_definition/branch overrides, and equation_selection with mode=include or exclude, tag (default name), and a nonempty values list. Omission selects Source. Equation selection accepts explicit tag values only; selector files are unsupported and no selector causes a file lookup. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides or equation selection mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Equation selection follows full-source Parse and Check, then changes model membership and variable types before Transform checks. A failed selection returns its cause and withholds selected model facts. Inputs.analysis retains configuration identity, invocation scope (explicit_macro_and_equation_inputs with equation selection, explicit_macro_inputs otherwise), completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion text preserves pre-transform source; equation counts and origins describe the selected model only when available. Extracted fragments describe the selected configuration. No invocation settings or hooks are imported automatically. Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -4271,6 +4640,16 @@
                   "$ref": "#/definitions/InitialDefinition"
                 },
                 "type": "array"
+              },
+              "equation_selection": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/EquationSelection"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "name": {
                 "type": [
@@ -4415,6 +4794,37 @@
             "enum": [
               "full",
               "compact"
+            ],
+            "type": "string"
+          },
+          "EquationSelection": {
+            "additionalProperties": false,
+            "description": "Explicit invocation tag values. This input never performs a file lookup.",
+            "properties": {
+              "mode": {
+                "$ref": "#/definitions/EquationSelectionMode"
+              },
+              "tag": {
+                "default": "name",
+                "type": "string"
+              },
+              "values": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "mode",
+              "values"
+            ],
+            "type": "object"
+          },
+          "EquationSelectionMode": {
+            "enum": [
+              "include",
+              "exclude"
             ],
             "type": "string"
           },
@@ -6737,6 +7147,12 @@
       "kind": "shared",
       "title": "Date in conditional forecast periods",
       "markdown": "### E482: Date in conditional forecast periods\n\nA `conditional_forecast_paths` period is written as a date. Dynare refuses: `conditional_forecast_paths: dates are not allowed in the 'periods' keyword`.\n\n**Fix**\n\nUse an integer period or integer range counted from the start of the conditional forecast.\n"
+    },
+    {
+      "code": "E483",
+      "kind": "shared",
+      "title": "Equation selection leaves unmatched static and dynamic rows",
+      "markdown": "### E483: Equation selection leaves unmatched static and dynamic rows\n\nThe selected invocation removes different numbers of equations tagged `static` and `dynamic`. Dynare refuses: `exclude_eqs/include_eqs: You must remove the same number of equations marked `static` as equations marked `dynamic`.`\n\nSelect both sides of each static/dynamic pair. This check runs after the full source has passed Parse and Check. No selected model facts are returned when selection fails.\n"
     },
     {
       "code": "I050",

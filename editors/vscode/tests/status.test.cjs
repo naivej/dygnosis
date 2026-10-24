@@ -160,6 +160,9 @@ test("configuration hover shows selected expressions and links to the shared sel
   assert.equal(configured.text, "Current config: $(symbol-operator) 93");
   assert.match(tooltipText(configured.tooltip), /N = 2; M = N\+1/);
   assert.deepEqual(configured.tooltip.isTrusted, { enabledCommands: ["dygnosis.selectAnalysisConfiguration"] });
+  const selected = modelStatus(facts(document(), { analysis: analysis({ equation_selection: { mode: "include", tag: "name", values: ["core", "policy"] } }) }), ["equations"]);
+  assert.equal(selected.text, "Current config: $(symbol-operator) 93");
+  assert.match(tooltipText(selected.tooltip), /Include name: core, policy/);
 });
 
 test("preview values and stale or incomplete outcomes keep configuration access", () => {

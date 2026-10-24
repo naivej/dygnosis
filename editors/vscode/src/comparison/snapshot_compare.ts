@@ -62,6 +62,7 @@ export class ComparisonFailure extends Error {
 }
 function configurationKey(value: AnalysisConfiguration): string {
   return JSON.stringify({ name: value.name ?? null, defines: (value.defines ?? []).map(input => [input.name, input.expression]),
+    equation_selection: value.equation_selection ? { mode: value.equation_selection.mode, tag: value.equation_selection.tag ?? "name", values: [...new Set(value.equation_selection.values)].sort() } : null,
     overrides: (value.overrides ?? []).map(operation => [operation.kind, operation.target.file, operation.target.site_id, operation.target.source_revision,
       operation.kind === "definition" ? operation.expression : operation.kind === "branch" ? operation.branch_id : null]) });
 }

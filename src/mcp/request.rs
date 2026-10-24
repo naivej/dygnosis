@@ -1172,7 +1172,7 @@ fn symbols(
     if rename && snapshot.model.is_analysis_preview() {
         return Ok(ToolResult::refused(
             "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED",
-            "Rename is unavailable for a definition or branch analysis preview. No edits were proposed. Reset the overrides to use source editing actions.",
+            "Rename is unavailable for a definition, branch or equation-selection analysis preview. No edits were proposed. Reset Analysis Configuration to use source editing actions.",
         ));
     }
     if rename

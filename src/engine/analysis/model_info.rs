@@ -361,6 +361,13 @@ pub(crate) fn macro_incomplete_status() -> Value {
 }
 
 pub(crate) fn incomplete_model_status(model: &Model, includes_complete: bool) -> Option<Value> {
+    if let Some(cause) = model
+        .invocation_analysis
+        .as_ref()
+        .and_then(|analysis| analysis.failure.as_ref())
+    {
+        return Some(json!({"status":"incomplete", "message":cause}));
+    }
     if !includes_complete {
         Some(model_incomplete_status())
     } else if model.macro_incomplete() {
@@ -432,6 +439,17 @@ pub fn incomplete_reason_records(
     model: &Model,
     includes: Option<&crate::engine::workspace::IncludeRecords>,
 ) -> Vec<(Span, &'static str, String)> {
+    if let Some(cause) = model
+        .invocation_analysis
+        .as_ref()
+        .and_then(|analysis| analysis.failure.as_ref())
+    {
+        return vec![(
+            model.model_block.unwrap_or_default(),
+            "ANALYSIS_EQUATION_SELECTION_UNAVAILABLE",
+            cause.clone(),
+        )];
+    }
     // Missing includes suppress possibly downstream unknown names and I211,
     // as in workspace diagnostics. Independent proven macro Errors remain.
     if let Some(records) = includes

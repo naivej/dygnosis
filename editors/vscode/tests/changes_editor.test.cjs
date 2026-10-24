@@ -502,6 +502,14 @@ test("analysis selectors retain independent choices and paths across resource re
   assert.equal(selector({ ...left, search_paths: [null] }), false);
 });
 
+test("equation selection is part of saved comparison identity and its visible label", () => {
+  const selection = { mode: "include", tag: "kind", values: ["core", "policy"] };
+  const resource = comparison({ ...working(), analysis: { equation_selection: selection } }, { ...working(), analysis: { equation_selection: { ...selection, mode: "exclude" } } });
+  assert.deepEqual(resourceData(JSON.parse(resourceQuery(resource))), resource);
+  assert.match(resourceName(resource), /Include kind=core,policy.*Exclude kind=core,policy/);
+  assert.equal(selector({ ...working(), analysis: { equation_selection: { mode: "include", values: [] } } }), false);
+});
+
 test("Compare Analysis prepares both presets without changing the live selection", async t => {
   const { host, service } = setup(t);
   service.supportsAnalysisConfiguration = true;

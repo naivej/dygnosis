@@ -1243,6 +1243,8 @@ pub struct AssignmentSyntax {
 
 #[derive(Clone, Debug, Default)]
 pub struct Model {
+    pub(crate) invocation_analysis:
+        Option<crate::engine::analysis::equation_selection::InvocationAnalysis>,
     pub(crate) analysis_context:
         Option<std::sync::Arc<crate::engine::analysis_configuration::MacroExecutionInputs>>,
     pub(crate) macro_source:
@@ -2516,12 +2518,15 @@ impl Model {
 
     /// A rejected model row makes uses and counts from that body incomplete.
     pub(crate) fn model_rows_rejected(&self) -> bool {
-        self.parse_issues.iter().any(|issue| {
-            self.model_block
-                .into_iter()
-                .chain(self.heterogeneous_models.iter().map(|block| block.span))
-                .any(|block| block.start <= issue.span.start && issue.span.start <= block.end)
-        })
+        self.invocation_analysis
+            .as_ref()
+            .is_some_and(|analysis| analysis.failure.is_some())
+            || self.parse_issues.iter().any(|issue| {
+                self.model_block
+                    .into_iter()
+                    .chain(self.heterogeneous_models.iter().map(|block| block.span))
+                    .any(|block| block.start <= issue.span.start && issue.span.start <= block.end)
+            })
     }
 
     pub fn name(&self, name: Name) -> &str {

@@ -20,6 +20,7 @@ for the model root. Change it with **Dynare: Select Analysis Configuration**
 |---|---|
 | **Source** | Macro inputs as written in the model. |
 | **Set macro inputs…** | Enter initial macro values for this root. |
+| **Select equations by tag…** | Include or exclude equations by explicit values for one tag. Values are comma-separated; values cannot contain commas. |
 | A saved configuration | Reuse presets listed in [Dynare: Analysis Configurations](settings:dynare.analysisConfigurations). |
 
 For one definition, place the cursor on it and run **Dynare: Override Macro
@@ -27,6 +28,13 @@ Definition for Analysis** (replacement expression, or **Skip this definition**).
 For another conditional arm, place the cursor in its chain and run **Dynare:
 Preview Macro Branch**. These choices affect analysis and preview only; they do
 not edit the files.
+
+Equation selection uses a tag name (default `name`) and one or more tag
+values. It changes the equations and endogenous/exogenous counts used by later
+checks and model facts. Parse and Check diagnostics still cover the complete
+model. The expansion text continues to show the source before equation
+selection. Selector files are not supported. Equation-selected analysis is a
+preview, so Rename and diagnostic fixes are unavailable.
 
 **Dynare: Reset Analysis Configuration** returns to **Source**. **Dynare: Save
 Analysis Configuration** stores the current choices for a model in a workspace

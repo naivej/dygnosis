@@ -1054,7 +1054,11 @@ impl Workspace {
             configuration_id: choices.configuration_id(),
             name: choices.name.clone(),
             preview: choices.is_preview(),
-            invocation_scope: "explicit_macro_inputs",
+            invocation_scope: if choices.equation_selection.is_some() {
+                "explicit_macro_and_equation_inputs"
+            } else {
+                "explicit_macro_inputs"
+            },
         };
         let previous = self
             .root_analyses
@@ -2394,9 +2398,9 @@ impl Workspace {
                 .docs
                 .get(&key)
                 .filter(|_| {
-                    self.root_analyses
-                        .get(&key)
-                        .is_none_or(|analysis| analysis.choices.is_source())
+                    self.root_analyses.get(&key).is_none_or(|analysis| {
+                        analysis.choices.defines.is_empty() && analysis.choices.overrides.is_empty()
+                    })
                 })
                 .filter(|_| {
                     let [segment] = spliced.segments.as_slice() else {
@@ -2418,6 +2422,10 @@ impl Workspace {
             if fatal.is_none()
                 && spliced.limit.is_none()
                 && spliced.refusal.is_none()
+                && self
+                    .root_analyses
+                    .get(&key)
+                    .is_none_or(|analysis| analysis.choices.equation_selection.is_none())
                 && let Some(model) = same_root
             {
                 self.effective.insert(key.clone(), Arc::clone(model));
@@ -2426,6 +2434,7 @@ impl Workspace {
             }
             // A one-segment unchanged root already has the same parser input,
             // original lines and macro evaluation context. Reuse its facts.
+            let mut parsing_budget = self.macro_budget(&key);
             let mut model = if let Some(model) = same_root {
                 model.as_ref().clone()
             } else {
@@ -2445,7 +2454,7 @@ impl Workspace {
                     &spliced.text,
                     &lines,
                     &evaluations,
-                    &mut self.macro_budget(&key),
+                    &mut parsing_budget,
                     spliced.execution_inputs.clone(),
                     spliced.macro_source.clone(),
                 )
@@ -2490,6 +2499,19 @@ impl Workspace {
                 }
                 model.macro_incomplete_span.get_or_insert(span);
                 model.incomplete_reasons.clear();
+            }
+            if let Some(selection) = self
+                .root_analyses
+                .get(&key)
+                .and_then(|analysis| analysis.choices.equation_selection.as_ref())
+                .cloned()
+            {
+                model.analysis_context = spliced.execution_inputs.clone();
+                crate::engine::analysis::equation_selection::apply(
+                    &mut model,
+                    &selection,
+                    &mut parsing_budget,
+                );
             }
             self.effective.insert(key.clone(), Arc::new(model));
         }
@@ -2565,6 +2587,16 @@ impl Workspace {
         let key = self.ensure_loaded(uri)?;
         self.checked_analysis(&key).ok()?;
         if !self.expand.contains_key(&key) {
+            // Selection needs the already-owned joined model's Parse/Check
+            // facts. Build that owner first instead of parsing Source in the
+            // report path and losing the invocation's membership.
+            if self
+                .root_analyses
+                .get(&key)
+                .is_some_and(|analysis| analysis.choices.equation_selection.is_some())
+            {
+                self.get_effective_model(uri)?;
+            }
             let spliced = self.spliced_source(&key);
             let incomplete = self
                 .records

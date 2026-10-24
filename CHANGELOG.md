@@ -2,6 +2,10 @@
 
 ## v0.11.35
 
+- Select equations by tag values in an analysis configuration. Include or
+  exclude the selected equations to inspect their model facts without changing
+  the `.mod` file. Equation selection is a preview; Rename and diagnostic fixes
+  are unavailable for it.
 - Workspace diagnostics update faster after edits in large models.
 
 ## v0.11.34

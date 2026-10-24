@@ -25,7 +25,7 @@ pub(super) const STALE: &str =
     "Model inputs changed during Rename. Refresh the model and try again.";
 pub(super) const IDENTIFIER: &str = symbols::IDENTIFIER.message;
 pub(super) const WRITABLE: &str = "A Rename target is unavailable or read-only. Make every affected source writable and try again.";
-pub(super) const PREVIEW: &str = "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED: Rename is unavailable while a definition or branch analysis preview is selected. No edits were proposed. Reset Analysis Configuration before requesting Rename.";
+pub(super) const PREVIEW: &str = "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED: Rename is unavailable while a definition, branch or equation-selection analysis preview is selected. No edits were proposed. Reset Analysis Configuration before requesting Rename.";
 
 pub(super) fn refusal_json(reason: &'static str) -> Value {
     json!({"error":reason,"code":if reason==PREVIEW{"ANALYSIS_PREVIEW_EDIT_UNSUPPORTED"}else{"RENAME_REFUSED"}})
