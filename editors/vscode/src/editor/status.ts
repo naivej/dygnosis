@@ -40,7 +40,7 @@ function incompleteDetail(info: ModelInfo): string {
 function configurationHover(info: ModelInfo): vscode.MarkdownString {
   const analysis = info.analysis;
   const equations = analysis?.configuration.equation_selection;
-  const name = /^Analysis preview(?: \(modified\))?$/.test(analysis?.selection.name ?? "") ? undefined : analysis?.selection.name;
+  const name = /^(?:Analysis preview|Macro inputs)(?: \(modified\))?$/.test(analysis?.selection.name ?? "") ? undefined : analysis?.selection.name;
   const choices = [
     ...(analysis?.configuration.defines ?? []).map(input => `Macro: ${input.name}=${input.expression}`),
     ...(equations ? equations.values.map(value =>

@@ -171,17 +171,18 @@ test("configuration hover shows selected expressions and links to the shared sel
   assert.match(tooltipText(selected.tooltip), /Equation: name='core' \(included\)\nEquation: name='policy' \(included\)/);
 });
 
-test("equation selection hover omits generic preview markers and retains the selected tags", () => {
-  // Guards the duplicate internal preview labels shown for an equation choice.
-  const metadata = analysis({ equation_selection: { mode: "exclude", tag: "name", values: ["policy"] } }, {
+test("configuration hover omits generic names and retains the selected inputs", () => {
+  // Guards generic macro/preview names appearing beside the actual input rows.
+  const metadata = analysis({ defines: [{ name: "xx", expression: "1" }],
+    equation_selection: { mode: "exclude", tag: "name", values: ["policy"] } }, {
     selection: { configuration_id: "selected", name: "Analysis preview", preview: true, invocation_scope: "explicit_macro_and_equation_inputs" },
   });
-  for (const name of ["Analysis preview", "Analysis preview (modified)"]) {
+  for (const name of ["Analysis preview", "Analysis preview (modified)", "Macro inputs", "Macro inputs (modified)"]) {
     metadata.selection.name = name;
     const value = modelStatus(facts(document(), { analysis: metadata }), ["equations"]);
     const text = tooltipText(value.tooltip);
-    assert.match(text, /Current config.*\nEquation: name='policy' \(excluded\)/);
-    assert.doesNotMatch(text, /\(preview\)|Analysis preview/);
+    assert.match(text, /Current config.*\nMacro: xx=1\nEquation: name='policy' \(excluded\)/);
+    assert.doesNotMatch(text, /\(preview\)|Analysis preview|Macro inputs/);
   }
   metadata.selection.name = "Fixed interest rate";
   assert.match(tooltipText(modelStatus(facts(document(), { analysis: metadata }), ["equations"]).tooltip), /Fixed interest rate/);
