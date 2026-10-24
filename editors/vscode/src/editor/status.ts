@@ -39,17 +39,20 @@ function incompleteDetail(info: ModelInfo): string {
 
 function configurationHover(info: ModelInfo): vscode.MarkdownString {
   const analysis = info.analysis;
+  const equations = analysis?.configuration.equation_selection;
   const name = /^Analysis preview(?: \(modified\))?$/.test(analysis?.selection.name ?? "") ? undefined : analysis?.selection.name;
   const choices = [
-    ...(analysis?.configuration.defines ?? []).map(input => `${input.name} = ${input.expression}`),
-    ...(analysis?.configuration.equation_selection ? [`${analysis.configuration.equation_selection.mode === "include" ? "Include" : "Exclude"} ${analysis.configuration.equation_selection.tag ?? "name"}: ${analysis.configuration.equation_selection.values.join(", ")}`] : []),
+    ...(analysis?.configuration.defines ?? []).map(input => `Macro: ${input.name}=${input.expression}`),
+    ...(equations ? equations.values.map(value =>
+      `Equation: ${equations.tag ?? "name"}='${value}' (${equations.mode === "include" ? "included" : "excluded"})`) : []),
     ...(analysis?.configuration.overrides ?? []).map(operation => operation.kind === "definition"
       ? `Definition override = ${operation.expression}`
       : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview"),
   ];
-  const tooltip = new vscode.MarkdownString("[Current config](command:dygnosis.selectAnalysisConfiguration): ");
-  tooltip.appendText(choices.length ? choices.join("; ") : name ?? "Source");
+  const tooltip = new vscode.MarkdownString("[Current config](command:dygnosis.selectAnalysisConfiguration)");
   if (analysis?.state === "stale") tooltip.appendText(" (stale)");
+  for (const choice of choices.length ? choices : [name ?? "Source"])
+    tooltip.appendMarkdown("  \n").appendText(choice);
   if (name && choices.length) tooltip.appendMarkdown("  \n").appendText(name);
   for (const receipt of analysis?.overrides ?? []) {
     if (receipt.application !== "applied" || receipt.cause) tooltip.appendMarkdown("  \n").appendText(

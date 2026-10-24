@@ -132,7 +132,7 @@ test("total icons and separate count blocks retain every class and dimension in 
     "100 endogenous (1 static, 0 predetermined, 0 forward-looking, 0 mixed)",
     "10 exogenous", "90 equations",
   ];
-  assert.equal(tooltipText(value.tooltip), `[Current config](command:dygnosis.selectAnalysisConfiguration): Source\n${report.join("\n")}`);
+  assert.equal(tooltipText(value.tooltip), `[Current config](command:dygnosis.selectAnalysisConfiguration)\nSource\n${report.join("\n")}`);
   assert.match(value.tooltip.value, /\*\*Aggregate model\*\*/);
   assert.doesNotMatch(tooltipText(value.tooltip), /main\.mod|before transformation|Click/);
   assert.equal(value.accessibilityLabel, `Dynare model counts. Total: 104 endogenous, 12 exogenous, 93 equations. ${report.join(". ")}. Choose the analysis configuration.`);
@@ -152,17 +152,23 @@ test("total counts include every dimension and fall back to aggregate when none 
 
 test("configuration hover shows selected expressions and links to the shared selector", () => {
   // Guards showing only a preset name, or losing the selector when macro choices change.
-  const metadata = analysis({ defines: [{ name: "N", expression: "2" }, { name: "M", expression: "N+1" }] });
+  const metadata = analysis({ defines: [{ name: "N", expression: "2" }, { name: "M", expression: "N+1" }],
+    equation_selection: { mode: "include", tag: "name", values: ["core", "policy"] } });
   const source = modelStatus(facts(document(), { analysis: analysis() }), ["equations"]);
   assert.equal(source.text, "Source: $(symbol-operator) 93");
-  assert.match(source.tooltip.value, /^\[Current config\]\(command:dygnosis.selectAnalysisConfiguration\): Source/);
+  assert.match(source.tooltip.value, /^\[Current config\]\(command:dygnosis.selectAnalysisConfiguration\) {2}\nSource/);
   const configured = modelStatus(facts(document(), { analysis: metadata }), ["equations"]);
   assert.equal(configured.text, "Current config: $(symbol-operator) 93");
-  assert.match(tooltipText(configured.tooltip), /N = 2; M = N\+1/);
+  // Guards the consumed hover layout: a heading and one hard-break row per input.
+  assert.deepEqual(tooltipText(configured.tooltip).split("\n").slice(0, 5), [
+    "[Current config](command:dygnosis.selectAnalysisConfiguration)",
+    "Macro: N=2", "Macro: M=N+1", "Equation: name='core' (included)", "Equation: name='policy' (included)",
+  ]);
+  assert.match(configured.tooltip.value, /\) {2}\nMacro: N=2 {2}\nMacro: M=N\\\+1 {2}\nEquation:/);
   assert.deepEqual(configured.tooltip.isTrusted, { enabledCommands: ["dygnosis.selectAnalysisConfiguration"] });
   const selected = modelStatus(facts(document(), { analysis: analysis({ equation_selection: { mode: "include", tag: "name", values: ["core", "policy"] } }) }), ["equations"]);
   assert.equal(selected.text, "Current config: $(symbol-operator) 93");
-  assert.match(tooltipText(selected.tooltip), /Include name: core, policy/);
+  assert.match(tooltipText(selected.tooltip), /Equation: name='core' \(included\)\nEquation: name='policy' \(included\)/);
 });
 
 test("equation selection hover omits generic preview markers and retains the selected tags", () => {
@@ -174,7 +180,7 @@ test("equation selection hover omits generic preview markers and retains the sel
     metadata.selection.name = name;
     const value = modelStatus(facts(document(), { analysis: metadata }), ["equations"]);
     const text = tooltipText(value.tooltip);
-    assert.match(text, /Current config.*Exclude name: policy/);
+    assert.match(text, /Current config.*\nEquation: name='policy' \(excluded\)/);
     assert.doesNotMatch(text, /\(preview\)|Analysis preview/);
   }
   metadata.selection.name = "Fixed interest rate";

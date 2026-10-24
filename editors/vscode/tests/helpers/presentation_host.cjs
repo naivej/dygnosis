@@ -71,7 +71,7 @@ async function checkStatusHovers(service, evidence, waitFor) {
   };
   const model = await hover("dygnosis.modelCounts", "Aggregate model");
   assert.ok(model.headings.includes("Aggregate model"));
-  assert.match(model.text, /Current config: Source/);
+  assert.match(model.text, /Current config\s*\nSource/);
   assert.match(model.text, /1 endogenous \(0 static, 1 predetermined, 0 forward-looking, 0 mixed\)/);
   assert.doesNotMatch(model.text, /presentation\.mod|before transformation|Click/);
   await waitFor(async () => (await service.execute("dynare/workspaceStatus"))?.complete, "workspace counts finish before native hover");
