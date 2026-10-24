@@ -478,7 +478,9 @@ mod tests {
         let child_path = directory.0.join("dormant.txt");
         std::fs::write(&child_path, "@#error \"This body must not execute\"\n").unwrap();
         let root = Url::from_file_path(directory.0.join("main.mod")).unwrap();
-        let child = Url::from_file_path(&child_path).unwrap();
+        // `temp_dir()` may use a symlinked path (for example /var on macOS),
+        // while the document link uses the canonical filesystem path.
+        let child = Url::from_file_path(child_path.canonicalize().unwrap()).unwrap();
         let text =
             "var y;model;y=0;end;\n@#if 0\n@#include \"dormant.txt\"\n@#include UNKNOWN\n@#endif\n";
         let (service, _socket) = new_service();
