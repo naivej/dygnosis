@@ -1151,18 +1151,18 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         kind: ExplainKind::Shared,
     }),
     ("E335", ExplainEntry {
-        title: "Equation-surgery tag matched no equation",
-        body: "A ``model_remove`` / ``model_replace`` tag set names no equation of the model. Dynare refuses: `model_remove/model_replace/exclude_eqs/include_eqs: The equations specified by <tag list> were not found.`\n\n**Fix**\n\nCheck the tag value against the ``[name='...']`` tags of the model block, or drop the tag.",
+        title: "Equation tag selection matched no equation",
+        body: "A tag selection for `model_remove`, `model_replace`, `include_eqs` or `exclude_eqs` matched no equation.\n\n**Fix**\n\nCheck both the tag key and value against the model equations, for example `name='policy'` or `group='policy'`. For an analysis configuration, change or clear the equation selection. See [Dynare's equation-selection rules](https://www.dynare.org/manual/running-dynare.html#exclude-eqs).",
         kind: ExplainKind::Shared,
     }),
     ("E336", ExplainEntry {
         title: "Excluded equation has no single endogenous on its left side",
-        body: "``model_remove`` removed an equation that carries no ``endogenous`` tag and whose left side is not one endogenous variable. Dynare refuses: `Equation N has been excluded but it does not have a single variable on its left-hand side or an `endogenous` tag`. ``model_replace`` does not gate on this.\n\n**Fix**\n\nName the variable with an ``endogenous='name'`` tag, or put a single endogenous variable on the left side.",
+        body: "An equation removed by `model_remove`, `include_eqs` or `exclude_eqs` has no `endogenous` tag, and its left side contains zero or several distinct endogenous variables. `model_replace` does not require this rule.\n\n**Fix**\n\nAdd an `endogenous='y'` tag, or use a left side containing only one distinct endogenous variable, such as `2*y`. See [Dynare's equation-selection rules](https://www.dynare.org/manual/running-dynare.html#exclude-eqs).",
         kind: ExplainKind::Shared,
     }),
     ("E337", ExplainEntry {
-        title: "Same endogenous excluded twice by one statement",
-        body: "One ``model_remove`` / ``model_replace`` statement excluded two equations that name the same endogenous. Dynare refuses: `Variable c was excluded twice via a model_remove or model_replace statement, or via the include_eqs or exclude_eqs option`.\n\n**Warrant**\n\nDynare looks the printed name up at the loop index, so it can name a symbol that was not excluded at all; the editor names the variable that was excluded twice.\n\n**Fix**\n\nRemove the equation once, or drop one of the tags.",
+        title: "Same endogenous variable excluded twice",
+        body: "One `model_remove` / `model_replace` statement or `include_eqs` / `exclude_eqs` selection removes two equations for the same endogenous variable.\n\n**Warrant**\n\nDynare refuses: `Variable c was excluded twice via a model_remove or model_replace statement, or via the include_eqs or exclude_eqs option`. Dynare looks the printed name up at the loop index, so it can name a symbol that was not excluded at all; the editor names the variable that was excluded twice.\n\n**Fix**\n\nRemove just one of those equations, or correct their `endogenous` tags. See [Dynare's equation-selection rules](https://www.dynare.org/manual/running-dynare.html#exclude-eqs).",
         kind: ExplainKind::Shared,
     }),
     ("E338", ExplainEntry {

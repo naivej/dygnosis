@@ -49,6 +49,93 @@ fn assert_no_errors_or_warnings(codes: &[String]) {
     );
 }
 
+fn assert_pinned_selection(
+    source: &str,
+    mode: &str,
+    values: &[&str],
+    success: bool,
+    message: &str,
+) {
+    let Some(preprocessor) = find_preprocessor(None) else {
+        eprintln!("skip equation selection honesty: pinned Dynare preprocessor is unavailable");
+        return;
+    };
+    let result = run_preprocessor_with_options(
+        source,
+        &preprocessor,
+        None,
+        Duration::from_secs(15),
+        JsonStage::Transform,
+        &[format!("{mode}_eqs=[{}]", values.join(","))],
+    );
+    let output = format!("{}{}", result.raw_stdout, result.raw_stderr);
+    assert_eq!(result.success, success, "{output}");
+    assert!(output.contains(message), "missing {message:?}: {output}");
+}
+
+#[test]
+fn removed_equation_ownership_matches_pinned_tags_and_distinct_lhs_variables() {
+    // Guards ignoring an explicit owner, requiring a bare LHS variable, or
+    // choosing different owners for include and exclude selection.
+    for lhs_and_tag in [
+        "[name='drop',endogenous='z'] y+z=0;",
+        "[name='drop',endogenous='z'] y=0;",
+        "[name='drop'] 2*z+z(-1)=y;",
+    ] {
+        let source = format!("var y z; model; {lhs_and_tag} [name='keep'] y=y(-1)+z; end;");
+        for (mode, values) in [("include", ["keep"]), ("exclude", ["drop"])] {
+            let (mut workspace, codes) = apply(&source, mode, &values);
+            let model = workspace.get_effective_model("main.mod").unwrap();
+            assert_no_errors_or_warnings(&codes);
+            assert!(has_decl(model, &model.endogenous, "y"));
+            assert!(!has_decl(model, &model.endogenous, "z"));
+            assert!(has_decl(model, &model.exogenous, "z"));
+            assert!(model.excluded_endogenous.is_empty());
+            assert_eq!(model.equations.len(), 1);
+            assert_eq!(model.equations[0].name, "keep");
+            assert_pinned_selection(
+                &source,
+                mode,
+                &values,
+                true,
+                "Variable 'z' turned into an exogenous",
+            );
+        }
+    }
+}
+
+#[test]
+fn restoring_equations_restores_exogenous_and_excluded_endogenous_types() {
+    // Guards carrying a previous selection's retyped or excluded symbols
+    // into a larger selection or a restored Source configuration.
+    let source = "var y z q; model; [name='y-law'] y=y(-1)+z; [name='z-law'] z=z(-1); [name='q-law'] q=q(-1); end;";
+    let (mut workspace, codes) = apply(source, "include", &["y-law"]);
+    assert_no_errors_or_warnings(&codes);
+    let model = workspace.get_effective_model("main.mod").unwrap();
+    assert!(has_decl(model, &model.exogenous, "z"));
+    assert!(has_decl(model, &model.excluded_endogenous, "q"));
+    for choices in [
+        selection("include", &["y-law", "z-law", "q-law"]),
+        AnalysisConfiguration::default(),
+        selection("include", &["y-law"]),
+        AnalysisConfiguration::default(),
+    ] {
+        let full = choices
+            .equation_selection
+            .as_ref()
+            .is_none_or(|selection| selection.values.len() == 3);
+        workspace
+            .set_root_analysis_configuration("main.mod", choices)
+            .unwrap();
+        let model = workspace.get_effective_model("main.mod").unwrap();
+        assert!(has_decl(model, &model.endogenous, "y"));
+        assert_eq!(has_decl(model, &model.endogenous, "z"), full);
+        assert_eq!(has_decl(model, &model.endogenous, "q"), full);
+        assert_eq!(has_decl(model, &model.exogenous, "z"), !full);
+        assert_eq!(has_decl(model, &model.excluded_endogenous, "q"), !full);
+    }
+}
+
 #[test]
 fn include_retypes_excluded_endogenous_used_through_a_model_local() {
     let source = "var y z q; model; #helper = z + q; [name='selected'] y=helper; [name='z-law'] z=0; [name='q-law'] q=0; end;";
@@ -133,6 +220,7 @@ fn unknown_selector_reports_e335_and_withholds_selected_completeness() {
             .unwrap()
             .model_complete
     );
+    assert_pinned_selection(source, "include", &["absent"], false, "were not found");
 }
 
 #[test]
@@ -151,6 +239,34 @@ fn ambiguous_excluded_lhs_reports_e336() {
             .analysis_metadata("main.mod")
             .unwrap()
             .model_complete
+    );
+    assert_pinned_selection(
+        source,
+        "include",
+        &["keep"],
+        false,
+        "does not have a single variable on its left-hand side",
+    );
+}
+
+#[test]
+fn removed_residual_equation_cannot_infer_ownership_from_its_right_side() {
+    // Guards inferring an owner from the RHS when the LHS has no endogenous.
+    let source = "var y z; model; [name='drop'] 0=z; [name='keep'] y=y(-1)+z; end;";
+    let (mut workspace, codes) = apply(source, "exclude", &["drop"]);
+    assert!(codes.iter().any(|code| code == "E336"), "{codes:?}");
+    assert!(
+        !workspace
+            .analysis_metadata("main.mod")
+            .unwrap()
+            .model_complete
+    );
+    assert_pinned_selection(
+        source,
+        "exclude",
+        &["drop"],
+        false,
+        "does not have a single variable on its left-hand side",
     );
 }
 
@@ -240,6 +356,7 @@ fn repeated_endogenous_ownership_reports_e337() {
             .unwrap()
             .model_complete
     );
+    assert_pinned_selection(source, "include", &["keep"], false, "was excluded twice");
 }
 
 #[test]

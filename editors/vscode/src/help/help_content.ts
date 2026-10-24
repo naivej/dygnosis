@@ -20,19 +20,24 @@ export const headingId = (value: string): string => value.toLowerCase().replace(
 export const userDiagnosticMarkdown = (markdown: string): string =>
   markdown.replace(/\n\n\*\*(?:Range w|W)arrant\*\*\n\n[\s\S]*?(?=\n\n\*\*|$)/g, "");
 
-/** Strip agent wire-contract boilerplate and format tool parameters for human readers. */
-function userToolMarkdown(tool: HelpTool): string {
-  const summary = tool.description.replace(/\s*Tool contract \d+:[\s\S]*$/, "").trim();
-  const schema = typeof tool.inputSchema === "object" && tool.inputSchema !== null ? tool.inputSchema as Record<string, unknown> : undefined;
-  const props = schema && typeof schema.properties === "object" && schema.properties !== null ? Object.entries(schema.properties as Record<string, Record<string, unknown>>) : [];
-  const rows = props.map(([name, prop]) => {
-    const desc = typeof prop?.description === "string" ? prop.description.replaceAll("|", "\\|").replaceAll("\n", " ") : "Optional selector or filter.";
-    return `| \`${name}\` | ${desc} |`;
+/** Reuse the agent topic's task summaries; wire contracts stay in MCP metadata. */
+function userToolPages(tools: HelpTool[], agents: HelpTopic | undefined): HelpTopic[] {
+  const summaries = new Map<string, string>();
+  for (const value of Lexer.lex(agents?.markdown ?? "")) {
+    const token = value as MarkedToken;
+    if (token.type !== "table") continue;
+    for (const row of token.rows) {
+      const link = row[0]?.tokens.find(value => {
+        const token = value as MarkedToken;
+        return token.type === "link" && /^tool:dynare_\w+$/.test(token.href);
+      }) as MarkedToken | undefined;
+      if (link?.type === "link" && row[1]) summaries.set(link.href.slice(5), row[1].text);
+    }
+  }
+  return tools.flatMap(tool => {
+    const summary = summaries.get(tool.name);
+    return summary ? [{ id: `tool:${tool.name}`, title: tool.name, keywords: [tool.name, "MCP"], markdown: `# ${tool.name}\n\n${summary}\n\n[Work with an agent](help:agents)` }] : [];
   });
-  const paramsSection = rows.length
-    ? `## Parameters\n\n| Parameter | Description |\n|---|---|\n${rows.join("\n")}`
-    : `## Input schema\n\n\`\`\`json\n${JSON.stringify(tool.inputSchema, null, 2)}\n\`\`\``;
-  return `# ${tool.name}\n\n${summary}\n\n[Agent tools](help:agents)\n\n${paramsSection}`;
 }
 
 /** Render tokens, never raw HTML. Links become messages, never command URIs. */
@@ -83,7 +88,7 @@ export function helpPages(bundle: HelpBundle): HelpTopic[] {
   if (reference) reference.markdown += `\n## Commands\n\n${bundle.commands.map(commandLink).join("\n")}\n\n## Dygnosis shortcuts\n\n${bundle.keybindings.map(key => `- ${bundle.commands.find(command => command.command === key.command)?.title ?? key.command}: ${key.key}; macOS ${key.mac ?? key.key}`).join("\n")}\n\n## Diagnostic codes\n\n| Label | Meaning |\n|---|---|\n| Shared | Dynare reports this on the file you edit, and Dygnosis reports it too. |\n| Added | Extra guidance from Dygnosis. Dynare never reports it. |\n| Skipped | Documented only. Dynare's message depends on rewritten equations or on the MATLAB file it generates, so Dygnosis does not show the check. |\n\n${bundle.reference.codes.map(codeIndexLink).join("\n")}\n\n## Command options\n\n${bundle.reference.options.map(entry => `- [${entry.command}](option:${entry.command})`).join("\n")}\n`;
   pages.push(...bundle.reference.options.map(entry => ({ id: `option:${entry.command}`, title: `${entry.command} options`, keywords: [entry.command, "options"], markdown: `# ${entry.command} options\n\n[Editing](help:edit-models) · [Command options](help:reference#command-options)\n\n| Option | Meaning |\n|---|---|\n${entry.options.map(option => `| \`${option.name}\` | ${option.description.replaceAll("|", "\\|").replaceAll("\n", " ")} |`).join("\n")}` })));
   pages.push(...bundle.reference.codes.map(code => ({ id: `check:${code.code}`, title: `${code.code}: ${code.title}`, keywords: [code.code, code.kind], markdown: `${userDiagnosticMarkdown(code.markdown)}\n\n[Use diagnostic actions](help:diagnostics) · [Diagnostic code index](help:reference#diagnostic-codes)` })));
-  pages.push(...bundle.reference.tools.map(tool => ({ id: `tool:${tool.name}`, title: tool.name, keywords: [tool.name, "MCP"], markdown: userToolMarkdown(tool) })));
+  pages.push(...userToolPages(bundle.reference.tools, pages.find(topic => topic.id === "agents")));
   for (const command of bundle.commands) pages.find(topic => topic.id === bundle.commandsTopics[command.command])?.keywords.push(command.command, `${command.category}: ${command.title}`);
   for (const [key, id] of Object.entries(bundle.settingsTopics)) pages.find(topic => topic.id === id)?.keywords.push(key);
   return pages;

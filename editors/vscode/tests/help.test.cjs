@@ -43,6 +43,21 @@ test('untrusted engine explanations cannot execute HTML, links or remote images'
   assert.match(helpMarkdown('[Feature](appearance.md#expression-value-hints)', () => undefined), /data-link="help:appearance#expression-value-hints"/);
 });
 
+test('tool Help uses the authored task summary without exposing MCP contracts', () => {
+  // Guards contract or schema changes leaking into human Help, and keeps the
+  // authored summary as the single owner for the overview and tool page.
+  const changed = JSON.parse(JSON.stringify(bundle));
+  changed.reference.tools.find(tool => tool.name === 'dynare_model_info').description = 'Internal MCP contract marker.';
+  changed.reference.tools.find(tool => tool.name === 'dynare_model_info').inputSchema = { properties: { internal_contract_field: {} } };
+  const agents = changed.topics.find(topic => topic.id === 'agents');
+  agents.markdown = agents.markdown.replace(/(\[dynare_model_info\]\(tool:dynare_model_info\) \| )[^\n]+/, '$1Inspect the model for this task. |');
+  const page = helpPages(changed).find(page => page.id === 'tool:dynare_model_info');
+  assert.match(page.markdown, /Inspect the model for this task\./);
+  assert.doesNotMatch(page.markdown, /Internal MCP contract marker|internal_contract_field|## Parameters|## Input schema/);
+  assert.equal(changed.reference.tools.find(tool => tool.name === 'dynare_model_info').description, 'Internal MCP contract marker.');
+  assert.match(helpMarkdown(page.markdown, () => undefined), /data-link="help:agents"/);
+});
+
 test('Help About and the extension listing use the product README without its logo', () => {
   const product = fs.readFileSync(path.join(__dirname, '../../../README.md'), 'utf8').replace(/!\[[^\]]*\]\([^)]*logo[^)]*\)\s*/g, '');
   assert.equal(bundle.topics.find(topic => topic.id === 'about').markdown, product);

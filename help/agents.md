@@ -5,8 +5,9 @@ checking and replicating Dynare models. To install it in your workspace, run
 `npx skills add naivej/dygnosis` in a terminal.
 
 Dygnosis also provides an MCP server so agents can inspect, check, compare and
-edit Dynare models directly. Click any tool name below to view its reference
-and parameters. Editing tools return proposed changes for your agent to apply.
+edit Dynare models directly. Editing tools return proposed changes for your
+agent to apply. For example, ask “Find the equations that use `k`” or “Compare
+this model with `HEAD~1`.” The server supplies tool instructions to the agent.
 
 ## Understand the model
 
