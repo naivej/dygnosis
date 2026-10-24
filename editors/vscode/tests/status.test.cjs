@@ -132,7 +132,7 @@ test("total icons and separate count blocks retain every class and dimension in 
     "100 endogenous (1 static, 0 predetermined, 0 forward-looking, 0 mixed)",
     "10 exogenous", "90 equations",
   ];
-  assert.equal(tooltipText(value.tooltip), `[Current config](command:dygnosis.selectAnalysisConfiguration)\nSource\nClick the status item to open Outline.\n${report.join("\n")}`);
+  assert.equal(tooltipText(value.tooltip), `[Current config](command:dygnosis.selectAnalysisConfiguration)\nSource\n${report.join("\n")}`);
   assert.match(value.tooltip.value, /\*\*Aggregate model\*\*/);
   assert.doesNotMatch(tooltipText(value.tooltip), /main\.mod|before transformation/);
   assert.equal(value.accessibilityLabel, `Dynare model counts. Total: 104 endogenous, 12 exogenous, 93 equations. ${report.join(". ")}. Click the status item to open Outline.`);
@@ -305,7 +305,7 @@ test("default status opens Outline and retains the Current config hover link", a
   assert.match(item.accessibilityInformation.label, /Total: 104 endogenous/);
   assert.match(item.accessibilityInformation.label, /Click the status item to open Outline\./);
   assert.match(tooltipText(item.tooltip), /^\[Current config\]\(command:dygnosis\.selectAnalysisConfiguration\)/);
-  assert.match(tooltipText(item.tooltip), /Click the status item to open Outline\./);
+  assert.doesNotMatch(tooltipText(item.tooltip), /Click the status item to open Outline\./);
   assert.equal(item.backgroundColor, undefined);
   assert.equal(item.color, undefined);
   registration.dispose();
@@ -412,7 +412,7 @@ test("edit invalidation removes numbers immediately and superseded versions cann
   ++env.doc.version;
   env.host.edited.fire({ document: env.doc });
   assert.equal(env.host.items[0].text, "$(sync~spin) Dynare: updating");
-  assert.equal(env.host.items[0].tooltip, "Refreshing model counts…\n\nClick the status item to open Outline.");
+  assert.equal(env.host.items[0].tooltip, "Refreshing model counts…");
   assert.match(env.host.items[0].accessibilityInformation.label, /Click the status item to open Outline\./);
   await flush();
   env.service.modelInfo = () => second.promise;
@@ -508,7 +508,7 @@ test("unavailable, incomplete and unsupported engines replace previous numbers",
   env.changed.fire();
   await flush();
   assert.match(env.host.items[0].tooltip, /bundled binary/);
-  assert.match(env.host.items[0].tooltip, /Click the status item to open Outline\./);
+  assert.doesNotMatch(env.host.items[0].tooltip, /Click the status item to open Outline\./);
   assert.match(env.host.items[0].accessibilityInformation.label, /Click the status item to open Outline\./);
   registration.dispose();
 });
@@ -537,7 +537,7 @@ test("pending model actions reuse the count item and restore configuration count
   tracked.clock.tick(249); assert.equal(item.text, counts);
   tracked.clock.tick(1); assert.match(item.text, /sync~spin.*Expanding macros/);
   assert.match(tooltipText(item.tooltip), /Loading hover/); assert.equal(env.host.items.length, 1);
-  assert.match(tooltipText(item.tooltip), /Click the status item to open Outline\./);
+  assert.doesNotMatch(tooltipText(item.tooltip), /Click the status item to open Outline\./);
   assert.doesNotMatch(tooltipText(item.tooltip), /Current config|N = 2/);
   assert.equal(item.command, "outline.focus");
   assert.match(item.accessibilityInformation.label, /Click the status item to open Outline\./);
