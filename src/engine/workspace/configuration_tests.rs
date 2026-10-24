@@ -941,10 +941,9 @@ fn worker_snapshots_keep_new_closed_dormant_override_targets() {
             .as_nanos()
     ));
     std::fs::create_dir_all(&folder).unwrap();
-    // macOS resolves the system temporary directory through /private, while
-    // std::env::temp_dir() can still return its /var alias. Keep every workspace
-    // key on the canonical path used by filesystem reads.
-    let folder = folder.canonicalize().unwrap();
+    // Normalize the existing directory before joining missing files: this
+    // resolves macOS aliases and strips Windows's verbatim path prefix.
+    let folder = PathBuf::from(path_key(&folder));
     let root = path_key(&folder.join("root.mod"));
     let dormant = path_key(&folder.join("dormant.inc"));
     std::fs::write(&dormant, "@#define N = 0\n").unwrap();

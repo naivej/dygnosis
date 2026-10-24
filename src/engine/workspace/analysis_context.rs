@@ -316,9 +316,9 @@ mod source_guard_tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&directory).unwrap();
-        // Resolve macOS's /var -> /private/var temporary-directory alias
-        // before using the path as a workspace key.
-        let directory = directory.canonicalize().unwrap();
+        // Normalize the existing directory before joining missing files: this
+        // resolves macOS aliases and strips Windows's verbatim path prefix.
+        let directory = PathBuf::from(path_key(&directory));
         let root = path_key(&directory.join("root.mod"));
         let helper = path_key(&directory.join("large.inc"));
         let text = "@#if ON\n@#include \"large.inc\"\n@#else\nvar y;model;y=0;end;\n@#endif\n";
