@@ -211,13 +211,13 @@ test("preview values and stale or incomplete outcomes keep configuration access"
   const metadata = analysis({ overrides: [operation] }, {
     state: "stale", selection: { configuration_id: "preview", name: "Alternative", preview: true, invocation_scope: "preview" },
     cause: { code: "STALE", message: "The written definition changed. Reset the analysis configuration." },
-    overrides: [{ operation, application: "unknown", known_execution_count: 0, execution_count: null, cause: "Its target changed." }],
+    overrides: [{ operation, name: "x", application: "unknown", known_execution_count: 0, execution_count: null, cause: "Its target changed." }],
   });
   for (const complete of [false, true]) {
     const value = modelStatus(facts(document(), { analysis: metadata, complete, n_equations: undefined }), ["equations"]);
     assert.equal(value.text, complete ? "$(info) Current config: unavailable" : "$(info) Current config: source only");
     assert.match(value.tooltip.value, /^\[Current config\]\(command:dygnosis.selectAnalysisConfiguration\)/);
-    assert.match(tooltipText(value.tooltip), /Macro: "\[link\]\(command:untrusted\)"/);
+    assert.match(tooltipText(value.tooltip), /Macro: x="\[link\]\(command:untrusted\)"/);
     assert.ok(value.tooltip.value.includes('\\[link\\]\\(command:untrusted\\)'));
     assert.match(tooltipText(value.tooltip), /\(stale\)/);
     assert.doesNotMatch(tooltipText(value.tooltip), /\(preview\)/);

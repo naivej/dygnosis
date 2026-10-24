@@ -10,7 +10,7 @@
   exclude the selected equations to inspect their model facts without changing
   the `.mod` file. Equation selection is a preview; Rename and diagnostic fixes
   are unavailable for it.
-- The **Current config** hover shows each macro input, replacement expression and equation tag choice on its own line, without generic configuration labels, and lists each selection failure cause once. Macro replacements use **Macro:**.
+- The **Current config** hover shows each macro input, replacement expression and equation tag choice on its own line, without generic configuration labels, and lists each selection failure cause once. Macro replacements include the name, such as **Macro: x=1**.
 - Select a current macro input to edit it, or choose **Add macro input**. Choose **Include equations** or **Exclude equations** and enter the tag expression directly. **Clear equation selection** keeps the other configuration choices.
 - Compare the current configuration with **Written source** or a saved configuration for the same model from **Show mod changes** > **config…**. Written source is always available. The current configuration is **After**.
 - Choose a baseline under **Compare filename with**: **.mod file…**, **config…**, recent commits, branches and tags, or enter a revision such as `HEAD~2`. A single changed file with captured text opens directly in Text diff.

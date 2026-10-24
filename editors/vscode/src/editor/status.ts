@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { DygnosisClient, isAnalysisDocument } from "../client/client";
-import { ModelInfo } from "../client/protocol";
+import { AnalysisOverride, ModelInfo } from "../client/protocol";
 import { booleanSetting, listSetting } from "../client/settings";
 import type { EffectivePreviewRegistry } from "./preview";
 
@@ -42,13 +42,17 @@ function configurationHover(info: ModelInfo): vscode.MarkdownString {
   const analysis = info.analysis;
   const equations = analysis?.configuration.equation_selection;
   const name = /^(?:Analysis preview|Macro inputs)(?: \(modified\))?$/.test(analysis?.selection.name ?? "") ? undefined : analysis?.selection.name;
+  const overrideChoice = (operation: AnalysisOverride, name?: string | null): string => operation.kind === "definition"
+    ? `Macro: ${name ? `${name}=` : ""}${operation.expression}`
+    : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview";
+  const overrideChoices = analysis?.overrides.length
+    ? analysis.overrides.map(receipt => overrideChoice(receipt.operation, receipt.name))
+    : (analysis?.configuration.overrides ?? []).map(operation => overrideChoice(operation));
   const choices = [
     ...(analysis?.configuration.defines ?? []).map(input => `Macro: ${input.name}=${input.expression}`),
     ...(equations ? equations.values.map(value =>
       `Equation: ${equations.tag ?? "name"}='${value}' (${equations.mode === "include" ? "included" : "excluded"})`) : []),
-    ...(analysis?.configuration.overrides ?? []).map(operation => operation.kind === "definition"
-      ? `Macro: ${operation.expression}`
-      : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview"),
+    ...overrideChoices,
   ];
   const tooltip = new vscode.MarkdownString("[Current config](command:dygnosis.selectAnalysisConfiguration)");
   if (analysis?.state === "stale") tooltip.appendText(" (stale)");

@@ -38,7 +38,7 @@ export type AnalysisOverride =
 export interface EquationSelection { mode: "include" | "exclude"; tag?: string; values: string[] }
 export interface AnalysisConfiguration { name?: string; defines?: { name: string; expression: string }[]; overrides?: AnalysisOverride[]; equation_selection?: EquationSelection }
 export interface OverrideReceipt {
-  operation: AnalysisOverride; application: "applied" | "not_reached" | "unknown";
+  operation: AnalysisOverride; name?: string | null; application: "applied" | "not_reached" | "unknown";
   known_execution_count: number; execution_count: number | null; cause: string | null;
 }
 export interface AnalysisMetadata {
@@ -131,6 +131,7 @@ export function parseAnalysisMetadata(value: unknown): AnalysisMetadata {
       typeof value.selection.invocation_scope !== "string" || !analysisConfiguration(value.configuration) || !natural(value.selection_generation) ||
       !(value.include_paths === null || strings(value.include_paths)) || ![true, false, null].includes(value.macro_complete as boolean | null) ||
       ![true, false, null].includes(value.model_complete as boolean | null) || !rows(value.overrides, row => analysisOverride(row.operation) &&
+        (row.name === undefined || nullableString(row.name)) &&
         ["applied", "not_reached", "unknown"].includes(String(row.application)) && natural(row.known_execution_count) &&
         (row.execution_count === null || natural(row.execution_count)) && nullableString(row.cause)) ||
       value.state === "stale" && (!record(value.cause) || typeof value.cause.code !== "string" || typeof value.cause.message !== "string" ||

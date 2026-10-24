@@ -738,6 +738,8 @@ mod tests {
         let accepted = set(&mut inner, &[request(&root, &first, choices)]).unwrap();
         assert_eq!(accepted["analysis"]["state"], "selected");
         assert_eq!(accepted["analysis"]["selection_generation"], 1);
+        assert_eq!(accepted["analysis"]["overrides"][0]["name"], "FLAG");
+        assert!(accepted["analysis"]["overrides"][1]["name"].is_null());
         assert_eq!(
             accepted["analysis"]["overrides"][0]["application"],
             "applied"

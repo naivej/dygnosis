@@ -224,6 +224,8 @@ pub enum OverrideApplication {
 #[derive(Clone, Debug, Serialize)]
 pub struct OverrideReceipt {
     pub operation: AnalysisOverride,
+    /// Written macro name retained by the guarded target; conditionals have none.
+    pub name: Option<String>,
     pub application: OverrideApplication,
     /// Successful applications in the reached prefix, never failed attempts.
     pub known_execution_count: u64,

@@ -152,12 +152,12 @@ test("webview uses text nodes, labels source sides and disables missing/stale lo
 test("comparison headers summarize choices, abnormal receipts and heterogeneous counts", () => {
   const env = webview();
   const analysis = { selection: { name: "Policy <A>", preview: true }, configuration: { defines: [{ name: "N", expression: "2" }], equation_selection: { mode: "include", tag: "name", values: ["policy"] }, overrides: [{ kind: "definition", target: { file: "main.mod" }, expression: "1" }] }, model_complete: true,
-    overrides: [{ operation: { kind: "definition", target: { file: "main.mod" }, expression: "1" }, application: "not_reached", known_execution_count: 0, execution_count: 0, cause: "The parent branch was not reached." }] };
+    overrides: [{ operation: { kind: "definition", target: { file: "main.mod" }, expression: "1" }, name: "x", application: "not_reached", known_execution_count: 0, execution_count: 0, cause: "The parent branch was not reached." }] };
   env.render({ before: "/before/main.mod @ HEAD · abc1234 · Source", inputNames: { before: "main.mod", after: "variant.mod" }, analysisSummaries: { before: { analysis: { ...analysis, configuration: { ...analysis.configuration, equation_selection: { mode: "exclude", tag: "name", values: ["policy"] } } }, counts: { n_equations: 1, n_endogenous: 1, heterogeneity_dimensions: [{ dimension: "households", n_equations: 2, n_endogenous: 3 }] }, search_paths: ["includes"] }, after: { analysis: { ...analysis, selection: { name: null, preview: false }, configuration: {}, overrides: [] } } } });
   const text = env.elements.models.textContent;
   assert.match(text, /Macro: N=2/);
   assert.match(text, /Equation: name='policy' \(excluded\)/);
-  assert.match(text, /Macro: 1/);
+  assert.match(text, /Macro: x=1/);
   assert.match(text, /Include paths: includes/);
   assert.match(text, /Definition override in main.mod · not reached.*parent branch was not reached/);
   assert.match(text, /Model counts are unavailable for this captured input/);

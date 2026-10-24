@@ -413,6 +413,7 @@ fn forced_chain_skips_missing_guards_and_does_not_activate_empty_parent() {
     assert_eq!(names(&mut ws), ["b"]);
     let metadata = ws.analysis_metadata("main.mod").unwrap();
     assert!(metadata.selection.preview && metadata.macro_complete && metadata.model_complete);
+    assert_eq!(metadata.overrides[0].name, None);
     assert_eq!(metadata.overrides[0].execution_count, Some(1));
     assert_eq!(
         metadata.overrides[1].application,
@@ -459,10 +460,9 @@ fn repeated_include_receipts_count_successes_and_preserve_failed_prefix() {
     )
     .unwrap();
     assert_eq!(names(&mut ws), ["y1", "y2"]);
-    assert_eq!(
-        ws.analysis_metadata("main.mod").unwrap().overrides[0].execution_count,
-        Some(2)
-    );
+    let metadata = ws.analysis_metadata("main.mod").unwrap();
+    assert_eq!(metadata.overrides[0].execution_count, Some(2));
+    assert_eq!(metadata.overrides[0].name.as_deref(), Some("N"));
     ws.set_root_analysis_configuration(
         "main.mod",
         AnalysisConfiguration {
@@ -478,6 +478,7 @@ fn repeated_include_receipts_count_successes_and_preserve_failed_prefix() {
     assert!(!metadata.macro_complete);
     assert_eq!(metadata.overrides[0].known_execution_count, 0);
     assert_eq!(metadata.overrides[0].execution_count, None);
+    assert_eq!(metadata.overrides[0].name.as_deref(), Some("N"));
     assert_eq!(
         metadata.overrides[0].application,
         OverrideApplication::Unknown

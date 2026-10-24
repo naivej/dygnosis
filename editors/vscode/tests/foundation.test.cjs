@@ -43,6 +43,18 @@ test("unknown schemas, wrong ownership and malformed nested locations are reject
   assert.equal(location({ uri: "file:///x", range: { start: { line: 1, character: 0 }, end: { line: 0, character: 5 } } }), false);
   assert.throws(() => parseModelInfo({ ...info(), complete: true, n_endogenous: -1 }, "file:///root.mod", "file:///root.mod"));
 });
+test("analysis receipts accept old engines without names and reject malformed optional names", () => {
+  const analysis = { state: "selected", selection: { configuration_id: "c", name: null, preview: false, invocation_scope: "source" },
+    configuration: { overrides: [{ kind: "definition", target: { file: null, site_id: "s", source_revision: "r" }, expression: "1" }] },
+    selection_generation: 0, include_paths: null, macro_complete: true, model_complete: true,
+    overrides: [{ operation: { kind: "definition", target: { file: null, site_id: "s", source_revision: "r" }, expression: "1" }, application: "applied", known_execution_count: 1, execution_count: 1, cause: null }] };
+  assert.equal(parseModelInfo({ ...info(), analysis }, "file:///root.mod", "file:///root.mod").analysis.overrides[0].name, undefined);
+  for (const name of ["x", null]) {
+    const named = { ...analysis, overrides: [{ ...analysis.overrides[0], name }] };
+    assert.equal(parseModelInfo({ ...info(), analysis: named }, "file:///root.mod", "file:///root.mod").analysis.overrides[0].name, name);
+  }
+  assert.throws(() => parseModelInfo({ ...info(), analysis: { ...analysis, overrides: [{ ...analysis.overrides[0], name: 1 }] } }, "file:///root.mod", "file:///root.mod"));
+});
 test("preview schemes and user-only executable scope are manifest constraints", () => {
   const manifest = require("../package.json");
   assert.equal(manifest.engines.vscode, "^1.102.0");

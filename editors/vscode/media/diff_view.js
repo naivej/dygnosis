@@ -436,12 +436,16 @@
       const summary = message.analysisSummaries?.[side], analysis = summary?.analysis;
       if (summary) {
         const configuration = analysis?.configuration ?? summary.requested_analysis;
+        const overrideChoice = (operation, name) => operation.kind === "definition"
+          ? `Macro: ${name ? `${name}=` : ""}${operation.expression}`
+          : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview";
+        const overrideChoices = analysis?.overrides?.length
+          ? analysis.overrides.map(receipt => overrideChoice(receipt.operation, receipt.name))
+          : (configuration?.overrides ?? []).map(operation => overrideChoice(operation));
         const choiceLines = [
           ...(configuration?.defines ?? []).map(input => `Macro: ${input.name}=${input.expression}`),
           ...(configuration?.equation_selection ? configuration.equation_selection.values.map(value => `Equation: ${configuration.equation_selection.tag ?? "name"}='${value}' (${configuration.equation_selection.mode === "include" ? "included" : "excluded"})`) : []),
-          ...(configuration?.overrides ?? []).map(operation => operation.kind === "definition"
-            ? `Macro: ${operation.expression}`
-            : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview"),
+          ...overrideChoices,
         ];
         const presetName = analysis?.selection?.name ?? configuration?.name;
         const usefulPresetName = presetName && !/^(?:Analysis preview|Macro inputs)(?: \(modified\))?$/.test(presetName) ? presetName : undefined;

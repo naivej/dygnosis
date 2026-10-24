@@ -1182,7 +1182,8 @@ impl Workspace {
             let failure=source.application_failures.get(&index);
             let application=if count>0 {OverrideApplication::Applied}else if source.macro_complete {OverrideApplication::NotReached}else{OverrideApplication::Unknown};
             let cause=failure.cloned().or_else(|| match application {OverrideApplication::NotReached=>Some("The written directive was not reached under this configuration; its requested body was not analyzed.".into()),OverrideApplication::Unknown=>Some("Macro execution stopped before this override could be proven; later applications are unknown.".into()),_ if !source.macro_complete=>Some("The successful prefix is retained; later applications are unknown because macro execution stopped.".into()),_=>None});
-            OverrideReceipt {operation:operation.clone(),application,known_execution_count:count,execution_count:source.macro_complete.then_some(count),cause}
+            let name = analysis.as_ref().and_then(|analysis| analysis.overrides.get(index)).and_then(|resolved| resolved.name.clone());
+            OverrideReceipt {operation:operation.clone(),name,application,known_execution_count:count,execution_count:source.macro_complete.then_some(count),cause}
         }).collect();
         Ok(Arc::new(AnalysisMetadata {
             selection,
