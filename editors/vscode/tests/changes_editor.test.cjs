@@ -43,6 +43,7 @@ test("Open changes offers file and configuration actions beside ordinary Git his
   assert.deepEqual(host.captures[0].resource.before, historical(commits.head, "main.mod", "main"));
   assert.deepEqual(host.captures[0].resource.after, working()); assert.deepEqual(host.captures[0].resource.anchor, working());
   assert.equal(host.last().status, "ready"); assert.equal(host.viewType, changesViewType);
+  assert.deepEqual(host.last().inputNames, { before: "main.mod", after: "main.mod" });
   assert.equal(host.providerOptions.supportsMultipleEditorsPerDocument, true);
   assert.equal(host.panels[0].webview.options.enableCommandUris, false); assert.match(host.panels[0].webview.html, /default-src 'none'/);
 });

@@ -16,7 +16,7 @@ export function diffHtml(webview: vscode.Webview, assets: vscode.Uri): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${style.toString()}"><title>Dygnosis Changes</title></head><body>
-<main><div id="reviewContent" class="review-content"><h1 class="sr-only">Changes</h1><p class="breadcrumb">Dygnosis <span aria-hidden="true">›</span> Changes</p>
+<main><div id="reviewContent" class="review-content"><h1 class="sr-only">Changes</h1>
 <header class="comparison-heading"><div class="comparison-selector"><div id="models" class="comparison-inputs"></div>
 <button id="changeComparison" type="button">Change comparison…</button><button id="swap" type="button" title="Swap Before and After">Swap sides</button></div><div class="comparison-actions"><button id="refresh" type="button">Refresh</button>
 <button id="rootTextDiff" type="button">Text diff</button><button id="capturedTextDiff" type="button" hidden>Text diff…</button></div></header>

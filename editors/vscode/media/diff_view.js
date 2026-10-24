@@ -429,36 +429,52 @@
     payload = message; references = new Map((message.references ?? []).map(reference => [reference.pointer, reference])); choices = message.choices;
     controls.models.replaceChildren();
     for (const [side, label, input] of [["before", "Before", message.before], ["after", "After", message.after]]) {
-      const model = node("div", undefined, "input-side"), parts = input.split(" · "); model.title = input;
+      const model = node("div", undefined, "input-side"), parts = input.split(" · ");
       const heading = node("div", undefined, "input-heading");
-      heading.append(node("small", label), node("code", basename(parts[0])), node("span", parts.slice(1).join(" · "), "input-context")); model.append(heading);
+      const sourceLabel = message.inputNames?.[side] ?? basename(parts[0]);
+      heading.append(node("small", label), node("code", sourceLabel)); model.append(heading);
       const summary = message.analysisSummaries?.[side], analysis = summary?.analysis;
       if (summary) {
-        const configuration = analysis?.configuration ?? summary.requested_analysis, preview = analysis?.selection.preview ?? !!configuration?.overrides?.length;
-        const name = analysis?.selection.name ?? configuration?.name ?? (preview ? "Analysis preview" : configuration?.defines?.length ? "Macro inputs" : configuration ? "Source" : "Analysis unavailable");
-        const complete = summary.complete === undefined ? analysis?.model_complete : summary.complete;
-        model.append(node("p", `${name}${preview ? " (preview)" : ""} · ${complete === true ? "Complete" : complete === false ? "Incomplete" : "Completeness unavailable"}`, "analysis-name"));
-        if (configuration) {
-        model.append(node("p", `Initial macro inputs: ${configuration.defines?.map(input => `${input.name}=${input.expression}`).join("; ") || "none"}`, "analysis-detail"));
-        }
+        const configuration = analysis?.configuration ?? summary.requested_analysis;
+        const choiceLines = [
+          ...(configuration?.defines ?? []).map(input => `Macro: ${input.name}=${input.expression}`),
+          ...(configuration?.equation_selection ? configuration.equation_selection.values.map(value => `Equation: ${configuration.equation_selection.tag ?? "name"}='${value}' (${configuration.equation_selection.mode === "include" ? "included" : "excluded"})`) : []),
+          ...(configuration?.overrides ?? []).map(operation => operation.kind === "definition"
+            ? `Definition override = ${operation.expression}`
+            : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview"),
+        ];
+        const presetName = analysis?.selection?.name ?? configuration?.name;
+        const usefulPresetName = presetName && !/^(?:Analysis preview|Macro inputs)(?: \(modified\))?$/.test(presetName) ? presetName : undefined;
+        const hoverLines = [input];
+        if (choiceLines.length) for (const choice of choiceLines) model.append(node("p", choice, "analysis-detail"));
+        else if (configuration) model.append(node("p", "Source", "analysis-detail"));
+        else if (!analysis) model.append(node("p", "Analysis unavailable", "analysis-detail"));
+        if (usefulPresetName) hoverLines.push(usefulPresetName);
+        if (summary.search_paths?.length) model.append(node("p", `Include paths: ${summary.search_paths.join(", ")}`, "analysis-detail"));
+        if (summary.search_paths?.length) hoverLines.push(`Include paths: ${summary.search_paths.join(", ")}`);
         if (!analysis) for (const operation of configuration?.overrides ?? []) {
           const file = operation.target.file === null ? "unnamed model" : basename(operation.target.file.replaceAll("\\", "/"));
-          const choice = operation.kind === "definition" ? `Definition in ${file}: ${operation.expression}` : operation.kind === "skip_definition" ? `Skip definition in ${file}` : `${operation.branch_id === null ? "No branch" : "Selected branch"} in ${file}`;
+          const choice = operation.kind === "definition" ? `Definition override in ${file} = ${operation.expression}` : operation.kind === "skip_definition" ? `Skip written definition in ${file}` : `${operation.branch_id === null ? "Preview no branch" : "Forced branch preview"} in ${file}`;
           model.append(node("p", `${choice} · application unavailable`, "analysis-detail"));
+          hoverLines.push(`${choice} · application unavailable`);
         }
         for (const receipt of analysis?.overrides ?? []) {
           const operation = receipt.operation, file = operation.target.file === null ? "unnamed model" : basename(operation.target.file.replaceAll("\\", "/"));
-          const choice = operation.kind === "definition" ? `Definition in ${file}: ${operation.expression}` : operation.kind === "skip_definition" ? `Skip definition in ${file}` : `${operation.branch_id === null ? "No branch" : "Selected branch"} in ${file}`;
-          const state = receipt.application === "applied" ? `${receipt.execution_count === null ? "applied at least" : "applied"} ${receipt.known_execution_count} time${receipt.known_execution_count === 1 ? "" : "s"}` : receipt.application === "not_reached" ? "not reached" : "application unknown";
-          model.append(node("p", `${choice} · ${state}${receipt.cause ? `. ${receipt.cause}` : ""}`, "analysis-detail"));
+          if (receipt.application !== "applied" || receipt.cause) {
+            const choice = operation.kind === "definition" ? `Definition override in ${file}` : operation.kind === "skip_definition" ? `Skip written definition in ${file}` : `Branch preview in ${file}`;
+            const state = receipt.application === "not_reached" ? "not reached" : receipt.application === "applied" ? "applied" : "application unknown";
+            model.append(node("p", `${choice} · ${state}${receipt.cause ? `. ${receipt.cause}` : ""}`, "analysis-detail"));
+            hoverLines.push(`${choice} · ${state}${receipt.cause ? `. ${receipt.cause}` : ""}`);
+          }
         }
         if (summary.counts) {
-          const counts = value => `${value.n_equations} ${value.n_equations === 1 ? "equation" : "equations"} · ${value.n_endogenous} endogenous ${value.n_endogenous === 1 ? "variable" : "variables"}`;
-          model.append(node("p", counts(summary.counts), "analysis-counts"));
-          for (const dimension of summary.counts.heterogeneity_dimensions) model.append(node("p", `${dimension.dimension}: ${counts(dimension)}`, "analysis-detail"));
+          const counts = value => `${value.n_endogenous} endogenous · ${value.n_equations} ${value.n_equations === 1 ? "equation" : "equations"}`;
+          hoverLines.push(`${summary.counts.heterogeneity_dimensions.length ? "Aggregate model: " : ""}${counts(summary.counts)}`);
+          for (const dimension of summary.counts.heterogeneity_dimensions) hoverLines.push(`Heterogeneous model: ${dimension.dimension} · ${counts(dimension)}`);
         } else model.append(node("p", summary.counts_cause || "Model counts are unavailable for this captured input.", "analysis-detail"));
         if (summary.cause?.message && summary.cause.message !== summary.counts_cause) model.append(node("p", summary.cause.message, "analysis-detail"));
-      }
+        model.title = hoverLines.join("\n");
+      } else model.title = input;
       controls.models.append(model);
     }
     controls.status.textContent = message.message; controls.status.className = message.status; controls.refresh.disabled = message.status === "loading";

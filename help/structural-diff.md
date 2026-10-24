@@ -11,6 +11,8 @@ current configuration with **Source** or a saved configuration.
 
 Your active model appears under **After** (`Working` includes saved files plus
 any open unsaved edits) and the baseline you select appears under **Before**.
+Each side shows its filename and configuration choices. Hover over a summary
+for its revision and model counts.
 
 | Baseline choice | Comparison input for Before |
 |---|---|
