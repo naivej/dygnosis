@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.11.35
+
+- Workspace diagnostics update faster after edits in large models.
+
 ## v0.11.34
 
 - Changing the Outline activity filter or other presentation settings keeps the

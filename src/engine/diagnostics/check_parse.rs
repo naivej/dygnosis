@@ -100,6 +100,11 @@ const BUILTINS: &[&str] = &[
 
 const EXPRESSION_OPERATOR_RESERVED: &[&str] = &["var_expectation", "pac_target_nonstationary"];
 
+#[cfg(test)]
+thread_local! {
+    static DIRECTIVE_TOKEN_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Declaration keywords and `varobs`. Each has a `<DYNARE_STATEMENT>` rule, so
 /// none of them can be a declared name. Block openers and `<INITIAL>`-only
 /// commands are legal names and are not listed here. `end` is legal in a
@@ -115,16 +120,17 @@ const RESERVED_BLOCK_KEYWORDS: &[&str] = &[
 ];
 
 pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
+    let execution = ExecutionTokens::new(model);
     let index = LineIndex::new(&model.source);
     let tokens = tokenize(&model.source);
     let mut out = Vec::new();
-    out.extend(format_recorded_issues(model, &index));
+    out.extend(format_recorded_issues(&execution, &index));
     out.extend(invalid_ident_diags(model, &tokens, &index));
     out.extend(reserved_ident_diags(model, &index));
     out.extend(reserved_symbol_use_diags(model));
-    out.extend(merged_equation_diags(model, &index, &out));
-    out.extend(merged_assignment_diags(model, &index, &out));
-    out.extend(unbalanced_paren_diags(model));
+    out.extend(merged_equation_diags(&execution, &index, &out));
+    out.extend(merged_assignment_diags(&execution, &index, &out));
+    out.extend(unbalanced_paren_diags(&execution));
     out
 }
 
@@ -467,16 +473,17 @@ fn leading_ident(s: &str) -> Option<&str> {
     if end == 0 { None } else { Some(&s[..end]) }
 }
 
-fn format_recorded_issues(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
-    format_issues(model, index, &model.parse_issues)
+fn format_recorded_issues(execution: &ExecutionTokens<'_>, index: &LineIndex) -> Vec<Diagnostic> {
+    format_issues(execution, index, &execution.model.parse_issues)
 }
 
 pub(crate) fn recorded_refusal(
     model: &Model,
     issue: &crate::engine::language::model::ParseIssue,
 ) -> Option<Diagnostic> {
+    let execution = ExecutionTokens::new(model);
     format_issues(
-        model,
+        &execution,
         &LineIndex::new(&model.source),
         std::slice::from_ref(issue),
     )
@@ -485,10 +492,11 @@ pub(crate) fn recorded_refusal(
 }
 
 fn format_issues(
-    model: &Model,
+    execution: &ExecutionTokens<'_>,
     index: &LineIndex,
     issues: &[crate::engine::language::model::ParseIssue],
 ) -> Vec<Diagnostic> {
+    let model = execution.model;
     let src = &model.source;
     let mut out = Vec::new();
     for issue in issues {
@@ -503,7 +511,7 @@ fn format_issues(
                 message,
                 active_tokens,
             } => {
-                let fix = command_separator_edit(model, index, active_tokens);
+                let fix = command_separator_edit(execution, index, active_tokens);
                 out.push(e001(issue.span, message.clone(), fix));
             }
             ParseIssueKind::MissingEnd {
@@ -1421,38 +1429,66 @@ fn reserved_ident_diags(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
 /// select a different branch at that same span. An empty range, a
 /// `MacroDir` or `MacroInterp` inside the slice, or a retained unresolved
 /// directive around the slice is not proof, so the scan does not guess.
-fn execution_tokens<'a>(model: &'a Model, range: &std::ops::Range<usize>) -> Option<&'a [Token]> {
-    if range.is_empty() {
-        return None;
-    }
-    let tokens = model.expanded_tokens.get(range.clone())?;
-    if tokens
-        .iter()
-        .any(|token| matches!(token.kind, TokenKind::MacroDir | TokenKind::MacroInterp))
-        || raw_directive_encloses(model, range.start)
-    {
-        return None;
-    }
-    Some(tokens)
+struct ExecutionTokens<'a> {
+    model: &'a Model,
+    directive_depths: std::cell::OnceCell<Option<Vec<(usize, i32)>>>,
 }
 
 /// Resolved `@#if` and `@#for` directives leave the expanded stream. A retained
 /// directive keeps its opener, so depth is positive only inside that raw block.
-fn raw_directive_encloses(model: &Model, index: usize) -> bool {
-    let mut depth = 0i32;
-    for token in model.expanded_tokens.iter().take(index) {
-        if crate::engine::control::cancelled() {
-            return Default::default();
-        }
-        if token.kind != TokenKind::MacroDir {
-            continue;
-        }
-        depth += directive_delta(token.text(&model.source));
-        if depth < 0 {
-            depth = 0;
+impl<'a> ExecutionTokens<'a> {
+    fn new(model: &'a Model) -> Self {
+        Self {
+            model,
+            directive_depths: std::cell::OnceCell::new(),
         }
     }
-    depth > 0
+
+    fn collect_directive_depths(&self) -> Option<Vec<(usize, i32)>> {
+        let mut depth = 0i32;
+        let mut directive_depths = Vec::new();
+        for (index, token) in self.model.expanded_tokens.iter().enumerate() {
+            #[cfg(test)]
+            DIRECTIVE_TOKEN_VISITS.with(|visits| visits.set(visits.get() + 1));
+            if crate::engine::control::cancelled() {
+                return None;
+            }
+            if token.kind != TokenKind::MacroDir {
+                continue;
+            }
+            let next = (depth + directive_delta(token.text(&self.model.source))).max(0);
+            if next != depth {
+                directive_depths.push((index, next));
+                depth = next;
+            }
+        }
+        Some(directive_depths)
+    }
+
+    fn get(&self, range: &std::ops::Range<usize>) -> Option<&'a [Token]> {
+        if range.is_empty() || crate::engine::control::cancelled() {
+            return None;
+        }
+        let tokens = self.model.expanded_tokens.get(range.clone())?;
+        if tokens
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::MacroDir | TokenKind::MacroInterp))
+        {
+            return None;
+        }
+        let depths = self
+            .directive_depths
+            .get_or_init(|| self.collect_directive_depths())
+            .as_deref()?;
+        let preceding = depths.partition_point(|(index, _)| *index < range.start);
+        let enclosed = preceding
+            .checked_sub(1)
+            .is_some_and(|index| depths[index].1 > 0);
+        if enclosed {
+            return None;
+        }
+        Some(tokens)
+    }
 }
 
 fn directive_delta(text: &str) -> i32 {
@@ -1575,11 +1611,12 @@ fn proved_separator_edge(src: &str, tokens: &[Token], index: usize, at: u32) -> 
 /// A semicolon edit needs one complete resid production and a proved written
 /// edge. Macro copies retain their edge; pieces inside interpolation do not.
 fn command_separator_edit(
-    model: &Model,
+    execution: &ExecutionTokens<'_>,
     index: &LineIndex,
     active_tokens: &std::ops::Range<usize>,
 ) -> Option<TextEdit> {
-    let tokens = execution_tokens(model, active_tokens)?;
+    let model = execution.model;
+    let tokens = execution.get(active_tokens)?;
     let complete = match tokens {
         [head] => {
             head.kind == TokenKind::Ident && head.text(&model.source).eq_ignore_ascii_case("resid")
@@ -1599,7 +1636,7 @@ fn command_separator_edit(
     // Include the refusing token. It can be another piece of the same
     // interpolation, even though it is outside the complete command prefix.
     let proof_end = (active_tokens.end + 1).min(model.expanded_tokens.len());
-    let proof = execution_tokens(model, &(active_tokens.start..proof_end))?;
+    let proof = execution.get(&(active_tokens.start..proof_end))?;
     if !complete || !proved_separator_edge(&model.source, proof, last_i, at) {
         return None;
     }
@@ -1871,10 +1908,11 @@ fn equation_separator_edit(
 }
 
 fn merged_equation_diags(
-    model: &Model,
+    execution: &ExecutionTokens<'_>,
     index: &LineIndex,
     already: &[Diagnostic],
 ) -> Vec<Diagnostic> {
+    let model = execution.model;
     let src = &model.source;
     let mut out = Vec::new();
     for eq in crate::engine::diagnostics::check_e020::all_model_equations(model) {
@@ -1891,7 +1929,7 @@ fn merged_equation_diags(
         }) {
             continue;
         }
-        let Some(toks) = execution_tokens(model, &eq.active_tokens) else {
+        let Some(toks) = execution.get(&eq.active_tokens) else {
             continue;
         };
         let eqs = standalone_eq_indices(toks);
@@ -1939,10 +1977,11 @@ fn merged_equation_diags(
 }
 
 fn merged_assignment_diags(
-    model: &Model,
+    execution: &ExecutionTokens<'_>,
     index: &LineIndex,
     already: &[Diagnostic],
 ) -> Vec<Diagnostic> {
+    let model = execution.model;
     let src = &model.source;
     let trailing = trailing_code_line(&model.expanded_tokens, src, index);
     let cmd_spans =
@@ -1963,7 +2002,7 @@ fn merged_assignment_diags(
         if skip_span(span) {
             return;
         }
-        let Some(toks) = execution_tokens(model, &active) else {
+        let Some(toks) = execution.get(&active) else {
             return;
         };
         if context == "top-level" {
@@ -2099,13 +2138,14 @@ fn merged_assignment_diags(
     out
 }
 
-fn unbalanced_paren_diags(model: &Model) -> Vec<Diagnostic> {
+fn unbalanced_paren_diags(execution: &ExecutionTokens<'_>) -> Vec<Diagnostic> {
+    let model = execution.model;
     let mut out = Vec::new();
     for eq in crate::engine::diagnostics::check_e020::all_model_equations(model) {
         if crate::engine::control::cancelled() {
             return Default::default();
         }
-        let Some(toks) = execution_tokens(model, &eq.active_tokens) else {
+        let Some(toks) = execution.get(&eq.active_tokens) else {
             continue;
         };
         let mut depth = 0i32;
@@ -2142,4 +2182,55 @@ fn unbalanced_paren_diags(model: &Model) -> Vec<Diagnostic> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn equation_checks_share_one_directive_scan() {
+        // Guards rescanning every preceding token for each equation's macro
+        // context during the missing-semicolon and parenthesis checks.
+        let source = format!("var y; model; {} end;", "y=y(-1);".repeat(64));
+        let model = crate::engine::language::parser::parse(&source);
+        DIRECTIVE_TOKEN_VISITS.with(|visits| visits.set(0));
+        assert!(check_parse(&model).is_empty());
+        let visits = DIRECTIVE_TOKEN_VISITS.with(std::cell::Cell::get);
+        assert!(
+            visits <= model.expanded_tokens.len(),
+            "{visits} directive-context token visits for {} tokens",
+            model.expanded_tokens.len()
+        );
+    }
+
+    #[test]
+    fn execution_tokens_preserve_nested_raw_directive_boundaries() {
+        // Guards treating an unresolved branch/loop body as active source,
+        // or letting an unmatched closer hide a later unresolved opener.
+        let source = "@#endif\noutside=1;\n@#if unknown\ninside=2;\n@#for i in unknown\nnested=3;\n@#endfor\nstill_inside=4;\n@#else\nother_branch=5;\n@#endif\nafter=6;";
+        let mut model = crate::engine::language::parser::parse("");
+        model.source = source.into();
+        model.expanded_tokens = tokenize(source);
+        let execution = ExecutionTokens::new(&model);
+        for (name, active) in [
+            ("outside", true),
+            ("inside", false),
+            ("nested", false),
+            ("still_inside", false),
+            ("other_branch", false),
+            ("after", true),
+        ] {
+            let index = model
+                .expanded_tokens
+                .iter()
+                .position(|token| token.kind == TokenKind::Ident && token.text(source) == name)
+                .unwrap();
+            assert_eq!(
+                execution.get(&(index..index + 3)).is_some(),
+                active,
+                "{name}"
+            );
+        }
+    }
 }
