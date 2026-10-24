@@ -47,7 +47,7 @@ function configurationHover(info: ModelInfo): vscode.MarkdownString {
     : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview";
   const overrideChoices = analysis?.overrides.length
     ? analysis.overrides.map(receipt => overrideChoice(receipt.operation, receipt.name))
-    : (analysis?.configuration.overrides ?? []).map(operation => overrideChoice(operation));
+    : (analysis?.configuration.overrides ?? []).map((operation, index) => overrideChoice(operation, analysis?.override_names?.[index]));
   const choices = [
     ...(analysis?.configuration.defines ?? []).map(input => `Macro: ${input.name}=${input.expression}`),
     ...(equations ? equations.values.map(value =>

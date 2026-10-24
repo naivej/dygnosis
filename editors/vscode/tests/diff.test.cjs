@@ -173,15 +173,20 @@ test("comparison headers summarize choices, abnormal receipts and heterogeneous 
 test("incomplete comparison headers keep both choices and explain unavailable counts", () => {
   const env = webview();
   env.render({ rows: [], status: "incomplete", analysisSummaries: {
-    before: { requested_analysis: { name: "Policy A", defines: [{ name: "ON", expression: "false" }] }, complete: true, counts: null, counts_cause: "Comparison stopped before counting the models." },
+    before: { requested_analysis: { name: "Policy A", defines: [{ name: "ON", expression: "false" }], overrides: [{ kind: "definition", target: { file: "models/main.mod" }, expression: "1" }] }, complete: true, counts: null, counts_cause: "Comparison stopped before counting the models.", cause: { message: "The source operation could not be matched." } },
     after: { requested_analysis: { name: "Policy B", defines: [{ name: "ON", expression: "true" }] }, complete: false, counts: null, counts_cause: "The active include missing.inc is unavailable." },
   } });
   const text = env.elements.models.textContent;
   assert.match(text, /Macro: ON=false/);
   assert.match(text, /Macro: ON=true/);
+  const unavailableOverride = "Macro: 1 · main.mod · application unavailable";
+  assert.equal(text.split(unavailableOverride).length - 1, 1);
+  assert.match(text, /Macro: 1 · main\.mod · application unavailable/);
+  assert.doesNotMatch(text, /Definition override in main\.mod = 1/);
   assert.match(env.elements.models.children[0].title, /Policy A/);
   assert.match(env.elements.models.children[1].title, /Policy B/);
   assert.match(text, /Comparison stopped before counting the models/); assert.match(text, /active include missing.inc is unavailable/);
+  assert.match(text, /The source operation could not be matched/);
   assert.doesNotMatch(text, /Complete|Completeness unavailable|Initial macro inputs|Analysis preview|Macro inputs/);
   assert.doesNotMatch(text, /0 equations|0 endogenous/);
 });

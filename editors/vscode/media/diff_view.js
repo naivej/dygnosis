@@ -436,12 +436,16 @@
       const summary = message.analysisSummaries?.[side], analysis = summary?.analysis;
       if (summary) {
         const configuration = analysis?.configuration ?? summary.requested_analysis;
-        const overrideChoice = (operation, name) => operation.kind === "definition"
-          ? `Macro: ${name ? `${name}=` : ""}${operation.expression}`
-          : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview";
+        const overrideChoice = (operation, name) => {
+          const label = operation.kind === "definition" ? `Macro: ${name ? `${name}=` : ""}${operation.expression}`
+            : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview";
+          if (analysis) return label;
+          const file = operation.target.file === null ? "unnamed model" : basename(operation.target.file.replaceAll("\\", "/"));
+          return `${label} · ${file} · application unavailable`;
+        };
         const overrideChoices = analysis?.overrides?.length
           ? analysis.overrides.map(receipt => overrideChoice(receipt.operation, receipt.name))
-          : (configuration?.overrides ?? []).map(operation => overrideChoice(operation));
+          : (configuration?.overrides ?? []).map((operation, index) => overrideChoice(operation, analysis?.override_names?.[index]));
         const choiceLines = [
           ...(configuration?.defines ?? []).map(input => `Macro: ${input.name}=${input.expression}`),
           ...(configuration?.equation_selection ? configuration.equation_selection.values.map(value => `Equation: ${configuration.equation_selection.tag ?? "name"}='${value}' (${configuration.equation_selection.mode === "include" ? "included" : "excluded"})`) : []),
@@ -456,12 +460,6 @@
         if (usefulPresetName) hoverLines.push(usefulPresetName);
         if (summary.search_paths?.length) model.append(node("p", `Include paths: ${summary.search_paths.join(", ")}`, "analysis-detail"));
         if (summary.search_paths?.length) hoverLines.push(`Include paths: ${summary.search_paths.join(", ")}`);
-        if (!analysis) for (const operation of configuration?.overrides ?? []) {
-          const file = operation.target.file === null ? "unnamed model" : basename(operation.target.file.replaceAll("\\", "/"));
-          const choice = operation.kind === "definition" ? `Definition override in ${file} = ${operation.expression}` : operation.kind === "skip_definition" ? `Skip written definition in ${file}` : `${operation.branch_id === null ? "Preview no branch" : "Forced branch preview"} in ${file}`;
-          model.append(node("p", `${choice} · application unavailable`, "analysis-detail"));
-          hoverLines.push(`${choice} · application unavailable`);
-        }
         for (const receipt of analysis?.overrides ?? []) {
           const operation = receipt.operation, file = operation.target.file === null ? "unnamed model" : basename(operation.target.file.replaceAll("\\", "/"));
           if (receipt.application !== "applied" || receipt.cause) {

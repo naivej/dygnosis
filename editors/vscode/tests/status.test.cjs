@@ -211,7 +211,7 @@ test("preview values and stale or incomplete outcomes keep configuration access"
   const metadata = analysis({ overrides: [operation] }, {
     state: "stale", selection: { configuration_id: "preview", name: "Alternative", preview: true, invocation_scope: "preview" },
     cause: { code: "STALE", message: "The written definition changed. Reset the analysis configuration." },
-    overrides: [{ operation, name: "x", application: "unknown", known_execution_count: 0, execution_count: null, cause: "Its target changed." }],
+    overrides: [], override_names: ["x"],
   });
   for (const complete of [false, true]) {
     const value = modelStatus(facts(document(), { analysis: metadata, complete, n_equations: undefined }), ["equations"]);
@@ -221,7 +221,6 @@ test("preview values and stale or incomplete outcomes keep configuration access"
     assert.ok(value.tooltip.value.includes('\\[link\\]\\(command:untrusted\\)'));
     assert.match(tooltipText(value.tooltip), /\(stale\)/);
     assert.doesNotMatch(tooltipText(value.tooltip), /\(preview\)/);
-    assert.match(tooltipText(value.tooltip), /Its target changed/);
     assert.match(tooltipText(value.tooltip), /Reset the analysis configuration/);
   }
 });

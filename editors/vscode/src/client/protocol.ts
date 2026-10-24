@@ -46,6 +46,7 @@ export interface AnalysisMetadata {
   selection: { configuration_id: string; name: string | null; preview: boolean; invocation_scope: string };
   configuration: AnalysisConfiguration; selection_generation: number; include_paths: string[] | null;
   macro_complete: boolean | null; model_complete: boolean | null; overrides: OverrideReceipt[];
+  override_names?: (string | null)[];
   cause?: { code: string; message: string; target?: GuardedTarget } | null;
 }
 export interface DirectiveSite {
@@ -134,6 +135,8 @@ export function parseAnalysisMetadata(value: unknown): AnalysisMetadata {
         (row.name === undefined || nullableString(row.name)) &&
         ["applied", "not_reached", "unknown"].includes(String(row.application)) && natural(row.known_execution_count) &&
         (row.execution_count === null || natural(row.execution_count)) && nullableString(row.cause)) ||
+      !(value.override_names === undefined || Array.isArray(value.override_names) && value.override_names.every(nullableString) &&
+        value.override_names.length === (value.configuration.overrides?.length ?? 0)) ||
       value.state === "stale" && (!record(value.cause) || typeof value.cause.code !== "string" || typeof value.cause.message !== "string" ||
         value.cause.target !== undefined && !guardedTarget(value.cause.target))) {
     throw new Error("Unsupported or invalid analysis configuration. Use the bundled engine or update dynare.serverPath.");

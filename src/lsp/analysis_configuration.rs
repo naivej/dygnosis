@@ -130,11 +130,16 @@ pub(super) fn metadata(inner: &mut Inner, root: &Url) -> Value {
     }
     let cause =
         cause.map(|cause| json!({"code":cause.code,"message":cause.message,"target":cause.target}));
-    json!({"state":if is_stale {"stale"} else {"selected"},"selection":selection,
+    let mut metadata = json!({"state":if is_stale {"stale"} else {"selected"},"selection":selection,
         "configuration":configuration.as_ref(),"selection_generation":inner.analysis_configuration.generation(root),
         "include_paths":paths,"macro_complete":facts.as_ref().map(|facts|facts.macro_complete),
         "model_complete":facts.as_ref().map(|facts|facts.model_complete),
-        "overrides":facts.as_ref().map(|facts|facts.overrides.clone()).unwrap_or_default(),"cause":cause})
+        "overrides":facts.as_ref().map(|facts|facts.overrides.clone()).unwrap_or_default(),"cause":cause});
+    if facts.is_none() {
+        metadata["override_names"] =
+            json!(inner.workspace.root_analysis_override_names(root.as_str()));
+    }
+    metadata
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -903,6 +908,8 @@ mod tests {
         edit(&mut inner, &root, &format!("// unrelated\n{source}"), 2);
         let stale = info(&mut inner, &root);
         assert_eq!(stale["analysis"]["state"], "stale");
+        assert_eq!(stale["analysis"]["overrides"], json!([]));
+        assert_eq!(stale["analysis"]["override_names"], json!(["FLAG"]));
         assert_eq!(
             set(&mut inner, &[request(&root, &stale, choices.clone())]).unwrap_err()["code"],
             "ANALYSIS_TARGET_STALE"

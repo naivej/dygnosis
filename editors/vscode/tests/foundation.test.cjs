@@ -54,6 +54,10 @@ test("analysis receipts accept old engines without names and reject malformed op
     assert.equal(parseModelInfo({ ...info(), analysis: named }, "file:///root.mod", "file:///root.mod").analysis.overrides[0].name, name);
   }
   assert.throws(() => parseModelInfo({ ...info(), analysis: { ...analysis, overrides: [{ ...analysis.overrides[0], name: 1 }] } }, "file:///root.mod", "file:///root.mod"));
+  assert.deepEqual(parseModelInfo({ ...info(), analysis: { ...analysis, overrides: [], override_names: ["x"] } }, "file:///root.mod", "file:///root.mod").analysis.override_names, ["x"]);
+  for (const override_names of [[], [1], ["x", "y"], null]) {
+    assert.throws(() => parseModelInfo({ ...info(), analysis: { ...analysis, overrides: [], override_names } }, "file:///root.mod", "file:///root.mod"));
+  }
 });
 test("preview schemes and user-only executable scope are manifest constraints", () => {
   const manifest = require("../package.json");

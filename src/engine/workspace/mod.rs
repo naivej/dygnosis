@@ -906,6 +906,25 @@ impl Workspace {
             .unwrap_or_default()
     }
 
+    /// Last accepted target names, in configuration order, without executing stale inputs.
+    pub fn root_analysis_override_names(&self, root: &str) -> Vec<Option<String>> {
+        let key = if self.overlay_only {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
+        self.root_analyses
+            .get(&key)
+            .map(|analysis| {
+                analysis
+                    .overrides
+                    .iter()
+                    .map(|operation| operation.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     fn checked_analysis(
         &mut self,
         key: &str,
