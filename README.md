@@ -1,18 +1,18 @@
-![Dygnosis](media/logo_s.png) 
+![Dygnosis](media/logo_s.png)
 
 Dygnosis adds Dynare language support to VS Code. Install it from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis) to start editing models.
 
-- Edit with live diagnostics, hover, completion, document or selection formatting, fixes, and commented shock templates.
-- Follow names with **Go to Definition**, **Find All References** and **Rename symbol** across known includes. Browse **Outline**, fold blocks and open linked model files.
-- Inspect model counts, equations, includes, and expanded source, with jumps back to the written equations.
-- Compare a model with Git history or another `.mod` file.
-- An overview of all dynare models in the current workspace.
-- Run **Dygnosis: Open Help** to learn more.
+- Edit with live diagnostics, hover, completion, formatting, quick fixes and commented shock templates. Syntax help covers Dynare commands, options, macros and PAC/VAR forms.
+- Follow names with **Go to Definition**, **Find All References** and **Rename symbol** across known includes. Browse **Outline**, fold each `@#if` arm separately and open linked model files.
+- Choose an **analysis configuration** for a model root: keep **Source**, set macro inputs, preview another `@#if` branch or select equations by tag. Status bar counts follow the selection and stay separate from inactive written source.
+- Inspect equations, includes and **Expand macros** previews, then **Go to written source**. Jump to any counted equation from the Command Palette.
+- Compare models in **Show mod changes**: Git revisions, another `.mod` file or two analysis configurations for the same root.
+- See every Dynare model in the workspace, with checks that update as you edit.
+- Run **Dygnosis: Open Help** for topics, settings and diagnostic codes.
 
-It also provides [MCP tools](https://github.com/naivej/dygnosis/blob/main/help/agents.md) and a [use-dynare skill](https://github.com/naivej/dygnosis/blob/main/.agents/skills/use-dynare/SKILL.md) for agents.
+It also provides [MCP tools](https://github.com/naivej/dygnosis/blob/main/help/agents.md) and a [use-dynare skill](https://github.com/naivej/dygnosis/blob/main/.agents/skills/use-dynare/SKILL.md) so agents can inspect, check, compare and propose edits with the same analysis choices.
 
 Editing and source analysis work without a Dynare installation. Run official Dynare in MATLAB or Octave for steady states, stability checks and model solutions. For MATLAB integration, see the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit).
-
 
 **Compatibility**: Dynare 7.2
 
