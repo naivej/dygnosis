@@ -7,7 +7,7 @@ checking and replicating Dynare models. To install it in your workspace, run
 Dygnosis also provides an MCP server so agents can inspect, check, compare and
 edit Dynare models directly. Editing tools return proposed changes for your
 agent to apply. For example, ask “Find the equations that use `k`” or “Compare
-this model with `HEAD~1`.” The server supplies tool instructions to the agent.
+this model with `HEAD~1`.”
 
 ## Understand the model
 
@@ -44,10 +44,9 @@ output.
 
 For external agents, open a trusted workspace folder and run **Dygnosis: Set up
 MCP for this workspace** from the Command Palette. This creates or updates
-`.mcp.json` in the selected folder's Git repository root, or in the selected
-workspace folder when it has no Git repository. Use [Dynare: Server
-Path](settings:dynare.serverPath) to select a custom executable instead of the
-bundled one. A manual stdio configuration uses:
+`.mcp.json` in the selected folder's Git repository root (or workspace folder).
+Use [Dynare: Server Path](settings:dynare.serverPath) to select a custom
+executable instead of the bundled one. A manual stdio configuration uses:
 
 ```json
 {
@@ -62,7 +61,3 @@ bundled one. A manual stdio configuration uses:
   }
 }
 ```
-
-If `.mcp.json` already contains a different `dygnosis` configuration or unsaved
-edits, VS Code opens a diff preview so you can review and click **Save reviewed
-setup**. Run the command again whenever you want to update `.mcp.json`.

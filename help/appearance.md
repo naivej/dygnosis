@@ -14,19 +14,18 @@ Tex](settings:dynare.nameDetails.tex).
 ## Block backgrounds
 
 Toggle block shading with [Dynare › Block Tint:
-Enabled](settings:dynare.blockTint.enabled). Under **Dygnosis: Appearance**, set
-individual block types to **Off**, **Subtle** or **Model-strength**, and use
-[Dynare › Block Tint: Heterogeneous
-Models](settings:dynare.blockTint.heterogeneousModels) for per-dimension
-overrides (for example `{"households": "off"}`).
+Enabled](settings:dynare.blockTint.enabled) and adjust individual block types in
+Settings. For [heterogeneous-agent models](https://www.dynare.org/manual/the-model-file.html#heterogeneity)
+(`heterogeneity=`), use [Dynare › Block Tint: Heterogeneous
+Models](settings:dynare.blockTint.heterogeneousModels) to set shading per
+`heterogeneity_dimension` (for example `{"households": "off"}`).
 
 ## Expression value hints
 
-Top-level parameter expressions such as `beta = 1 / 1.04;` can show an inline
-value hint when Dygnosis evaluates them statically (plain numbers omit the
-hint). Toggle with [Dynare: Parameter Value
-Hints](settings:dynare.parameterValueHints); VS Code's **Editor › Inlay Hints:
-Enabled** (`editor.inlayHints.enabled`) must also allow inlay hints.
+Top-level parameter expressions such as `beta = 1 / 1.04;` show an inline value
+hint when Dygnosis can evaluate them statically. Toggle hints with [Dynare:
+Parameter Value Hints](settings:dynare.parameterValueHints) (requires VS Code's
+`editor.inlayHints.enabled`).
 
 ## Custom colors
 
@@ -34,12 +33,7 @@ Semantic highlighting distinguishes Dynare symbol roles and follows your theme
 plus `editor.semanticHighlighting.enabled`. Native MATLAB lines and `verbatim`
 blocks keep their own highlighting.
 
-Run **Dygnosis: Edit in settings.json** to customize. Symbol colors use
-`editor.semanticTokenColorCustomizations` (for example
-`dynareParameter:dynare`); block and comparison accents use
-`workbench.colorCustomizations` keys such as
-`dynare.blockTint.modelBackground`, `dynare.blockTint.subtleBackground`,
-`dynare.effectiveModel.macroBackground` and `dynare.diff.changedForeground`.
+Run **Dygnosis: Edit in settings.json** to customize colors:
 
 ```json
 {
@@ -51,7 +45,11 @@ Run **Dygnosis: Edit in settings.json** to customize. Symbol colors use
 }
 ```
 
-Common semantic selectors: `dynareEndogenous:dynare`, `dynareExogenous:dynare`,
-`dynareParameter:dynare`, `dynareModelLocal:dynare`, plus
-`dynareEndogenous.forwardLooking:dynare` and
-`dynareEndogenous.predetermined:dynare`.
+- **Semantic token selectors** (`editor.semanticTokenColorCustomizations`):
+  `dynareEndogenous:dynare`, `dynareExogenous:dynare`,
+  `dynareParameter:dynare`, `dynareModelLocal:dynare`,
+  `dynareEndogenous.forwardLooking:dynare` and
+  `dynareEndogenous.predetermined:dynare`.
+- **Workbench color keys** (`workbench.colorCustomizations`):
+  `dynare.blockTint.modelBackground`, `dynare.blockTint.subtleBackground`,
+  `dynare.effectiveModel.macroBackground` and `dynare.diff.changedForeground`.
