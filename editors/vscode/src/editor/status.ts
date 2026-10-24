@@ -26,17 +26,20 @@ function countLines(info: CountFacts, counts: StatusCount[]): string[] {
 }
 
 function incompleteDetail(info: ModelInfo): string {
-  const reasons = Array.isArray(info.incomplete_reasons)
-    ? info.incomplete_reasons
-      .map(reason => typeof reason?.message === "string" ? reason.message.trim() : "")
-      .filter(message => message.length > 0)
-    : [];
-  if (reasons.length > 0) return reasons.join("\n");
+  const reasons = new Set<string>();
+  const cause = info.analysis?.cause?.message.trim();
+  if (cause) reasons.add(cause);
+  for (const reason of Array.isArray(info.incomplete_reasons) ? info.incomplete_reasons : []) {
+    const message = typeof reason?.message === "string" ? reason.message.trim() : "";
+    if (message) reasons.add(message);
+  }
+  if (reasons.size > 0) return [...reasons].join("\n");
   return info.message ?? "Model expansion is incomplete.";
 }
 
 function configurationHover(info: ModelInfo): vscode.MarkdownString {
   const analysis = info.analysis;
+  const name = /^Analysis preview(?: \(modified\))?$/.test(analysis?.selection.name ?? "") ? undefined : analysis?.selection.name;
   const choices = [
     ...(analysis?.configuration.defines ?? []).map(input => `${input.name} = ${input.expression}`),
     ...(analysis?.configuration.equation_selection ? [`${analysis.configuration.equation_selection.mode === "include" ? "Include" : "Exclude"} ${analysis.configuration.equation_selection.tag ?? "name"}: ${analysis.configuration.equation_selection.values.join(", ")}`] : []),
@@ -45,17 +48,16 @@ function configurationHover(info: ModelInfo): vscode.MarkdownString {
       : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview"),
   ];
   const tooltip = new vscode.MarkdownString("[Current config](command:dygnosis.selectAnalysisConfiguration): ");
-  tooltip.appendText(choices.length ? choices.join("; ") : analysis?.selection.name ?? "Source");
-  if (analysis?.selection.preview) tooltip.appendText(" (preview)");
+  tooltip.appendText(choices.length ? choices.join("; ") : name ?? "Source");
   if (analysis?.state === "stale") tooltip.appendText(" (stale)");
-  if (analysis?.selection.name && choices.length) tooltip.appendMarkdown("  \n").appendText(analysis.selection.name);
+  if (name && choices.length) tooltip.appendMarkdown("  \n").appendText(name);
   for (const receipt of analysis?.overrides ?? []) {
     if (receipt.application !== "applied" || receipt.cause) tooltip.appendMarkdown("  \n").appendText(
       `${receipt.operation.kind === "branch" ? "Branch preview" : "Definition override"}: ${receipt.application === "not_reached" ? "not reached" : receipt.application}${receipt.cause ? ` — ${receipt.cause}` : ""}`);
   }
   if (analysis?.include_paths !== null && analysis?.include_paths !== undefined)
     tooltip.appendMarkdown("  \n").appendText(`Include paths: ${analysis.include_paths.join(", ") || "none"}`);
-  if (analysis?.cause) tooltip.appendMarkdown("\n\n").appendText(analysis.cause.message);
+  if (info.complete && analysis?.cause) tooltip.appendMarkdown("\n\n").appendText(analysis.cause.message);
   tooltip.isTrusted = { enabledCommands: ["dygnosis.selectAnalysisConfiguration"] };
   return tooltip;
 }

@@ -165,6 +165,38 @@ test("configuration hover shows selected expressions and links to the shared sel
   assert.match(tooltipText(selected.tooltip), /Include name: core, policy/);
 });
 
+test("equation selection hover omits generic preview markers and retains the selected tags", () => {
+  // Guards the duplicate internal preview labels shown for an equation choice.
+  const metadata = analysis({ equation_selection: { mode: "exclude", tag: "name", values: ["policy"] } }, {
+    selection: { configuration_id: "selected", name: "Analysis preview", preview: true, invocation_scope: "explicit_macro_and_equation_inputs" },
+  });
+  for (const name of ["Analysis preview", "Analysis preview (modified)"]) {
+    metadata.selection.name = name;
+    const value = modelStatus(facts(document(), { analysis: metadata }), ["equations"]);
+    const text = tooltipText(value.tooltip);
+    assert.match(text, /Current config.*Exclude name: policy/);
+    assert.doesNotMatch(text, /\(preview\)|Analysis preview/);
+  }
+  metadata.selection.name = "Fixed interest rate";
+  assert.match(tooltipText(modelStatus(facts(document(), { analysis: metadata }), ["equations"]).tooltip), /Fixed interest rate/);
+});
+
+test("incomplete equation selection hover shows each cause once and keeps distinct reasons", () => {
+  // Guards one selection failure repeated in metadata, coverage and fallback text.
+  const message = "Equation selection was not applied: policy=1 was not found. Change the tag values or reset Analysis Configuration.";
+  const other = "The selected model has no complete equation counts.";
+  const metadata = analysis({ equation_selection: { mode: "include", tag: "policy", values: ["1"] } }, {
+    selection: { configuration_id: "invalid", name: "Analysis preview", preview: true, invocation_scope: "explicit_macro_and_equation_inputs" },
+    cause: { code: "ANALYSIS_EQUATION_SELECTION_UNAVAILABLE", message }, model_complete: false,
+  });
+  const info = facts(document(), { analysis: metadata, complete: false, message,
+    incomplete_reasons: [{ message }, { message: ` ${message} ` }, { message: other }] });
+  const text = tooltipText(modelStatus(info, ["equations"]).tooltip);
+  assert.equal(text.split(message).length - 1, 1);
+  assert.match(text, /Counts are unavailable/);
+  assert.ok(text.includes(other));
+});
+
 test("preview values and stale or incomplete outcomes keep configuration access", () => {
   // Guards unavailable counts hiding the choices or cause needed to reset a preview.
   const target = { file: null, site_id: "definition", source_revision: "source" };
@@ -180,7 +212,8 @@ test("preview values and stale or incomplete outcomes keep configuration access"
     assert.match(value.tooltip.value, /^\[Current config\]\(command:dygnosis.selectAnalysisConfiguration\)/);
     assert.match(tooltipText(value.tooltip), /Definition override = "\[link\]\(command:untrusted\)"/);
     assert.ok(value.tooltip.value.includes('\\[link\\]\\(command:untrusted\\)'));
-    assert.match(tooltipText(value.tooltip), /preview.*stale/);
+    assert.match(tooltipText(value.tooltip), /\(stale\)/);
+    assert.doesNotMatch(tooltipText(value.tooltip), /\(preview\)/);
     assert.match(tooltipText(value.tooltip), /Its target changed/);
     assert.match(tooltipText(value.tooltip), /Reset the analysis configuration/);
   }

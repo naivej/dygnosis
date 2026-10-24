@@ -6,6 +6,7 @@
   exclude the selected equations to inspect their model facts without changing
   the `.mod` file. Equation selection is a preview; Rename and diagnostic fixes
   are unavailable for it.
+- The **Current config** hover shows selected inputs without generic preview labels and lists each selection failure cause once.
 - Workspace diagnostics update faster after edits in large models.
 
 ## v0.11.34
