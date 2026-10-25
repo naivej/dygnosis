@@ -534,13 +534,18 @@ fn dispatch_query(
             .map(|analysis| analysis.coverage.clone())
             .collect::<Vec<_>>()
     ));
-    if snapshot
+    if let Some((root, analysis)) = snapshot
         .analyses
-        .values()
-        .any(|analysis| analysis.coverage["complete"] != true)
+        .iter()
+        .find(|(_, analysis)| analysis.coverage["complete"] != true)
         && !matches!(result.outcome.status.as_str(), "refused" | "unchanged")
     {
-        result.cause("partial","INCOMPLETE_INPUT","Only available source facts are returned. Includes, parsing or macro expansion prevent complete model coverage; see coverage reasons.");
+        let cause = analysis.coverage["reasons"]
+            .as_array()
+            .and_then(|rows| rows.first())
+            .and_then(|reason| reason["message"].as_str())
+            .unwrap_or("Parsing, includes or macro expansion did not complete.");
+        result.cause("partial","INCOMPLETE_INPUT",format!("{tool} for {root}: {cause} Available source facts are returned; complete model coverage is unavailable."));
     }
     project_and_page(tool, &arguments, &params, &snapshot.revision, &mut result)?;
     if snapshot.source_structure.is_some()
@@ -1172,7 +1177,10 @@ fn symbols(
     if rename && snapshot.model.is_analysis_preview() {
         return Ok(ToolResult::refused(
             "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED",
-            "Rename is unavailable for a definition, branch or equation-selection analysis preview. No edits were proposed. Reset Analysis Configuration to use source editing actions.",
+            snapshot
+                .workspace
+                .root_analysis_configuration(&snapshot.root)
+                .preview_edit_cause("Rename"),
         ));
     }
     if rename
@@ -1198,10 +1206,10 @@ fn symbols(
                 result.cause(
                     "unchanged",
                     "NO_MATCH",
-                    "No matching symbol binding was found in the selected model.",
+                    format!("No binding for {} in {} under the selected configuration. No Rename edits were proposed.", params.old_name.as_deref().or(params.symbol.as_deref()).or(params.binding_id.as_deref()).unwrap_or("the selected source position"), snapshot.root_file.as_deref().unwrap_or("unnamed model")),
                 );
             } else if tool == "dynare_symbol_info" {
-                result.cause(if snapshot.coverage["complete"]==true{"unchanged"}else{"partial"}, "BINDING_UNAVAILABLE", "No accepted symbol binding is available for this selection under the selected analysis configuration. Coverage identifies any incomplete model facts. Use dynare_symbol_info with view=source and a literal name or written target to inspect source candidates; those candidates do not establish references.");
+                result.cause(if snapshot.coverage["complete"]==true{"unchanged"}else{"partial"}, "BINDING_UNAVAILABLE", format!("No binding for {} in {} under the selected configuration.{} Use view=source to inspect source declarations; they do not establish references.",params.symbol.as_deref().or(params.binding_id.as_deref()).unwrap_or("the selected source position"), snapshot.root_file.as_deref().unwrap_or("unnamed model"), if snapshot.coverage["complete"]==true{""}else{" Model coverage is incomplete; a missing binding is not proof of absence."}));
                 result.data["source_view"] = json!({"tool":"dynare_symbol_info","view":"source"});
             }
             return Ok(result);

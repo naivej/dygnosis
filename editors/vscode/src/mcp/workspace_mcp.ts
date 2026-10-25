@@ -239,7 +239,7 @@ export interface WorkspaceMerge { text: string; identical: boolean; conflict: bo
 export function mergeWorkspaceConfig(text: string, command: string): WorkspaceMerge {
   if (!path.isAbsolute(command)) throw new Error("The workspace MCP command must be an absolute executable path.");
   let parsed: unknown;
-  try { parsed = JSON.parse(text); } catch (error) { throw new Error(".mcp.json is not strict JSON. Fix it before setup; the file was left intact.", { cause: error }); }
+  try { parsed = JSON.parse(text); } catch (error) { throw new Error(`.mcp.json is not strict JSON: ${error instanceof Error ? error.message : String(error)} The file was left intact.`, { cause: error }); }
   if (!record(parsed) || Array.isArray(parsed)) throw new Error(".mcp.json must contain a JSON object. The file was left intact.");
   const root = jsonTree(text);
   const servers = root.properties?.get("mcpServers");
@@ -299,7 +299,10 @@ async function unchangedConfig(uri: vscode.Uri, snapshot: ConfigSnapshot): Promi
 }
 /** Review and persistence are separate so cancellation and revision races are checked before mutation. */
 export async function writeWorkspaceConfig(uri: vscode.Uri, command: string, review: (before: string, after: string) => Promise<boolean>): Promise<"saved" | "identical" | "cancelled"> {
-  const snapshot = await configSnapshot(uri), merged = mergeWorkspaceConfig(snapshot.source, command);
+  const snapshot = await configSnapshot(uri);
+  let merged: WorkspaceMerge;
+  try { merged = mergeWorkspaceConfig(snapshot.source, command); }
+  catch (error) { throw new Error(`${uri.fsPath}: ${error instanceof Error ? error.message : String(error)}`, { cause: error }); }
   if (merged.identical) { if (snapshot.document) await vscode.window.showTextDocument(snapshot.document); return "identical"; }
   if ((merged.conflict || snapshot.dirty) && !await review(snapshot.source, merged.text)) return "cancelled";
   return withWorkspaceLock(`${uri.fsPath}.dygnosis.lock`, async () => {
@@ -376,7 +379,6 @@ export function registerWorkspaceMcp(context: vscode.ExtensionContext, service?:
       const uri = await workspaceDestination();
       if (!uri || disposed) return;
       log(`Workspace MCP destination: ${uri.fsPath}`);
-      void vscode.window.showInformationMessage(`Dygnosis workspace MCP destination: ${uri.fsPath}`);
       const selected = await resolveBinary(context, log);
       let executable = selected.path;
       if (selected.override) {
@@ -390,7 +392,7 @@ export function registerWorkspaceMcp(context: vscode.ExtensionContext, service?:
       }
       if (disposed) return;
       const result = await writeWorkspaceConfig(uri, executable, (before, after) => review(uri, before, after));
-      if (result !== "cancelled") await vscode.window.showInformationMessage(`Dygnosis workspace MCP ${result === "identical" ? "is already configured" : "is configured"} in ${uri.fsPath}. Restart or reconnect the agent's MCP server. ${selected.override ? "The executable is user-managed." : "Its path uses this host's extension storage."}`);
+      if (result !== "cancelled") await vscode.window.showInformationMessage(`Dygnosis MCP ${result === "identical" ? "is already configured" : "configuration saved"}: ${uri.fsPath}. ${result === "identical" ? "No configuration change was needed." : "Reconnect the agent's MCP server to load it."}`);
     } catch (error) { log(`Workspace MCP setup: ${String(error)}`); if (!disposed) await vscode.window.showErrorMessage(`Dygnosis workspace MCP setup: ${error instanceof Error ? error.message : String(error)}`); }
     finally { running = false; }
   });

@@ -139,6 +139,11 @@ pub(super) fn metadata(inner: &mut Inner, root: &Url) -> Value {
         metadata["override_names"] =
             json!(inner.workspace.root_analysis_override_names(root.as_str()));
     }
+    metadata["override_branch_labels"] = json!(
+        inner
+            .workspace
+            .root_analysis_override_branch_labels(root.as_str())
+    );
     metadata
 }
 
@@ -778,7 +783,7 @@ mod tests {
         assert!(
             serde_json::to_string(&definition_hover)
                 .unwrap()
-                .contains("Application: applied")
+                .contains("Replacement expression:")
         );
         set(&mut inner, &[request(&root, &accepted, json!({}))]).unwrap();
         let inactive_hover =
@@ -927,6 +932,50 @@ mod tests {
             "ANALYSIS_PRESET_AMBIGUOUS"
         );
         assert_eq!(inner.analysis_configuration.generation(&root), 2);
+    }
+
+    #[test]
+    fn branch_labels_match_selected_picker_text_and_survive_stale_source() {
+        // Guards losing the chosen arm, its controlling condition or its accepted text after an edit.
+        let source =
+            "@#define FLAG=0\n@#if FLAG\nvar a;\n@#elseif OTHER\nvar b;\n@#else\nvar c;\n@#endif\n";
+        let (mut inner, root) = state(source);
+        let first = info(&mut inner, &root);
+        let sites = first["sites"].as_array().unwrap();
+        let definition = sites
+            .iter()
+            .find(|site| site["kind"] == "definition")
+            .unwrap();
+        let conditional = sites
+            .iter()
+            .find(|site| site["kind"] == "conditional")
+            .unwrap();
+        for (index, label) in [
+            (Some(0), "@#if FLAG"),
+            (Some(1), "@#if FLAG → @#elseif OTHER"),
+            (Some(2), "@#if FLAG → @#else"),
+            (None, "@#if FLAG → No branch"),
+        ] {
+            let branch = index.map(|index| conditional["branches"][index]["branch_id"].clone());
+            let choices = json!({"overrides":[
+                {"kind":"definition","target":definition["target"],"expression":"1"},
+                {"kind":"branch","target":conditional["target"],"branch_id":branch}
+            ]});
+            let proof = info(&mut inner, &root);
+            let accepted = set(&mut inner, &[request(&root, &proof, choices)]).unwrap();
+            assert_eq!(
+                accepted["analysis"]["override_branch_labels"],
+                json!([null, label])
+            );
+            assert_eq!(accepted["analysis"]["overrides"][1]["branch_label"], label);
+        }
+        edit(&mut inner, &root, &format!("// moved\n{source}"), 2);
+        let stale = info(&mut inner, &root);
+        assert_eq!(stale["analysis"]["state"], "stale");
+        assert_eq!(
+            stale["analysis"]["override_branch_labels"],
+            json!([null, "@#if FLAG → No branch"])
+        );
     }
 
     #[test]

@@ -54,14 +54,17 @@ pub(super) fn label(inner: &Inner, document: &Url, hover: &mut Hover) {
     let choices = inner
         .workspace
         .root_analysis_configuration(roots[0].as_str());
-    if choices.is_source() && choices.name.is_none() {
+    let Some(name) = choices.name.as_deref().filter(|name| {
+        !matches!(
+            *name,
+            "Analysis preview"
+                | "Analysis preview (modified)"
+                | "Macro inputs"
+                | "Macro inputs (modified)"
+        )
+    }) else {
         return;
-    }
-    let name = choices.name.as_deref().unwrap_or(if choices.is_preview() {
-        "Analysis preview"
-    } else {
-        "Macro inputs"
-    });
+    };
     let detail = format!(
         "\n\nAnalysis: {name}{}",
         if choices.is_preview() {
@@ -144,23 +147,33 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
         .availability
         .iter()
         .find(|row| row.source_id == item.source_id);
-    let state = availability.map_or(SourceAvailability::Unknown, |row| row.availability);
+    let control = matches!(
+        item.kind,
+        SourceItemKind::Conditional | SourceItemKind::Branch
+    ) && item.selection.start <= byte
+        && byte < item.selection.end;
+    let state = availability.map_or(SourceAvailability::Unknown, |row| {
+        if control {
+            row.control_availability
+        } else {
+            row.availability
+        }
+    });
     let root = inner.context_roots(document).into_iter().next()?;
     let choices = inner.workspace.root_analysis_configuration(root.as_str());
-    let overridden = choices.overrides.iter().find(|choice| {
-        file.sites.iter().any(|site| {
-            &site.target == choice.target()
-                && site.directive_span.start <= byte
-                && byte < site.directive_span.end
-        })
+    let overridden = choices.overrides.iter().find_map(|choice| {
+        file.sites
+            .iter()
+            .find(|site| {
+                &site.target == choice.target()
+                    && site.directive_span.start <= byte
+                    && byte < site.directive_span.end
+            })
+            .map(|site| (choice, site))
     });
-    if state == SourceAvailability::Active && overridden.is_none() && !item.template {
+    if state == SourceAvailability::Active && overridden.is_none() && !item.template && !control {
         return None;
     }
-    let written = file
-        .text
-        .get(item.span.start as usize..item.span.end as usize)
-        .unwrap_or("");
     // A containing statement supplies availability, not the hovered name.
     // Reuse its retained lexical tokens for a precise inner token and range.
     let (name, selection, option) = if item.selection.start <= byte && byte < item.selection.end {
@@ -203,8 +216,23 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
         };
         (name, token.span, option)
     };
-    let mut message = format!("**{name}** · {}", availability_label(state));
-    if let Some(cause) = availability.and_then(|row| row.cause.as_ref()) {
+    let mut message = format!(
+        "**{name}** · {}",
+        if state == SourceAvailability::Mixed {
+            "active in some expansions"
+        } else {
+            availability_label(state)
+        }
+    );
+    if state == SourceAvailability::Unknown
+        && let Some(cause) = availability.and_then(|row| {
+            if control {
+                row.control_cause.as_ref()
+            } else {
+                row.cause.as_ref()
+            }
+        })
+    {
         message.push_str("\n\n");
         message.push_str(&cause.message);
     }
@@ -214,7 +242,7 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
             option.summary
         ));
     }
-    if let Some(choice) = overridden {
+    if let Some((choice, site)) = overridden {
         use crate::engine::analysis_configuration::AnalysisOverride;
         let value = match choice {
             AnalysisOverride::Definition { expression, .. } => {
@@ -223,20 +251,29 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
             AnalysisOverride::SkipDefinition { .. } => {
                 "Skip this definition; keep any earlier value.".into()
             }
-            AnalysisOverride::Branch { branch_id, .. } => format!(
-                "Forced branch: {}",
-                branch_id.as_deref().unwrap_or("No branch")
-            ),
+            AnalysisOverride::Branch { branch_id, .. } => {
+                if let Some(branch_id) = branch_id {
+                    site.branches
+                        .iter()
+                        .find(|branch| &branch.branch_id == branch_id)
+                        .map_or_else(
+                            || "The selected branch is unavailable in this source.".into(),
+                            |branch| format!("Branch preview: `{}`", branch.expected_text),
+                        )
+                } else {
+                    "Skip this conditional for analysis.".into()
+                }
+            }
         };
-        message.push_str(&format!(
-            "\n\nWritten: `{}`\n\nAnalysis preview: {value}",
-            written.trim()
-        ));
+        message.push_str(&format!("\n\n{value}"));
         if let Ok(metadata) = inner.workspace.analysis_metadata(root.as_str())
             && let Some(receipt) = metadata
                 .overrides
                 .iter()
                 .find(|receipt| receipt.operation.target() == choice.target())
+            && (receipt.application
+                != crate::engine::analysis_configuration::OverrideApplication::Applied
+                || receipt.cause.is_some())
         {
             let application = match receipt.application {
                 crate::engine::analysis_configuration::OverrideApplication::Applied => "applied",
@@ -251,16 +288,12 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
                 message.push_str(cause);
             }
         }
-    } else if matches!(
-        item.kind,
-        SourceItemKind::Declaration | SourceItemKind::Equation | SourceItemKind::MacroDefinition
-    ) {
-        message.push_str(&format!("\n\nWritten: `{}`", written.trim()));
     }
-    if state != SourceAvailability::Active {
-        message.push_str("\n\nThis is written source information. Model values, timing and equation numbers require a complete configuration that executes this code.");
-    }
-    let index = LineIndex::new(&file.text);
+    let index = inner
+        .workspace
+        .source_document(root.as_str(), &normalize_uri(document.as_str()))
+        .map(|source| source.source_index())
+        .unwrap_or_else(|| Arc::new(LineIndex::new(&file.text)));
     let mut hover = markdown_hover(message, Some(span_range(&index, &file.text, selection)));
     label(inner, document, &mut hover);
     Some(hover)
@@ -292,11 +325,11 @@ pub(super) fn candidates(inner: &mut Inner, arguments: &[Value]) -> Value {
         .map(|item| {
             let state = projected.as_ref().and_then(|file| file.availability.iter().find(|row| row.source_id == item.source_id))
                 .map_or(SourceAvailability::Unknown, |row| row.availability);
-            json!({"source_id":item.source_id,"name":name,"label":"source candidate · unverified","availability":availability_label(state),
+            json!({"source_id":item.source_id,"name":name,"label":"source candidate · unverified","kind":item.written_kind,"availability":availability_label(state),
                 "location":{"uri":document,"range":span_range(&index,&text,item.selection)}})
         }).collect();
     json!({"schema_version":1,"document_uri":document,"document_version":version,"source_revision":inventory.source_revision,
-        "candidates":rows,"message":if rows.is_empty() {"No compatible written declaration was found in this file. Source candidates do not prove a binding."} else {"Choose a written declaration. Each candidate is unverified."}})
+        "candidates":rows,"message":if rows.is_empty() {format!("No declaration of {name} was found in {}.{}", document.path().rsplit('/').next().unwrap_or("this file"), inventory.coverage_cause.as_ref().map(|cause|format!(" {cause}")).unwrap_or_default())} else {"Choose a source declaration; this does not establish references.".into()}})
 }
 
 #[cfg(test)]
@@ -446,6 +479,271 @@ mod tests {
         let response=server.execute("dynare/captureRename",&[json!({"textDocument":{"uri":root},"position":{"line":5,"character":3},"newName":"persistence"})]);
         assert_eq!(response["code"], "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED");
         assert!(response.get("edit").is_none());
+    }
+
+    #[tokio::test]
+    async fn semantic_hover_omits_automatic_analysis_names() {
+        // Guards generic preview labels hiding the useful symbol facts in every hover.
+        let root = Url::parse("file:///C:/dygnosis-analysis-hover/main.mod").unwrap();
+        let text =
+            "@#define FLAG=0\nvar y;\nparameters rho;\nrho=0.5;\nmodel;\ny=rho*y(-1);\nend;\n";
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(root.clone(), text.into(), 1);
+        selected_preview(server, &root);
+        for name in [
+            None,
+            Some("Analysis preview"),
+            Some("Analysis preview (modified)"),
+            Some("Macro inputs"),
+            Some("Macro inputs (modified)"),
+        ] {
+            {
+                let mut inner = server.lock_inner();
+                let mut choices =
+                    (*inner.workspace.root_analysis_configuration(root.as_str())).clone();
+                choices.name = name.map(str::to_owned);
+                inner
+                    .workspace
+                    .set_root_analysis_configuration(root.as_str(), choices)
+                    .unwrap();
+                inner.analysis_configuration_committed(&root);
+            }
+            let hover = server
+                .hover_at(&TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: root.clone() },
+                    position: Position::new(5, 3),
+                })
+                .unwrap();
+            let value = serde_json::to_value(hover).unwrap().to_string();
+            assert!(value.contains("rho"), "{value}");
+            assert!(!value.contains("Analysis:"), "{value}");
+        }
+    }
+
+    #[tokio::test]
+    async fn conditional_hover_reports_each_arm_under_an_else_preview() {
+        // Guards the opener reporting directive execution and the selected else having no activity.
+        let root = Url::parse("file:///C:/dygnosis-branch-hover/main.mod").unwrap();
+        let text = "@#define FLAG=1\n@#if FLAG\nvar a;\n@#else\nvar b;\n@#endif\n";
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(root.clone(), text.into(), 1);
+        {
+            let mut inner = server.lock_inner();
+            let source = inner
+                .workspace
+                .source_structure(root.as_str(), &SourceStructureQuery::default())
+                .unwrap();
+            let site = source.files[0]
+                .sites
+                .iter()
+                .find(|site| {
+                    site.kind == crate::engine::analysis_configuration::DirectiveKind::Conditional
+                })
+                .unwrap();
+            let choices = serde_json::from_value(json!({"overrides":[{
+                "kind":"branch","target":site.target,"branch_id":site.branches[1].branch_id
+            }]}))
+            .unwrap();
+            inner
+                .workspace
+                .set_root_analysis_configuration(root.as_str(), choices)
+                .unwrap();
+            inner.analysis_configuration_committed(&root);
+            let projected = file(&mut inner, &root).unwrap();
+            let states: Vec<_> = projected
+                .inventory
+                .items
+                .iter()
+                .filter(|item| {
+                    matches!(
+                        item.kind,
+                        SourceItemKind::Conditional | SourceItemKind::Branch
+                    )
+                })
+                .map(|item| {
+                    projected
+                        .availability
+                        .iter()
+                        .find(|row| row.source_id == item.source_id)
+                        .unwrap()
+                        .control_availability
+                })
+                .collect();
+            assert_eq!(
+                states,
+                [SourceAvailability::Inactive, SourceAvailability::Active]
+            );
+        }
+        let mut actual = Vec::new();
+        for (line, character) in [(1, 3), (1, 6), (3, 3)] {
+            let hover = server.hover_at(&TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: root.clone() },
+                position: Position::new(line, character),
+            });
+            actual.push(hover.map(|hover| match hover.contents {
+                HoverContents::Markup(markup) => {
+                    markup.value.lines().next().unwrap_or_default().to_owned()
+                }
+                _ => panic!("markdown hover"),
+            }));
+        }
+        assert!(
+            actual[0]
+                .as_ref()
+                .is_some_and(|text| text.ends_with(" · inactive"))
+                && actual[1]
+                    .as_ref()
+                    .is_some_and(|text| text.ends_with(" · inactive"))
+                && actual[2]
+                    .as_ref()
+                    .is_some_and(|text| text.ends_with(" · active")),
+            "if / else hovers: {actual:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn conditional_hover_tracks_source_and_each_preview_without_reanalysis() {
+        // Guards stale arm labels after forcing, skipping or clearing a branch, and repeated parsing for hover.
+        use crate::engine::analysis_configuration::{AnalysisConfiguration, AnalysisOverride};
+        use crate::engine::language::parser::PARSE_EXPANDED_BUILDS;
+        for (opener, newline) in ["@#if FLAG", "@#ifdef FLAG", "@#ifndef FLAG"]
+            .into_iter()
+            .flat_map(|opener| ["\n", "\r\n"].map(move |newline| (opener, newline)))
+        {
+            let root = Url::parse("file:///C:/dygnosis-branch-hover/main.mod").unwrap();
+            let text = format!(
+                "@#define FLAG=1\n{opener}\nvar a;\n@#elseif 0\nvar b;\n@#else\nvar c;\n@#endif\n"
+            )
+            .replace('\n', newline);
+            let (service, _socket) = new_service();
+            let server = service.inner();
+            server.upsert(root.clone(), text, 1);
+            let (target, branches) = {
+                let mut inner = server.lock_inner();
+                let source = inner
+                    .workspace
+                    .source_structure(root.as_str(), &SourceStructureQuery::default())
+                    .unwrap();
+                let site = source.files[0]
+                    .sites
+                    .iter()
+                    .find(|site| {
+                        site.kind
+                            == crate::engine::analysis_configuration::DirectiveKind::Conditional
+                    })
+                    .unwrap();
+                (
+                    site.target.clone(),
+                    site.branches
+                        .iter()
+                        .map(|branch| branch.branch_id.clone())
+                        .collect::<Vec<_>>(),
+                )
+            };
+            let positions = [
+                (1, 3, 0),
+                (1, opener.find("FLAG").unwrap() as u32, 0),
+                (3, 3, 1),
+                (3, 9, 1),
+                (5, 3, 2),
+            ];
+            let hover_at = |line, character| {
+                let hover = server
+                    .hover_at(&TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri: root.clone() },
+                        position: Position::new(line, character),
+                    })
+                    .unwrap();
+                let HoverContents::Markup(markup) = hover.contents else {
+                    panic!("markdown hover")
+                };
+                markup.value.lines().next().unwrap_or_default().to_owned()
+            };
+            for selected in [
+                None,
+                Some(Some(0)),
+                Some(Some(1)),
+                Some(Some(2)),
+                Some(None),
+                None,
+            ] {
+                let mut choices = AnalysisConfiguration::default();
+                if let Some(index) = selected {
+                    choices.overrides.push(AnalysisOverride::Branch {
+                        target: target.clone(),
+                        branch_id: index.map(|index| branches[index].clone()),
+                    });
+                }
+                {
+                    let mut inner = server.lock_inner();
+                    inner
+                        .workspace
+                        .set_root_analysis_configuration(root.as_str(), choices)
+                        .unwrap();
+                    inner.analysis_configuration_committed(&root);
+                }
+                hover_at(1, 3);
+                let before = PARSE_EXPANDED_BUILDS.with(|builds| builds.get());
+                let active =
+                    selected.unwrap_or(Some(if opener == "@#ifndef FLAG" { 2 } else { 0 }));
+                for (line, character, arm) in positions {
+                    let actual = hover_at(line, character);
+                    let expected = if active == Some(arm) {
+                        "active"
+                    } else {
+                        "inactive"
+                    };
+                    assert!(
+                        actual.ends_with(&format!(" · {expected}")),
+                        "{opener} / {selected:?} / line {line}: {actual}"
+                    );
+                }
+                assert_eq!(
+                    PARSE_EXPANDED_BUILDS.with(|builds| builds.get()),
+                    before,
+                    "current branch hovers must reuse the selected analysis"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn activity_hover_omits_source_copies_and_keeps_unknown_causes() {
+        // Guards copying a visible statement into its hover or hiding why activity is unknown.
+        for (condition, state) in [("0", "inactive"), ("MISSING", "unknown")] {
+            let root = Url::parse("file:///C:/dygnosis-activity-hover/main.mod").unwrap();
+            let text = format!("@#if {condition}\nvar hidden;\n@#endif\nvar y;model;y=0;end;\n");
+            let (service, _socket) = new_service();
+            let server = service.inner();
+            server.upsert(root.clone(), text.clone(), 1);
+            let mut inner = server.lock_inner();
+            let hover = hover(&mut inner, &root, text.find("hidden").unwrap() as u32).unwrap();
+            let HoverContents::Markup(markup) = hover.contents else {
+                panic!("markdown hover")
+            };
+            assert!(
+                markup.value.starts_with(&format!("**hidden** · {state}")),
+                "{}",
+                markup.value
+            );
+            assert!(!markup.value.contains("Written:"));
+            assert!(!markup.value.contains("var hidden;"));
+            assert!(
+                !markup
+                    .value
+                    .contains("Model values, timing and equation numbers")
+            );
+            if state == "inactive" {
+                assert_eq!(markup.value, "**hidden** · inactive");
+            } else {
+                assert!(
+                    markup.value.contains("\n\n"),
+                    "unknown activity retains its cause"
+                );
+            }
+        }
     }
 
     #[tokio::test]

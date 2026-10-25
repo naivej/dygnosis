@@ -1,5 +1,6 @@
 import { analysisConfiguration, record } from "../client/protocol";
 import type { AnalysisConfiguration } from "../client/protocol";
+import { configurationSummary } from "../client/analysis_presentation";
 
 interface AnalysisSelector { analysis?: AnalysisConfiguration; search_paths?: string[] }
 export interface WorkingSelector extends AnalysisSelector { kind: "working"; root_uri: string }
@@ -44,10 +45,7 @@ export function resourceName(resource: ComparisonResource): string {
   return `${base} · ${version(resource.before)} → ${version(resource.after)}.dygnosis-changes`;
 }
 export function configurationLabel(analysis: AnalysisConfiguration): string {
-  const preview = !!analysis.overrides?.length;
-  const selection = analysis.equation_selection;
-  const name = analysis.name ?? (selection ? `${selection.mode === "include" ? "Include" : "Exclude"} ${selection.tag ?? "name"}=${selection.values.join(",")}` : preview ? "Analysis preview" : analysis.defines?.length ? "Macro inputs" : "Source");
-  return `${name}${preview ? " (preview)" : selection ? " (equation selection)" : ""}`;
+  return configurationSummary(analysis);
 }
 export function inputLabel(input: ModelSelector): string {
   const analysis = input.analysis ? ` · ${configurationLabel(input.analysis)}` : "";

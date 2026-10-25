@@ -135,7 +135,7 @@ test("total icons and separate count blocks retain every class and dimension in 
   assert.equal(tooltipText(value.tooltip), `[Current config](command:dygnosis.selectAnalysisConfiguration)\nSource\n${report.join("\n")}`);
   assert.match(value.tooltip.value, /\*\*Aggregate model\*\*/);
   assert.doesNotMatch(tooltipText(value.tooltip), /main\.mod|before transformation/);
-  assert.equal(value.accessibilityLabel, `Dynare model counts. Total: 104 endogenous, 12 exogenous, 93 equations. ${report.join(". ")}. Click the status item to open Outline.`);
+  assert.equal(value.accessibilityLabel, `main.mod. Source. Total: 104 endogenous, 12 exogenous, 93 equations. ${report.join(". ")}. Click the status item to open Outline.`);
   assert.doesNotMatch(value.text, /warning|error/);
 });
 
@@ -186,6 +186,60 @@ test("configuration hover omits generic names and retains the selected inputs", 
   }
   metadata.selection.name = "Fixed interest rate";
   assert.match(tooltipText(modelStatus(facts(document(), { analysis: metadata }), ["equations"]).tooltip), /Fixed interest rate/);
+});
+
+test("branch hover identifies the selected directive and keeps its accepted text when stale", () => {
+  // Guards replacing the selected branch with a generic preview label or another input's text.
+  const definition = { kind: "definition", target: { file: null, site_id: "definition", source_revision: "source" }, expression: "1" };
+  for (const label of ["@#if FLAG", "@#if FLAG → @#elseif OTHER", "@#if FLAG → @#else", "@#if FLAG → No branch", '@#if LABEL == "[link](command:untrusted)"']) {
+    const operation = { kind: "branch", target: { file: null, site_id: "conditional", source_revision: "source" }, branch_id: label.endsWith("No branch") ? null : "selected-arm" };
+    for (const state of ["selected", "stale"]) {
+      const metadata = analysis({ overrides: [definition, operation] }, {
+        state, selection: { configuration_id: "branch", name: "Analysis preview (modified)", preview: true, invocation_scope: "preview" },
+        override_branch_labels: [null, label], override_names: ["FLAG", null],
+        overrides: state === "stale" ? [] : [definition, operation].map(operation => ({ operation, name: operation.kind === "definition" ? "FLAG" : null,
+          application: operation.kind === "branch" ? "not_reached" : "applied", known_execution_count: 0, execution_count: 0, cause: null })),
+      });
+      const value = modelStatus(facts(document(), { analysis: metadata }), ["equations"]);
+      const text = tooltipText(value.tooltip);
+      assert.ok(text.includes(`Macro: FLAG=1\nBranch: ${label}`), text);
+      assert.doesNotMatch(text, /Forced branch preview|Analysis preview|\(preview\)/);
+      if (state === "selected") assert.ok(text.includes(`Branch: ${label} (not reached)`), text);
+      else assert.match(text, /\(stale\)/);
+      if (label.includes("[link]")) assert.ok(value.tooltip.value.includes('\\[link\\]\\(command:untrusted\\)'));
+    }
+  }
+});
+
+test("preview outcomes stay next to their own configuration when several branches are selected", () => {
+  // Guards an unreachable preview's status appearing after unrelated configuration rows.
+  const operations = ["first", "second", "third"].map(site_id => ({ kind: "branch", target: { file: null, site_id, source_revision: "source" }, branch_id: "arm" }));
+  const cause = "The written directive was not reached under this configuration; its requested body was not analyzed.";
+  const unknown = "Macro expansion stopped before application could be established.";
+  const metadata = analysis({ overrides: operations }, {
+    override_branch_labels: ["@#if ela → @#else", "@#if ela1", "@#if other"],
+    overrides: operations.map((operation, index) => ({ operation, application: ["applied", "not_reached", "unknown"][index],
+      known_execution_count: index === 0 ? 1 : 0, execution_count: index === 2 ? null : index === 0 ? 1 : 0,
+      cause: [null, cause, unknown][index] })),
+  });
+  const text = tooltipText(modelStatus(facts(document(), { analysis: metadata }), ["equations"]).tooltip);
+  assert.deepEqual(text.split("\n").slice(1, 4), [
+    "Branch: @#if ela → @#else", `Branch: @#if ela1 (not reached) — ${cause}`, `Branch: @#if other (unknown) — ${unknown}`,
+  ]);
+  assert.doesNotMatch(text, /Branch preview:/);
+  assert.equal(text.split(cause).length - 1, 1);
+});
+
+test("repeated macro names retain each captured definition location", () => {
+  // Guards indistinguishable skip choices when the same macro is defined twice.
+  const operations = ["first", "second"].map(site_id => ({ kind: "skip_definition", target: {
+    file: "file:///workspace/settings.inc", site_id, source_revision: "source" } }));
+  const metadata = analysis({ overrides: operations }, {
+    overrides: operations.map((operation, index) => ({ operation, name: "FLAG", source_line: [12, 40][index],
+      application: "applied", known_execution_count: 1, execution_count: 1, cause: null })),
+  });
+  const text = tooltipText(modelStatus(facts(document(), { analysis: metadata }), ["equations"]).tooltip);
+  assert.match(text, /Skip FLAG definition · settings\.inc:12\nSkip FLAG definition · settings\.inc:40/);
 });
 
 test("incomplete equation selection hover shows each cause once and keeps distinct reasons", () => {
@@ -284,6 +338,20 @@ test("older engines without incomplete_reasons keep the generic hover", () => {
   assert.match(tooltipText(value.tooltip), /Model expansion is incomplete/);
   assert.doesNotMatch(tooltipText(value.tooltip), /Unknown variable/);
 });
+test("incomplete accessibility keeps one bounded mapped cause and full hover detail", () => {
+  // Guards long reason lists being spoken on each status update.
+  const first = "Expansion stopped in the policy include. " + "detail ".repeat(200);
+  const later = "A separate unavailable include also stopped analysis.";
+  const value = modelStatus(facts(document(), { complete: false, incomplete_reasons: [
+    { message: first, location: { uri: "file:///workspace/policy.inc", range: { start: { line: 16 } } } },
+    { message: later },
+  ] }), ["equations"]);
+  assert.match(value.accessibilityLabel, /policy\.inc:17 — Expansion stopped/);
+  assert.doesNotMatch(value.accessibilityLabel, /separate unavailable include/);
+  assert.ok(value.accessibilityLabel.length < 700);
+  const text = tooltipText(value.tooltip);
+  assert.ok(text.includes(first.trim())); assert.ok(text.includes(later));
+});
 test("ignored diagnostic codes do not remove incomplete hover reasons", () => {
   // Hover reads model-info reasons only; Ignore filters painted diagnostics elsewhere.
   const value = modelStatus(facts(document(), {
@@ -339,7 +407,7 @@ test("invalid settings are safely filtered or fall back with an Output explanati
   await flush();
   assert.equal(env.host.items[0].text, "Source: $(symbol-operator) 93");
   assert.ok(env.service.logged.some(message => message.includes("Invalid dynare.statusBar.enabled")));
-  assert.ok(env.service.logged.some(message => message.includes("Invalid or repeated entries")));
+  assert.ok(env.service.logged.some(message => message.includes("invalid or repeated entries ignored")));
   registration.dispose();
 });
 test("unregistered virtual previews, other languages and no editor do not request or show counts", async () => {
@@ -390,7 +458,7 @@ test("a mod opened as an include uses its chosen root while preferences use the 
   assert.equal(env.service.requests[0].document.toString(), env.doc.uri.toString());
   assert.equal(env.host.items[0].text, "Source: $(symbol-operator) 93");
   assert.match(tooltipText(env.host.items[0].tooltip), /Aggregate model/);
-  assert.doesNotMatch(tooltipText(env.host.items[0].tooltip), /owner\.mod|part\.mod/);
+  assert.match(tooltipText(env.host.items[0].tooltip), /Model: owner\.mod/);
   registration.dispose();
 });
 test("ambiguous background model counts explain the owner-selection action", async () => {
@@ -411,7 +479,7 @@ test("edit invalidation removes numbers immediately and superseded versions cann
   ++env.doc.version;
   env.host.edited.fire({ document: env.doc });
   assert.equal(env.host.items[0].text, "$(sync~spin) Dynare: updating");
-  assert.equal(env.host.items[0].tooltip, "Refreshing model counts…");
+  assert.match(env.host.items[0].tooltip, /Model: main\.mod\nRefreshing model counts…/);
   assert.match(env.host.items[0].accessibilityInformation.label, /Click the status item to open Outline\./);
   await flush();
   env.service.modelInfo = () => second.promise;
@@ -518,6 +586,8 @@ test("a failed request remains quiet apart from Output and shows unavailable sta
   await flush();
   assert.equal(env.host.items[0].text, "$(info) Dynare: unavailable");
   assert.deepEqual(env.service.logged, ["Error: connection closed"]);
+  assert.match(env.host.items[0].tooltip, /main\.mod[\s\S]*connection closed/);
+  assert.doesNotMatch(env.host.items[0].tooltip, /Choose a model root/);
   registration.dispose();
 });
 
@@ -537,7 +607,7 @@ test("pending model actions reuse the count item and restore configuration count
   tracked.clock.tick(1); assert.match(item.text, /sync~spin.*Expanding macros/);
   assert.match(tooltipText(item.tooltip), /Loading hover/); assert.equal(env.host.items.length, 1);
   assert.doesNotMatch(tooltipText(item.tooltip), /Click the status item to open Outline\./);
-  assert.doesNotMatch(tooltipText(item.tooltip), /Current config|N = 2/);
+  assert.match(tooltipText(item.tooltip), /Current config[\s\S]*Macro: N=2/);
   assert.equal(item.command, "outline.focus");
   assert.match(item.accessibilityInformation.label, /Click the status item to open Outline\./);
   expansion.resolve(); await first; assert.match(item.text, /Loading hover/);
@@ -559,7 +629,7 @@ test("activity before owner resolution keeps the latest incomplete result undern
   owner.resolve(env.doc.uri); await flush();
   model.resolve(facts(env.doc, { complete: false, incomplete_reasons: [{ message: "The selected branch cannot be expanded." }] }));
   await flush(); assert.match(env.host.items[0].text, /Expanding macros/);
-  assert.doesNotMatch(tooltipText(env.host.items[0].tooltip), /Current config/);
+  assert.match(tooltipText(env.host.items[0].tooltip), /Current config[\s\S]*selected branch cannot be expanded/);
   expansion.resolve(); await pending;
   assert.equal(env.host.items[0].text, "$(info) Source: incomplete");
   assert.match(tooltipText(env.host.items[0].tooltip), /selected branch cannot be expanded/);

@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.11.36
+
+- Status, workspace checks and action messages identify affected files and
+  known causes. Recovery actions follow the cause. Macro preview failures
+  retain the captured text and explain what could not be refreshed.
+- Model Diff keeps branch application results with each captured choice and
+  comparison limits with the affected row. Configuration titles summarize
+  choices instead of repeating automatic preview names.
+- MCP outcomes identify affected override targets and omitted metadata actions.
+  Tool descriptions keep the rules relevant to each operation. Engine startup
+  failures include the executable and observed exit or timeout.
+- Macro definition actions on an `@#if` condition point to **Preview Macro
+  Branch** instead of opening an empty picker.
+- Preview a branch directly from its conditional directive. **Clear branch
+  previews** restores source conditions and keeps the other analysis choices.
+- Activity hovers omit repeated source and generic explanations. Conditional
+  headers show the selected arm's activity, including forced `@#else` previews.
+- The **Current config** hover identifies selected branches by their controlling
+  condition. Outcomes such as **not reached** appear beside the affected
+  choice. Automatic preview names are omitted from count and source hovers.
+
 ## v0.11.35
 
 - Configure macro inputs and equation selection with one complete expression

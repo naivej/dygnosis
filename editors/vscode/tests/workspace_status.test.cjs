@@ -200,8 +200,8 @@ test("workspace hover combines incomplete and failed without counting queued wor
   assert.match(content.tooltip.value, /<td align="left">Checked<\/td><td align="right">2<\/td>/);
   assert.match(content.tooltip.value, /<td align="left">Not fully checked<\/td><td align="right">2<\/td>/);
   assert.match(content.tooltip.value, /<td align="left">Excluded<\/td><td align="right">1<\/td>/);
-  assert.doesNotMatch(content.tooltip.value, /Pending|Checking|Incomplete|Failed/);
-  assert.match(content.accessibilityLabel, /Checked: 2\. Not fully checked: 2\. Excluded: 1\./);
+  assert.doesNotMatch(content.tooltip.value, /Pending|Checking/);
+  assert.match(content.accessibilityLabel, /Checked: 2\. Not fully checked: 2\. Incomplete: 1\. Failed: 1\. Excluded: 1\./);
 });
 
 test("workspace hover retains cancellation, discovery and disabled outcomes beside the summary", () => {
@@ -211,7 +211,7 @@ test("workspace hover retains cancellation, discovery and disabled outcomes besi
   assert.match(tooltipText(cancelled.tooltip), /file edit\/change or Recheck/);
   const discovery = workspaceStatusContent(parseWorkspaceStatus(facts([], { coverage_complete: false,
     discovery_failures: [{ folder_uri: workspace, failure: "Permission denied" }] })));
-  assert.match(tooltipText(discovery.tooltip), /Could not read 1 folder\. The model list may be incomplete/);
+  assert.match(tooltipText(discovery.tooltip), /workspace: Permission denied.*The model list may be incomplete/);
   const disabled = workspaceStatusContent(parseWorkspaceStatus(facts([], { enabled: false, discovery: "disabled", complete: false, coverage_complete: false })));
   assert.match(tooltipText(disabled.tooltip), /Enable dynare\.workspaceDiagnostics in Settings/);
   assert.doesNotMatch(disabled.tooltip.value, /\| Models \|/);
@@ -357,6 +357,7 @@ test("not fully checked filter reveals affected paths and restores full-tree col
   assert.equal(deep.children[0].command.arguments[0].toString(), entries[0].root_uri);
   const failed = rows(env)[1].children[0];
   assert.equal(failed.label, "broken.dyn"); assert.match(failed.tooltip, /Could not read model/);
+  assert.match(failed.accessibilityInformation.label, /Could not read model/);
   assert.equal(env.host.views[0].description, "2 not fully checked");
   assert.equal(env.host.executed.findLast(call => call.name === "setContext").args[1], true);
   await env.host.commands.get("dygnosis.showAllWorkspaceFiles")();

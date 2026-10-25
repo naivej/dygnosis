@@ -67,6 +67,7 @@ struct RootEntry {
     errors: usize,
     warnings: usize,
     failure: Option<String>,
+    cause: Option<String>,
     stamps: InputStamps,
     force: bool,
     cached_report: Option<Arc<RootReport>>,
@@ -89,6 +90,7 @@ impl RootEntry {
             errors: 0,
             warnings: 0,
             failure: None,
+            cause: None,
             stamps: InputStamps::new(),
             force: true,
             cached_report: None,
@@ -108,6 +110,7 @@ impl RootEntry {
         self.state = "pending";
         self.due = Some(Instant::now() + delay);
         self.failure = None;
+        self.cause = None;
         self.revision = None;
         self.errors = 0;
         self.warnings = 0;
@@ -193,8 +196,8 @@ impl WorkspaceCheckState {
             *counts.entry(entry.state).or_default() += 1;
             let analysis = workspace.root_analysis_configuration(uri.as_str());
             if entry.selected && !analysis.is_source() { non_default_roots += 1; }
-            json!({"root_uri": uri, "state": entry.state, "revision": entry.revision, "errors": entry.errors, "warnings": entry.warnings, "failure": entry.failure,
-                "analysis":{"name":analysis.name,"preview":analysis.is_preview(),"source":analysis.is_source()},
+            json!({"root_uri": uri, "state": entry.state, "revision": entry.revision, "errors": entry.errors, "warnings": entry.warnings, "failure": entry.failure,"cause":entry.cause,
+                "analysis":{"name":analysis.name,"label":analysis.display_label(),"preview":analysis.is_preview(),"source":analysis.is_source()},
                 "dependency_candidates": entry.dependency_uris})
         }).collect();
         let complete = enabled
@@ -899,6 +902,7 @@ async fn run_worker(backend: Backend) {
                             entry.revision = Some(checked.report.revision.clone());
                             entry.errors = checked.report.errors;
                             entry.warnings = checked.report.warnings;
+                            entry.cause = checked.report.incomplete_cause.clone();
                             entry.cached_report =
                                 checked.complete.then(|| Arc::clone(&checked.report));
                             inner.reports.insert(root.clone(), checked.report);
@@ -1112,6 +1116,7 @@ impl Inner {
             entry.revision = Some(checked.report.revision.clone());
             entry.errors = checked.report.errors;
             entry.warnings = checked.report.warnings;
+            entry.cause = checked.report.incomplete_cause.clone();
             entry.failure = None;
             entry.cached_report = checked.complete.then(|| Arc::clone(&checked.report));
         }
@@ -1552,6 +1557,7 @@ mod tests {
                 revision: String::new(),
                 errors: 0,
                 warnings: 0,
+                incomplete_cause: None,
                 reusable: false,
                 stamps: InputStamps::new(),
                 owner_files: HashSet::new(),

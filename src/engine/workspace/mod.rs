@@ -925,6 +925,25 @@ impl Workspace {
             .unwrap_or_default()
     }
 
+    /// Last accepted branch labels, without scanning or executing current source.
+    pub(crate) fn root_analysis_override_branch_labels(&self, root: &str) -> Vec<Option<String>> {
+        let key = if self.overlay_only {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
+        self.root_analyses
+            .get(&key)
+            .map(|analysis| {
+                analysis
+                    .overrides
+                    .iter()
+                    .map(|operation| operation.branch_label.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     fn checked_analysis(
         &mut self,
         key: &str,
@@ -1052,7 +1071,16 @@ impl Workspace {
                 .expect("acquired target")
                 .macro_source(&mut budget)
                 .map_err(expression_error)?;
-            let selected = resolve_override(operation, file.clone(), &source, &mut budget)?;
+            let mut selected = resolve_override(operation, file.clone(), &source, &mut budget)?;
+            // Presentation borrows a valid index; it never starts a source scan.
+            selected.source_line = self.docs.get(&file).and_then(|doc| {
+                doc.source_index.get().map(|index| {
+                    index
+                        .position(&doc.source, selected.directive_span.start)
+                        .line
+                        + 1
+                })
+            });
             if by_file
                 .entry(file)
                 .or_default()
@@ -1196,14 +1224,53 @@ impl Workspace {
             .as_ref()
             .map(|analysis| analysis.selection.clone())
             .unwrap_or_else(source_selection);
-        let overrides=configuration.overrides.iter().enumerate().map(|(index,operation)| {
-            let count=source.applications.get(index).copied().unwrap_or(0);
-            let failure=source.application_failures.get(&index);
-            let application=if count>0 {OverrideApplication::Applied}else if source.macro_complete {OverrideApplication::NotReached}else{OverrideApplication::Unknown};
-            let cause=failure.cloned().or_else(|| match application {OverrideApplication::NotReached=>Some("The written directive was not reached under this configuration; its requested body was not analyzed.".into()),OverrideApplication::Unknown=>Some("Macro execution stopped before this override could be proven; later applications are unknown.".into()),_ if !source.macro_complete=>Some("The successful prefix is retained; later applications are unknown because macro execution stopped.".into()),_=>None});
-            let name = analysis.as_ref().and_then(|analysis| analysis.overrides.get(index)).and_then(|resolved| resolved.name.clone());
-            OverrideReceipt {operation:operation.clone(),name,application,known_execution_count:count,execution_count:source.macro_complete.then_some(count),cause}
-        }).collect();
+        let overrides = configuration
+            .overrides
+            .iter()
+            .enumerate()
+            .map(|(index, operation)| {
+                let count = source.applications.get(index).copied().unwrap_or(0);
+                let failure = source.application_failures.get(&index);
+                let application = if count > 0 {
+                    OverrideApplication::Applied
+                } else if source.macro_complete {
+                    OverrideApplication::NotReached
+                } else {
+                    OverrideApplication::Unknown
+                };
+                let cause = failure.cloned().or_else(|| match application {
+                    OverrideApplication::NotReached => None,
+                    OverrideApplication::Unknown => {
+                        Some("Macro expansion stopped before application could be checked.".into())
+                    }
+                    _ if !source.macro_complete => Some(
+                        "Applied in the reached prefix; later applications are unknown.".into(),
+                    ),
+                    _ => None,
+                });
+                let name = analysis
+                    .as_ref()
+                    .and_then(|analysis| analysis.overrides.get(index))
+                    .and_then(|resolved| resolved.name.clone());
+                let branch_label = analysis
+                    .as_ref()
+                    .and_then(|analysis| analysis.overrides.get(index))
+                    .and_then(|resolved| resolved.branch_label.clone());
+                OverrideReceipt {
+                    operation: operation.clone(),
+                    name,
+                    branch_label,
+                    source_line: analysis
+                        .as_ref()
+                        .and_then(|analysis| analysis.overrides.get(index))
+                        .and_then(|resolved| resolved.source_line),
+                    application,
+                    known_execution_count: count,
+                    execution_count: source.macro_complete.then_some(count),
+                    cause,
+                }
+            })
+            .collect();
         Ok(Arc::new(AnalysisMetadata {
             selection,
             configuration,

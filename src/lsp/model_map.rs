@@ -919,7 +919,7 @@ pub(crate) fn add_source_symbols(
                 match state {
                     SourceAvailability::Active => "active",
                     SourceAvailability::Inactive => "inactive",
-                    SourceAvailability::Mixed => "mixed",
+                    SourceAvailability::Mixed => "active in some expansions",
                     SourceAvailability::Unknown => "unknown",
                 }
                 .to_owned(),

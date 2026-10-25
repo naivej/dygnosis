@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { DygnosisClient, isAnalysisDocument } from "../client/client";
 import type { ModelSnapshot } from "../client/client";
 import type { Equation, Location } from "../client/protocol";
+import { fileLabel } from "../client/failure";
 
 export interface NavigationContext {
   document: vscode.TextDocument;
@@ -14,7 +15,7 @@ export interface NavigationContext {
 interface EquationPick extends vscode.QuickPickItem { equation: Equation }
 interface OwnerPick extends vscode.QuickPickItem { root: vscode.Uri; info: ModelSnapshot }
 function sourceLabel(location: Location | null): string {
-  if (!location) return "Source unavailable";
+  if (!location) return "No single source location";
   const uri = vscode.Uri.parse(location.uri);
   return `${vscode.workspace.asRelativePath(uri)}:${String(location.range.start.line + 1)}`;
 }
@@ -24,7 +25,7 @@ function scopeLabel(equation: Equation): string {
 function equationPicks(equations: Equation[]): EquationPick[] {
   return equations.map(equation => {
     const origins = equation.origin_frames.map(frame => frame.variable && frame.value !== null
-      ? `${frame.variable}=${frame.value}` : frame.kind).join(", ");
+      ? `${frame.variable}=${frame.value}` : ({ override_definition: "Definition override", definition_override: "Definition override", branch: "Branch preview", include: "Include", for: "Macro loop" }[frame.kind] ?? frame.kind.replaceAll("_", " "))).join(", ");
     return {
       label: `${String(equation.number)} · ${equation.name || "Unnamed equation"}`,
       description: `${scopeLabel(equation)} · ${sourceLabel(equation.location)}`,
@@ -67,8 +68,9 @@ async function jumpEquation(service: DygnosisClient, context: NavigationContext,
   guard: () => boolean = () => true): Promise<void> {
   const fresh = await validateNavigationContext(service, context, guard);
   const row = fresh?.equations.find(candidate => candidate.id === equation.id);
-  if (!row) { refuse("The model changed. Choose the equation again."); }
-  if (!row.location) { refuse("A verified written location is unavailable for this equation."); }
+  const label = `Equation ${equation.number}${equation.name ? ` [${equation.name}]` : ""} in ${fileLabel(context.root.toString())}`;
+  if (!row) { refuse(`${label} is no longer current. Choose the equation again.`); }
+  if (!row.location) { refuse(`${label} has no single verified source location: ${row.segments.length > 1 ? `it spans ${row.segments.length} written regions` : row.segments.length === 0 ? "no written region was retained" : "the captured region is not a verified jump target"}. Open macro expansion to inspect its origins.`); }
   const target = row.location;
   await service.openLocation(target, context.root, async loadedDocument => {
     const loadedVersion = loadedDocument.version;

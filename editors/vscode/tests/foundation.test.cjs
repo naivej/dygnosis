@@ -58,6 +58,13 @@ test("analysis receipts accept old engines without names and reject malformed op
   for (const override_names of [[], [1], ["x", "y"], null]) {
     assert.throws(() => parseModelInfo({ ...info(), analysis: { ...analysis, overrides: [], override_names } }, "file:///root.mod", "file:///root.mod"));
   }
+  // Guards an invalid label array attaching a branch's text to another override.
+  for (const override_branch_labels of [[null], ["@#if FLAG → @#else"]]) {
+    assert.deepEqual(parseModelInfo({ ...info(), analysis: { ...analysis, override_branch_labels } }, "file:///root.mod", "file:///root.mod").analysis.override_branch_labels, override_branch_labels);
+  }
+  for (const override_branch_labels of [[], [1], ["first", "second"], null]) {
+    assert.throws(() => parseModelInfo({ ...info(), analysis: { ...analysis, override_branch_labels } }, "file:///root.mod", "file:///root.mod"));
+  }
 });
 test("preview schemes and user-only executable scope are manifest constraints", () => {
   const manifest = require("../package.json");

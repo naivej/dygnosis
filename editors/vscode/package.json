@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.35",
+  "version": "0.11.36",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -547,12 +547,31 @@
                     "equation_selection": {
                       "type": "object",
                       "description": "Select equations by explicit tag values for analysis.",
-                      "required": ["mode", "values"],
+                      "required": [
+                        "mode",
+                        "values"
+                      ],
                       "additionalProperties": false,
                       "properties": {
-                        "mode": { "enum": ["include", "exclude"] },
-                        "tag": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "default": "name" },
-                        "values": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+                        "mode": {
+                          "enum": [
+                            "include",
+                            "exclude"
+                          ]
+                        },
+                        "tag": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                          "default": "name"
+                        },
+                        "values": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
                       }
                     }
                   }

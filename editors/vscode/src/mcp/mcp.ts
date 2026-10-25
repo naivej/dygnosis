@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { resolveBinary, validateMcpBinary } from "../client/binary";
 import { Log } from "../client/settings";
+import { failureText } from "../client/failure";
 
 export function registerMcp(context: vscode.ExtensionContext, log: Log): vscode.Disposable {
   const changed = new vscode.EventEmitter<void>();
@@ -10,7 +11,7 @@ export function registerMcp(context: vscode.ExtensionContext, log: Log): vscode.
       try {
         const binary = await resolveBinary(context, log);
         return [new vscode.McpStdioServerDefinition("Dygnosis", binary.path, ["mcp"], {}, binary.version)];
-      } catch (error) { log(`MCP discovery: ${String(error)}. Reinstall Dygnosis or configure dynare.serverPath.`); return []; }
+      } catch (error) { log(`MCP discovery failed: ${failureText(error)}`); throw error; }
     },
     resolveMcpServerDefinition: async () => {
       try {
@@ -18,7 +19,7 @@ export function registerMcp(context: vscode.ExtensionContext, log: Log): vscode.
         await validateMcpBinary(binary, log);
         return new vscode.McpStdioServerDefinition("Dygnosis", binary.path, ["mcp"], {}, binary.version);
       } catch (error) {
-        throw new Error(`Dygnosis MCP could not start: ${String(error)}. Open dynare.serverPath, use the bundled binary, or show Dygnosis Output.`, { cause: error });
+        log(`MCP start failed: ${failureText(error)}`); throw error;
       }
     },
   });

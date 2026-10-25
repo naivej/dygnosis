@@ -70,7 +70,8 @@ export function registerHelp(context: vscode.ExtensionContext): vscode.Disposabl
         else if (/^https?:\/\//.test(target)) await vscode.env.openExternal(vscode.Uri.parse(target));
       }
       } catch (error) {
-        await next.webview.postMessage({ type: "notice", text: `The Help action failed: ${String(error)}` });
+        const action = record(message) ? message.type === "copy" ? "Copy example" : message.type === "permalink" ? "Copy topic link" : message.type === "link" && typeof message.target === "string" ? `Open ${message.target}` : "Help action" : "Help action";
+        await next.webview.postMessage({ type: "notice", text: `${action} failed: ${error instanceof Error ? error.message : String(error)}` });
       }
     }));
   };
@@ -92,7 +93,7 @@ export function registerHelp(context: vscode.ExtensionContext): vscode.Disposabl
   if (!context.globalState.get<boolean>("helpInvitationShown")) {
     void context.globalState.update("helpInvitationShown", true).then(async () => {
       if (disposed) return;
-      const action = await vscode.window.showInformationMessage("Dygnosis is ready. Open Help to start a model or explore its features.", "Open Help");
+      const action = await vscode.window.showInformationMessage("Open a .mod file to use Dygnosis. Help explains editing and model checks.", "Open Help");
       if (action) await vscode.commands.executeCommand("dygnosis.openHelp", "get-started");
     });
   }

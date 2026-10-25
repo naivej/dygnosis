@@ -125,13 +125,19 @@ export function registerLenses(service: DygnosisClient): vscode.Disposable {
       } catch (error) { if (current()) service.log(String(error)); return []; }
     },
   };
-  const unavailable = (): never => refuse("The model changed. Wait for the CodeLens to refresh and try again.");
+  const unavailable = (target?: LensTarget): never => {
+    const context = target?.context;
+    const action = target?.kind === "declarationReferences" ? "Find references" : target?.kind === "effectiveModel" ? "Expand macros" : "CodeLens action";
+    const cause = context && context.info.client_instance !== service.currentInstance ? "the engine changed"
+      : context && context.document.version !== context.version ? "the document changed" : "the model context is no longer current";
+    refuse(`${action}${context ? ` at ${context.document.uri.path.split("/").at(-1)}:${target.anchor.range.start.line + 1}` : ""} stopped: ${cause}. Wait for CodeLens to refresh, then try again.`);
+  };
   const action = (run: (target: LensTarget, info: ModelSnapshot) => Promise<void>) => async (target: LensTarget): Promise<void> => {
     if (disposed) return;
     try {
-      if (!target || !accepted.has(target)) unavailable();
+      if (!target || !accepted.has(target)) unavailable(target);
       const info = await freshContext(target);
-      if (!info) { unavailable(); return; }
+      if (!info) { unavailable(target); return; }
       await run(target, info);
     } catch (error) { if (!disposed) await explainFailure(service, error); }
   };
@@ -139,7 +145,7 @@ export function registerLenses(service: DygnosisClient): vscode.Disposable {
     vscode.languages.registerCodeLensProvider(documentSelector, provider),
     vscode.commands.registerCommand("dygnosis.findLensReferences", action(async (target, info) => {
       const group = declarationLensGroups(info, target.context.document).find(row => row.anchor.range.start.line === target.anchor.range.start.line);
-      if (!group || group.declarations.map(row => row.id).join("\n") !== target.ids.join("\n")) { unavailable(); return; }
+      if (!group || group.declarations.map(row => row.id).join("\n") !== target.ids.join("\n")) { unavailable(target); return; }
       const declaration = group.declarations.length === 1 ? group.declarations[0] : (await vscode.window.showQuickPick(
         group.declarations.map(row => ({ label: row.name, description: `${row.final_kind ?? row.written_kind}${row.dimension ? ` · ${row.dimension}` : ""}`,
           detail: row.long_name ?? undefined, declaration: row })), { placeHolder: "Choose the symbol for Find All References", matchOnDescription: true }))?.declaration;
@@ -147,15 +153,15 @@ export function registerLenses(service: DygnosisClient): vscode.Disposable {
       const fresh = await freshContext(target, true);
       const row = fresh?.declarations.find(candidate => candidate.id === declaration.id);
       if (!row?.location || !declaration.location || !sameWrittenLocation(row.location, declaration.location) ||
-          !safeAnchor(row.location, target.context.document)) { unavailable(); return; }
+          !safeAnchor(row.location, target.context.document)) { unavailable(target); return; }
       const editor = vscode.window.activeTextEditor;
-      if (!editor || editor.document !== target.context.document || !contextCurrent(target.context, true, false)) { unavailable(); return; }
+      if (!editor || editor.document !== target.context.document || !contextCurrent(target.context, true, false)) { unavailable(target); return; }
       editor.selection = new vscode.Selection(row.location.range.start.line, row.location.range.start.character,
         row.location.range.start.line, row.location.range.start.character);
       await vscode.commands.executeCommand("references-view.findReferences");
     })),
     vscode.commands.registerCommand("dygnosis.showLensEffectiveModel", action(async (target, info) => {
-      if (!info.first_model_anchor || !sameWrittenLocation(info.first_model_anchor, target.anchor)) { unavailable(); return; }
+      if (!info.first_model_anchor || !sameWrittenLocation(info.first_model_anchor, target.anchor)) { unavailable(target); return; }
       await vscode.commands.executeCommand("dygnosis.showEffectiveModel", {
         document: target.context.document, version: target.context.version, root: target.context.root, info,
         guard: () => contextCurrent(target.context, true, false),

@@ -168,7 +168,7 @@ function setup(options = {}) {
     client: { initializeResult: { capabilities: { experimental: { dygnosis: { effectivePreview: {
       command: "dynare/showEffectiveModel", navigation_schema_version: 1, dependency_candidates: true,
     } } } } } },
-    log: message => service.logged.push(message), failure: async message => service.logged.push(message),
+    log: message => service.logged.push(message), failure: async error => service.logged.push(error instanceof Error ? error.message : String(error)),
     ensureStarted: async () => {},
     rootForDocument: async document => service.root ?? document.uri,
     value: payload(),
@@ -474,6 +474,24 @@ test("dependency candidates watch missing arbitrary-extension files and invalida
     assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
     await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 0);
     env.registration.dispose(); env.previews.dispose(); assert.ok(env.host.watchers.every(watcher => watcher.disposed));
+  }
+});
+
+test("document change and close retain their file cause after client invalidation", async () => {
+  // Guards later document listeners replacing a known input file with generic stale text.
+  for (const event of ["changed", "closed"]) {
+    const env = setup(), dependency = "file:///workspace/policy.inc", source = doc(dependency);
+    env.host.documents.set(dependency, source);
+    env.service.value.dependency_candidates.push(dependency);
+    const session = await env.show();
+    env.service.changed.fire({ reason: "file", root: main, uri: dependency });
+    if (event === "changed") env.edit(source);
+    else env.host.closed.fire(source);
+    assert.ok(session.outdated.includes(`policy.inc ${event}.`), session.outdated);
+    assert.match(session.document.getText(), /policy\.inc (changed|closed)\./);
+    assert.ok(session.document.getText().endsWith(session.text));
+    assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
+    env.registration.dispose(); env.previews.dispose();
   }
 });
 

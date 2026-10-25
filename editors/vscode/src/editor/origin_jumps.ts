@@ -7,6 +7,7 @@ import { appendMacroMessages, effectivePreviewArguments } from "./preview";
 import { location, record } from "../client/protocol";
 import type { Location, Position, Range } from "../client/protocol";
 import { analysisSettingsChanged, booleanSetting, listSetting } from "../client/settings";
+import { fileLabel } from "../client/failure";
 
 /** The input-only event and native placement option are integrated with 0.11.2. */
 export interface OriginJumpClient extends Pick<DygnosisClient, "client" | "currentInstance" | "log" | "failure" | "revalidate" | "execute" | "output" | "onDidChangeAnalysis"> {
@@ -259,9 +260,9 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     ++state.operation; state.cancellation?.cancel(); state.cancellation?.dispose(); state.cancellation = undefined;
     state.loadingOperation = undefined; state.pendingFile = false;
   };
-  const stale = (state: State): void => {
+  const stale = (state: State, cause = "Model inputs changed."): void => {
     state.stale = true; ++state.epoch; cancel(state); clearMacroTint(state);
-    previews.markOutdated?.(state.session, "Its source or analysis configuration changed; the displayed text keeps its captured configuration.");
+    previews.markOutdated?.(state.session, `${cause} This preview keeps its captured configuration. Refresh macro expansion.`);
     updateContext();
     if (state.refreshOnReveal) scheduleConfigurationRefresh(state);
   };
@@ -272,7 +273,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       // A filesystem notification may describe the unchanged disk file just
       // loaded. Withhold actions and make that loader prove the same snapshot.
       state.pendingFile = true; state.stale = true; updateContext();
-    } else stale(state);
+    } else stale(state, `${fileLabel(target)} changed.`);
   };
   const watch = (state: State): void => {
     for (const watcher of state.watchers) watcher.dispose();
@@ -293,14 +294,14 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     states.set(session, state);
     state.subscriptions.push(service.onDidInvalidate(event => {
       if (event.root && !sameUri(event.root, session.root.toString())) return;
-      if (event.reason === "file" && event.uri) observeFile(state, event.uri); else stale(state);
+      if (event.reason === "file" && event.uri) observeFile(state, event.uri); else stale(state, event.reason === "lifecycle" ? "The engine stopped or restarted." : "The model inputs or analysis configuration changed.");
     }),
       vscode.workspace.onDidChangeTextDocument(event => {
-        if (event.contentChanges.length && (state.payload?.dependency_candidates ?? [session.root.toString()]).some(uri => sameUri(uri, event.document.uri.toString()))) stale(state);
+        if (event.contentChanges.length && (state.payload?.dependency_candidates ?? [session.root.toString()]).some(uri => sameUri(uri, event.document.uri.toString()))) stale(state, `${fileLabel(event.document.uri.toString())} changed.`);
         else if (event.document === session.document) updateContext();
       }),
       vscode.workspace.onDidCloseTextDocument(document => {
-        if ((state.payload?.dependency_candidates ?? [session.root.toString()]).some(uri => sameUri(uri, document.uri.toString()))) stale(state);
+        if ((state.payload?.dependency_candidates ?? [session.root.toString()]).some(uri => sameUri(uri, document.uri.toString()))) stale(state, `${fileLabel(document.uri.toString())} closed.`);
       }),
       vscode.workspace.onDidChangeConfiguration(event => {
         if (analysisSettingsChanged(event, session.root) || event.affectsConfiguration("dynare.serverPath", session.root)) stale(state);
@@ -318,7 +319,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
               state.instance === service.currentInstance && info?.complete &&
               state.payload?.complete && rootVersionMatches(state, state.payload)) { state.stale = false; updateContext(); }
         }).catch(error => service.log(String(error)));
-      } catch (error) { void service.failure(String(error)); }
+      } catch (error) { void service.failure(error); }
     }
     updateContext();
   };
@@ -334,7 +335,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     cancel(state); state.cancellation = new vscode.CancellationTokenSource();
     return { operation: state.operation, epoch: state.epoch, token: state.cancellation.token };
   };
-  const unavailable = (): never => refuse("This preview has changed or its source is unavailable. Refresh macro expansion and choose the row again.");
+  const unavailable = (cause = "The captured model or source is no longer current."): never => refuse(`Source navigation stopped: ${cause} Refresh macro expansion, then choose the row again.`);
   const refreshState = async (state: State): Promise<void> => {
     if (disposed) return;
     if (state.refreshTimer) { clearTimeout(state.refreshTimer); state.refreshTimer = undefined; }
@@ -385,7 +386,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
         return;
       }
       state.refreshAttempts = (state.refreshAttempts ?? 0) - 1;
-      void refreshState(state).catch(error => service.failure(String(error)));
+      void refreshState(state).catch(error => service.failure(error));
     }, 75);
   };
   const refresh = async (): Promise<void> => {
@@ -432,7 +433,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
         const loaded = document.version;
         if (document.isClosed || !sameUri(document.uri.toString(), target.uri) || !targetFitsDocument(target, document) ||
             (target.document_version !== null && loaded !== target.document_version) ||
-            (target.document_version === null && document.isDirty)) { unavailable(); }
+            (target.document_version === null && document.isDirty)) { unavailable(`${document.uri.path.split("/").at(-1)} no longer matches the captured source.`); }
         const proof = await validated(document);
         const proofCurrent = (): boolean => !!proof && proof.fileEpoch === state.fileEpoch && proof.revision === payload.revision &&
           sameUri(proof.root, state.session.root.toString()) && current() && !document.isClosed && document.version === loaded &&
@@ -529,7 +530,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
         const loaded = document.version;
         if (document.isClosed || !sameUri(document.uri.toString(), pick.target.uri) || !targetFitsDocument(pick.target, document) ||
             (pick.target.document_version !== null && loaded !== pick.target.document_version) ||
-            (pick.target.document_version === null && document.isDirty)) { unavailable(); }
+            (pick.target.document_version === null && document.isDirty)) { unavailable(`${document.uri.path.split("/").at(-1)} no longer matches the captured source.`); }
         const proof = await validated(pick, document);
         const proofCurrent = (): boolean => !!proof && proof.fileEpoch === state.fileEpoch && proof.revision === payload.revision &&
           sameUri(proof.root, state.session.root.toString()) && current() && !document.isClosed && document.version === loaded &&

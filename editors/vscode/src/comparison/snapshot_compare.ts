@@ -13,6 +13,7 @@ import type { AnalysisConfiguration, AnalysisMetadata } from "../client/protocol
 import type { AnalysisSide } from "../editor/analysis_configuration";
 import { normalizeGitText } from "./git_provenance";
 import { semanticCapability } from "./semantic_view";
+import { fileLabel } from "../client/failure";
 
 interface WorkingInput { kind: "working"; input_id: string; root_uri: string; expected_revision: string; search_paths?: string[]; analysis?: AnalysisConfiguration }
 type ConfiguredHistoricalInput = HistoricalInput & { analysis?: AnalysisConfiguration };
@@ -44,11 +45,11 @@ export async function prepareAnalysisSide(service: DygnosisClient, root: vscode.
   return { kind: "working", root_uri: root.toString(), analysis: structuredClone(prepared.prepared_analysis), search_paths: [...prepared.prepared_include_paths] };
 }
 
-export async function freezeWorkingSelector(service: DygnosisClient, input: ModelSelector, token: vscode.CancellationToken): Promise<ModelSelector> {
+export async function freezeWorkingSelector(service: DygnosisClient, input: ModelSelector, token: vscode.CancellationToken, side?: DiffSide): Promise<ModelSelector> {
   if (input.kind !== "working" || input.analysis !== undefined || !service.supportsAnalysisConfiguration) return input;
   const root = vscode.Uri.parse(input.root_uri), context = await service.analysisContext(root, root, token);
   assertActive(token);
-  if (!context) throw new ComparisonFailure("INPUT_CHANGED", "The model source changed while capturing its analysis configuration. Open the comparison again.");
+  if (!context) throw new ComparisonFailure("INPUT_CHANGED", `Configuration capture for ${fileLabel(root.toString())} is no longer current. Refresh the comparison.`, side);
   return { ...input, analysis: structuredClone(context.analysis.configuration), search_paths: input.search_paths ?? context.analysis.include_paths ?? configuredSearchPaths(root, service) };
 }
 export interface CapturedComparison {
@@ -175,7 +176,7 @@ export async function captureComparison(service: DygnosisClient, git: () => Prom
   const prepare = async (side: DiffSide, selector: ModelSelector): Promise<WorkingInput | ConfiguredHistoricalInput> => {
     assertActive(token);
     if (selector.kind === "working") {
-      selector = await freezeWorkingSelector(service, selector, token);
+      selector = await freezeWorkingSelector(service, selector, token, side);
       selectors[side] = selector;
       if (selector.kind !== "working") throw new Error("The comparison root changed during capture.");
       const root = vscode.Uri.parse(selector.root_uri), info = await service.modelInfo(root, root, true, token);

@@ -280,6 +280,7 @@
     const sides = node("div", undefined, "sides"); sides.append(sidePanel(row, "before"), sidePanel(row, "after")); article.append(sides);
     const instruction = row.semantic?.expressions.find(expression => expression.field === "statement_text");
     if (row.semantic?.family === "operations" && instruction?.before && instruction.after && instruction.before.text === instruction.after.text && row.semantic.fields.some(field => field.changed && !["role", "order"].includes(field.name))) article.append(node("p", "The text is the same, but the resulting changes to the model differ.", "source-note"));
+    const notes = rowNotes(row); if (notes) article.append(notes);
     return article;
   }
   function sliceRuns(expression, start, end) {
@@ -326,12 +327,12 @@
     statement_options_text_only: null, matched_irf_expression_positions: null,
     command_list_empty_occurrences_not_retained: null, type_result_history_association: null,
     prior_function_history_unavailable: null,
-    equation_correspondence_unpaired: "Some equations could not be matched between Before and After. They are shown as Removed and Added.",
-    condition_correspondence_unpaired: "Some conditions could not be matched between Before and After. They are shown as Removed and Added.",
-    occurrence_correspondence_unpaired: "Some repeated settings could not be matched between Before and After. They are shown as Removed and Added.",
-    complementarity_unmatched: "Some conditions could only be compared as text.",
-    references_partial: "Some equations may be missing from the list.",
-    reference_limit: "Some equations may be missing from the list.",
+    equation_correspondence_unpaired: "Equation pairing unavailable; shown as Removed and Added.",
+    condition_correspondence_unpaired: "Condition pairing unavailable; shown as Removed and Added.",
+    occurrence_correspondence_unpaired: "Occurrence pairing unavailable; shown as Removed and Added.",
+    complementarity_unmatched: "Condition compared as text only.",
+    references_partial: "Equation reference list is partial.",
+    reference_limit: "Equation reference list reached its limit.",
     detail_output_partial: "This comparison is too large to show every detail. Use Text diff to review the files.",
     history_identity_unavailable: "Source text and source links are unavailable for some historical values.",
     producer_occurrence_context: "The source lines for some instructions could not be found.",
@@ -359,7 +360,9 @@
     if (/_evaluation_unavailable$/.test(code)) {
       const name = code.replace(/_evaluation_unavailable$/, "") + "_value";
       const field = detail.fields.find(field => field.name.replaceAll(".", "_") === name);
-      return field && ["before", "after"].every(side => !detail[side] || field[side].state !== "unknown") ? null : "Some expressions have no calculated value.";
+      if (field && ["before", "after"].every(side => !detail[side] || field[side].state !== "unknown")) return null;
+      const sides = field && ["before", "after"].filter(side => detail[side] && field[side].state === "unknown").map(titleCase).join(" and ");
+      return `${field?.label.replace(/: known value$/, "") ?? "Expression"}: ${sides ? `${sides} ` : ""}value unavailable; expression retained.`;
     }
     if (/_number_spelling_unavailable$/.test(code)) return "Some numbers could not be compared exactly.";
     if (/_named_operator_association_unavailable$/.test(code)) return "Some expressions have an unknown model name.";
@@ -369,11 +372,14 @@
     if (/_text_unavailable$/.test(code)) return instructionShown ? null : "The text for some values is unavailable. Use Text diff to review the files.";
     return "Some details could not be compared. Use Text diff to review the files.";
   }
-  function groupNotes(rows) {
-    const entries = rows.flatMap(row => row.semantic ? [
-      ...row.semantic.limits.map(limit => comparisonNote(row.semantic, limit)),
-      ...visibleExpressions(row.semantic).filter(expression => expression.availability !== "complete").map(expression => expression.availability === "not_available" ? "Some text could not be compared. Use Text diff to review the files." : "Some text changes are not highlighted. Use Text diff to review them."),
-    ] : payload.semantic ? ["Some details are unavailable. The available changes are shown."] : []);
+  function rowNotes(row) {
+    const entries = row.semantic ? [
+      ...row.semantic.limits.map(limit => {
+        const text = comparisonNote(row.semantic, limit);
+        return text && `${text}${limit.omitted !== null ? ` ${limit.omitted} omitted.` : ""}`;
+      }),
+      ...visibleExpressions(row.semantic).filter(expression => expression.availability !== "complete").map(expression => `${titleCase(expression.field)}: ${expression.availability === "not_available" ? "text comparison unavailable" : "highlighting is partial"}.`),
+    ] : payload.semantic ? ["Comparison details unavailable; the returned change is shown."] : [];
     const unique = new Set(entries.filter(Boolean));
     if (!unique.size) return null;
     const notes = node("aside", undefined, "group-notes"), list = node("ul", undefined, "limits"); notes.setAttribute("aria-label", "Comparison limits");
@@ -406,7 +412,6 @@
     const selected = groups.get(choices.group), rows = node("section", undefined, "group-rows"); rows.setAttribute("aria-label", selected?.label ?? "Model changes");
     if (selected) {
       for (const row of historyCards(selected.rows)) rows.append(rowDetail(row));
-      const notes = groupNotes(selected.rows); if (notes) rows.append(notes);
     } else {
       const text = ["failure", "incomplete", "loading"].includes(payload.status) ? "" : payload.rows.length ? "No changes match these filters." : payload.sourceChanges?.files.length ? "No model changes. File text differs; use Text diff." : payload.coverage?.availability !== "complete" && payload.semantic ? "No model changes shown. Some details could not be compared." : payload.status === "ready" ? "No model changes found. File text may still differ." : "Refresh to compare current files.";
       if (text) rows.append(node("p", text, "empty"));
@@ -436,16 +441,24 @@
       const summary = message.analysisSummaries?.[side], analysis = summary?.analysis;
       if (summary) {
         const configuration = analysis?.configuration ?? summary.requested_analysis;
-        const overrideChoice = (operation, name) => {
+        const names = new Map();
+        for (const receipt of analysis?.overrides ?? []) if (receipt.name) names.set(receipt.name, (names.get(receipt.name) ?? 0) + 1);
+        const overrideChoice = (operation, name, branchLabel) => {
           const label = operation.kind === "definition" ? `Macro: ${name ? `${name}=` : ""}${operation.expression}`
-            : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview";
+            : operation.kind === "skip_definition" ? `Skip ${name ?? "macro"} definition` : `Branch: ${branchLabel ?? (operation.branch_id === null ? "No branch" : "selected")}`;
           if (analysis) return label;
           const file = operation.target.file === null ? "unnamed model" : basename(operation.target.file.replaceAll("\\", "/"));
           return `${label} · ${file} · application unavailable`;
         };
         const overrideChoices = analysis?.overrides?.length
-          ? analysis.overrides.map(receipt => overrideChoice(receipt.operation, receipt.name))
-          : (configuration?.overrides ?? []).map((operation, index) => overrideChoice(operation, analysis?.override_names?.[index]));
+          ? analysis.overrides.map((receipt, index) => {
+            let choice = overrideChoice(receipt.operation, receipt.name, receipt.branch_label ?? analysis.override_branch_labels?.[index]);
+            if (receipt.name && names.get(receipt.name) > 1) choice += ` · ${basename(receipt.operation.target.file ?? "unnamed model")}${receipt.source_line ? `:${receipt.source_line}` : ""}`;
+            if (receipt.application === "applied" && !receipt.cause) return choice;
+            const state = receipt.application === "not_reached" ? "not reached" : receipt.application === "unknown" ? "application unknown" : "applied";
+            return `${choice} (${state})${receipt.cause ? ` — ${receipt.cause}` : ""}`;
+          })
+          : (configuration?.overrides ?? []).map((operation, index) => overrideChoice(operation, analysis?.override_names?.[index], analysis?.override_branch_labels?.[index]));
         const choiceLines = [
           ...(configuration?.defines ?? []).map(input => `Macro: ${input.name}=${input.expression}`),
           ...(configuration?.equation_selection ? configuration.equation_selection.values.map(value => `Equation: ${configuration.equation_selection.tag ?? "name"}='${value}' (${configuration.equation_selection.mode === "include" ? "included" : "excluded"})`) : []),
@@ -454,21 +467,13 @@
         const presetName = analysis?.selection?.name ?? configuration?.name;
         const usefulPresetName = presetName && !/^(?:Analysis preview|Macro inputs)(?: \(modified\))?$/.test(presetName) ? presetName : undefined;
         const hoverLines = [input];
+        hoverLines.push(...choiceLines);
         if (choiceLines.length) for (const choice of choiceLines) model.append(node("p", choice, "analysis-detail"));
         else if (configuration) model.append(node("p", "Source", "analysis-detail"));
         else if (!analysis) model.append(node("p", "Analysis unavailable", "analysis-detail"));
         if (usefulPresetName) hoverLines.push(usefulPresetName);
         if (summary.search_paths?.length) model.append(node("p", `Include paths: ${summary.search_paths.join(", ")}`, "analysis-detail"));
         if (summary.search_paths?.length) hoverLines.push(`Include paths: ${summary.search_paths.join(", ")}`);
-        for (const receipt of analysis?.overrides ?? []) {
-          const operation = receipt.operation, file = operation.target.file === null ? "unnamed model" : basename(operation.target.file.replaceAll("\\", "/"));
-          if (receipt.application !== "applied" || receipt.cause) {
-            const choice = operation.kind === "definition" ? `Definition override in ${file}` : operation.kind === "skip_definition" ? `Skip written definition in ${file}` : `Branch preview in ${file}`;
-            const state = receipt.application === "not_reached" ? "not reached" : receipt.application === "applied" ? "applied" : "application unknown";
-            model.append(node("p", `${choice} · ${state}${receipt.cause ? `. ${receipt.cause}` : ""}`, "analysis-detail"));
-            hoverLines.push(`${choice} · ${state}${receipt.cause ? `. ${receipt.cause}` : ""}`);
-          }
-        }
         if (summary.counts) {
           const counts = value => `${value.n_endogenous} endogenous · ${value.n_equations} ${value.n_equations === 1 ? "equation" : "equations"}`;
           hoverLines.push(`${summary.counts.heterogeneity_dimensions.length ? "Aggregate model: " : ""}${counts(summary.counts)}`);
@@ -480,8 +485,9 @@
       controls.models.append(model);
     }
     controls.status.textContent = message.message; controls.status.className = message.status; controls.refresh.disabled = message.status === "loading";
+    controls.status.setAttribute("data-code", message.failureCode ?? "");
     controls.status.hidden = message.status === "ready" && message.message === "Current comparison";
-    const path = document.getElementById("choosePath"); if (path) path.hidden = message.status !== "failure" || !/model|root|path|file|source/i.test(message.message);
+    const path = document.getElementById("choosePath"); if (path) path.hidden = message.status !== "failure" || !message.canChoosePath;
     const boundary = document.getElementById("sourceBoundary"); if (boundary) { boundary.hidden = !message.coverage; boundary.textContent = !message.coverage ? "" : message.coverage.source_boundary === "parsed_models_only" ? "File text is unavailable" : message.coverage.source_boundary.startsWith("supplied_") ? "Provided model files and the includes they use" : "Model files and the includes they use"; }
     const hasFiles = !!message.sourceChanges?.files.length;
     const root = document.getElementById("rootTextDiff"); if (root) { root.disabled = message.status !== "ready"; root.hidden = hasFiles; }

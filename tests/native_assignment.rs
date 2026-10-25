@@ -342,13 +342,11 @@ fn native_boundaries_follow_macro_output_in_execution_order() {
 fn full_archive_is_quiet_for_native_assignment_claims_on_all_transports() {
     let source =
         include_str!("../.agents/skills/use-dynare/references/examples/NK_FNL23_rep_trans.mod");
-    assert!(
-        source
-            .lines()
-            .nth(310)
-            .unwrap()
-            .contains("oo_.steady_state(8)")
-    );
+    assert!(source.lines().any(|line| {
+        line.split_once('=').is_some_and(|(left, right)| {
+            left.trim() == "steady_state_proof" && right.contains("oo_.steady_state(8)")
+        })
+    }));
     for code in ["E001", "E275"] {
         quiet(source, code);
         agree(source, code);

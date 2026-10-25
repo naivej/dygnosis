@@ -4,17 +4,14 @@ import { DygnosisClient } from "../client/client";
 import { AnalysisConfiguration, AnalysisContext, AnalysisMetadata, AnalysisOverride, EquationSelection, PresetBinding, analysisConfiguration, parseAnalysisMetadata, record } from "../client/protocol";
 import { CommandCancelled, refuse, runCommand } from "../client/refusal";
 import type { EffectivePreviewRegistry } from "./preview";
+import { automaticConfigurationName, configurationSummary } from "../client/analysis_presentation";
 
 export interface AnalysisSide { analysis: AnalysisConfiguration; include_paths: string[] | null; preset_bindings?: PresetBinding[] }
 interface Preset { name: string; root: string; analysis: AnalysisConfiguration; includePaths?: string[]; bindings: PresetBinding[] }
 interface Target { root: vscode.Uri; document: vscode.Uri; current(): boolean }
 
 export function analysisLabel(analysis: AnalysisMetadata): string {
-  const selection = analysis.selection;
-  const equationSelection = analysis.configuration.equation_selection;
-  const equationLabel = equationSelection ? `${equationSelection.mode === "include" ? "Include" : "Exclude"} ${equationSelection.tag ?? "name"}=${equationSelection.values.join(",")}` : undefined;
-  const name = selection.name ?? (equationLabel ?? (selection.preview ? "Analysis preview" : (analysis.configuration.defines?.length ?? 0) ? "Macro inputs" : "Source"));
-  return `${name}${selection.preview ? " (preview)" : ""}${analysis.state === "stale" ? " (stale)" : ""}`;
+  return `${configurationSummary({ ...analysis.configuration, name: analysis.selection.name ?? analysis.configuration.name }, analysis.include_paths)}${analysis.state === "stale" ? " (stale)" : ""}`;
 }
 export function resultAnalysis(result: unknown): AnalysisMetadata | undefined {
   if (!record(result) || result.analysis === undefined) return undefined;
@@ -93,7 +90,8 @@ export async function chooseAnalysisBaseline(root: vscode.Uri, token: vscode.Can
 function modified(context: AnalysisContext): AnalysisConfiguration {
   const choices = structuredClone(context.analysis.configuration);
   const name = context.analysis.selection.name;
-  choices.name = name ? name.endsWith(" (modified)") ? name : `${name} (modified)` : "Analysis preview";
+  if (automaticConfigurationName(name)) delete choices.name;
+  else choices.name = name!.endsWith(" (modified)") ? name! : `${name} (modified)`;
   return choices;
 }
 function replaceOverride(choices: AnalysisConfiguration, operation: AnalysisOverride): void {
@@ -125,7 +123,7 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     if (!invocation.current()) refuse("The source or chosen root changed. Request the analysis action again.");
     await service.setAnalysisConfiguration(invocation.root, side.analysis, proof, side.include_paths, side.preset_bindings, () => invocation.current());
   };
-  type Choice = vscode.QuickPickItem & { side?: AnalysisSide; action?: "save" | "input" | "include" | "exclude" | "clearEquations"; index?: number };
+  type Choice = vscode.QuickPickItem & { side?: AnalysisSide; action?: "save" | "input" | "include" | "exclude" | "clearEquations" | "clearBranches"; index?: number };
   const choose = async (invocation: Target, proof: AnalysisContext): Promise<Choice> => {
     const saved = presets(invocation.root);
     const entries: Choice[] = [
@@ -135,6 +133,8 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
       { label: "Add macro input…", action: "input", index: -1 },
       { label: "Include equations…", action: "include" }, { label: "Exclude equations…", action: "exclude" },
       ...(proof.analysis.configuration.equation_selection ? [{ label: "Clear equation selection", action: "clearEquations" as const }] : []),
+      ...(proof.analysis.configuration.overrides?.some(operation => operation.kind === "branch")
+        ? [{ label: "Clear branch previews", description: "Use source conditions", action: "clearBranches" as const }] : []),
       { label: "Save current configuration…", action: "save" },
     ];
     const pick = await vscode.window.showQuickPick(entries, { placeHolder: "Choose an analysis configuration or edit its inputs", title: `Dynare: ${analysisLabel(proof.analysis)}` });
@@ -199,29 +199,42 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     choices.equation_selection = { mode, ...selection };
     await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });
   };
-  const override = async (branch: boolean, skip = false): Promise<void> => {
+  const previewBranch = async (): Promise<void> => {
     const invocation = await target(true), proof = await context(invocation);
     const position = vscode.window.activeTextEditor!.selection.active;
-    const sites = proof.sites.filter(site => (branch ? site.kind === "conditional" : site.kind !== "conditional") &&
-      site.location.uri === invocation.document.toString() && (site.location.range.start.line <= position.line && position.line <= site.location.range.end.line ||
-        branch && site.branches.some(arm => arm.location.range.start.line <= position.line && position.line <= arm.location.range.end.line)));
-    const site = sites.length === 1 ? sites[0] : (await vscode.window.showQuickPick(sites.map(site => ({ label: site.expected_text, site })), { placeHolder: branch ? "Select the controlling conditional" : "Select the written macro definition" }))?.site;
-    if (!site) refuse(branch ? "Place the cursor on a conditional opener before previewing one of its branches." : `Place the cursor on a macro definition before ${skip ? "skipping" : "overriding"} it for analysis.`);
-    const choices = modified(proof);
-    if (branch) {
-      const pick = await vscode.window.showQuickPick([{ label: "No branch", branch_id: null as string | null }, ...site.branches.map(arm => ({ label: arm.expected_text, branch_id: arm.branch_id }))], { placeHolder: "Preview one written branch; enclosing loops and conditions still apply" });
-      if (!pick) throw new CommandCancelled();
-      replaceOverride(choices, { kind: "branch", target: site.target, branch_id: pick.branch_id });
-    } else {
-      if (site.kind === "function_definition") refuse(`Function-like macro definitions cannot be ${skip ? "skipped" : "overridden"} for analysis. Select a value definition.`);
-      if (skip) replaceOverride(choices, { kind: "skip_definition", target: site.target });
-      else {
-        const previous = choices.overrides?.find(operation => operation.target.file === site.target.file && operation.target.site_id === site.target.site_id);
-        const expression = await vscode.window.showInputBox({ prompt: "Dynare macro expression for this written definition, for example 2 or false", value: previous?.kind === "definition" ? previous.expression : "", validateInput: value => value.trim() ? undefined : "Enter a Dynare macro expression." });
-        if (expression === undefined) throw new CommandCancelled();
-        if (!expression.trim()) refuse("Enter a Dynare macro expression. Use Skip Macro Definition for Analysis to skip this definition.");
-        replaceOverride(choices, { kind: "definition", target: site.target, expression });
+    let operation: Extract<AnalysisOverride, { kind: "branch" }> | undefined;
+    for (const site of proof.sites) {
+      if (site.kind !== "conditional") continue;
+      const arm = site.branches.find(arm => arm.location.uri === invocation.document.toString() &&
+        arm.location.range.start.line <= position.line && (position.line < arm.location.range.end.line ||
+          position.line === arm.location.range.end.line && arm.location.range.end.character > 0));
+      if (arm) {
+        operation = { kind: "branch", target: site.target, branch_id: arm.branch_id };
+        break;
       }
+    }
+    if (!operation) refuse(proof.source_coverage.cause ?? "Place the cursor on a macro condition or @#else to preview that branch.");
+    const choices = modified(proof);
+    replaceOverride(choices, operation);
+    await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });
+  };
+  const override = async (skip = false): Promise<void> => {
+    const invocation = await target(true), proof = await context(invocation);
+    const position = vscode.window.activeTextEditor!.selection.active;
+    const sites = proof.sites.filter(site => site.kind !== "conditional" && site.location.uri === invocation.document.toString() &&
+      site.location.range.start.line <= position.line && position.line <= site.location.range.end.line);
+    if (!sites.length) refuse(`Place the cursor on an @#define directive before ${skip ? "skipping" : "overriding"} it for analysis. To select a conditional branch, use Dynare: Preview Macro Branch.`);
+    const site = sites.length === 1 ? sites[0] : (await vscode.window.showQuickPick(sites.map(site => ({ label: site.expected_text, site })), { placeHolder: "Select the written macro definition" }))?.site;
+    if (!site) throw new CommandCancelled();
+    const choices = modified(proof);
+    if (site.kind === "function_definition") refuse(`Function-like macro definitions cannot be ${skip ? "skipped" : "overridden"} for analysis. Select a value definition.`);
+    if (skip) replaceOverride(choices, { kind: "skip_definition", target: site.target });
+    else {
+      const previous = choices.overrides?.find(operation => operation.target.file === site.target.file && operation.target.site_id === site.target.site_id);
+      const expression = await vscode.window.showInputBox({ title: `Override ${site.name ?? "macro"} · ${path.posix.basename(invocation.document.path)}:${site.location.range.start.line + 1}`, prompt: `Source: ${site.expected_text.replace(/\s+/g, " ").slice(0, 100)}. Enter a replacement expression.`, value: previous?.kind === "definition" ? previous.expression : "", validateInput: value => value.trim() ? undefined : "Enter a macro expression." });
+      if (expression === undefined) throw new CommandCancelled();
+      if (!expression.trim()) refuse("Enter a Dynare macro expression. Use Skip Macro Definition for Analysis to skip this definition.");
+      replaceOverride(choices, { kind: "definition", target: site.target, expression });
     }
     await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });
   };
@@ -232,16 +245,18 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
       if (selected.action === "save") await save(invocation);
       else if (selected.action === "input") await inputs(invocation, proof, selected.index!);
       else if (selected.action === "include" || selected.action === "exclude") await equations(invocation, proof, selected.action);
-      else if (selected.action === "clearEquations") {
-        const choices = modified(proof); delete choices.equation_selection;
+      else if (selected.action === "clearEquations" || selected.action === "clearBranches") {
+        const choices = modified(proof);
+        if (selected.action === "clearEquations") delete choices.equation_selection;
+        else choices.overrides = choices.overrides?.filter(operation => operation.kind !== "branch");
         await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });
       } else await apply(invocation, proof, selected.side!);
     }, () => !disposed)),
     vscode.commands.registerCommand("dygnosis.resetAnalysisConfiguration", () => runCommand(service, async () => { const invocation = await target(); await apply(invocation, await context(invocation), { analysis: {}, include_paths: null }); }, () => !disposed)),
     vscode.commands.registerCommand("dygnosis.saveAnalysisConfiguration", () => runCommand(service, () => save(), () => !disposed)),
-    vscode.commands.registerCommand("dygnosis.overrideMacroDefinition", () => runCommand(service, () => override(false), () => !disposed)),
-    vscode.commands.registerCommand("dygnosis.skipMacroDefinition", () => runCommand(service, () => override(false, true), () => !disposed)),
-    vscode.commands.registerCommand("dygnosis.previewMacroBranch", () => runCommand(service, () => override(true), () => !disposed)),
+    vscode.commands.registerCommand("dygnosis.overrideMacroDefinition", () => runCommand(service, () => override(), () => !disposed)),
+    vscode.commands.registerCommand("dygnosis.skipMacroDefinition", () => runCommand(service, () => override(true), () => !disposed)),
+    vscode.commands.registerCommand("dygnosis.previewMacroBranch", () => runCommand(service, previewBranch, () => !disposed)),
   ];
   return new vscode.Disposable(() => { disposed = true; for (const registration of registrations) registration.dispose(); });
 }

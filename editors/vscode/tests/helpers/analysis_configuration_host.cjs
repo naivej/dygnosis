@@ -12,7 +12,7 @@ async function press(key, code, number, modifiers = 0) {
     await send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: number, nativeVirtualKeyCode: number, modifiers });
   });
 }
-async function choose(label, waitFor, keyboard = false, placeholder = "Select the analysis configuration for this model root") {
+async function choose(label, waitFor, keyboard = false, placeholder = "Choose an analysis configuration or edit its inputs") {
   let point;
   await waitFor(async () => {
     point = await nativeWorkbench(async send => {
@@ -79,7 +79,7 @@ async function openConfigurationFromStatus(waitFor) {
   });
   await waitFor(async () => nativeWorkbench(async send => {
     const result = await send("Runtime.evaluate", { returnByValue: true, expression:
-      "(() => { const hover=[...document.querySelectorAll('.monaco-hover .rendered-markdown')].find(item=>item.getClientRects().length && item.textContent.replaceAll(String.fromCharCode(160),' ').includes('Forced branch preview')); const link=[...hover?.querySelectorAll('a')??[]].find(item=>item.textContent==='Current config'); if(!link) return false; link.click(); return true; })()" });
+      "(() => { const hover=[...document.querySelectorAll('.monaco-hover .rendered-markdown')].find(item=>item.getClientRects().length && item.textContent.replaceAll(String.fromCharCode(160),' ').includes('Branch: @#if FLAG → @#else')); const link=[...hover?.querySelectorAll('a')??[]].find(item=>item.textContent==='Current config'); if(!link) return false; link.click(); return true; })()" });
     return result.result.value;
   }), "Current config hover link opens the configuration selector").catch(async error => {
     const state = await nativeWorkbench(async send => {
@@ -101,7 +101,7 @@ async function dismissOutcome(cause, waitFor) {
       return result.result.value;
     });
     return outcome;
-  }, "native stale-refresh outcome states its cause");
+  }, "native action outcome states its cause");
   await nativeWorkbench(async send => {
     for (const type of ["mousePressed", "mouseReleased"])
       await send("Input.dispatchMouseEvent", { type, button: "left", clickCount: 1, x: outcome.x, y: outcome.y });
@@ -140,6 +140,12 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
     });
     for (const row of rows.filter(row => !row.name.startsWith("@#")))
       assert.doesNotMatch(row.detail ?? "", /\b(?:active|inactive|mixed|unknown)\b/, `${row.name} repeats macro activity`);
+    for (const [directive, state] of [["@#if FLAG", selected ? "active" : "inactive"], ["@#else", selected ? "inactive" : "active"]]) {
+      const position = document.positionAt(source.indexOf(directive) + 3);
+      const hovers = await vscode.commands.executeCommand("vscode.executeHoverProvider", document.uri, position);
+      const text = (hovers ?? []).flatMap(hover => hover.contents.map(content => typeof content === "string" ? content : content.value)).join("\n");
+      assert.ok(text.split("\n")[0].endsWith(` · ${state}`), `${directive} hover agrees with its Outline arm: ${text}`);
+    }
   }
   await waitFor(async () => {
     const rows = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", document.uri);
@@ -157,7 +163,7 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
     dormantHover = (hovers ?? []).flatMap(hover => hover.contents.map(content => typeof content === "string" ? content : content.value)).join("\n");
     return dormantHover.includes("inactive");
   }, "native written hover reports the dormant declaration as inactive");
-  assert.match(dormantHover, /written source information/);
+  assert.doesNotMatch(dormantHover, /Written:|Model values, timing and equation numbers/);
   assert.doesNotMatch(dormantHover, /(?:Equation number|Effective equation|Binding|Timing)\s*[:#]\s*\S/i);
   const dormantDefinitions = await vscode.commands.executeCommand("vscode.executeDefinitionProvider", document.uri, dormantPosition);
   assert.deepEqual(dormantDefinitions ?? [], [], "an inactive written declaration does not invent a semantic binding");
@@ -216,14 +222,32 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   await vscode.window.showTextDocument(helper);
   await waitFor(async () => (await service.rootForDocument(helper))?.toString() === document.uri.toString(), "helper initially has its executed root");
   const editor = await vscode.window.showTextDocument(document);
-  const conditionalPosition = document.positionAt(source.indexOf("@#if FLAG"));
+  const conditionalPosition = document.positionAt(source.indexOf("@#else"));
   editor.selection = new vscode.Selection(conditionalPosition, conditionalPosition);
-  const branch = vscode.commands.executeCommand("dygnosis.previewMacroBranch");
-  await choose("@#else", waitFor, false, "Preview one written branch; enclosing loops and conditions still apply"); await branch;
+  await vscode.commands.executeCommand("dygnosis.previewMacroBranch");
   let selected = await context();
   assert.equal(selected.analysis.selection.preview, true);
   assert.equal(selected.analysis.configuration.overrides[0].kind, "branch");
+  assert.deepEqual(selected.analysis.override_branch_labels, ["@#if FLAG → @#else"]);
   await assertBranchActivity(false);
+  const branchHovers = await vscode.commands.executeCommand("vscode.executeHoverProvider", document.uri, document.positionAt(source.indexOf("y=2")));
+  const branchHover = (branchHovers ?? []).flatMap(hover => hover.contents.map(content => typeof content === "string" ? content : content.value)).join("\n");
+  assert.ok(branchHover.includes("y"), "the selected branch keeps its symbol hover");
+  assert.doesNotMatch(branchHover, /Analysis:|Analysis preview/);
+  const clearing = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
+  await choose("Clear branch previews", waitFor); await clearing;
+  assert.equal((await context()).analysis.configuration.overrides.length, 0);
+  await assertBranchActivity(true);
+  const ordinaryPosition = document.positionAt(source.indexOf("var y"));
+  editor.selection = new vscode.Selection(ordinaryPosition, ordinaryPosition);
+  const rejecting = vscode.commands.executeCommand("dygnosis.previewMacroBranch");
+  await dismissOutcome("Place the cursor on a macro condition or @#else", waitFor); await rejecting;
+  assert.equal((await context()).analysis.configuration.overrides.length, 0, "ordinary code cannot change the accepted branch selection");
+  await assertBranchActivity(true);
+  editor.selection = new vscode.Selection(conditionalPosition, conditionalPosition);
+  await vscode.commands.executeCommand("dygnosis.previewMacroBranch");
+  await assertBranchActivity(false);
+  evidence.checks.push("native directive preview opens no picker; Clear branch previews restores source activity; other cursor positions give a hint without changing the configuration");
   assert.equal(document.getText(), source, "analysis preview does not edit written macros");
   await vscode.window.showTextDocument(helper);
   assert.equal((await service.rootForDocument(helper))?.toString(), document.uri.toString(), "a dormant helper retains the chosen root");
@@ -254,7 +278,7 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   inputEvents.dispose(); analysisEvents.dispose();
   preview = vscode.window.activeTextEditor.document;
   assert.match(preview.uri.path, /Source/); assert.match(preview.getText(), /y=1/);
-  assert.match(originalPreview.uri.path, /Analysis preview/);
+  assert.match(originalPreview.uri.path, /1 branch preview/);
   assert.equal((await context()).analysis.selection.preview, false);
   await assertBranchActivity(true);
   const loading = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
@@ -281,7 +305,7 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
     } catch (error) { if (error.code === "NATIVE_FRAME_PENDING") return false; throw error; }
   }, "frozen comparison summaries are rendered");
   assert.deepEqual(evidence.analysis_comparison.sides.map(side => [side.heading, side.detail]), [
-    [["Before", "main.mod"], "Source"], [["After", "main.mod"], "Forced branch preview"],
+    [["Before", path.basename(rootPath)], "Source"], [["After", path.basename(rootPath)], "Branch: @#if FLAG → @#else"],
   ]);
   assert.ok(evidence.analysis_comparison.sides.every(side => side.title.includes("1 endogenous · 1 equation")),
     "captured model counts remain available in each input-side hover title");

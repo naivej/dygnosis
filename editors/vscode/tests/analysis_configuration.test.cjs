@@ -50,6 +50,13 @@ function setup() {
   const registration = registerAnalysisConfigurations(service, previews);
   return { document, proof, service, sessions, registration, run: name => host.commands.get(`dygnosis.${name}`)() };
 }
+function conditionalSite(env, line = 1, opener = "@#if FLAG") {
+  const location = line => ({ uri: env.document.uri.toString(), range: { start: { line, character: 0 }, end: { line, character: 20 } } });
+  return { target: { file: "/workspace/main.mod", site_id: `conditional-${line}`, source_revision: "raw-sha" }, kind: "conditional", name: null,
+    expected_text: opener, location: location(line), branches: [opener, "@#elseif OTHER", "@#else"].map((expected_text, index) => ({
+      branch_id: `${line}-arm-${index}`, expected_text, location: location(line + index * 2),
+    })) };
+}
 
 test("source and expanded selectors use one root and never apply saved startup choices", async () => {
   const env = setup();
@@ -196,6 +203,124 @@ test("invalid or cancelled expression input keeps the current configuration", as
   }
 });
 
+test("definition commands on a conditional explain the required directive without an empty picker", async () => {
+  for (const command of ["overrideMacroDefinition", "skipMacroDefinition"]) {
+    const env = setup();
+    const location = line => ({ uri: env.document.uri.toString(), range: { start: { line, character: 0 }, end: { line, character: 15 } } });
+    env.proof.sites = [
+      { target: { file: "/workspace/main.mod", site_id: "definition", source_revision: "raw-sha" }, kind: "definition", name: "FLAG", expected_text: "@#define FLAG=0", location: location(0), branches: [] },
+      { target: { file: "/workspace/main.mod", site_id: "conditional", source_revision: "raw-sha" }, kind: "conditional", name: null, expected_text: "@#if FLAG", location: location(1),
+        branches: [{ branch_id: "if-arm", expected_text: "@#if FLAG", location: location(1) }] },
+    ];
+    await env.run(command);
+    assert.equal(host.picks.length, 0, "a condition has no selectable definition; do not open a picker that accepts no value");
+    assert.equal(host.inputs.length, 0);
+    assert.equal(env.service.calls.length, 0, "a rejected action keeps the analysis configuration");
+    assert.match(host.messages.at(-1), /@#define/);
+    assert.match(host.messages.at(-1), /Dynare: Preview Macro Branch\./);
+    env.registration.dispose();
+  }
+});
+
+test("branch preview without a directive gives a cursor hint or retained source cause", async () => {
+  const env = setup();
+  await env.run("previewMacroBranch");
+  assert.equal(host.picks.length, 0);
+  assert.equal(env.service.calls.length, 0);
+  assert.match(host.messages.at(-1), /Place the cursor on a macro condition or @#else/);
+  env.proof.source_coverage = { complete: false, cause: "Source discovery stopped at its work allowance." };
+  await env.run("previewMacroBranch");
+  assert.equal(host.messages.at(-1), env.proof.source_coverage.cause);
+  env.registration.dispose();
+});
+
+test("branch directives preview their own arm without a picker and keep other choices", async () => {
+  // Guards choosing a different arm, including an enclosing conditional, from the cursor's directive.
+  for (const opener of ["@#if FLAG", "@#ifdef FLAG", "@#ifndef FLAG"]) for (const index of [0, 1, 2]) {
+    const env = setup(), site = conditionalSite(env), other = conditionalSite(env, 11, opener);
+    env.proof.sites = [site, other];
+    env.proof.analysis.configuration = { defines: [{ name: "N", expression: "2" }],
+      overrides: [{ kind: "branch", target: site.target, branch_id: null }] };
+    host.editor.selection.active = other.branches[index].location.range.start;
+    await env.run("previewMacroBranch");
+    assert.equal(host.picks.length, 0);
+    assert.deepEqual(env.service.calls[0][1].overrides, [env.proof.analysis.configuration.overrides[0],
+      { kind: "branch", target: other.target, branch_id: other.branches[index].branch_id }]);
+    assert.deepEqual(env.service.calls[0][1].defines, env.proof.analysis.configuration.defines);
+    env.registration.dispose();
+  }
+});
+
+test("branch preview elsewhere keeps the configuration without a branch picker", async () => {
+  // Guards restoring the file-wide picker from ordinary code, a branch body or its closing directive.
+  const env = setup(), first = conditionalSite(env), second = conditionalSite(env, 11, "@#if SECOND");
+  env.proof.sites = [first, second];
+  env.proof.analysis.configuration = { overrides: [{ kind: "branch", target: first.target, branch_id: first.branches[2].branch_id }] };
+  const accepted = globalThis.structuredClone(env.proof.analysis.configuration);
+  for (const line of [0, 2, 6]) {
+    host.editor.selection.active.line = line;
+    await env.run("previewMacroBranch");
+    assert.equal(host.picks.length, 0);
+    assert.equal(env.service.calls.length, 0);
+    assert.deepEqual(env.proof.analysis.configuration, accepted);
+    assert.match(host.messages.at(-1), /Place the cursor on a macro condition or @#else/);
+  }
+  env.registration.dispose();
+});
+
+test("expanded previews direct branch actions to written source without a picker", async () => {
+  const env = setup(), site = conditionalSite(env);
+  env.proof.sites = [site];
+  const expanded = { uri: uri("dygnosis-effective:/1/main.mod"), version: 1, isClosed: false };
+  env.sessions.set(expanded.uri.toString(), { root: env.document.uri });
+  host.editor = { document: expanded, selection: { active: site.branches[0].location.range.start } };
+  await env.run("previewMacroBranch");
+  assert.equal(host.picks.length, 0);
+  assert.equal(env.service.calls.length, 0);
+  assert.match(host.messages.at(-1), /Go to written source.*controlling macro directive/);
+  env.registration.dispose();
+});
+
+test("a changed source or server cannot apply a direct branch preview", async () => {
+  // Guards accepting a directive after its captured source or engine changed.
+  for (const changed of ["source", "server"]) {
+    const env = setup(); env.proof.sites = [conditionalSite(env)];
+    env.service.analysisContext = async () => {
+      if (changed === "source") ++env.document.version;
+      else ++env.service.currentInstance;
+      return env.proof;
+    };
+    await env.run("previewMacroBranch");
+    assert.equal(env.service.calls.length, 0);
+    assert.equal(host.picks.length, 0);
+    assert.match(host.messages.at(-1), /changed/);
+    env.registration.dispose();
+  }
+});
+
+test("Clear branch previews restores source conditions and preserves every other analysis input", async () => {
+  // Guards Clear removing definitions or equation selection, or keeping a forced No branch choice.
+  const env = setup(), first = conditionalSite(env), second = conditionalSite(env, 11);
+  const definition = { kind: "definition", target: { ...first.target, site_id: "define" }, expression: "3" };
+  const skipped = { kind: "skip_definition", target: { ...first.target, site_id: "skip" } };
+  env.proof.analysis.configuration = { defines: [{ name: "N", expression: "2" }], equation_selection: { mode: "exclude", tag: "name", values: ["policy"] },
+    overrides: [{ kind: "branch", target: first.target, branch_id: first.branches[1].branch_id }, definition,
+      { kind: "branch", target: second.target, branch_id: null }, skipped] };
+  env.proof.analysis.include_paths = ["/workspace/includes"];
+  host.answers.push(items => items.find(item => item.label === "Clear branch previews"));
+  await env.run("selectAnalysisConfiguration");
+  const choices = env.service.calls[0][1];
+  assert.deepEqual(choices.overrides, [definition, skipped]);
+  assert.deepEqual(choices.defines, env.proof.analysis.configuration.defines);
+  assert.deepEqual(choices.equation_selection, env.proof.analysis.configuration.equation_selection);
+  assert.deepEqual(env.service.calls[0][3], env.proof.analysis.include_paths);
+  env.proof.analysis.configuration = globalThis.structuredClone(choices);
+  host.answers.push(items => { assert.ok(!items.some(item => item.action === "clearBranches")); return undefined; });
+  await env.run("selectAnalysisConfiguration");
+  assert.equal(env.service.calls.length, 1);
+  env.registration.dispose();
+});
+
 test("definition override opens one guarded expression input; skip remains a separate command", async () => {
   const env = setup(), target = { file: "/workspace/main.mod", site_id: "guarded-definition", source_revision: "raw-sha" };
   env.proof.sites = [{ target, kind: "definition", name: "FLAG", expected_text: "@#define FLAG=0", location: { uri: env.document.uri.toString(), range: { start: { line: 1, character: 0 }, end: { line: 1, character: 15 } } }, branches: [] }];
@@ -204,7 +329,7 @@ test("definition override opens one guarded expression input; skip remains a sep
   await env.run("overrideMacroDefinition");
   assert.equal(host.picks.length, 0, "a unique definition opens its expression input without a method picker");
   assert.equal(host.inputs.length, 1); assert.equal(host.inputs[0].value, "7");
-  assert.equal(host.inputs[0].validateInput(""), "Enter a Dynare macro expression.");
+  assert.equal(host.inputs[0].validateInput(""), "Enter a macro expression.");
   assert.deepEqual(env.service.calls[0][1].overrides, [{ kind: "definition", target, expression: "8" }]);
   host.inputAnswers.push("");
   await env.run("overrideMacroDefinition");
@@ -212,10 +337,6 @@ test("definition override opens one guarded expression input; skip remains a sep
   assert.deepEqual(env.service.calls[0][1].overrides, [{ kind: "definition", target, expression: "8" }], "blank input cannot become a skip operation");
   await env.run("skipMacroDefinition");
   assert.deepEqual(env.service.calls[1][1].overrides, [{ kind: "skip_definition", target }]);
-  env.proof.sites = [{ ...env.proof.sites[0], kind: "conditional", branches: [{ branch_id: "else-arm", expected_text: "@#else", location: { uri: env.document.uri.toString(), range: { start: { line: 4, character: 0 }, end: { line: 4, character: 6 } } } }] }];
-  host.editor.selection.active.line = 4; host.answers.push(items => items[0]);
-  await env.run("previewMacroBranch");
-  assert.deepEqual(env.service.calls[2][1].overrides, [{ kind: "branch", target, branch_id: null }]);
   env.registration.dispose();
 });
 
@@ -267,6 +388,6 @@ test("baseline picker always offers written source and saved choices without cha
   host.answers.push(() => undefined);
   assert.equal(await chooseAnalysisBaseline(env.document.uri, token), undefined, "cancellation leaves the comparison baseline unset");
   assert.equal(env.service.calls.length, 0, "choosing Before does not change the active After configuration");
-  assert.equal(analysisLabel({ ...metadata(), state: "stale", selection: { ...metadata().selection, name: "Alternative", preview: true } }), "Alternative (preview) (stale)");
+  assert.equal(analysisLabel({ ...metadata(), state: "stale", selection: { ...metadata().selection, name: "Alternative", preview: true } }), "Alternative (stale)");
   env.registration.dispose();
 });

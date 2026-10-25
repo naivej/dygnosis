@@ -305,6 +305,9 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
     workspaceStatus = await status(service);
     return workspaceStatus?.complete && workspaceStatus.counts.incomplete === 1;
   }, "missing include produces one model that is not fully checked");
+  const incompletePolicy = workspaceStatus.roots.find(root => vscode.Uri.parse(root.root_uri).fsPath.toLowerCase() === policyPath.toLowerCase());
+  assert.ok(incompletePolicy, "the incomplete root uses the policy file identity");
+  assert.match(incompletePolicy.cause, /policy\.dyn:1.*missing-workspace-check\.inc/);
   const clickFilter = async title => {
     const clicked = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); const action=[...pane.querySelectorAll('.pane-header .action-label')].find(value=>(value.getAttribute('aria-label')||value.title||'').includes(${JSON.stringify(title)})); if(!action) return false; action.click(); return true; })()`);
     assert.equal(clicked, true, `native workspace toolbar contains ${title}`);
@@ -313,6 +316,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   await scrollWorkspaceTreeToTop(waitFor);
   await waitFor(async () => rowTextIncludes(await treeRows(), "policy.dyn"), "filter expands the path to the affected model");
   const filteredRows = await treeRows();
+  assert.ok(rowTextIncludes(filteredRows, "missing-workspace-check.inc"), "the affected row identifies the failed include without another model query");
   assert.ok(rowTextIncludes(filteredRows, "models") && rowTextIncludes(filteredRows, "variants"));
   for (const name of ["root.mod", "root.dyn", "same.mod", "shared.inc", "Open Dygnosis Help"])
     assert.ok(!rowTextIncludes(filteredRows, name), `${name} is absent from the affected-model list`);

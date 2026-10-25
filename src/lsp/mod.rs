@@ -91,6 +91,7 @@ struct RootReport {
     revision: String,
     errors: usize,
     warnings: usize,
+    incomplete_cause: Option<String>,
     reusable: bool,
     stamps: crate::engine::workspace::InputStamps,
     owner_files: HashSet<String>,
@@ -1035,9 +1036,20 @@ impl Backend {
         pos: &TextDocumentPositionParams,
     ) -> Option<Hover> {
         if let Some(document) = inner.document(&pos.text_document.uri) {
-            let index = LineIndex::new(&crate::engine::language::parser::normalize_newlines(
-                &document.text,
-            ));
+            let index = inner
+                .workspace
+                .source_document(
+                    pos.text_document.uri.as_str(),
+                    &crate::engine::workspace::include_resolver::normalize_uri(
+                        pos.text_document.uri.as_str(),
+                    ),
+                )
+                .map(|source| source.source_index())
+                .unwrap_or_else(|| {
+                    Arc::new(LineIndex::new(
+                        &crate::engine::language::parser::normalize_newlines(&document.text),
+                    ))
+                });
             let byte = index.offset_utf16(&document.text, span_pos(pos.position));
             if let Some(hover) = source_intelligence::hover(inner, &pos.text_document.uri, byte) {
                 return Some(hover);
@@ -1621,9 +1633,16 @@ impl Backend {
                 .is_preview()
             {
                 actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                    title: fix_title(lib), kind: Some(CodeActionKind::QUICKFIX),
-                    disabled: Some(CodeActionDisabled { reason: "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED: Diagnostic fixes are unavailable while a definition, branch or equation-selection preview is selected. Reset Analysis Configuration before requesting this edit.".into() }),
-                    diagnostics: Some(vec![row.lsp_diagnostic.clone()]), ..CodeAction::default()
+                    title: fix_title(lib),
+                    kind: Some(CodeActionKind::QUICKFIX),
+                    disabled: Some(CodeActionDisabled {
+                        reason: inner
+                            .workspace
+                            .root_analysis_configuration(row.root.as_str())
+                            .preview_edit_cause("Diagnostic fixes"),
+                    }),
+                    diagnostics: Some(vec![row.lsp_diagnostic.clone()]),
+                    ..CodeAction::default()
                 }));
                 continue;
             }
@@ -3983,6 +4002,8 @@ fn prepare_root_report(
             .1
             .push(diagnostic);
     }
+    let mut incomplete_cause: Option<(u8, String)> = None;
+    let configuration_label = analysis.display_label();
     let routes = files
         .into_iter()
         .map(|(uri, (source, diagnostics))| {
@@ -3991,15 +4012,33 @@ fn prepare_root_report(
                 .into_iter()
                 .zip(converted)
                 .map(|(diagnostic, mut item)| {
+                    let rank = match diagnostic.code.as_str() {
+                        "E061" => Some(0),
+                        "E001" => Some(1),
+                        "I211" => Some(2),
+                        _ => None,
+                    };
+                    if let Some(rank) = rank
+                        && incomplete_cause
+                            .as_ref()
+                            .is_none_or(|(prior, _)| rank < *prior)
+                    {
+                        incomplete_cause = Some((
+                            rank,
+                            format!(
+                                "{}:{} — {}",
+                                uri.path().rsplit('/').next().unwrap_or("model"),
+                                item.range.start.line + 1,
+                                item.message
+                            )
+                            .chars()
+                            .take(512)
+                            .collect(),
+                        ));
+                    }
                     if !analysis.is_source() {
-                        let name = analysis.name.as_deref().unwrap_or("Custom");
-                        let suffix = if analysis.is_preview() {
-                            " (preview)"
-                        } else {
-                            ""
-                        };
-                        item.source = Some(format!("Dygnosis · {name}{suffix}"));
-                        item.message = format!("[{name}{suffix}] {}", item.message);
+                        item.source = Some(format!("Dygnosis · {configuration_label}"));
+                        item.message = format!("[{configuration_label}] {}", item.message);
                     }
                     // Every row needs provenance for replay after a root
                     // revision notification, including ordinary checks.
@@ -4028,6 +4067,7 @@ fn prepare_root_report(
         revision,
         errors,
         warnings,
+        incomplete_cause: incomplete_cause.map(|(_, cause)| cause),
         reusable: false,
         stamps: crate::engine::workspace::InputStamps::new(),
         owner_files: HashSet::new(),
@@ -4165,8 +4205,18 @@ fn naming_action_for_root(
             Some(NumberOrString::String(code)) if code == "I209" => "Add long names",
             _ => return None,
         };
-        return Some(CodeAction {title:title.into(),kind:Some(CodeActionKind::QUICKFIX),diagnostics:Some(vec![note]),
-            disabled:Some(CodeActionDisabled{reason:"ANALYSIS_PREVIEW_EDIT_UNSUPPORTED: Diagnostic fixes are unavailable while a definition, branch or equation-selection preview is selected. Reset Analysis Configuration before requesting this edit.".into()}),..CodeAction::default()});
+        return Some(CodeAction {
+            title: title.into(),
+            kind: Some(CodeActionKind::QUICKFIX),
+            diagnostics: Some(vec![note]),
+            disabled: Some(CodeActionDisabled {
+                reason: inner
+                    .workspace
+                    .root_analysis_configuration(root.as_str())
+                    .preview_edit_cause(title),
+            }),
+            ..CodeAction::default()
+        });
     }
     if params
         .context

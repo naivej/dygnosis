@@ -28,7 +28,10 @@ pub(super) fn edit_request(
     if snapshot.model.is_analysis_preview() && tool == "dynare_auto_fix" {
         return Ok(ToolResult::refused(
             "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED",
-            "Diagnostic fixes are unavailable for a definition, branch or equation-selection analysis preview. No edits were proposed. Reset Analysis Configuration to use source editing actions.",
+            snapshot
+                .workspace
+                .root_analysis_configuration(&snapshot.root)
+                .preview_edit_cause("Diagnostic fixes"),
         ));
     }
     if snapshot.model.is_analysis_preview()
@@ -37,7 +40,10 @@ pub(super) fn edit_request(
     {
         return Ok(ToolResult::refused(
             "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED",
-            "Source action proposals are unavailable for a definition, branch or equation-selection analysis preview. No edits were proposed. Reset Analysis Configuration to use source editing actions.",
+            snapshot
+                .workspace
+                .root_analysis_configuration(&snapshot.root)
+                .preview_edit_cause("Source actions"),
         ));
     }
     crate::engine::control::run(snapshot.workspace.cancellation(), || match tool {
@@ -806,8 +812,12 @@ fn action(
     }
 }
 
-fn metadata_action(snapshot: &mut SourceSnapshot, row: &OwnedDiagnostic) -> Option<Action> {
-    let context = row.diagnostic.writing.as_ref()?;
+fn metadata_action(snapshot: &mut SourceSnapshot, row: &OwnedDiagnostic) -> Result<Action, String> {
+    let context = row
+        .diagnostic
+        .writing
+        .as_ref()
+        .ok_or("The diagnostic has no captured metadata selection.")?;
     let (kind, plan) = match row.diagnostic.code.as_str() {
         "I208" => (
             "equation_tags",
@@ -825,14 +835,14 @@ fn metadata_action(snapshot: &mut SourceSnapshot, row: &OwnedDiagnostic) -> Opti
                 context,
             )?,
         ),
-        _ => return None,
+        _ => return Err("This diagnostic has no metadata action.".into()),
     };
     let edits = plan
         .edits
         .iter()
         .map(|edit| source_edit(snapshot, &edit.file, edit.span, edit.new_text.clone()))
         .collect::<Result<Vec<_>, _>>()
-        .ok()?;
+        .map_err(|cause| format!("Metadata source edit was not prepared: {cause}"))?;
     for owner in snapshot
         .owner_roots
         .iter()
@@ -858,7 +868,7 @@ fn metadata_action(snapshot: &mut SourceSnapshot, row: &OwnedDiagnostic) -> Opti
                 }
                 _ => equation_names::long_name_plan_captured(&mut workspace, owner, context),
             };
-            if let Some(plan) = plan {
+            if let Ok(plan) = plan {
                 compatible.extend(plan.edits);
             }
         }
@@ -873,7 +883,9 @@ fn metadata_action(snapshot: &mut SourceSnapshot, row: &OwnedDiagnostic) -> Opti
                 })
             })
         {
-            return None;
+            return Err(format!(
+                "Model owner {owner} does not accept the same metadata edits."
+            ));
         }
     }
     let mut action = action(
@@ -890,7 +902,7 @@ fn metadata_action(snapshot: &mut SourceSnapshot, row: &OwnedDiagnostic) -> Opti
         let name=snapshot.model.written_declarations.iter().find(|declaration|declaration.declaration.parse_order==row.row_id).map(|declaration|snapshot.model.name(declaration.declaration.name));
         json!({"location":source,"equation_id":equation.map(|equation|super::request::equation_id(snapshot,equation)),"name":name,"reason":row.reason})
     }).collect();
-    Some(action)
+    Ok(action)
 }
 
 fn actions_request(
@@ -910,9 +922,13 @@ fn actions_request(
     let (set, rows) = owned_diagnostics(snapshot)?;
     let selected = select_diagnostics(params, snapshot, &rows)?;
     if snapshot.model.is_analysis_preview() {
-        let omitted: Vec<_> = selected.iter().filter(|row|row.diagnostic.fix.is_some() || matches!(row.diagnostic.code.as_str(),"I208"|"I209")).map(|row|json!({"diagnostic_id":row.id,"code":"ANALYSIS_PREVIEW_EDIT_UNSUPPORTED","reason":"Source action proposals are unavailable for a definition, branch or equation-selection analysis preview. Reset Analysis Configuration to use source editing actions."})).collect();
+        let cause = snapshot
+            .workspace
+            .root_analysis_configuration(&snapshot.root)
+            .preview_edit_cause("Source actions");
+        let omitted: Vec<_> = selected.iter().filter(|row|row.diagnostic.fix.is_some() || matches!(row.diagnostic.code.as_str(),"I208"|"I209")).map(|row|json!({"diagnostic_id":row.id,"code":"ANALYSIS_PREVIEW_EDIT_UNSUPPORTED","reason":cause})).collect();
         let mut result = ToolResult::new(json!({"actions":[],"omitted_actions":omitted}));
-        result.cause("partial","ANALYSIS_PREVIEW_EDIT_UNSUPPORTED","The analysis preview is read-only for source actions. No edit proposals were returned. Reset Analysis Configuration to use source editing actions.");
+        result.cause("partial", "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED", cause);
         return Ok(result);
     }
     let unsafe_macro = macro_unsafe(snapshot);
@@ -947,10 +963,9 @@ fn actions_request(
                 }
             })
         {
-            if let Some(action) = metadata_action(snapshot, row) {
-                actions.push(action);
-            } else {
-                omitted.push(json!({"diagnostic_id":row.id,"kind":if row.diagnostic.code=="I208"{"equation_tags"}else{"long_names"},"reason":"No complete metadata plan is safe for the captured source and checked owners."}));
+            match metadata_action(snapshot, row) {
+                Ok(action) => actions.push(action),
+                Err(cause) => omitted.push(json!({"diagnostic_id":row.id,"code":"METADATA_PLAN_UNAVAILABLE","file":row.file,"kind":if row.diagnostic.code=="I208"{"equation_tags"}else{"long_names"},"reason":cause})),
             }
         }
     }

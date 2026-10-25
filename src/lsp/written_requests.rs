@@ -32,6 +32,14 @@ pub(super) fn hover(source: &SourceDocument, position: Position) -> Option<Optio
     }
     let range = Some(span_range(&index, text, span));
     if macro_directive_name_with_tokens(text, byte, &inventory.macro_tokens) == Some(span) {
+        // Conditional headers need the selected arm's activity, including an active else.
+        // Other macro keywords retain source-only syntax help.
+        if ["if", "ifdef", "ifndef", "elseif", "else"]
+            .iter()
+            .any(|name| word.eq_ignore_ascii_case(name))
+        {
+            return None;
+        }
         let result =
             crate::engine::catalog::syntax::query(&crate::engine::catalog::syntax::SyntaxQuery {
                 name: Some(word.into()),

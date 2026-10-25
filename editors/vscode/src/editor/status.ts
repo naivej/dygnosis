@@ -3,6 +3,8 @@ import { DygnosisClient, isAnalysisDocument } from "../client/client";
 import { AnalysisOverride, ModelInfo } from "../client/protocol";
 import { booleanSetting, listSetting } from "../client/settings";
 import type { EffectivePreviewRegistry } from "./preview";
+import { failureText, fileLabel, reasonText } from "../client/failure";
+import { automaticConfigurationName, configurationSummary } from "../client/analysis_presentation";
 
 export const statusCounts = ["endogenous", "exogenous", "equations"];
 export type StatusCount = "endogenous" | "exogenous" | "equations";
@@ -26,28 +28,37 @@ function countLines(info: CountFacts, counts: StatusCount[]): string[] {
   });
 }
 
-function incompleteDetail(info: ModelInfo): string {
-  const reasons = new Set<string>();
+function incompleteDetail(info: ModelInfo): { detail: string; leadingCause: string } {
+  const reasons = new Map<string, string>();
   const cause = info.analysis?.cause?.message.trim();
-  if (cause) reasons.add(cause);
+  if (cause) reasons.set(cause, cause);
   for (const reason of Array.isArray(info.incomplete_reasons) ? info.incomplete_reasons : []) {
     const message = typeof reason?.message === "string" ? reason.message.trim() : "";
-    if (message) reasons.add(message);
+    if (message) reasons.set(message, reasonText({ ...reason, message }));
   }
-  if (reasons.size > 0) return [...reasons].join("\n");
-  return info.message ?? "Model expansion is incomplete.";
+  const detail = reasons.size > 0 ? [...reasons.values()].join("\n") : info.message ?? "Model expansion is incomplete.";
+  const leading = reasons.values().next().value ?? detail;
+  return { detail, leadingCause: leading.length > 512 ? leading.slice(0, 511) + "…" : leading };
 }
 
 function configurationHover(info: ModelInfo): vscode.MarkdownString {
   const analysis = info.analysis;
   const equations = analysis?.configuration.equation_selection;
-  const name = /^(?:Analysis preview|Macro inputs)(?: \(modified\))?$/.test(analysis?.selection.name ?? "") ? undefined : analysis?.selection.name;
-  const overrideChoice = (operation: AnalysisOverride, name?: string | null): string => operation.kind === "definition"
+  const name = automaticConfigurationName(analysis?.selection.name) ? undefined : analysis?.selection.name;
+  const names = new Map<string, number>();
+  for (const receipt of analysis?.overrides ?? []) if (receipt.name) names.set(receipt.name, (names.get(receipt.name) ?? 0) + 1);
+  const overrideChoice = (operation: AnalysisOverride, name?: string | null, branchLabel?: string | null): string => operation.kind === "definition"
     ? `Macro: ${name ? `${name}=` : ""}${operation.expression}`
-    : operation.kind === "skip_definition" ? "Skip written definition" : operation.branch_id === null ? "Preview no branch" : "Forced branch preview";
+    : operation.kind === "skip_definition" ? `Skip ${name ?? "macro"} definition` : `Branch: ${branchLabel ?? (operation.branch_id === null ? "No branch" : "selected")}`;
   const overrideChoices = analysis?.overrides.length
-    ? analysis.overrides.map(receipt => overrideChoice(receipt.operation, receipt.name))
-    : (analysis?.configuration.overrides ?? []).map((operation, index) => overrideChoice(operation, analysis?.override_names?.[index]));
+    ? analysis.overrides.map((receipt, index) => {
+      let choice = overrideChoice(receipt.operation, receipt.name, receipt.branch_label ?? analysis.override_branch_labels?.[index]);
+      if (receipt.name && (names.get(receipt.name) ?? 0) > 1) choice += ` · ${fileLabel(receipt.operation.target.file ?? info.root_uri)}${receipt.source_line ? `:${receipt.source_line}` : ""}`;
+      if (receipt.application === "applied" && !receipt.cause) return choice;
+      const application = receipt.application === "not_reached" ? "not reached" : receipt.application;
+      return `${choice} (${application})${receipt.cause ? ` — ${receipt.cause}` : ""}`;
+    })
+    : (analysis?.configuration.overrides ?? []).map((operation, index) => overrideChoice(operation, analysis?.override_names?.[index], analysis?.override_branch_labels?.[index]));
   const choices = [
     ...(analysis?.configuration.defines ?? []).map(input => `Macro: ${input.name}=${input.expression}`),
     ...(equations ? equations.values.map(value =>
@@ -59,12 +70,9 @@ function configurationHover(info: ModelInfo): vscode.MarkdownString {
   for (const choice of choices.length ? choices : [name ?? "Source"])
     tooltip.appendMarkdown("  \n").appendText(choice);
   if (name && choices.length) tooltip.appendMarkdown("  \n").appendText(name);
-  for (const receipt of analysis?.overrides ?? []) {
-    if (receipt.application !== "applied" || receipt.cause) tooltip.appendMarkdown("  \n").appendText(
-      `${receipt.operation.kind === "branch" ? "Branch preview" : "Definition override"}: ${receipt.application === "not_reached" ? "not reached" : receipt.application}${receipt.cause ? ` — ${receipt.cause}` : ""}`);
-  }
   if (analysis?.include_paths !== null && analysis?.include_paths !== undefined)
     tooltip.appendMarkdown("  \n").appendText(`Include paths: ${analysis.include_paths.join(", ") || "none"}`);
+  if (info.root_uri !== info.document_uri) tooltip.appendMarkdown("\n\n").appendText(`Model: ${fileLabel(info.root_uri)}`);
   if (info.complete && analysis?.cause) tooltip.appendMarkdown("\n\n").appendText(analysis.cause.message);
   tooltip.isTrusted = { enabledCommands: ["dygnosis.selectAnalysisConfiguration"] };
   return tooltip;
@@ -73,16 +81,17 @@ function configurationHover(info: ModelInfo): vscode.MarkdownString {
 /** Sum scope counts for the status bar; retain each scope's facts in the hover. */
 export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusContent {
   const analysis = info.analysis;
-  const configured = analysis && (analysis.selection.name || analysis.configuration.defines?.length ||
+  const configured = analysis && (!automaticConfigurationName(analysis.selection.name) || analysis.configuration.defines?.length ||
     analysis.configuration.overrides?.length || analysis.configuration.equation_selection || analysis.include_paths !== null);
   const label = configured ? "Current config" : "Source";
+  const spoken = analysis ? configurationSummary({ ...analysis.configuration, name: analysis.selection.name ?? analysis.configuration.name }, analysis.include_paths) : "Source";
   const tooltip = configurationHover(info);
   if (!info.complete) {
-    const detail = incompleteDetail(info);
+    const { detail, leadingCause } = incompleteDetail(info);
     return {
       text: `$(info) ${label}: ${analysis?.state === "stale" ? "source only" : "incomplete"}`,
       tooltip: tooltip.appendMarkdown("\n\n").appendText(`${detail}\nCounts are unavailable.`),
-      accessibilityLabel: `Dynare model expansion is incomplete. Counts are unavailable. ${outlineClickInstruction}`,
+      accessibilityLabel: `${fileLabel(info.root_uri)}. ${spoken}: ${leadingCause}. Counts are unavailable. ${outlineClickInstruction}`,
     };
   }
   const groups = [
@@ -96,8 +105,8 @@ export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusConte
   });
   if (shown.some(count => !validCount(count.value))) return {
     text: `$(info) ${label}: unavailable`,
-    tooltip: tooltip.appendMarkdown("\n\n").appendText("Model counts are unavailable."),
-    accessibilityLabel: `Dynare model counts are unavailable. ${outlineClickInstruction}`,
+    tooltip: tooltip.appendMarkdown("\n\n").appendText("Counts withheld: the engine returned an invalid count."),
+    accessibilityLabel: `${fileLabel(info.root_uri)}. Counts withheld: the engine returned an invalid count. ${outlineClickInstruction}`,
   };
   const report: string[] = [];
   for (const group of groups) {
@@ -113,7 +122,7 @@ export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusConte
   return {
     text: `${label}: ${shown.map(count => `$(${count.icon}) ${String(count.value)}`).join("  ")}`,
     tooltip,
-    accessibilityLabel: `Dynare model counts. Total: ${shown.map(count => `${String(count.value)} ${count.label}`).join(", ")}. ${report.join(". ")}. ${outlineClickInstruction}`,
+    accessibilityLabel: `${fileLabel(info.root_uri)}. ${spoken}. Total: ${shown.map(count => `${String(count.value)} ${count.label}`).join(", ")}. ${report.join(". ")}. ${outlineClickInstruction}`,
   };
 }
 
@@ -136,8 +145,8 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
     const activity = service.modelActivity(displayed.document.uri, displayed.root);
     content(activity ? {
       text: `$(sync~spin) Dynare: ${activity.label}…`,
-      tooltip: activity.detail,
-      accessibilityLabel: `Dynare: ${activity.label}. ${activity.pending} pending model request${activity.pending === 1 ? "" : "s"}. ${outlineClickInstruction}`,
+      tooltip: new vscode.MarkdownString().appendText(`${activity.detail}\n\n`).appendMarkdown(typeof displayed.value.tooltip === "string" ? displayed.value.tooltip : displayed.value.tooltip.value),
+      accessibilityLabel: `${fileLabel((displayed.root ?? displayed.document.uri).toString())}. ${activity.label}. ${outlineClickInstruction}`,
     } : displayed.value);
   };
   const preferences = (document: vscode.TextDocument): { enabled: boolean; counts: StatusCount[] } => ({
@@ -166,7 +175,7 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
     };
     displayed = { document, current, value: {
       text: "$(sync~spin) Dynare: updating",
-      tooltip: "Refreshing model counts…",
+      tooltip: `Model: ${fileLabel(uri)}\nRefreshing model counts…`,
       accessibilityLabel: `Dynare model counts are updating. ${outlineClickInstruction}`,
     } };
     const updateContent = (value: StatusContent): void => {
@@ -175,12 +184,10 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
       render();
     };
     render();
-    const unavailable = (): void => updateContent({
+    const unavailable = (cause: string): void => updateContent({
       text: "$(info) Dynare: unavailable",
-      tooltip: service.supportsModelInfo
-        ? "Model counts are unavailable. Choose a model root, or open Dygnosis Output for details."
-        : "Model counts are unavailable. Restart the Dygnosis language server, or use the bundled binary in Settings.",
-      accessibilityLabel: `Dynare model counts are unavailable. ${outlineClickInstruction}`,
+      tooltip: `Model: ${fileLabel((displayed?.root ?? document.uri).toString())}\nCounts unavailable — ${cause}`,
+      accessibilityLabel: `${fileLabel((displayed?.root ?? document.uri).toString())}. Counts unavailable: ${cause} ${outlineClickInstruction}`,
     });
     const update = async (): Promise<void> => {
       const root = preview?.root ?? await service.rootForDocument(document);
@@ -194,19 +201,20 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
         return;
       }
       displayed!.root = root;
+      displayed!.value.tooltip = `Model: ${fileLabel(root.toString())}\nRefreshing model counts…`;
       render();
       const client = service.client;
       const requestedDocument = preview ? root : document.uri;
       const info = await service.modelInfo(root, requestedDocument);
       if (!current() || client !== service.client) return;
-      if (!info) { unavailable(); return; }
+      if (!info) { unavailable(service.supportsModelInfo ? "The request ended without current model information. Refresh the model." : "This engine does not support model information. Use the bundled binary or update Server Path."); return; }
       if (info.root_uri !== root.toString() || info.document_uri !== requestedDocument.toString() || !preview && info.document_version !== version) {
-        unavailable(); return;
+        unavailable("The response no longer matches this model or document. Counts were withheld."); return;
       }
       updateContent(modelStatus(info, settings.counts));
     };
     void update().catch((error: unknown) => {
-      if (current()) { service.log(String(error)); unavailable(); }
+      if (current()) { service.log(String(error)); unavailable(failureText(error)); }
     });
   };
   const listeners = [

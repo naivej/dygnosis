@@ -712,7 +712,7 @@ test("direct text diff chooses captured files or root fallback and forwards the 
   env.render({ sourceChanges: null, hasHistory: true });
   assert.equal(env.elements.capturedTextDiff.hidden, true); assert.equal(env.elements.rootTextDiff.hidden, false);
   env.elements.rootTextDiff.fire("click"); assert.equal(env.posted.at(-1).type, "rootTextDiff"); assert.equal(env.posted.at(-1).token, 3);
-  assert.equal(env.elements.choosePath.hidden, true); env.render({ status: "failure", message: "Before model path is absent" }); assert.equal(env.elements.choosePath.hidden, false);
+  assert.equal(env.elements.choosePath.hidden, true); env.render({ status: "failure", message: "Before model path is absent", canChoosePath: true }); assert.equal(env.elements.choosePath.hidden, false);
   env.render({ status: "failure", message: "Unsupported comparison detail" }); assert.equal(env.elements.choosePath.hidden, true);
 });
 test("long retained values remain readable without an expander", () => {
@@ -772,7 +772,7 @@ test("diff highlight notes follow visible expressions and combine repeated cause
   env.render(snapshot); assert.equal(descendants(env.elements.results).some(element => element.className === "group-notes"), false);
   detail.expressions.pop(); env.render(snapshot);
   const notes = descendants(env.elements.results).find(element => element.className === "group-notes");
-  assert.equal(notes.textContent, "Some text changes are not highlighted. Use Text diff to review them.");
+  assert.equal(notes.textContent, "Mean: highlighting is partial.");
   assert.doesNotMatch(notes.textContent, /budget|token|Serialized/);
 });
 
@@ -784,7 +784,7 @@ test("diff calculation notes require a missing calculated value", () => {
   detail.fields.push(field); env.render(snapshot);
   assert.equal(descendants(env.elements.results).some(element => element.className === "group-notes"), false);
   field.before = { state: "unknown", value: null }; env.render(snapshot);
-  assert.equal(descendants(env.elements.results).find(element => element.className === "group-notes").textContent, "Some expressions have no calculated value.");
+  assert.equal(descendants(env.elements.results).find(element => element.className === "group-notes").textContent, "Prior mean: Before value unavailable; expression retained.");
 });
 
 // Guards per-use omission counts being presented as missing equations, and raw future reasons leaking into the view.
@@ -792,15 +792,15 @@ test("diff notes keep useful missing-detail warnings and a plain fallback", () =
   const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
   row.semantic.limits = [{ code: "references_partial", reason: "Direct local references were omitted by the comparison-wide reference limit.", omitted: 12, owner: "semantic_equations" }];
   env.render(snapshot);
-  assert.equal(descendants(env.elements.results).find(element => element.className === "group-notes").textContent, "Some equations may be missing from the list.");
+  assert.equal(descendants(env.elements.results).find(element => element.className === "group-notes").textContent, "Equation reference list is partial. 12 omitted.");
   row.semantic.limits.push({ code: "future_limit", reason: "Unknown retained producer correspondence.", omitted: 5, owner: "future" }); env.render(snapshot);
   assert.match(env.elements.results.textContent, /Some details could not be compared\. Use Text diff to review the files\./);
-  assert.doesNotMatch(env.elements.results.textContent, /12 omitted|5 omitted|producer|correspondence/);
+  assert.doesNotMatch(env.elements.results.textContent, /producer|correspondence/);
   env.elements.search.value = "not a matching name"; env.elements.search.fire("input");
   assert.equal(descendants(env.elements.results).some(element => element.className === "group-notes"), false);
 });
 
-test("repeated row limitations appear once after all changes in the selected group", () => {
+test("row limitations stay with each affected change", () => {
   const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), original = snapshot.rows[0];
   const reason = "The written copy source is retained; inherited prior or optimizer values are not resolved.", message = "Copied prior and optimizer values are not compared.";
   original.semantic.limits = [{ code: "prior_copy_effective_unavailable", reason, owner: "semantic_priors", omitted: null }];
@@ -808,9 +808,11 @@ test("repeated row limitations appear once after all changes in the selected gro
   env.render(snapshot);
   const articles = descendants(env.elements.results).filter(element => element.tag === "article");
   assert.equal(articles.length, 2); assert.ok(articles.every(article => !article.textContent.includes(reason)));
-  assert.equal(env.elements.results.textContent.split(message).length - 1, 1); assert.doesNotMatch(env.elements.results.textContent, /retained|inherited/);
-  const group = descendants(env.elements.results).find(element => element.className === "group-rows");
-  assert.equal(group.children.at(-1).className, "group-notes"); assert.equal(group.children.at(-1).textContent, message);
+  assert.equal(env.elements.results.textContent.split(message).length - 1, 2); assert.doesNotMatch(env.elements.results.textContent, /retained|inherited/);
+  assert.ok(articles.every(article => article.children.at(-1).className === "group-notes" && article.children.at(-1).textContent === message));
+  next.semantic.limits = []; env.render(snapshot);
+  const nextArticles = descendants(env.elements.results).filter(element => element.tag === "article");
+  assert.ok(nextArticles[0].textContent.includes(message)); assert.ok(!nextArticles[1].textContent.includes(message));
 });
 
 test("shock cards use captured statement text and omit its duplicate named attributes", () => {
@@ -1146,6 +1148,6 @@ test("unavailable captured text has a picker reason and cannot open a partial te
   };
   await host.open(); host.message({ type: "capturedTextDiff", token: host.last().token }); await flush();
   assert.match(host.picks.at(-1).items[0].description, /unavailable.*complete captured text/i);
-  assert.match(host.logs.at(-1), /Complete captured text is unavailable/);
+  assert.match(host.logs.at(-1), /complete captured text is unavailable/);
   assert.equal(host.calls.some(call => call.id === "vscode.diff"), false);
 });

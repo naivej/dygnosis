@@ -159,6 +159,126 @@ impl std::fmt::Display for ConfigurationError {
 impl std::error::Error for ConfigurationError {}
 
 impl AnalysisConfiguration {
+    pub fn preview_edit_cause(&self, action: &str) -> String {
+        let mut kinds = Vec::new();
+        let branches = self
+            .overrides
+            .iter()
+            .any(|operation| matches!(operation, AnalysisOverride::Branch { .. }));
+        let definitions = self
+            .overrides
+            .iter()
+            .any(|operation| !matches!(operation, AnalysisOverride::Branch { .. }));
+        if branches {
+            kinds.push("branch previews");
+        }
+        if definitions {
+            kinds.push("definition previews");
+        }
+        if self.equation_selection.is_some() {
+            kinds.push("equation selection");
+        }
+        let recovery = if definitions {
+            "Reset Analysis Configuration"
+        } else if branches && self.equation_selection.is_some() {
+            "Clear branch previews and equation selection in Analysis Configuration"
+        } else if branches {
+            "Clear branch previews in Analysis Configuration"
+        } else {
+            "Clear equation selection in Analysis Configuration"
+        };
+        format!(
+            "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED: {action} is unavailable with {}. {recovery}, then request it again. No edit proposals were returned.",
+            kinds.join(" and ")
+        )
+    }
+
+    /// Bounded display of retained choices; does not inspect or evaluate source.
+    pub fn display_label(&self) -> String {
+        fn short(text: &str) -> String {
+            let mut result: String = text.chars().take(70).collect();
+            if result.len() < text.len() {
+                result.push('…');
+            }
+            result
+        }
+        if let Some(name) = self.name.as_deref()
+            && !matches!(
+                name.trim_end_matches(" (modified)"),
+                "Analysis preview" | "Macro inputs"
+            )
+        {
+            return short(name);
+        }
+        let mut parts: Vec<_> = self
+            .defines
+            .iter()
+            .take(2)
+            .map(|input| short(&format!("{}={}", input.name, input.expression)))
+            .collect();
+        if self.defines.len() > 2 {
+            parts.push(format!("+{} macro inputs", self.defines.len() - 2));
+        }
+        let mut counts = [0usize; 3];
+        for operation in &self.overrides {
+            counts[match operation {
+                AnalysisOverride::Branch { .. } => 0,
+                AnalysisOverride::Definition { .. } => 1,
+                AnalysisOverride::SkipDefinition { .. } => 2,
+            }] += 1;
+        }
+        for (count, label) in counts.into_iter().zip([
+            "branch preview",
+            "definition override",
+            "skipped definition",
+        ]) {
+            if count > 0 {
+                parts.push(format!(
+                    "{count} {label}{}",
+                    if count == 1 { "" } else { "s" }
+                ));
+            }
+        }
+        if let Some(selection) = &self.equation_selection {
+            parts.push(short(&format!(
+                "{} {}={}{}",
+                if selection.mode == EquationSelectionMode::Include {
+                    "Include"
+                } else {
+                    "Exclude"
+                },
+                selection.tag,
+                selection
+                    .values
+                    .iter()
+                    .take(2)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(","),
+                if selection.values.len() > 2 {
+                    format!(" (+{})", selection.values.len() - 2)
+                } else {
+                    String::new()
+                }
+            )));
+        }
+        if parts.is_empty() {
+            "Source".into()
+        } else {
+            parts
+                .iter()
+                .take(2)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" · ")
+                + &if parts.len() > 2 {
+                    format!(" · +{} choices", parts.len() - 2)
+                } else {
+                    String::new()
+                }
+        }
+    }
+
     pub fn is_preview(&self) -> bool {
         !self.overrides.is_empty() || self.equation_selection.is_some()
     }
@@ -226,6 +346,10 @@ pub struct OverrideReceipt {
     pub operation: AnalysisOverride,
     /// Written macro name retained by the guarded target; conditionals have none.
     pub name: Option<String>,
+    /// Label captured when the guarded branch was accepted, including its opener.
+    pub branch_label: Option<String>,
+    /// Accepted one-based line, only when the source owner already has an index.
+    pub source_line: Option<u32>,
     pub application: OverrideApplication,
     /// Successful applications in the reached prefix, never failed attempts.
     pub known_execution_count: u64,
@@ -289,6 +413,7 @@ pub struct SourceItemAvailability {
     /// Outline control rows describe their arm, while source inspection keeps
     /// describing execution of the directive itself.
     pub(crate) control_availability: SourceAvailability,
+    pub(crate) control_cause: Option<Arc<AvailabilityCause>>,
     pub cause: Option<Arc<AvailabilityCause>>,
     pub occurrences: Vec<SourceItemOccurrence>,
 }
@@ -519,6 +644,9 @@ pub(crate) struct ResolvedOverride {
     pub directive_span: Span,
     pub name: Option<String>,
     pub branch_index: Option<usize>,
+    /// Accepted picker text, including the controlling opener for a later arm.
+    pub branch_label: Option<String>,
+    pub source_line: Option<u32>,
 }
 
 #[derive(Debug)]
@@ -751,6 +879,14 @@ pub(crate) fn resolve_override(
         budget,
         file.len()
             .saturating_add(site.expected_text.len())
+            .saturating_add(
+                branch_index.map_or(0, |index| site.branches[index].expected_text.len()),
+            )
+            .saturating_add(if matches!(operation, AnalysisOverride::Branch { .. }) {
+                16
+            } else {
+                0
+            })
             .saturating_add(target.site_id.len())
             .saturating_add(target.source_revision.len())
             .saturating_add(match operation {
@@ -759,12 +895,24 @@ pub(crate) fn resolve_override(
             })
             .saturating_add(1),
     )?;
+    let branch_label = matches!(operation, AnalysisOverride::Branch { .. }).then(|| {
+        let selected = branch_index
+            .map(|index| site.branches[index].expected_text.as_str())
+            .unwrap_or("No branch");
+        if selected == site.expected_text {
+            site.expected_text.clone()
+        } else {
+            format!("{} → {selected}", site.expected_text)
+        }
+    });
     Ok(ResolvedOverride {
         file,
         operation: operation.clone(),
         directive_span: site.directive_span,
         name: site.name.clone(),
         branch_index,
+        branch_label,
+        source_line: None,
     })
 }
 

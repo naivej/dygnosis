@@ -39,6 +39,8 @@ export interface EquationSelection { mode: "include" | "exclude"; tag?: string; 
 export interface AnalysisConfiguration { name?: string; defines?: { name: string; expression: string }[]; overrides?: AnalysisOverride[]; equation_selection?: EquationSelection }
 export interface OverrideReceipt {
   operation: AnalysisOverride; name?: string | null; application: "applied" | "not_reached" | "unknown";
+  branch_label?: string | null;
+  source_line?: number | null;
   known_execution_count: number; execution_count: number | null; cause: string | null;
 }
 export interface AnalysisMetadata {
@@ -47,6 +49,7 @@ export interface AnalysisMetadata {
   configuration: AnalysisConfiguration; selection_generation: number; include_paths: string[] | null;
   macro_complete: boolean | null; model_complete: boolean | null; overrides: OverrideReceipt[];
   override_names?: (string | null)[];
+  override_branch_labels?: (string | null)[];
   cause?: { code: string; message: string; target?: GuardedTarget } | null;
 }
 export interface DirectiveSite {
@@ -133,10 +136,14 @@ export function parseAnalysisMetadata(value: unknown): AnalysisMetadata {
       !(value.include_paths === null || strings(value.include_paths)) || ![true, false, null].includes(value.macro_complete as boolean | null) ||
       ![true, false, null].includes(value.model_complete as boolean | null) || !rows(value.overrides, row => analysisOverride(row.operation) &&
         (row.name === undefined || nullableString(row.name)) &&
+        (row.branch_label === undefined || nullableString(row.branch_label)) &&
+        (row.source_line === undefined || row.source_line === null || natural(row.source_line) && row.source_line > 0) &&
         ["applied", "not_reached", "unknown"].includes(String(row.application)) && natural(row.known_execution_count) &&
         (row.execution_count === null || natural(row.execution_count)) && nullableString(row.cause)) ||
       !(value.override_names === undefined || Array.isArray(value.override_names) && value.override_names.every(nullableString) &&
         value.override_names.length === (value.configuration.overrides?.length ?? 0)) ||
+      !(value.override_branch_labels === undefined || Array.isArray(value.override_branch_labels) && value.override_branch_labels.every(nullableString) &&
+        value.override_branch_labels.length === (value.configuration.overrides?.length ?? 0)) ||
       value.state === "stale" && (!record(value.cause) || typeof value.cause.code !== "string" || typeof value.cause.message !== "string" ||
         value.cause.target !== undefined && !guardedTarget(value.cause.target))) {
     throw new Error("Unsupported or invalid analysis configuration. Use the bundled engine or update dynare.serverPath.");

@@ -4,6 +4,7 @@ import { DygnosisClient } from "../client/client";
 import { NavigationContext, validateNavigationContext } from "./model_navigation";
 import { location, Position, Range, record } from "../client/protocol";
 import { analysisLabel, resultAnalysis } from "./analysis_configuration";
+import { reasonText } from "../client/failure";
 
 export interface EffectivePreviewSession {
   readonly uri: vscode.Uri;
@@ -38,7 +39,7 @@ export function appendMacroMessages(output: vscode.OutputChannel, result: unknow
 }
 function previewText(result: unknown): string | undefined {
   const reasons = record(result) && Array.isArray(result.incomplete_reasons)
-    ? result.incomplete_reasons.filter(record).flatMap(reason => typeof reason.message === "string" ? [reason.message] : []) : [];
+    ? result.incomplete_reasons.filter(record).flatMap(reason => typeof reason.message === "string" ? [reasonText({ message: reason.message, location: reason.location })] : []) : [];
   const explanation = reasons.length ? reasons.join("\n") : record(result) && typeof result.message === "string" ? result.message : "Complete model counts and source jumps are unavailable. Resolve the model problems and refresh.";
   return record(result) && typeof result.effective_text === "string"
     ? (result.status === "incomplete" ? `// INCOMPLETE EXPANSION — this preview is partial.\n// ${explanation.replace(/\r?\n/g, "\n// ")}\n` : "") + result.effective_text : undefined;

@@ -45,7 +45,7 @@ test("one unverified candidate still needs an explicit picker and a fresh source
   const state = setup();
   await state.invoke();
   assert.equal(host.picks.length, 1);
-  assert.match(host.picks[0][0].description, /source candidate · unverified · inactive/);
+  assert.match(host.picks[0][0].description, /declaration · inactive/);
   assert.equal(host.calls, 2);
   assert.equal(host.shown.length, 1);
   assert.equal(host.shown[0].root, undefined);

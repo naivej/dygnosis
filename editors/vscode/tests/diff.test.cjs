@@ -159,7 +159,7 @@ test("comparison headers summarize choices, abnormal receipts and heterogeneous 
   assert.match(text, /Equation: name='policy' \(excluded\)/);
   assert.match(text, /Macro: x=1/);
   assert.match(text, /Include paths: includes/);
-  assert.match(text, /Definition override in main.mod · not reached.*parent branch was not reached/);
+  assert.match(text, /Macro: x=1 \(not reached\).*parent branch was not reached/);
   assert.match(text, /Model counts are unavailable for this captured input/);
   assert.match(text, /Beforemain\.mod/);
   assert.doesNotMatch(text, /abc1234|HEAD|Policy <A>|endogenous ·|equations/);
@@ -170,6 +170,28 @@ test("comparison headers summarize choices, abnormal receipts and heterogeneous 
   assert.match(env.elements.models.children[1].textContent, /Source/);
   assert.doesNotMatch(text, /Complete|Completeness unavailable|Initial macro inputs|applied \d+ times/);
 });
+test("captured branch labels keep each application result on its own choice", () => {
+  const env = webview(), operations = ["first", "second"].map(site_id => ({ kind: "branch", target: { file: "main.mod", site_id, source_revision: "captured" }, branch_id: "else" }));
+  const analysis = { selection: { name: null, preview: true }, configuration: { overrides: operations }, overrides: operations.map((operation, index) => ({ operation, branch_label: index ? "@#if ela1" : "@#if ela → @#else", application: index ? "not_reached" : "applied", cause: index ? "The parent was not reached." : null })) };
+  env.render({ analysisSummaries: { before: { analysis, counts: { n_endogenous: 1, n_equations: 1, heterogeneity_dimensions: [] } } } });
+  const model = env.elements.models.children[0], choices = model.children.filter(child => child.className === "analysis-detail");
+  assert.equal(choices[0].textContent, "Branch: @#if ela → @#else");
+  assert.equal(choices[1].textContent, "Branch: @#if ela1 (not reached) — The parent was not reached.");
+  assert.doesNotMatch(model.textContent, /Forced branch|Branch preview in|application unknown/);
+  assert.match(model.title, /@#if ela1 \(not reached\)/);
+});
+
+test("captured repeated macro names identify their own definition lines", () => {
+  // Guards Before/After choices that cannot distinguish two definitions of one macro.
+  const env = webview(), operations = ["first", "second"].map(site_id => ({ kind: "skip_definition", target: {
+    file: "file:///workspace/settings.inc", site_id, source_revision: "captured" } }));
+  const analysis = { selection: { name: null, preview: true }, configuration: { overrides: operations },
+    overrides: operations.map((operation, index) => ({ operation, name: "FLAG", source_line: [12, 40][index], application: "applied", cause: null })) };
+  env.render({ analysisSummaries: { before: { analysis, counts: { n_endogenous: 1, n_equations: 1, heterogeneity_dimensions: [] } } } });
+  const choices = env.elements.models.children[0].children.filter(child => child.className === "analysis-detail");
+  assert.deepEqual(choices.map(choice => choice.textContent), ["Skip FLAG definition · settings.inc:12", "Skip FLAG definition · settings.inc:40"]);
+});
+
 test("incomplete comparison headers keep both choices and explain unavailable counts", () => {
   const env = webview();
   env.render({ rows: [], status: "incomplete", analysisSummaries: {

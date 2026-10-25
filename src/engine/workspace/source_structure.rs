@@ -2,6 +2,7 @@
 //! not establish execution ownership or change the effective model's coverage.
 
 use super::*;
+use crate::engine::analysis::source_inventory::SourceItemKind;
 use crate::engine::analysis::source_inventory::{SourceItem, SourcePathStep};
 use crate::engine::language::lexer::TokenKind;
 use std::mem::size_of;
@@ -694,19 +695,39 @@ impl Workspace {
                     &mut budget,
                     &mut retained_bytes,
                 )?;
+                let control_availability = if !proven {
+                    SourceAvailability::Unknown
+                } else {
+                    match (control_active, control_inactive) {
+                        (true, true) => SourceAvailability::Mixed,
+                        (true, false) => SourceAvailability::Active,
+                        (false, true) => SourceAvailability::Inactive,
+                        _ => SourceAvailability::Unknown,
+                    }
+                };
+                let control_cause = if control_availability == SourceAvailability::Unknown
+                    && state != control_availability
+                    && matches!(
+                        item.kind,
+                        SourceItemKind::Conditional | SourceItemKind::Branch
+                    ) {
+                    availability_cause(
+                        control_availability,
+                        item,
+                        &cause_context,
+                        excluded,
+                        &mut causes,
+                        &mut budget,
+                        &mut retained_bytes,
+                    )?
+                } else {
+                    cause.clone()
+                };
                 let projected = SourceItemAvailability {
                     source_id: item.source_id.clone(),
                     availability: state,
-                    control_availability: if !proven {
-                        SourceAvailability::Unknown
-                    } else {
-                        match (control_active, control_inactive) {
-                            (true, true) => SourceAvailability::Mixed,
-                            (true, false) => SourceAvailability::Active,
-                            (false, true) => SourceAvailability::Inactive,
-                            _ => SourceAvailability::Unknown,
-                        }
-                    },
+                    control_availability,
+                    control_cause,
                     cause,
                     occurrences,
                 };

@@ -10,7 +10,7 @@ warning off
 % Specify the intratemporal elasticity between green and brown sector: if ela=1, csi=1 and final output is cobb douglas
 % Specify if you are simulating a Green QE: if gqe=1, Green QE, if gqe=0, no Green QE
 % Specify if you want save bond functions: BOND=1, yes, BOND=0 no
-
+@#define ela1 =  0
 @#define ela =  0
 @#define gqe =  1
 BOND=0;
@@ -135,6 +135,9 @@ h^(phi)=w*lam;                                                         %(1)
 % Intermediated Firms
 @#if ela
 y=yG^(1-zeta)*yB^(zeta);                                                                %(5a)
+@#if ela1
+y=1;
+@#endif
 @#else
 y^((csi-1)/csi)=(1-zeta)^(1/csi)*(yG)^((csi-1)/csi)+(zeta)^(1/csi)*(yB)^((csi-1)/csi);  %(5b)
 @#endif

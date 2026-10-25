@@ -53,7 +53,7 @@ test("Outline activity choices resolve by resource and invalid values use Both",
     workspace["outline.activity"] = "invalid";
     settings = configurationSnapshot(message => logged.push(message)).dynare.configuration;
     assert.equal(settings.folders[0].settings.outline.activity, "both");
-    assert.ok(logged.includes("Invalid dynare.outline.activity; using both."));
+    assert.ok(logged.some(message => /Invalid dynare.outline.activity.*expected both, active or inactive; using both/.test(message)));
   } finally { delete globals["outline.activity"]; delete workspace["outline.activity"]; }
 });
 test("macro work settings reach each root scope and simultaneous tint changes reach the engine", () => {
@@ -110,8 +110,8 @@ test("invalid workspace values fall back or filter entries and explain the exact
     assert.equal(settings.loose.workspaceDiagnostics, true);
     assert.deepEqual(settings.loose.workspaceExcludePaths, ["valid/**"]);
     assert.deepEqual(settings.folders[0].settings.workspaceExcludePaths, []);
-    assert.ok(logged.includes("Invalid dynare.workspaceDiagnostics; using true."));
-    assert.ok(logged.includes("Invalid dynare.workspaceExcludePaths entries were ignored."));
+    assert.ok(logged.some(message => /Invalid dynare.workspaceDiagnostics.*expected true or false; using true/.test(message)));
+    assert.ok(logged.some(message => /Invalid dynare.workspaceExcludePaths.*non-string entries ignored/.test(message)));
   } finally { delete globals.workspaceDiagnostics; delete globals.workspaceExcludePaths; delete workspace.workspaceExcludePaths; }
 });
 test("one absolute executable resolver supports spaces and never selects PATH", () => {

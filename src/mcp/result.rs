@@ -36,6 +36,8 @@ pub(crate) enum Detail {
 pub(crate) struct Reason {
     pub code: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -81,7 +83,19 @@ impl ToolResult {
         self.outcome.reasons.push(Reason {
             code: code.into(),
             message: message.into(),
+            target: None,
         });
+    }
+
+    pub fn cause_for(
+        &mut self,
+        status: &str,
+        code: &str,
+        message: impl Into<String>,
+        target: Value,
+    ) {
+        self.cause(status, code, message);
+        self.outcome.reasons.last_mut().unwrap().target = Some(target);
     }
 
     pub fn refused(code: &str, message: impl Into<String>) -> Self {
@@ -106,6 +120,7 @@ impl ToolResult {
             .expect("complete wire result")
             .len()
             + 512;
+        let mut proposal_withheld = false;
         if size > OUTPUT_BYTES {
             let had_proposal = self.proposal.is_some()
                 || self
@@ -113,6 +128,7 @@ impl ToolResult {
                     .get("actions")
                     .and_then(Value::as_array)
                     .is_some_and(|a| a.iter().any(|r| r.get("proposal").is_some()));
+            proposal_withheld = had_proposal;
             self.data = Value::Null;
             self.proposal = None;
             self.selection = None;
@@ -138,8 +154,18 @@ impl ToolResult {
                 .take(32)
                 .map(|reason| reason.code.chars().take(64).collect::<String>())
                 .collect();
-            self.outcome.reasons=vec![Reason{code:"OUTPUT_LIMIT".into(),message:
-                "The result and its metadata exceed the output limit. No facts or proposal are available. Extended outcome text, input guards and coverage were omitted; original outcome codes are retained in limits. Use shorter arguments, compact detail or a smaller owner set.".into()}];
+            self.outcome.reasons = vec![Reason {
+                code: "OUTPUT_LIMIT".into(),
+                message: format!(
+                    "The result and its metadata exceed the output limit. No facts or proposal are available. Input guards and coverage were omitted; original outcome codes remain in limits. {}",
+                    if proposal_withheld {
+                        "Select a smaller action or model owner set; edit proposals cannot be paged."
+                    } else {
+                        "Use compact detail, selected sections or a smaller page."
+                    }
+                ),
+                target: None,
+            }];
             self.limits = vec![json!({"code":"OUTPUT_LIMIT","ceiling_bytes":OUTPUT_BYTES,
                 "omitted":"result rows, extended outcome text, input guards and coverage", "original_outcome_codes":original_codes})];
             return build(
@@ -291,8 +317,21 @@ impl Pages {
         let cursor = if let Some(token) = &options.continuation {
             let cursor: Cursor =
                 serde_json::from_str(token).map_err(|_| "Invalid continuation token")?;
-            if cursor.tool != tool || cursor.revision != revision || cursor.query != query {
-                return Err("INPUT_CHANGED: Continuation does not match this tool, input revision or query. Start a new first page.".into());
+            if cursor.tool != tool {
+                return Err(format!(
+                    "INPUT_CHANGED: This continuation belongs to {}, not {tool}. Start a new first page.",
+                    cursor.tool
+                ));
+            }
+            if cursor.revision != revision {
+                return Err(format!(
+                    "INPUT_CHANGED: The input revision for {tool} changed. Start a new first page."
+                ));
+            }
+            if cursor.query != query {
+                return Err(format!(
+                    "INPUT_CHANGED: The filters or output options for {tool} changed. Start a new first page."
+                ));
             }
             cursor
         } else {

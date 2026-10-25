@@ -435,6 +435,35 @@ fn forced_chain_skips_missing_guards_and_does_not_activate_empty_parent() {
 }
 
 #[test]
+fn override_receipt_borrows_only_an_existing_source_line_index() {
+    // Guards presentation starting a source scan and losing the accepted line.
+    let source = "// settings\n@#define FLAG = 0\nvar y; model; y=0; end;\n";
+    let selected = target(&mut workspace(source, &[]), "@#define FLAG = 0");
+    for indexed in [false, true] {
+        let mut ws = workspace(source, &[]);
+        assert!(ws.docs["main.mod"].source_index.get().is_none());
+        if indexed {
+            ws.docs["main.mod"].source_index();
+        }
+        ws.set_root_analysis_configuration(
+            "main.mod",
+            AnalysisConfiguration {
+                overrides: vec![AnalysisOverride::SkipDefinition {
+                    target: selected.clone(),
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(ws.docs["main.mod"].source_index.get().is_some(), indexed);
+        let metadata = ws.analysis_metadata("main.mod").unwrap();
+        let receipt = &metadata.overrides[0];
+        assert_eq!(receipt.name.as_deref(), Some("FLAG"));
+        assert_eq!(receipt.source_line, indexed.then_some(2));
+    }
+}
+
+#[test]
 fn repeated_include_receipts_count_successes_and_preserve_failed_prefix() {
     // Guards collapsing repeated include visits or counting a failed replacement
     // evaluation as an applied assignment.

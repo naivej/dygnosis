@@ -323,8 +323,14 @@ pub(super) fn advertised_tools(structured: bool) -> Vec<Tool> {
         };
         let configuration = if matches!(name,"dynare_syntax"|"dynare_diagnostic_info") {String::new()} else {
             let argument=if name=="dynare_compare_models"{"analysis_a and analysis_b"}else{"analysis"};
-            format!(" Optional {argument} supplies ordered defines, guarded definition/skip_definition/branch overrides, and equation_selection with mode=include or exclude, tag (default name), and a nonempty values list. Omission selects Source. Equation selection accepts explicit tag values only; selector files are unsupported and no selector causes a file lookup. Names label choices and do not load editor presets. Discover targets with Model Info source_structure before selecting an override. Overrides or equation selection mark an analysis preview; Rename and diagnostic-fix proposals are unavailable for previews. Equation selection follows full-source Parse and Check, then changes model membership and variable types before Transform checks. A failed selection returns its cause and withholds selected model facts. Inputs.analysis retains configuration identity, invocation scope (explicit_macro_and_equation_inputs with equation selection, explicit_macro_inputs otherwise), completeness and application receipts. Source coverage, model completeness, override application and paging are separate. Expansion text preserves pre-transform source; equation counts and origins describe the selected model only when available. Extracted fragments describe the selected configuration. No invocation settings or hooks are imported automatically.")};
-        let mut tool=Tool::new(name,format!("{description}{configuration} Tool contract 3: read data beside outcome, inputs, coverage, selection, proposal and limits. Default 25 rows share one response allowance; selection reports counts and continuation. Reuse identities or continuations with their original revision guards; changed choices, view or filters require a new first page. Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. A proposal is atomic: verify every input guard and expected_text, then apply the whole edit set with external file tools. No tool writes files or executes MATLAB/Octave."),input_schema(name))
+            format!(" Optional {argument} selects macro inputs, guarded overrides and explicit equation tag values. Omission selects Source; names do not load editor presets. Discover override targets with dynare_model_info source_structure. Overrides and equation selection create previews that withhold Rename and diagnostic-fix proposals. Equation selection follows full-source Parse and Check; failed selection withholds model facts. Read application receipts and coverage separately. Invocation settings and hooks are not imported.")};
+        let source_contract = if matches!(name,"dynare_syntax"|"dynare_diagnostic_info") { "" } else {
+            " Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. Reused identities require their original expected revision guards."
+        };
+        let edit_contract = if matches!(name,"dynare_actions"|"dynare_rename"|"dynare_format") {
+            " A proposal is atomic: verify every input guard and expected_text before applying the whole edit set with external file tools."
+        } else { "" };
+        let mut tool=Tool::new(name,format!("{description}{configuration} Read outcome and coverage beside data. Default 25 rows share one response allowance; selection reports counts and continuation. Changed inputs or filters require a new first page.{source_contract}{edit_contract} No tool writes files or executes MATLAB/Octave."),input_schema(name))
             .with_annotations(ToolAnnotations::new().read_only(true).destructive(false).idempotent(true).open_world(false));
         if structured {let mut schema=super::result::output_schema().as_ref().clone();schema["properties"]["schema_version"]=json!({"const":3});tool.output_schema=Some(Arc::new(schema));}
         tool
@@ -656,7 +662,37 @@ fn syntax(params: &Params, arguments: &Value) -> Result<CallToolResult, rmcp::Er
         json!({"forms":found.records,"available_contexts":found.available_contexts}),
     );
     if result.data["forms"].as_array().is_none_or(Vec::is_empty) && params.name.is_some() {
-        result.cause("refused",if found.known_name{"WRONG_CONTEXT"}else{"UNKNOWN_SYNTAX"},if found.known_name{"The spelling is known, but no form matches the selected kind, context and parent. Read available_contexts or remove a filter."}else{"The spelling is not in the pinned Dynare syntax records. Search or omit name to inspect the available index."});
+        let name = params.name.as_deref().unwrap_or_default();
+        let message = if found.known_name {
+            format!(
+                "No form of '{name}' matches kind={}, context={}, parent={}. Valid contexts: {}. Remove an incompatible filter.",
+                params.kind.as_deref().unwrap_or("any"),
+                params.context.as_deref().unwrap_or("any"),
+                params.parent.as_deref().unwrap_or("any"),
+                result.data["available_contexts"]
+                    .as_array()
+                    .map(|rows| rows
+                        .iter()
+                        .take(4)
+                        .map(Value::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", "))
+                    .unwrap_or_default()
+            )
+        } else {
+            format!(
+                "'{name}' is not in the pinned Dynare syntax records. Search or omit name to inspect the index."
+            )
+        };
+        result.cause(
+            "refused",
+            if found.known_name {
+                "WRONG_CONTEXT"
+            } else {
+                "UNKNOWN_SYNTAX"
+            },
+            message,
+        );
     }
     // An index returns useful form summaries. Option detail has its own exact
     // parent lookup; an exact form keeps its identity while paging its options.
@@ -799,6 +835,40 @@ pub(super) fn page_collections(path: &str, value: &mut Value, pages: &mut Pages,
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unreached_override_reasons_keep_their_captured_target_and_branch_label() {
+        // Guards associating two identical application causes with the wrong choice.
+        let text = "@#if 0\n@#if A\n@#else\n@#endif\n@#if B\n@#else\n@#endif\n@#endif\nvar y; model; y=0; end;";
+        let source = json!({"kind":"map","root":"main.mod","files":{"main.mod":text}});
+        let discovery = call(
+            "dynare_model_info",
+            json!({"source":source,"sections":["source_structure"],"page_size":100}),
+        );
+        let directives = discovery["data"]["source_structure"]["directives"]
+            .as_array()
+            .unwrap();
+        let choices: Vec<_> = directives.iter().filter(|site| matches!(site["expected_text"].as_str(),Some("@#if A"|"@#if B"))).map(|site|json!({"kind":"branch","target":site["target"],"branch_id":site["branches"][1]["branch_id"]})).collect();
+        assert_eq!(choices.len(), 2);
+        let result = call(
+            "dynare_model_info",
+            json!({"source":source,"analysis":{"overrides":choices},"sections":["summary"]}),
+        );
+        let reasons: Vec<_> = result["outcome"]["reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|reason| reason["code"] == "ANALYSIS_OVERRIDE_NOT_REACHED")
+            .collect();
+        assert_eq!(reasons.len(), 2);
+        for (index, reason) in reasons.iter().enumerate() {
+            assert_eq!(reason["target"], choices[index]["target"]);
+            assert!(reason["message"].as_str().unwrap().contains(if index == 0 {
+                "@#if A → @#else"
+            } else {
+                "@#if B → @#else"
+            }));
+        }
+    }
     const MODEL: &str = "var y; varexo e; parameters a; a=.5; model; [name='eq'] y=a*y(-1)+e; end;";
     fn source(text: &str) -> Value {
         json!({"kind":"text","text":text})

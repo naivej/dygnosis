@@ -7,6 +7,7 @@ import { CommandCancelled, refuse, runCommand } from "../client/refusal";
 export interface SourceCandidate {
   source_id: string;
   name: string;
+  kind?: string | null;
   label: "source candidate · unverified";
   availability: "active" | "inactive" | "mixed" | "unknown";
   location: Location;
@@ -28,6 +29,7 @@ export function parseSourceCandidates(value: unknown, document: vscode.TextDocum
       typeof value.message !== "string" || !Array.isArray(value.candidates) || !value.candidates.every((candidate: unknown) => {
         if (!record(candidate) || typeof candidate.source_id !== "string" || !candidate.source_id ||
             typeof candidate.name !== "string" || !candidate.name || candidate.label !== "source candidate · unverified" ||
+            !(candidate.kind === undefined || candidate.kind === null || typeof candidate.kind === "string") ||
             !["active", "inactive", "mixed", "unknown"].includes(String(candidate.availability)) || !location(candidate.location) ||
             candidate.location.uri !== document.uri.toString()) return false;
         const range = candidate.location.range;
@@ -64,9 +66,9 @@ export function registerSourceCandidates(service: Pick<DygnosisClient, "ensureSt
     const proof = parseSourceCandidates(response, document);
     if (!proof.candidates.length) refuse(proof.message);
     const pick = await vscode.window.showQuickPick(proof.candidates.map(candidate => ({
-      label: candidate.name, description: `${candidate.label} · ${candidate.availability}`,
+      label: candidate.name, description: `${candidate.kind ?? "declaration"} · ${candidate.availability === "mixed" ? "active in some expansions" : candidate.availability}`,
       detail: `${vscode.workspace.asRelativePath(document.uri)}:${String(candidate.location.range.start.line + 1)}`, candidate,
-    })), { title: "Dynare: Source candidates", placeHolder: "Choose a written declaration; this does not prove a binding" });
+    })), { title: "Dynare: Source declarations", placeHolder: "Choose a declaration; this does not establish references" });
     if (!pick) throw new CommandCancelled();
     if (!current()) refuse("The source or server changed while choosing a candidate. Request source candidates again.");
     await service.openLocation(pick.candidate.location, undefined, async target => {

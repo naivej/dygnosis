@@ -531,7 +531,7 @@ test("dependency, ownership, close, reopen, and instance changes cannot revive a
     await prepare(service, doc, fix);
     assert.equal(await command(fix.command.command, ...fix.command.arguments), false, title);
     assert.equal(host.applied.length, 0, title);
-    assert.match(host.messages.at(-1), /expired.*document, model inputs, or server changed/, title);
+    assert.match(host.messages.at(-1), /Fix E001 in a\.mod.*(?:changed|closed|restarted).*No edits were applied/, title);
     registration.dispose();
   };
   await refuse((_service, doc) => { ++doc.version; }, "document version");

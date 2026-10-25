@@ -1,4 +1,5 @@
 import { CommandCancelled, refuse, runCommand } from "./refusal";
+import { ActionFailure, responseFailure, failureText } from "./failure";
 import { spawn, ChildProcess } from "node:child_process";
 import * as vscode from "vscode";
 import {
@@ -247,8 +248,7 @@ export class DygnosisClient implements vscode.Disposable {
     if (!client || !this.documentContextSupported || this.closed || document.isClosed || this.contextLifecycles.get(key) !== lifecycle) return;
     try {
       const result: unknown = await client.sendRequest(ExecuteCommandRequest.type, { command: "dynare/setDocumentContext", arguments: [{ document_uri: key, document_version: document.version, root_uri: null }] });
-      if (record(result) && typeof result.error === "string") throw new Error(result.error);
-      if (record(result) && result.success === false && typeof result.message === "string") throw new Error(result.message);
+      if (record(result) && (typeof result.error === "string" || result.success === false && typeof result.message === "string")) throw responseFailure(result, "Clear model owner", key);
     } catch (error) {
       this.log(`The editor model choice was cleared, but diagnostics could not return to automatic context: ${String(error)}`);
     }
@@ -374,7 +374,7 @@ export class DygnosisClient implements vscode.Disposable {
     } catch (error) {
       if (!this.closed && generation === this.startGeneration) {
         this.activity.reset();
-        throw new Error(`Dygnosis could not start. Reinstall the extension or check dynare.serverPath. ${String(error)}`, { cause: error });
+        throw new ActionFailure(`Dygnosis could not start: ${failureText(error)}`, error instanceof ActionFailure ? error.code : "ENGINE_START_FAILED", error);
       }
     }
   }
@@ -419,11 +419,14 @@ export class DygnosisClient implements vscode.Disposable {
   async execute(command: string, args: unknown[], token?: vscode.CancellationToken): Promise<unknown> {
     await this.ensureStarted();
     const client = this.client;
-    if (!client) throw new Error("Dygnosis is unavailable. Open Dygnosis Output or restart the language server.");
-    if (!client.initializeResult?.capabilities.executeCommandProvider?.commands.includes(command)) throw new Error(`The selected engine does not support ${command}. Use the bundled binary or update dynare.serverPath.`);
+    if (!client) throw new ActionFailure("The language server is unavailable. Restart it.", "ENGINE_UNAVAILABLE");
+    if (!client.initializeResult?.capabilities.executeCommandProvider?.commands.includes(command)) throw new ActionFailure(`The selected engine does not support ${command}. Use the bundled binary or update Server Path.`, "ENGINE_UNSUPPORTED");
     const result: unknown = await client.sendRequest(ExecuteCommandRequest.type, { command, arguments: args }, token);
-    if (record(result) && typeof result.error === "string") throw new Error(result.error);
-    if (record(result) && result.success === false && typeof result.message === "string") throw new Error(result.message);
+    if (record(result) && (typeof result.error === "string" || result.success === false && typeof result.message === "string")) {
+      const argument = args[0], subject = record(argument) ? argument.root_uri ?? argument.document_uri : argument;
+      const labels: Record<string, string> = { "dynare/modelInfo": "Model information", "dynare/showEffectiveModel": "Macro expansion", "dynare/sourceCandidates": "Source candidates", "dynare/setAnalysisConfiguration": "Analysis configuration", "dynare/captureRename": "Rename" };
+      throw responseFailure(result, labels[command] ?? command.replace("dynare/", ""), typeof subject === "string" ? subject : undefined);
+    }
     return result;
   }
   async modelInfo(root: vscode.Uri, document = root, fresh = false, token?: vscode.CancellationToken): Promise<ModelSnapshot | undefined> {
@@ -819,11 +822,15 @@ export class DygnosisClient implements vscode.Disposable {
     const viewColumn = options?.reuseOpen ? reuseOpenViewColumn(document.uri) : options?.viewColumn;
     await vscode.window.showTextDocument(document, { viewColumn, selection });
   }
-  async failure(message: string): Promise<void> {
+  async failure(error: unknown): Promise<void> {
+    const message = failureText(error);
     this.log(message);
     if (this.reportedFailure === message) return;
     this.reportedFailure = message;
-    const action = await vscode.window.showErrorMessage(message, "Show Output", "Use bundled binary", "Open Settings", "Open Help");
+    const code = error instanceof ActionFailure ? error.code : undefined;
+    const actions = code === "ENGINE_INCOMPATIBLE" ? ["Use bundled binary", "Open Settings", "Show Output"]
+      : code === "ENGINE_PATH_UNAVAILABLE" || code === "ENGINE_UNSUPPORTED" ? ["Open Settings", "Show Output"] : ["Show Output"];
+    const action = await vscode.window.showErrorMessage(message, ...actions);
     if (action === "Show Output") this.output.show();
     else if (action === "Use bundled binary") await vscode.workspace.getConfiguration("dynare").update("serverPath", "", vscode.ConfigurationTarget.Global);
     else if (action === "Open Settings") await vscode.commands.executeCommand("workbench.action.openSettings", "@ext:CoconutWater.dygnosis dynare.serverPath");

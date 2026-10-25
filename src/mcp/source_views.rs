@@ -260,7 +260,32 @@ pub(super) fn symbols(snapshot: &SourceSnapshot, params: &Params) -> Result<Tool
         json!({"view":"source","label":"source candidates","source_item_count":structure.coverage.complete.then_some(rows.len()),"available_source_item_count":rows.len(),"candidates":rows,"source_coverage":coverage(snapshot)}),
     );
     if empty {
-        result.cause("unchanged","SOURCE_CANDIDATE_UNAVAILABLE","No recognizable literal source candidate matches this selection. Source coverage states any inspection limits; no binding or references were inferred.");
+        let label = params
+            .symbol
+            .as_deref()
+            .map(|name| format!("'{name}'"))
+            .unwrap_or_else(|| "the selected source position".into());
+        result.cause(
+            if structure.coverage.complete {
+                "unchanged"
+            } else {
+                "partial"
+            },
+            "SOURCE_CANDIDATE_UNAVAILABLE",
+            format!(
+                "No source declaration matches {label} in {}.{}",
+                params
+                    .file
+                    .as_deref()
+                    .or(snapshot.root_file.as_deref())
+                    .unwrap_or("the supplied source"),
+                if structure.coverage.complete {
+                    ""
+                } else {
+                    " Source inspection is incomplete; see source_coverage for the affected files."
+                }
+            ),
+        );
     }
     Ok(result)
 }
@@ -270,7 +295,20 @@ pub(super) fn outcomes(snapshot: &SourceSnapshot, result: &mut ToolResult) {
         && !structure.coverage.complete
         && result.outcome.status != "refused"
     {
-        result.cause("partial","SOURCE_COVERAGE_INCOMPLETE","Only available written source records are returned. Source coverage identifies files or targets that could not be inspected; model completeness is separate.");
+        let first = structure
+            .coverage
+            .unresolved_targets
+            .first()
+            .map(|target| target.cause.as_str())
+            .or_else(|| {
+                structure
+                    .coverage
+                    .indexed_files
+                    .iter()
+                    .find_map(|file| file.cause.as_deref())
+            })
+            .unwrap_or("Source inspection stopped before all requested files were indexed.");
+        result.cause("partial","SOURCE_COVERAGE_INCOMPLETE",format!("Source inspection for {} is partial: {first} Available source records are retained.",snapshot.root_file.as_deref().unwrap_or("unnamed model")));
     }
     if result.outcome.status != "refused" {
         for receipt in snapshot.inputs["analysis"]["overrides"]
@@ -279,7 +317,38 @@ pub(super) fn outcomes(snapshot: &SourceSnapshot, result: &mut ToolResult) {
             .flatten()
         {
             if receipt["application"] == "not_reached" || receipt["application"] == "unknown" {
-                result.cause("partial",if receipt["application"]=="not_reached"{"ANALYSIS_OVERRIDE_NOT_REACHED"}else{"ANALYSIS_OVERRIDE_UNKNOWN"},receipt["cause"].as_str().unwrap_or("The requested override application is unavailable; no alternate model was substituted."));
+                let operation = &receipt["operation"];
+                let label = if operation["kind"] == "branch" {
+                    format!(
+                        "Branch {}",
+                        receipt["branch_label"].as_str().unwrap_or("preview")
+                    )
+                } else {
+                    format!(
+                        "Definition {}",
+                        receipt["name"].as_str().unwrap_or("override")
+                    )
+                };
+                let file = operation["target"]["file"]
+                    .as_str()
+                    .unwrap_or("unnamed model");
+                let cause = receipt["cause"].as_str().unwrap_or(
+                    if receipt["application"] == "not_reached" {
+                        "The selected directive was not reached."
+                    } else {
+                        "Application is unknown."
+                    },
+                );
+                result.cause_for(
+                    "partial",
+                    if receipt["application"] == "not_reached" {
+                        "ANALYSIS_OVERRIDE_NOT_REACHED"
+                    } else {
+                        "ANALYSIS_OVERRIDE_UNKNOWN"
+                    },
+                    format!("{label} in {file}: {cause}"),
+                    operation["target"].clone(),
+                );
             }
         }
     }

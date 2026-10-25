@@ -11,7 +11,8 @@ type DiscoveryState = "pending" | "discovering" | "complete" | "cancelled" | "di
 export interface WorkspaceRoot {
   root_uri: string; state: RootState; revision: string | null;
   errors: number; warnings: number; failure: string | null; dependency_candidates: string[];
-  analysis?: {name: string | null; preview: boolean; source: boolean};
+  cause?: string | null;
+  analysis?: {name: string | null; label?: string; preview: boolean; source: boolean};
 }
 export interface WorkspaceStatus {
   schema_version: 1; pass_revision: number; enabled: boolean; discovery: DiscoveryState;
@@ -66,13 +67,13 @@ export function parseWorkspaceStatus(value: unknown): WorkspaceStatus {
   const rootKeys = new Set<string>();
   const roots = value.roots.map((root: unknown): WorkspaceRoot => {
     if (!record(root) || !fileUri(root.root_uri) || !states.includes(root.state as RootState) || !nullableText(root.revision) ||
-        !integer(root.errors) || !integer(root.warnings) || !nullableText(root.failure) || !Array.isArray(root.dependency_candidates) ||
+        !integer(root.errors) || !integer(root.warnings) || !nullableText(root.failure) || !(root.cause === undefined || nullableText(root.cause)) || !Array.isArray(root.dependency_candidates) ||
         !root.dependency_candidates.every(fileUri)) return invalid();
     const key = identity(vscode.Uri.parse(root.root_uri));
     if (rootKeys.has(key)) return invalid(); rootKeys.add(key);
-    if (root.analysis !== undefined && (!record(root.analysis) || !nullableText(root.analysis.name) || typeof root.analysis.preview !== "boolean" || typeof root.analysis.source !== "boolean")) return invalid();
+    if (root.analysis !== undefined && (!record(root.analysis) || !nullableText(root.analysis.name) || !(root.analysis.label === undefined || typeof root.analysis.label === "string") || typeof root.analysis.preview !== "boolean" || typeof root.analysis.source !== "boolean")) return invalid();
     return { root_uri: root.root_uri, state: root.state as RootState, revision: root.revision, errors: root.errors,
-      warnings: root.warnings, failure: root.failure, dependency_candidates: root.dependency_candidates, analysis: root.analysis as WorkspaceRoot["analysis"] };
+      warnings: root.warnings, failure: root.failure, cause: root.cause, dependency_candidates: root.dependency_candidates, analysis: root.analysis as WorkspaceRoot["analysis"] };
   });
   if (states.some(state => roots.filter(root => root.state === state).length !== counts[state])) return invalid();
   if (value.non_default_roots !== undefined && (!integer(value.non_default_roots) || value.non_default_roots !== roots.filter(root => root.state !== "excluded" && root.analysis?.source === false).length)) return invalid();
@@ -127,7 +128,11 @@ export function workspaceStatusContent(status: WorkspaceStatus): StatusContent {
   else { label = `${counts.checked}/${selected} checked`; icon = "check"; }
   const rows: [string, number][] = [["Checked", counts.checked]];
   const notFullyChecked = counts.incomplete + counts.failed;
-  if (notFullyChecked) rows.push(["Not fully checked", notFullyChecked]);
+  if (notFullyChecked) {
+    rows.push(["Not fully checked", notFullyChecked]);
+    if (counts.incomplete) rows.push(["Incomplete", counts.incomplete]);
+    if (counts.failed) rows.push(["Failed", counts.failed]);
+  }
   if (counts.excluded) rows.push(["Excluded", counts.excluded]);
   const notes: string[] = [];
   if (status.non_default_roots) notes.push(`${status.non_default_roots} root model${status.non_default_roots === 1 ? " uses" : "s use"} a non-default analysis configuration.`);
@@ -138,7 +143,10 @@ export function workspaceStatusContent(status: WorkspaceStatus): StatusContent {
       notes.push(`Cancelled.${remaining ? ` ${remaining} model${remaining === 1 ? " was" : "s were"} not checked.` : ""} Completed results remain. Checks resume after a file edit/change or Recheck.`);
     }
     const failures = status.discovery_failures.length;
-    if (failures) notes.push(`Could not read ${failures} folder${failures === 1 ? "" : "s"}. The model list may be incomplete.`);
+    if (failures) {
+      const first = status.discovery_failures[0];
+      notes.push(`${vscode.Uri.parse(first.folder_uri).path}: ${first.failure}${failures > 1 ? ` (${failures - 1} more folder failures)` : ""} The model list may be incomplete.`);
+    }
   }
   const tooltip = new vscode.MarkdownString("**Models in workspace**\n\n");
   if (status.enabled) {
@@ -198,10 +206,11 @@ function treeRows(status: WorkspaceStatus, currentFolders: readonly vscode.Works
       const detail = `${root.state === "checked" ? "Checked" : root.state[0].toUpperCase() + root.state.slice(1)}${root.state === "checked" ? ` · ${diagnostics(root.errors, "Error")}, ${diagnostics(root.warnings, "Warning")}` : ""}`;
       const item = new WorkspaceItem(keyFor(uri), label, root.state === "failed" || root.state === "incomplete" ? "warning" :
         root.state === "checked" ? root.errors ? "error" : "check" : root.state === "checking" ? "sync~spin" : root.state === "excluded" ? "circle-slash" : "clock");
-      const analysis = root.analysis && !root.analysis.source ? ` · ${root.analysis.name ?? "Custom"}${root.analysis.preview ? " (preview)" : ""}` : "";
-      item.resourceUri = uri; item.description = detail + analysis;
-      item.tooltip = `${uri.fsPath}\n${detail}${analysis}${root.failure ? `\n${root.failure}` : ""}`;
-      item.accessibilityInformation = { label: `${label}. ${detail}${analysis}` };
+      const analysis = root.analysis && !root.analysis.source ? ` · ${root.analysis.label ?? root.analysis.name ?? "Custom configuration"}` : "";
+      const cause = root.failure ?? (root.state === "incomplete" ? root.cause : undefined);
+      item.resourceUri = uri; item.description = detail + analysis + (cause ? ` — ${cause}` : "");
+      item.tooltip = `${uri.fsPath}\n${detail}${analysis}${cause ? `\n${cause}` : ""}`;
+      item.accessibilityInformation = { label: `${label}. ${detail}${analysis}${cause ? `. ${cause}` : ""}` };
       item.command = { command: "vscode.open", title: "Open model", arguments: [uri] };
       addFile(uri, item);
     }

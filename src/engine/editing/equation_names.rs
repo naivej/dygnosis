@@ -64,13 +64,14 @@ pub(crate) fn equation_name_plan_captured(
     ws: &mut Workspace,
     root: &str,
     context: &WritingContext,
-) -> Option<NameTagPlan> {
+) -> Result<NameTagPlan, String> {
     let WritingRows::Equations(rows) = &context.rows else {
-        return None;
+        return Err("The diagnostic does not select equation rows.".into());
     };
-    captured_context_is_current(ws, root, context)
-        .then(|| equation_name_plan_rows(ws, root, rows))
-        .flatten()
+    if !captured_context_is_current(ws, root, context) {
+        return Err("The diagnostic's source revision or model owner changed.".into());
+    }
+    equation_name_plan_rows_result(ws, root, rows)
 }
 
 fn captured_context_is_current(ws: &mut Workspace, root: &str, context: &WritingContext) -> bool {
@@ -87,8 +88,22 @@ fn captured_context_is_current(ws: &mut Workspace, root: &str, context: &Writing
 }
 
 fn equation_name_plan_rows(ws: &mut Workspace, uri: &str, rows: &[usize]) -> Option<NameTagPlan> {
-    let model = ws.get_effective_model(uri)?.clone();
-    let report = ws.expand_report(uri)?.clone();
+    equation_name_plan_rows_result(ws, uri, rows).ok()
+}
+
+fn equation_name_plan_rows_result(
+    ws: &mut Workspace,
+    uri: &str,
+    rows: &[usize],
+) -> Result<NameTagPlan, String> {
+    let model = ws
+        .get_effective_model(uri)
+        .ok_or("The captured model is unavailable.")?
+        .clone();
+    let report = ws
+        .expand_report(uri)
+        .ok_or("The captured macro origins are unavailable.")?
+        .clone();
     let mut sources = BTreeMap::<String, String>::new();
     for origin in &report.origins {
         let Some(file) = origin.origin_uri.as_deref() else {
@@ -102,7 +117,8 @@ fn equation_name_plan_rows(ws: &mut Workspace, uri: &str, rows: &[usize]) -> Opt
         }
     }
     let plan = plan_edits(&model, &report, &sources, rows)?;
-    collision_safe(ws, uri, &plan.edits).then_some(plan)
+    collision_safe(ws, uri, &plan.edits)?;
+    Ok(plan)
 }
 
 fn plan_edits(
@@ -110,8 +126,9 @@ fn plan_edits(
     report: &ExpandReport,
     sources: &BTreeMap<String, String>,
     row_ids: &[usize],
-) -> Option<NameTagPlan> {
-    let (aggregate, heterogeneous) = counted_rows(model, report)?;
+) -> Result<NameTagPlan, String> {
+    let (aggregate, heterogeneous) = counted_rows(model, report)
+        .ok_or("Equation counts do not match the captured source origins.")?;
     let selected: HashSet<_> = row_ids.iter().copied().collect();
     let mut shared: HashMap<(String, u32, u32), usize> = HashMap::new();
     for row in aggregate.iter().chain(&heterogeneous) {
@@ -132,7 +149,11 @@ fn plan_edits(
             ));
             continue;
         }
-        let file = row.origin.origin_uri.as_deref()?;
+        let file = row
+            .origin
+            .origin_uri
+            .as_deref()
+            .ok_or("The equation has no written source file.")?;
         let Some(source) = sources.get(file) else {
             skipped += 1;
             skipped_rows.push(skipped_equation(
@@ -156,7 +177,8 @@ fn plan_edits(
     let mut edits = Vec::new();
     for (row, file, source) in sites {
         let name = allocate(&taken);
-        let (span, new_text) = tag_edit(source, row.origin.written_span, &name)?;
+        let (span, new_text) = tag_edit(source, row.origin.written_span, &name)
+            .ok_or("The equation tag slot could not be verified.")?;
         taken.insert(name);
         edits.push(NameTagEdit {
             file: file.to_string(),
@@ -165,14 +187,18 @@ fn plan_edits(
         });
     }
     if edits.is_empty() {
-        return None;
+        return Err(skipped_rows
+            .first()
+            .map(|row| row.reason)
+            .unwrap_or("The selected equations have no missing name tags.")
+            .into());
     }
     let title = if skipped == 0 {
         "Add equation tags".to_string()
     } else {
         format!("Add equation tags ({skipped} skipped)")
     };
-    Some(NameTagPlan {
+    Ok(NameTagPlan {
         title,
         edits,
         skipped,
@@ -347,15 +373,21 @@ fn apply_edits(ws: &mut Workspace, edits: &[NameTagEdit]) -> Option<()> {
     Some(())
 }
 
-fn collision_safe(ws: &mut Workspace, root: &str, edits: &[NameTagEdit]) -> bool {
+fn collision_safe(ws: &mut Workspace, root: &str, edits: &[NameTagEdit]) -> Result<(), String> {
     let before = collision_counts(ws, root);
     let mut candidate = ws.snapshot_with_root_settings(root);
     if apply_edits(&mut candidate, edits).is_none() {
-        return false;
+        return Err("The metadata edits could not be applied to the captured source.".into());
     }
-    collision_counts(&mut candidate, root)
-        .iter()
-        .all(|(message, count)| *count <= before.get(message).copied().unwrap_or(0))
+    if let Some((message, _)) = collision_counts(&mut candidate, root)
+        .into_iter()
+        .find(|(message, count)| *count > before.get(message).copied().unwrap_or(0))
+    {
+        return Err(format!(
+            "The proposed equation tags introduce a conflict: {message}"
+        ));
+    }
+    Ok(())
 }
 
 fn collision_counts(ws: &mut Workspace, root: &str) -> BTreeMap<String, usize> {
@@ -383,25 +415,36 @@ pub(crate) fn long_name_plan(
     {
         return None;
     }
-    long_name_plan_rows(ws, root, rows)
+    long_name_plan_rows(ws, root, rows).ok()
 }
 
 pub(crate) fn long_name_plan_captured(
     ws: &mut Workspace,
     root: &str,
     context: &WritingContext,
-) -> Option<NameTagPlan> {
+) -> Result<NameTagPlan, String> {
     let WritingRows::Declarations(rows) = &context.rows else {
-        return None;
+        return Err("The diagnostic does not select declaration rows.".into());
     };
-    captured_context_is_current(ws, root, context)
-        .then(|| long_name_plan_rows(ws, root, rows))
-        .flatten()
+    if !captured_context_is_current(ws, root, context) {
+        return Err("The diagnostic's source revision or model owner changed.".into());
+    }
+    long_name_plan_rows(ws, root, rows)
 }
 
-fn long_name_plan_rows(ws: &mut Workspace, root: &str, rows: &[usize]) -> Option<NameTagPlan> {
-    let model = ws.get_effective_model(root)?.clone();
-    let report = ws.expand_report(root)?.clone();
+fn long_name_plan_rows(
+    ws: &mut Workspace,
+    root: &str,
+    rows: &[usize],
+) -> Result<NameTagPlan, String> {
+    let model = ws
+        .get_effective_model(root)
+        .ok_or("The captured model is unavailable.")?
+        .clone();
+    let report = ws
+        .expand_report(root)
+        .ok_or("The captured declaration origins are unavailable.")?
+        .clone();
     let selected: HashSet<_> = rows.iter().copied().collect();
     let mut edits = Vec::new();
     let mut skipped = 0;
@@ -493,14 +536,18 @@ fn long_name_plan_rows(ws: &mut Workspace, root: &str, rows: &[usize]) -> Option
         }
     }
     if edits.is_empty() {
-        return None;
+        return Err(skipped_rows
+            .first()
+            .map(|row| row.reason)
+            .unwrap_or("The selected declarations have no missing long_name values.")
+            .into());
     }
     let title = if skipped == 0 {
         "Add long names".to_string()
     } else {
         format!("Add long names ({skipped} skipped)")
     };
-    Some(NameTagPlan {
+    Ok(NameTagPlan {
         title,
         edits,
         skipped,
@@ -951,7 +998,7 @@ pub(crate) fn metadata_completion(
             }
         };
         let completion = site.completion(&file, &value);
-        if collision_safe(ws, root, std::slice::from_ref(&completion.edit)) {
+        if collision_safe(ws, root, std::slice::from_ref(&completion.edit)).is_ok() {
             return Some(completion);
         }
     }
@@ -1409,6 +1456,34 @@ fn cursor_in_comment(source: &str, cursor: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn captured_metadata_refusal_retains_the_failed_source_or_revision_check() {
+        // Guards discarding the reason when every generated declaration is uneditable.
+        let root = "C:/metadata/context/root.mod";
+        let mut workspace = Workspace::new();
+        workspace.update_document(root, "@#define NAME=\"y\"\nvar @{NAME};\nmodel; y=0; end;");
+        let set = crate::engine::diagnostics::check_in_workspace_with_origins(&mut workspace, root);
+        let context = set
+            .diagnostics
+            .iter()
+            .find(|note| note.code == "I209")
+            .and_then(|note| note.writing.as_ref())
+            .unwrap();
+        let cause = long_name_plan_captured(&mut workspace, root, context)
+            .err()
+            .expect("generated name must withhold its metadata edit");
+        assert!(
+            cause.contains("generated") || cause.contains("verified written name"),
+            "{cause}"
+        );
+        let mut stale = context.clone();
+        stale.input_revision = "changed".into();
+        let cause = long_name_plan_captured(&mut workspace, root, &stale)
+            .err()
+            .unwrap();
+        assert!(cause.contains("revision"), "{cause}");
+    }
 
     #[test]
     fn literal_model_leaf_completion_does_not_inject_metadata_proofs() {

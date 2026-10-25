@@ -27,8 +27,8 @@ pub(super) const IDENTIFIER: &str = symbols::IDENTIFIER.message;
 pub(super) const WRITABLE: &str = "A Rename target is unavailable or read-only. Make every affected source writable and try again.";
 pub(super) const PREVIEW: &str = "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED: Rename is unavailable while a definition, branch or equation-selection analysis preview is selected. No edits were proposed. Reset Analysis Configuration before requesting Rename.";
 
-pub(super) fn refusal_json(reason: &'static str) -> Value {
-    json!({"error":reason,"code":if reason==PREVIEW{"ANALYSIS_PREVIEW_EDIT_UNSUPPORTED"}else{"RENAME_REFUSED"}})
+pub(super) fn refusal_json(reason: String) -> Value {
+    json!({"error":reason,"code":if reason.starts_with("ANALYSIS_PREVIEW_EDIT_UNSUPPORTED:"){"ANALYSIS_PREVIEW_EDIT_UNSUPPORTED"}else{"RENAME_REFUSED"}})
 }
 
 pub(super) struct Decision {
@@ -37,36 +37,33 @@ pub(super) struct Decision {
     roots: Vec<Url>,
 }
 
-pub(super) fn capture(
-    inner: &mut Inner,
-    root: &Url,
-) -> std::result::Result<SemanticModel, &'static str> {
+pub(super) fn capture(inner: &mut Inner, root: &Url) -> std::result::Result<SemanticModel, String> {
     #[cfg(test)]
     CAPTURE_COUNT.with(|captures| captures.set(captures.get() + 1));
     let revision = inner.root_revision(root).ok_or(SOURCE)?;
     SemanticModel::capture(&mut inner.workspace, root.as_str(), revision)
-        .map_err(|reason| reason.message)
+        .map_err(|reason| reason.message.to_owned())
 }
 
 pub(super) fn decide(
     inner: &mut Inner,
     pos: &TextDocumentPositionParams,
     new_name: Option<&str>,
-) -> std::result::Result<Decision, &'static str> {
+) -> std::result::Result<Decision, String> {
     let uri = &pos.text_document.uri;
     let doc = inner.document(uri).ok_or(SOURCE)?;
     let text = doc.text.clone();
     let version = doc.version;
     let byte = source_index(&text).offset_utf16(&text, span_pos(pos.position));
     if inner.context_ambiguous(uri) {
-        return Err("Choose a model owner before requesting Rename for this file.");
+        return Err("Choose a model owner before requesting Rename for this file.".into());
     }
     let mut roots = inner.context_roots(uri);
     if roots.is_empty() && (is_model_root(uri) || uri.scheme() == "untitled") {
         roots.push(uri.clone());
     }
     if roots.is_empty() || !matches!(uri.scheme(), "file" | "untitled") {
-        return Err("Rename requires a file or untitled source with a known model owner.");
+        return Err("Rename requires a file or untitled source with a known model owner.".into());
     }
     // The displayed context selects the binding and its collision scope. Every
     // known owner still has to accept edits to these same written bytes.
@@ -83,7 +80,10 @@ pub(super) fn decide(
             .root_analysis_configuration(root.as_str())
             .is_preview()
         {
-            return Err(PREVIEW);
+            return Err(inner
+                .workspace
+                .root_analysis_configuration(root.as_str())
+                .preview_edit_cause("Rename"));
         }
         views.push(capture(inner, root)?);
     }
@@ -102,7 +102,7 @@ pub(super) fn decide(
         .ok_or(MAPPING)?;
     let replacement = new_name.unwrap_or(&binding.name);
     if new_name.is_some() && replacement == binding.name {
-        return Err("The requested name is already the current name.");
+        return Err("The requested name is already the current name.".into());
     }
     // The first owner identifies the binding. Each known owner at the selected
     // source must accept it before the shared operation can include that owner.
@@ -118,15 +118,26 @@ pub(super) fn decide(
             || other.definition != binding.definition
             || other.dimension != binding.dimension
         {
-            return Err(symbols::BINDING.message);
+            return Err(symbols::BINDING.message.into());
         }
     }
     let proposal = loop {
         let proposal = symbols::rename(&views, 0, &binding, replacement).map_err(|reason| {
             if reason.code == "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED" {
-                PREVIEW
+                roots
+                    .iter()
+                    .find_map(|root| {
+                        let choices = inner.workspace.root_analysis_configuration(root.as_str());
+                        choices.is_preview().then(|| {
+                            choices.preview_edit_cause(&format!(
+                                "Rename for {}",
+                                root.path().rsplit('/').next().unwrap_or("model")
+                            ))
+                        })
+                    })
+                    .unwrap_or_else(|| PREVIEW.into())
             } else {
-                reason.message
+                reason.message.to_owned()
             }
         })?;
         let mut additional = Vec::new();
@@ -152,7 +163,7 @@ pub(super) fn decide(
         if !sources.contains_key(&edit.file) {
             let target_uri = naming_edit_url(inner, &roots[0], &edit.file).ok_or(MAPPING)?;
             if !matches!(target_uri.scheme(), "file" | "untitled") {
-                return Err(WRITABLE);
+                return Err(WRITABLE.into());
             }
             if target_uri.scheme() == "file" {
                 match target_uri.to_file_path() {
@@ -160,12 +171,14 @@ pub(super) fn decide(
                         Ok(metadata)
                             if !metadata.is_file() || metadata.permissions().readonly() =>
                         {
-                            return Err(WRITABLE);
+                            return Err(WRITABLE.into());
                         }
-                        Err(_) if inner.document(&target_uri).is_none() => return Err(SOURCE),
+                        Err(_) if inner.document(&target_uri).is_none() => {
+                            return Err(SOURCE.into());
+                        }
                         _ => {}
                     },
-                    Err(_) if inner.document(&target_uri).is_none() => return Err(MAPPING),
+                    Err(_) if inner.document(&target_uri).is_none() => return Err(MAPPING.into()),
                     _ => {}
                 }
             }
@@ -183,7 +196,7 @@ pub(super) fn decide(
         if source.get(edit.span.start as usize..edit.span.end as usize)
             != Some(edit.expected.as_str())
         {
-            return Err(STALE);
+            return Err(STALE.into());
         }
         changes
             .entry(target_uri.clone())
@@ -201,13 +214,13 @@ pub(super) fn decide(
             crate::engine::workspace::include_resolver::normalize_uri(target.as_str()) != *file
         })
     {
-        return Err(STALE);
+        return Err(STALE.into());
     }
     for (root, view) in roots.iter().zip(&views) {
         if inner.root_revision(root).as_ref() != Some(&view.revision)
             || !inner.workspace.input_snapshot_is_current(root.as_str())
         {
-            return Err(STALE);
+            return Err(STALE.into());
         }
     }
     Ok(Decision {
@@ -300,7 +313,7 @@ pub(super) fn references(
 pub(super) fn capture_command(
     inner: &mut Inner,
     arguments: &[Value],
-) -> std::result::Result<Value, &'static str> {
+) -> std::result::Result<Value, String> {
     let params: RenameParams = serde_json::from_value(
         arguments
             .first()
@@ -309,13 +322,13 @@ pub(super) fn capture_command(
     )
     .map_err(|_| "captureRename requires valid Rename arguments")?;
     if !is_legal_ident(&params.new_name) {
-        return Err(IDENTIFIER);
+        return Err(IDENTIFIER.into());
     }
     let pos = &params.text_document_position;
     let decision = decide(inner, pos, Some(&params.new_name))?;
     let (edit, roots) = (decision.edit, decision.roots);
     let DocumentChanges::Edits(documents) = edit.document_changes.as_ref().ok_or(SOURCE)? else {
-        return Err(MAPPING);
+        return Err(MAPPING.into());
     };
     let mut source_uris: HashSet<Url> = documents
         .iter()
@@ -340,7 +353,7 @@ pub(super) fn capture_command(
         let text = inner.workspace.get_source(uri.as_str()).ok_or(SOURCE)?;
         bytes = bytes.checked_add(text.len()).ok_or(SOURCE)?;
         if bytes > crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES {
-            return Err("Rename capture exceeds the 16 MiB source limit.");
+            return Err("Rename capture exceeds the 16 MiB source limit.".into());
         }
         sources.push(json!({ "uri": uri, "text": text, "version": inner.document(&uri).map(|document| document.version) }));
     }
@@ -350,7 +363,7 @@ pub(super) fn capture_command(
             json!({ "root_uri": root, "revision": inner.root_revision(&root).ok_or(SOURCE)? }),
         );
         if !inner.workspace.input_snapshot_is_current(root.as_str()) {
-            return Err(STALE);
+            return Err(STALE.into());
         }
     }
     owners.sort_by(|left, right| left["root_uri"].as_str().cmp(&right["root_uri"].as_str()));

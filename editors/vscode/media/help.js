@@ -41,7 +41,11 @@
     if (query) {
       const words = query.split(/\s+/);
       const found = topics.filter(topic => words.every(word => `${topic.title} ${topic.keywords.join(' ')} ${topic.markdown}`.toLowerCase().includes(word))).slice(0, 50);
-      controls.results.append(node('p', found.length ? `${found.length} matching ${found.length === 1 ? 'topic' : 'topics'}` : 'No results. Try a feature name, command, setting key or diagnostic code.'));
+      controls.results.append(node('p', found.length ? `${found.length} matching ${found.length === 1 ? 'topic' : 'topics'}` : `No Help results for “${state.query.trim()}”.`));
+      if (!found.length) {
+        const clear = node('button', 'Clear search'); clear.type = 'button';
+        clear.addEventListener('click', () => { controls.search.value = ''; search(); controls.search.focus(); }); controls.results.append(clear);
+      }
       for (const topic of found) {
         const button = node('button', topic.title); button.type = 'button'; button.addEventListener('click', () => open(topic.id));
         const text = topic.markdown.replace(/[#`*[\]]/g, ' ').replace(/\s+/g, ' '), position = text.toLowerCase().indexOf(words[0]);

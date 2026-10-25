@@ -184,12 +184,34 @@ pub(crate) fn extract_prepared(
         return Ok(unsupported(kind, detail));
     }
     if hits.is_empty() {
-        let explanation = match &request.dimension {
+        let scope = match &request.dimension {
             Some(dimension) => {
-                format!("No equation matched the selectors in dimension `{dimension}`.")
+                format!(" in dimension `{dimension}`")
             }
-            None => "No equation matched the selectors.".to_string(),
+            None => String::new(),
         };
+        let filters = request
+            .names
+            .iter()
+            .take(3)
+            .map(|name| format!("name='{name}'"))
+            .chain(
+                request
+                    .tags
+                    .iter()
+                    .take(3)
+                    .map(|(tag, value)| format!("{tag}='{value}'")),
+            )
+            .collect::<Vec<_>>()
+            .join(", ");
+        let explanation = format!(
+            "No equation matched the selectors{scope}: {}.",
+            if filters.is_empty() {
+                "selected equation identity or index"
+            } else {
+                &filters
+            }
+        );
         return Ok(ExtractResult {
             status: ExtractStatus::Empty,
             fragment: Some(String::new()),

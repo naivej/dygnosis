@@ -5,6 +5,7 @@ import { DocumentDiagnosticRequest, Middleware, WorkspaceDiagnosticRequest, Work
 import { DygnosisClient, isAnalysisDocument } from "../client/client";
 import { record } from "../client/protocol";
 import { booleanSetting } from "../client/settings";
+import { fileLabel } from "../client/failure";
 
 type PushNext = NonNullable<Middleware["handleDiagnostics"]> extends
   (uri: vscode.Uri, diagnostics: vscode.Diagnostic[], next: infer Next) => void ? Next : never;
@@ -55,6 +56,15 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
   const pulled = new Map<string, RawSet>();
   const actionContexts = new Map<string, ActionContext>();
   const pendingEdits = new Map<string, PendingEdit>();
+  // Keep only bounded display receipts after discarding obsolete edit payloads.
+  const retiredEdits = new Map<string, string>();
+  const retireEdit = (key: string, cause: string): void => {
+    const saved = pendingEdits.get(key); if (!saved) return;
+    const subject = `Fix ${saved.diagnostics.map(diagnosticCode).filter(Boolean).join(", ")} in ${fileLabel(saved.documentUri)}`;
+    if (retiredEdits.size >= 128) retiredEdits.delete(retiredEdits.keys().next().value!);
+    retiredEdits.set(key, `${subject}: ${cause}`.slice(0, 512)); pendingEdits.delete(key);
+  };
+  const retireAll = (cause: string): void => { for (const key of pendingEdits.keys()) retireEdit(key, cause); };
   const progressSubscriptions = new Set<vscode.Disposable>();
   const middleware = service.middleware;
   const previousPush = middleware.handleDiagnostics;
@@ -79,7 +89,7 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
   const syncInstance = (): void => {
     if (instance === service.currentInstance) return;
     instance = service.currentInstance;
-    pushed.clear(); pulled.clear(); actionContexts.clear(); pendingEdits.clear();
+    pushed.clear(); pulled.clear(); actionContexts.clear(); retireAll("The engine stopped or restarted.");
   };
   const refresh = (): void => {
     syncInstance();
@@ -124,7 +134,7 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
       const key = target.toString();
       for (const [id, saved] of pendingEdits) {
         if (saved.documentUri !== key || saved.diagnostics.length === 0) continue;
-        if (!saved.diagnostics.every(diagnostic => items.some(item => sameDiagnostic(item, diagnostic)))) pendingEdits.delete(id);
+        if (!saved.diagnostics.every(diagnostic => items.some(item => sameDiagnostic(item, diagnostic)))) retireEdit(id, "The selected diagnostics changed.");
       }
       pushed.set(key, { uri: target, items, version: versionFor(target), next });
       next(target, visible(items));
@@ -263,19 +273,22 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
   middleware.provideWorkspaceDiagnostics = workspacePull;
   middleware.provideCodeActions = actions;
 
-  const currentEdit = (saved: PendingEdit): boolean => {
-    if (disposed || saved.instance !== service.currentInstance || saved.folder !== folderGeneration) return false;
+  const editCause = (saved: PendingEdit): string | undefined => {
+    if (disposed) return "The editor action closed.";
+    if (saved.instance !== service.currentInstance) return "The engine stopped or restarted.";
+    if (saved.folder !== folderGeneration) return "Workspace folders changed.";
     const document = documentFor(vscode.Uri.parse(saved.documentUri));
-    if (!document || document.version !== saved.documentVersion) return false;
+    if (!document || document.version !== saved.documentVersion) return `${fileLabel(saved.documentUri)} changed or closed.`;
     for (const [key, offered] of saved.versions) {
       const open = documentFor(vscode.Uri.parse(key));
-      if (offered === null) { if (open) return false; }
-      else if (!open || open.version !== offered) return false;
+      if (offered === null) { if (open) return `${fileLabel(key)} opened after the fix was prepared.`; }
+      else if (!open || open.version !== offered) return `${fileLabel(key)} changed or closed.`;
     }
-    if (saved.diagnostics.length === 0) return true;
+    if (saved.diagnostics.length === 0) return undefined;
     const raw = currentRaw(document.uri);
-    if (!raw || raw.version !== document.version) return false;
-    return saved.diagnostics.every(diagnostic => !hiddenCodes.has(diagnosticCode(diagnostic) ?? "") && raw.items.some(item => sameDiagnostic(item, diagnostic)));
+    if (!raw || raw.version !== document.version) return "Current diagnostics are unavailable.";
+    if (!saved.diagnostics.every(diagnostic => !hiddenCodes.has(diagnosticCode(diagnostic) ?? "") && raw.items.some(item => sameDiagnostic(item, diagnostic)))) return "The selected diagnostics changed or were hidden.";
+    return undefined;
   };
   const savedAction = (argument: unknown): ActionContext | undefined => {
     if (typeof argument !== "object" || argument === null || !("diagnosticAction" in argument) || typeof argument.diagnosticAction !== "string") return undefined;
@@ -288,7 +301,12 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
       const key = typeof argument === "object" && argument !== null && "diagnosticEdit" in argument && typeof argument.diagnosticEdit === "string" ? argument.diagnosticEdit : undefined;
       const saved = key ? pendingEdits.get(key) : undefined;
       if (key) pendingEdits.delete(key);
-      if (!saved || !currentEdit(saved)) refuse("The diagnostic fix expired because its document, model inputs, or server changed. Request the fix again.");
+      if (!saved) {
+        const cause = key && retiredEdits.get(key); if (key) retiredEdits.delete(key);
+        refuse(`${cause || "The diagnostic fix is no longer current."} No edits were applied. Request it from the current Problems list.`);
+      }
+      const cause = editCause(saved);
+      if (cause) refuse(`Fix ${saved.diagnostics.map(diagnosticCode).filter(Boolean).join(", ")} in ${fileLabel(saved.documentUri)} stopped: ${cause} No edits were applied. Request the fix again.`);
       const applied = await vscode.workspace.applyEdit(saved.edit) === true;
       if (!applied) refuse("VS Code did not apply the diagnostic fix. Check that its source is writable and request the fix again.");
       return true;
@@ -299,7 +317,7 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
       if (!booleanSetting("diagnosticActions.ignore", saved.uri, true, service.log)) refuse("Ignore check is disabled by dynare.diagnosticActions.ignore.");
       hiddenCodes.add(code);
       for (const [id, pending] of pendingEdits) {
-        if (pending.diagnostics.some(diagnostic => diagnosticCode(diagnostic) === code)) pendingEdits.delete(id);
+        if (pending.diagnostics.some(diagnostic => diagnosticCode(diagnostic) === code)) retireEdit(id, `Check ${code} was hidden.`);
       }
       refresh();
     }, () => !disposed)),
@@ -315,12 +333,12 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       ++folderGeneration;
       pushed.clear(); pulled.clear();
-      hiddenCodes.clear(); actionContexts.clear(); pendingEdits.clear(); refresh();
+      hiddenCodes.clear(); actionContexts.clear(); retireAll("Workspace folders changed."); refresh();
     }),
     vscode.workspace.onDidCloseTextDocument(document => {
       const key = document.uri.toString();
       for (const [id, saved] of actionContexts) if (saved.uri.toString() === key) actionContexts.delete(id);
-      for (const [id, saved] of pendingEdits) if (saved.documentUri === key || saved.versions.has(key)) pendingEdits.delete(id);
+      for (const [id, saved] of pendingEdits) if (saved.documentUri === key || saved.versions.has(key)) retireEdit(id, `${fileLabel(key)} closed.`);
       pushed.delete(document.uri.toString()); pulled.delete(document.uri.toString());
     }),
     service.onDidInvalidate(event => {
@@ -328,10 +346,10 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
       // changed alone, so only that following changed may keep proved edits.
       revisionConfirmedChange = true;
       queueMicrotask(() => { revisionConfirmedChange = false; });
-      if (event.reason === "file" || event.inputRevision === undefined) pendingEdits.clear();
+      if (event.reason === "file" || event.inputRevision === undefined) retireAll(event.reason === "lifecycle" ? "The engine stopped or restarted." : event.uri ? `${fileLabel(event.uri)} changed.` : "Model inputs changed.");
       else for (const [key, saved] of pendingEdits) {
         const contradicted = saved.roots.some(row => row.root === event.root && row.revision !== event.inputRevision);
-        if (saved.roots.length === 0 || contradicted) pendingEdits.delete(key);
+        if (saved.roots.length === 0 || contradicted) retireEdit(key, "The model input revision changed.");
       }
       // Input changes can leave the document version unchanged. A server
       // notification follows its push; preserve facts from that same revision.
@@ -352,11 +370,11 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
       ++inputGeneration; actionContexts.clear(); syncInstance();
       const followedInvalidation = revisionConfirmedChange;
       revisionConfirmedChange = false;
-      if (!followedInvalidation) pendingEdits.clear();
+      if (!followedInvalidation) retireAll("The selected model owner or context changed.");
     }),
   ];
   return vscode.Disposable.from(...registrations, new vscode.Disposable(() => {
-    disposed = true; hiddenCodes.clear(); pushed.clear(); pulled.clear(); actionContexts.clear(); pendingEdits.clear();
+    disposed = true; hiddenCodes.clear(); pushed.clear(); pulled.clear(); actionContexts.clear(); pendingEdits.clear(); retiredEdits.clear();
     for (const subscription of progressSubscriptions) subscription.dispose();
     progressSubscriptions.clear();
     if (middleware.handleDiagnostics === push) middleware.handleDiagnostics = previousPush;

@@ -5,6 +5,8 @@ const outputRoot = path.resolve(__dirname, "../../out");
 const moduleFiles = Object.freeze({
   activity: "client/activity",
   analysis_configuration: "editor/analysis_configuration",
+  analysis_presentation: "client/analysis_presentation",
+  failure: "client/failure",
   source_candidates: "editor/source_candidates",
   binary: "client/binary",
   captured_text: "comparison/captured_text",

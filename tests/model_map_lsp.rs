@@ -737,8 +737,8 @@ async fn outline_control_activity_handles_empty_nested_and_repeated_arms() {
         (7, "inactive"),
         (8, "inactive"),
         (11, "active"),
-        (12, "mixed"),
-        (13, "mixed"),
+        (12, "active in some expansions"),
+        (13, "active in some expansions"),
         (16, "inactive"),
         (17, "inactive"),
     ] {
@@ -769,7 +769,7 @@ async fn outline_control_activity_handles_empty_nested_and_repeated_arms() {
     assert!(
         visible
             .iter()
-            .any(|row| row.detail.as_deref() == Some("mixed"))
+            .any(|row| row.detail.as_deref() == Some("active in some expansions"))
     );
     let child = url("control-activity.inc");
     open(server, &child, "@#if k\n@#else\n@#endif\n").await;
@@ -783,7 +783,7 @@ async fn outline_control_activity_handles_empty_nested_and_repeated_arms() {
         symbols(server, &child)
             .await
             .iter()
-            .all(|row| row.detail.as_deref() == Some("mixed"))
+            .all(|row| row.detail.as_deref() == Some("active in some expansions"))
     );
     open(server, &root, "@#if MISSING\n@#else\n@#endif\n").await;
     let unknown = symbols(server, &root).await;

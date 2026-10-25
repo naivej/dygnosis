@@ -271,7 +271,7 @@ test("root/version/restart changes while a picker is open refuse the old equatio
 test("dependency/settings revision changes and missing current identities refuse navigation", async () => {
   const env = setup(); await flush();
   env.service.revalidate = async () => undefined; env.host.answers.push(items => items[0]); await env.run("jumpToEquation");
-  assert.equal(env.service.jumps.length, 0); assert.match(env.host.messages.at(-1), /model changed/);
+  assert.equal(env.service.jumps.length, 0); assert.match(env.host.messages.at(-1), /Equation 1 \[Euler\].*no longer current/);
   env.service.revalidate = async () => facts(env.doc, { equations: [equation("replacement")] });
   env.host.answers.push(items => items[0]); await env.run("jumpToEquation"); assert.equal(env.service.jumps.length, 0); env.registration.dispose();
 });
@@ -279,7 +279,7 @@ test("owner changes during the fresh revision request refuse the old target", as
   const env = setup(); await flush(); const fresh = deferred(); env.service.revalidate = () => fresh.promise;
   env.host.answers.push(items => items[0]); const pending = env.run("jumpToEquation"); await flush();
   env.service.root = uri("file:///workspace/changed.mod"); fresh.resolve(facts(env.doc)); await pending;
-  assert.equal(env.service.jumps.length, 0); assert.match(env.host.messages.at(-1), /model changed/); env.registration.dispose();
+  assert.equal(env.service.jumps.length, 0); assert.match(env.host.messages.at(-1), /Equation 1 \[Euler\].*no longer current/); env.registration.dispose();
 });
 test("source edits, focus, ownership, restart, and dependency revisions during source loading refuse the jump", async () => {
   for (const change of ["source", "focus", "owner", "restart", "dependency"]) {
@@ -349,6 +349,6 @@ test("dyn and untitled roots preserve their original URI during navigation", asy
 test("no written location means no guessed anchor, segment, or equation-text jump", async () => {
   const env = setup(); env.service.info = () => facts(env.doc, { equations: [equation("unmapped", { location: null })] }); await flush();
   env.host.answers.push(items => items[0]); await env.run("jumpToEquation");
-  assert.match(env.host.picks[0].items[0].description, /Source unavailable/);
-  assert.match(env.host.messages.at(-1), /verified written location is unavailable/); assert.equal(env.service.jumps.length, 0); env.registration.dispose();
+  assert.match(env.host.picks[0].items[0].description, /No single source location/);
+  assert.match(env.host.messages.at(-1), /no single verified source location/); assert.equal(env.service.jumps.length, 0); env.registration.dispose();
 });

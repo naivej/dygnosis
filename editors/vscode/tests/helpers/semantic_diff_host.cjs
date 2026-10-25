@@ -62,7 +62,13 @@ async function checkEquationSurgerySource(service, workspaceRoot, evidence, wait
   const uri = vscode.Uri.from({ scheme: "dygnosis-changes", path: `/${resourceName(resource)}`, query: resourceQuery(resource) });
   await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
   await waitFor(async () => {
-    try { return await nativeChanges(async ({ evaluate }) => { evidence.semantic_surgery_state = await evaluate('({status:document.getElementById("status").className,message:document.getElementById("status").textContent,groups:[...document.querySelectorAll(".group-button")].map(node=>node.textContent),code:document.querySelector(".side.after .expression")?.textContent,models:document.getElementById("models").textContent})'); return evidence.semantic_surgery_state.status === "ready" && Boolean(evidence.semantic_surgery_state.code); }); }
+    try { return await nativeChanges(async ({ evaluate }) => {
+      evidence.semantic_surgery_state = await evaluate('({status:document.getElementById("status").className,failureCode:document.getElementById("status").getAttribute("data-code"),message:document.getElementById("status").textContent,groups:[...document.querySelectorAll(".group-button")].map(node=>node.textContent),code:document.querySelector(".side.after .expression")?.textContent,models:document.getElementById("models").textContent})');
+      if (evidence.semantic_surgery_state.failureCode === "INPUT_CHANGED" && !evidence.semantic_surgery_refreshed) {
+        evidence.semantic_surgery_refreshed = true; await evaluate('document.getElementById("refresh").click()');
+      }
+      return evidence.semantic_surgery_state.status === "ready" && Boolean(evidence.semantic_surgery_state.code);
+    }); }
     catch (error) { if (error.code === "NATIVE_FRAME_PENDING") { evidence.semantic_surgery_discovery = error.discovery; return false; } throw error; }
   }, "written replacement card");
   await nativeChanges(async ({ evaluate, send }) => {
@@ -334,9 +340,9 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     const visited = [];
     for (const label of groupLabels) {
       await group(label); await checkPairedCards(); visited.push(...await evaluate('[...document.querySelectorAll("article[data-row-id]")].map(row=>row.getAttribute("data-row-id"))'));
-      const notes = await evaluate('({withinRows:document.querySelectorAll("article .limits").length,text:[...document.querySelectorAll(".group-notes li")].map(note=>note.textContent),last:document.querySelector(".group-rows").lastElementChild.className})');
-      assert.equal(notes.withinRows, 0); assert.equal(notes.text.length, new Set(notes.text).size);
-      if (notes.text.length) assert.equal(notes.last, "group-notes");
+      const notes = await evaluate('({outsideRows:document.querySelectorAll(".group-rows > .group-notes").length,rows:[...document.querySelectorAll(".group-notes")].map(note=>({row:note.closest("article[data-row-id]")?.getAttribute("data-row-id"),text:[...note.querySelectorAll("li")].map(item=>item.textContent)}))})');
+      assert.equal(notes.outsideRows, 0);
+      for (const note of notes.rows) { assert.ok(note.row); assert.equal(note.text.length, new Set(note.text).size); }
       if (label === "Commands") assert.equal(await evaluate('document.querySelector(".group-rows").textContent.includes("Unclaimed accepted tokens")'), false);
     }
     assert.equal(new Set(visited).size, 15, "all filtered changes are available as full rows in their groups");
