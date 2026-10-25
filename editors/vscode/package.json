@@ -17,7 +17,8 @@
     "node": "^22.13.0 || >=24"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Themes"
   ],
   "extensionKind": [
     "workspace"
@@ -71,7 +72,18 @@
           ".dyn",
           ".inc"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./media/file-icons/dynare-mod-light.svg",
+          "dark": "./media/file-icons/dynare-mod-dark.svg"
+        }
+      }
+    ],
+    "iconThemes": [
+      {
+        "id": "dygnosis",
+        "label": "Dygnosis",
+        "path": "./media/file-icons/dygnosis-icon-theme.json"
       }
     ],
     "grammars": [

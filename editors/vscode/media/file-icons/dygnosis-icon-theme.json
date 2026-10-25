@@ -1,0 +1,38 @@
+{
+  "iconDefinitions": {
+    "file": { "iconPath": "./file-dark.svg" },
+    "file-light": { "iconPath": "./file-light.svg" },
+    "mod": { "iconPath": "./dynare-mod-dark.svg" },
+    "mod-light": { "iconPath": "./dynare-mod-light.svg" },
+    "inc": { "iconPath": "./dynare-inc-dark.svg" },
+    "inc-light": { "iconPath": "./dynare-inc-light.svg" },
+    "dyn": { "iconPath": "./dynare-dyn-dark.svg" },
+    "dyn-light": { "iconPath": "./dynare-dyn-light.svg" }
+  },
+  "showLanguageModeIcons": true,
+  "file": "file",
+  "fileExtensions": {
+    "mod": "mod",
+    "inc": "inc",
+    "dyn": "dyn"
+  },
+  "languageIds": { "dynare": "mod" },
+  "light": {
+    "file": "file-light",
+    "fileExtensions": {
+      "mod": "mod-light",
+      "inc": "inc-light",
+      "dyn": "dyn-light"
+    },
+    "languageIds": { "dynare": "mod-light" }
+  },
+  "highContrast": {
+    "file": "file-light",
+    "fileExtensions": {
+      "mod": "mod-light",
+      "inc": "inc-light",
+      "dyn": "dyn-light"
+    },
+    "languageIds": { "dynare": "mod-light" }
+  }
+}

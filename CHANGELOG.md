@@ -2,6 +2,8 @@
 
 ## v0.11.36
 
+- Choose the **Dygnosis** file icon theme for colored `dy` icons on `.mod`,
+  `.inc` and `.dyn` files. Compatible themes can use a shared Dynare icon.
 - Status, workspace checks and action messages identify affected files and
   known causes. Recovery actions follow the cause. Macro preview failures
   retain the captured text and explain what could not be refreshed.
