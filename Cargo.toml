@@ -12,6 +12,10 @@ exclude = ["editors/**"]
 name = "dygnosis"
 path = "src/main.rs"
 
+[features]
+# Developer experiment; ordinary builds retain the system allocator and no store.
+experimental-mcp-reuse = []
+
 [dependencies]
 # Musl libm, pure Rust. Used for `tgamma` / `lgamma` / `erf` / `erfc` so those
 # builtins are not local series. https://github.com/rust-lang/libm

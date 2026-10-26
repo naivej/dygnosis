@@ -1,6 +1,11 @@
 use clap::{Parser, Subcommand};
 use dygnosis::VERSION;
 
+#[cfg(feature = "experimental-mcp-reuse")]
+#[global_allocator]
+static ALLOCATOR: dygnosis::retained_memory::TrackingAllocator =
+    dygnosis::retained_memory::TrackingAllocator;
+
 #[derive(Parser)]
 #[command(name = "dygnosis", version = VERSION, about = env!("CARGO_PKG_DESCRIPTION"))]
 struct Cli {

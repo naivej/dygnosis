@@ -531,6 +531,10 @@ pub(crate) struct SourceIncludeLookup {
 thread_local! {
     pub(crate) static SOURCE_LOOKUP_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     pub(crate) static INPUT_REVISION_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(any(test, feature = "experimental-mcp-reuse"))]
+thread_local! {
     pub(crate) static INPUT_FILE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
@@ -1412,6 +1416,11 @@ impl Workspace {
         self.cancellation = Some(cancellation);
     }
 
+    #[cfg(feature = "experimental-mcp-reuse")]
+    pub(crate) fn clear_request_cancellation(&mut self) {
+        self.cancellation = None;
+    }
+
     pub(crate) fn cancellation(&self) -> Option<Arc<AtomicBool>> {
         self.cancellation.clone()
     }
@@ -2208,7 +2217,7 @@ impl Workspace {
     }
 
     fn input_file(&self, key: &str) -> InputFile {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "experimental-mcp-reuse"))]
         INPUT_FILE_READS.with(|reads| reads.set(reads.get() + 1));
         let identity = if self.overlay_only || is_virtual_uri(key) {
             None

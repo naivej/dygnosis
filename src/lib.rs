@@ -8,6 +8,14 @@ pub mod lsp;
 pub mod mcp;
 mod test_support;
 
+#[cfg(feature = "experimental-mcp-reuse")]
+#[doc(hidden)]
+pub mod retained_memory;
+
+#[cfg(all(test, feature = "experimental-mcp-reuse"))]
+#[global_allocator]
+static TEST_ALLOCATOR: retained_memory::TrackingAllocator = retained_memory::TrackingAllocator;
+
 // Preserve the public Rust module paths while implementation follows its owner.
 pub use engine::analysis::assignment_values;
 pub use engine::analysis::equations;

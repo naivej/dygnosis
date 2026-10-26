@@ -220,6 +220,8 @@ impl Default for SourceLimits {
 
 #[derive(Clone, Default)]
 pub struct RequestControl {
+    #[cfg(feature = "experimental-mcp-reuse")]
+    pub(super) retention: Option<Arc<super::retention::Session>>,
     pub cancelled: Arc<AtomicBool>,
     pub limits: SourceLimits,
     pub progress: Arc<ProgressState>,
@@ -314,7 +316,76 @@ pub struct SourceSnapshot {
     pub coverage: Value,
 }
 
+#[derive(Clone, Copy)]
+struct ReuseView<'a> {
+    workspace: &'a Workspace,
+    root: &'a str,
+    owner_roots: &'a [String],
+    exact_input: bool,
+}
+
+impl<'a> ReuseView<'a> {
+    fn snapshot(snapshot: &'a SourceSnapshot, exact_input: bool) -> Self {
+        Self {
+            workspace: &snapshot.workspace,
+            root: &snapshot.root,
+            owner_roots: &snapshot.owner_roots,
+            exact_input,
+        }
+    }
+
+    fn copy_for(
+        &self,
+        root: &str,
+        owners: &[String],
+        control: &RequestControl,
+    ) -> Option<Workspace> {
+        (self.exact_input
+            && root == self.root
+            && owners == self.owner_roots
+            && control.macro_work_limit == self.workspace.root_macro_work_limit(self.root))
+        .then(|| self.workspace.snapshot_with_root_settings(root))
+    }
+}
+
+#[cfg(feature = "experimental-mcp-reuse")]
+pub(super) struct ReusableSource {
+    workspace: Workspace,
+    root: String,
+    owner_roots: Vec<String>,
+    #[cfg(test)]
+    model: std::sync::Weak<Model>,
+}
+
+#[cfg(feature = "experimental-mcp-reuse")]
+impl ReusableSource {
+    #[cfg(test)]
+    pub(super) fn model_weak(&self) -> std::sync::Weak<Model> {
+        self.model.clone()
+    }
+    fn view(&self) -> ReuseView<'_> {
+        ReuseView {
+            workspace: &self.workspace,
+            root: &self.root,
+            owner_roots: &self.owner_roots,
+            exact_input: true,
+        }
+    }
+}
+
 impl SourceSnapshot {
+    #[cfg(feature = "experimental-mcp-reuse")]
+    pub(super) fn reusable(&self) -> ReusableSource {
+        let mut workspace = self.workspace.snapshot_with_root_settings(&self.root);
+        workspace.clear_request_cancellation();
+        ReusableSource {
+            workspace,
+            root: self.root.clone(),
+            owner_roots: self.owner_roots.clone(),
+            #[cfg(test)]
+            model: Arc::downgrade(&self.model),
+        }
+    }
     pub fn range(&self, file: &str, span: Span) -> Option<Value> {
         let text = self.text(Some(file))?;
         text.get(span.start as usize..span.end as usize)?;
@@ -387,6 +458,18 @@ pub(super) fn resolve_source_configured_reusing(
     );
     #[cfg(test)]
     let previous = previous.or_else(|| probe.previous());
+    let previous = previous.map(|(snapshot, exact)| ReuseView::snapshot(snapshot, exact));
+    #[cfg(feature = "experimental-mcp-reuse")]
+    let lease = control
+        .retention
+        .as_ref()
+        .and_then(|session| session.checkout(&input, control, analysis, previous.is_none()));
+    #[cfg(feature = "experimental-mcp-reuse")]
+    let previous = previous.or_else(|| {
+        lease
+            .as_ref()
+            .and_then(|lease| lease.source().map(ReusableSource::view))
+    });
     let result = resolve_source_configured_inner(
         input,
         expected_revision,
@@ -399,6 +482,10 @@ pub(super) fn resolve_source_configured_reusing(
     if let Ok(snapshot) = &result {
         probe.retain(snapshot, control);
     }
+    #[cfg(feature = "experimental-mcp-reuse")]
+    if let (Some(lease), Ok(snapshot)) = (lease, &result) {
+        lease.complete(snapshot, control);
+    }
     result
 }
 
@@ -408,20 +495,25 @@ fn resolve_source_configured_inner(
     control: &RequestControl,
     analysis: Option<&AnalysisConfiguration>,
     inspection: Option<&SourceStructureQuery>,
-    previous: Option<(&SourceSnapshot, bool)>,
+    previous: Option<ReuseView<'_>>,
 ) -> Result<SourceSnapshot, SourceError> {
     control.check()?;
-    let (mut workspace, root, owner_roots, kind, include_dirs, root_file) = match input {
+    let (mut workspace, root, owner_roots, kind, include_dirs, root_file, reused) = match input {
         SourceInput::Text { text } => {
             check_files(
                 &BTreeMap::from([(TEXT_ROOT.into(), text.clone())]),
                 &control.limits,
             )?;
-            let mut workspace = Workspace::overlay_documents_with_work_limit(
-                &BTreeMap::from([(TEXT_ROOT.into(), text)]),
-                Some(Arc::clone(&control.cancelled)),
-                control.macro_work_limit,
-            );
+            let cached = previous
+                .and_then(|previous| previous.copy_for(TEXT_ROOT, &[TEXT_ROOT.into()], control));
+            let reused = cached.is_some();
+            let mut workspace = cached.unwrap_or_else(|| {
+                Workspace::overlay_documents_with_work_limit(
+                    &BTreeMap::from([(TEXT_ROOT.into(), text)]),
+                    Some(Arc::clone(&control.cancelled)),
+                    control.macro_work_limit,
+                )
+            });
             workspace.set_root_search_paths(TEXT_ROOT, Vec::new());
             workspace.set_unnamed_root(TEXT_ROOT);
             (
@@ -431,6 +523,7 @@ fn resolve_source_configured_inner(
                 "text",
                 Vec::new(),
                 None,
+                reused,
             )
         }
         SourceInput::Map {
@@ -463,11 +556,15 @@ fn resolve_source_configured_inner(
             }
             check_files(&files, &control.limits)?;
             validate_paths(&include_dirs)?;
-            let mut workspace = Workspace::overlay_documents_with_work_limit(
-                &files,
-                Some(Arc::clone(&control.cancelled)),
-                control.macro_work_limit,
-            );
+            let cached = previous.and_then(|previous| previous.copy_for(&root, &owners, control));
+            let reused = cached.is_some();
+            let mut workspace = cached.unwrap_or_else(|| {
+                Workspace::overlay_documents_with_work_limit(
+                    &files,
+                    Some(Arc::clone(&control.cancelled)),
+                    control.macro_work_limit,
+                )
+            });
             let paths: Vec<_> = include_dirs
                 .iter()
                 .map(|dir| PathBuf::from(supplied_path_key(dir)))
@@ -476,7 +573,15 @@ fn resolve_source_configured_inner(
                 workspace.set_root_search_paths(owner, paths.clone());
             }
             let root_file = Some(root.clone());
-            (workspace, root, owners, "map", include_dirs, root_file)
+            (
+                workspace,
+                root,
+                owners,
+                "map",
+                include_dirs,
+                root_file,
+                reused,
+            )
         }
         SourceInput::Disk {
             root,
@@ -507,8 +612,11 @@ fn resolve_source_configured_inner(
                     .collect(),
             );
             let root = normalize_uri(&root);
-            let mut workspace =
-                Workspace::with_search_paths(include_dirs.iter().map(PathBuf::from).collect());
+            let cached = previous.and_then(|previous| previous.copy_for(&root, &owners, control));
+            let reused = cached.is_some();
+            let mut workspace = cached.unwrap_or_else(|| {
+                Workspace::with_search_paths(include_dirs.iter().map(PathBuf::from).collect())
+            });
             workspace.set_default_macro_work_limit(control.macro_work_limit);
             for owner in &owners {
                 workspace
@@ -521,6 +629,7 @@ fn resolve_source_configured_inner(
                 "disk",
                 include_dirs,
                 Some(root),
+                reused,
             )
         }
     };
@@ -536,32 +645,12 @@ fn resolve_source_configured_inner(
         control.limits.max_source_bytes,
         control.limits.max_files,
     );
-    if let Some((previous, exact_input)) = previous {
-        if exact_input
-            && root == previous.root
-            && owner_roots == previous.owner_roots
-            && control.macro_work_limit == previous.workspace.root_macro_work_limit(&previous.root)
-        {
-            workspace = previous.workspace.snapshot_with_root_settings(&root);
-            // A retained workspace can outlive its worker. Bind the new
-            // caller's controls before configuration validation or acquisition.
-            workspace.set_cancellation(Arc::clone(&control.cancelled));
-            workspace.set_source_limits(
-                control.limits.max_file_bytes,
-                control.limits.max_source_bytes,
-                control.limits.max_files,
-            );
-            // A copied selection is request-local. Omission still selects Source.
-            workspace
-                .set_root_analysis_configuration(&root, analysis.cloned().unwrap_or_default())
-                .map_err(|error| SourceError::failure(error.code, error.message))?;
-        } else {
-            workspace.reuse_comparison_sources(&previous.workspace, &previous.root);
-        }
+    if !reused && let Some(previous) = previous {
+        workspace.reuse_comparison_sources(previous.workspace, previous.root);
     }
-    if let Some(analysis) = analysis {
+    if reused || analysis.is_some() {
         workspace
-            .set_root_analysis_configuration(&root, analysis.clone())
+            .set_root_analysis_configuration(&root, analysis.cloned().unwrap_or_default())
             .map_err(|error| SourceError::failure(error.code, error.message))?;
     }
     let mut analyses = BTreeMap::new();
