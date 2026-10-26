@@ -506,6 +506,16 @@ fn equation_row_json(
     unit: &McpUnit,
     with_explain: bool,
 ) -> Value {
+    let mut value = equation_facts_json(row, with_explain);
+    if let Some(origin) = origin {
+        attach_origin(&mut value, origin, unit);
+    }
+    value
+}
+
+fn equation_facts_json(row: &EquationRow, with_explain: bool) -> Value {
+    #[cfg(test)]
+    EQUATION_ROW_PROJECTIONS.with(|count| count.set(count.get() + 1));
     let idents: Vec<Value> = row
         .idents
         .iter()
@@ -544,13 +554,15 @@ fn equation_row_json(
             },
         });
     }
-    if let Some(origin) = origin {
-        attach_origin(&mut v, origin, unit);
-    }
     if with_explain {
         v["explain"] = json!(explain_equation(row));
     }
     v
+}
+
+#[cfg(test)]
+thread_local! {
+    static EQUATION_ROW_PROJECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 struct McpUnit<'a> {

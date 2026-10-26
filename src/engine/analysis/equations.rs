@@ -183,7 +183,12 @@ fn equation_row(
 }
 
 pub fn count_gap(model: &Model) -> CountGap {
-    let n_equations = collapsed_equation_count(model);
+    count_gap_with_rows(model, &equations(model))
+}
+
+/// Reuse the aggregate rows already owned by an equation query.
+pub(crate) fn count_gap_with_rows(model: &Model, rows: &[EquationRow]) -> CountGap {
+    let n_equations = collapsed_counted_rows(rows);
     let referenced = equation_refs(model);
     // The official transform-stage count compares the aggregate tree with the
     // plain-endogenous symbol count (`endo_nbr()` collects `endogenous` only,
@@ -245,10 +250,6 @@ pub fn explain_equation(row: &EquationRow) -> String {
 
 fn is_counted(eq: &Equation) -> bool {
     !eq.is_local && !eq.static_tag
-}
-
-fn collapsed_equation_count(model: &Model) -> usize {
-    collapsed_counted_rows(&equations(model))
 }
 
 /// Reuse accepted equation rows when a caller already owns their analysis.

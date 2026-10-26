@@ -1,6 +1,6 @@
 //! MCP request contracts and adapters over one explicitly acquired source snapshot.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use rmcp::model::CallToolResult;
 use schemars::JsonSchema;
@@ -430,6 +430,7 @@ fn dispatch_query(
     control
         .check()
         .map_err(|e| rmcp::ErrorData::internal_error(e.message, None))?;
+    let mut projected_pages = None;
     let mut result = match tool {
         "dynare_symbol_info" if params.view == Some(super::canonical::View::Source) => {
             super::source_views::symbols(&snapshot, &params)?
@@ -484,8 +485,10 @@ fn dispatch_query(
         "dynare_equations" if params.view == Some(super::canonical::View::Source) => {
             super::source_views::equations(&snapshot, &params)?
         }
-        "dynare_equations" => equation_query(&mut snapshot, &params)?,
-        "dynare_expand" => expand_query(&snapshot, &params)?,
+        "dynare_equations" => {
+            equation_query(&mut snapshot, &params, &arguments, &mut projected_pages)?
+        }
+        "dynare_expand" => expand_query(&snapshot, &params, &arguments, &mut projected_pages)?,
         "dynare_related_files" => {
             if snapshot.root_file.is_none() {
                 return Err(invalid(
@@ -547,7 +550,14 @@ fn dispatch_query(
             .unwrap_or("Parsing, includes or macro expansion did not complete.");
         result.cause("partial","INCOMPLETE_INPUT",format!("{tool} for {root}: {cause} Available source facts are returned; complete model coverage is unavailable."));
     }
-    project_and_page(tool, &arguments, &params, &snapshot.revision, &mut result)?;
+    project_and_page(
+        tool,
+        &arguments,
+        &params,
+        &snapshot.revision,
+        &mut result,
+        projected_pages,
+    )?;
     if snapshot.source_structure.is_some()
         && !snapshot
             .workspace
@@ -817,8 +827,16 @@ fn line_bytes(text: &str, range: &LineRange) -> Result<(usize, usize), rmcp::Err
     Ok((start, end))
 }
 
-fn expand_query(snapshot: &SourceSnapshot, params: &Params) -> Result<ToolResult, rmcp::ErrorData> {
-    use crate::engine::language::span::Span;
+fn expand_query(
+    snapshot: &SourceSnapshot,
+    params: &Params,
+    arguments: &Value,
+    projected: &mut Option<Pages>,
+) -> Result<ToolResult, rmcp::ErrorData> {
+    use crate::engine::language::span::{LineIndex, Span};
+    use crate::engine::preview::preview_navigation::{
+        NAVIGATION_SCHEMA_VERSION, navigation_row_json,
+    };
     if [
         params.line_range.is_some(),
         params.expanded_range.is_some(),
@@ -833,9 +851,9 @@ fn expand_query(snapshot: &SourceSnapshot, params: &Params) -> Result<ToolResult
             "Choose one line_range, expanded_range or equation_id",
         ));
     }
-    let mut data = super::expand_with_unit(&unit(snapshot));
     let full = &snapshot.report.effective_text;
-    let span = if let Some(range) = &params.line_range {
+    let mut selected_occurrence = None;
+    let selection = if let Some(range) = &params.line_range {
         let (start, end) = line_bytes(full, range)?;
         Some(Span::new(start, end))
     } else if let Some(range) = &params.expanded_range {
@@ -850,7 +868,7 @@ fn expand_query(snapshot: &SourceSnapshot, params: &Params) -> Result<ToolResult
     } else if let Some(id) = &params.equation_id {
         let selected = selected_equation(snapshot, id)?;
         let fact = &snapshot.report.model_map.equations[selected];
-        let Some(navigation) = snapshot
+        let Some(row) = snapshot
             .report
             .navigation
             .iter()
@@ -861,72 +879,278 @@ fn expand_query(snapshot: &SourceSnapshot, params: &Params) -> Result<ToolResult
                 "The selected occurrence has no verified range in the available expanded text.",
             ));
         };
-        data["selected_occurrence"] =
-            json!({"equation_id":id,"source":source_json(snapshot,&fact.source)});
-        Some(navigation.effective_span)
+        selected_occurrence =
+            Some(json!({"equation_id":id,"source":source_json(snapshot,&fact.source)}));
+        Some(row.effective_span)
     } else {
         None
     };
-    let Some(span) = span else {
-        return Ok(ToolResult::new(data));
-    };
-    let selected = full
+    let span = selection.unwrap_or(Span::new(0, full.len()));
+    let text = full
         .get(span.start as usize..span.end as usize)
         .ok_or_else(|| invalid("Expanded selection is outside the available text"))?;
-    data["effective_text"] = json!(selected);
-    data["selected_expanded_range"] = super::range_json(span, full);
-    let mut retained = Vec::new();
-    let mut omitted = 0;
-    let original = data["navigation"].as_array().cloned().unwrap_or_default();
+    let Ok(mut pages) = prepare_pages("dynare_expand", arguments, params, &snapshot.revision)
+    else {
+        // The final paging step returns the established error envelope.
+        return Ok(ToolResult::new(Value::Null));
+    };
+    let complete = snapshot.coverage["complete"] == true;
+    let collection_complete = snapshot
+        .analyses
+        .values()
+        .all(|analysis| analysis.coverage["complete"] == true);
+    let has_heterogeneous = !snapshot.report.heterogeneous_origins.is_empty();
+    let mut selected_rows = Vec::new();
+    let mut origin_keys = HashSet::new();
+    let mut omitted = 0usize;
     for row in &snapshot.report.navigation {
+        if crate::engine::control::cancelled() {
+            break;
+        }
         let range = row.effective_span;
-        if range.end <= span.start || range.start >= span.end {
+        if selection.is_some() && (range.end <= span.start || range.start >= span.end) {
             continue;
         }
-        if range.start < span.start || range.end > span.end {
+        if selection.is_some() && (range.start < span.start || range.end > span.end) {
             omitted += 1;
             continue;
         }
-        if let Some(mut value) = original
-            .iter()
-            .find(|value| value["id"] == format!("e{}", row.equation.id))
-            .cloned()
+        if selection.is_some()
+            && let Some(number) = row.equation.number
         {
-            value["equation_id"] = json!(equation_id(snapshot, &row.equation));
-            value["effective_range"] = super::range_json(
-                Span {
-                    start: range.start - span.start,
-                    end: range.end - span.start,
-                },
-                selected,
-            );
-            retained.push(value);
+            origin_keys.insert((row.equation.dimension.as_deref(), number));
+        }
+        if complete {
+            selected_rows.push(row);
         }
     }
-    data["navigation"] = json!(retained);
-    data["origins"] = json!(
-        snapshot
-            .report
-            .origins
+    let mut origins = Vec::new();
+    let mut dimension_counts = HashMap::new();
+    for origin in &snapshot.report.origins {
+        if crate::engine::control::cancelled() {
+            break;
+        }
+        *dimension_counts
+            .entry(origin.dimension.as_deref())
+            .or_insert(0usize) += 1;
+        if selection.is_none()
+            || origin_keys.contains(&(origin.dimension.as_deref(), origin.scope_index + 1))
+        {
+            origins.push(origin);
+        }
+    }
+    let mut data = json!({
+        "effective_text":text,
+        "n_equations":if snapshot.coverage["includes_complete"] == true { snapshot.report.n_equations } else { 0 },
+        "navigation_schema_version":NAVIGATION_SCHEMA_VERSION,
+        "root_file":snapshot.root_file,"revision":snapshot.revision,"complete":complete,
+    });
+    if has_heterogeneous {
+        data["n_aggregate_equations"] = json!(snapshot.report.aggregate_origins.len());
+        data["n_heterogeneous_equations"] =
+            json!(snapshot.report.n_equations - snapshot.report.aggregate_origins.len());
+        let dimensions =
+            crate::engine::analysis::model_info::heterogeneous_dimension_names(&snapshot.model);
+        let range = pages.projection_range(
+            "heterogeneity_dimensions",
+            dimensions.len(),
+            collection_complete,
+        );
+        data["heterogeneity_dimensions"] = json!(dimensions[range].iter().map(|dimension| {
+            let name = snapshot.model.name(*dimension);
+            json!({"dimension":name,"n_equations":dimension_counts.get(&Some(name)).copied().unwrap_or(0)})
+        }).collect::<Vec<_>>());
+    }
+    if !complete {
+        data["status"] = json!("incomplete");
+        data["message"] =
+            json!("Expansion is partial; equation counts and source navigation are unavailable.");
+        let reasons = snapshot.coverage["reasons"]
+            .as_array()
+            .expect("incomplete reasons");
+        let range =
+            pages.projection_range("incomplete_reasons", reasons.len(), collection_complete);
+        data["incomplete_reasons"] = json!(&reasons[range]);
+    }
+    let range = pages.projection_range(
+        "macro_messages",
+        snapshot.report.macro_messages.len(),
+        collection_complete,
+    );
+    data["macro_messages"] = json!(
+        snapshot.report.macro_messages[range]
             .iter()
-            .zip(data["origins"].as_array().into_iter().flatten())
-            .filter(|(origin, _)| {
-                snapshot.report.navigation.iter().any(|row| {
-                    row.equation.dimension == origin.dimension
-                        && row.equation.number == Some(origin.scope_index + 1)
-                        && span.start <= row.effective_span.start
-                        && row.effective_span.end <= span.end
-                })
+            .map(|message| {
+                let file = message
+                    .file
+                    .as_deref()
+                    .filter(|file| snapshot.sources.contains_key(*file));
+                let mut value = json!({"kind":message.kind,"message":message.message,
+            "location":snapshot_range(snapshot,file,message.span)});
+                if let Some(file) = &message.file {
+                    value["file"] = json!(file);
+                }
+                value
             })
-            .map(|(_, value)| value.clone())
             .collect::<Vec<_>>()
     );
+    let index = LineIndex::new(text);
+    let mut normalized = BTreeMap::<String, Option<(String, LineIndex)>>::new();
+    let range = pages.projection_range("navigation", selected_rows.len(), collection_complete);
+    data["navigation"] = json!(
+        selected_rows[range]
+            .iter()
+            .map(|row| {
+                let mut value = navigation_row_json(
+                    row,
+                    |range| {
+                        indexed_range(
+                            &index,
+                            text,
+                            Span {
+                                start: range.start - span.start,
+                                end: range.end - span.start,
+                            },
+                        )
+                    },
+                    |segment| {
+                        let original = snapshot.text(segment.file.as_deref())?;
+                        if segment.span.is_empty() {
+                            return None;
+                        }
+                        original.get(segment.span.start as usize..segment.span.end as usize)?;
+                        let key = segment.file.as_deref().unwrap_or(&snapshot.root);
+                        let normalized = normalized.entry(key.to_owned()).or_insert_with(|| {
+                            original.contains('\r').then(|| {
+                                let text =
+                                    crate::engine::language::parser::normalize_newlines(original);
+                                let index = LineIndex::new(&text);
+                                (text, index)
+                            })
+                        });
+                        let range = if let Some((text, index)) = normalized {
+                            indexed_range(index, text, segment.span)
+                        } else {
+                            snapshot_range(snapshot, segment.file.as_deref(), segment.span)
+                        };
+                        let mut location = json!({"range":range});
+                        if let Some(file) = mapped_file(snapshot, segment.file.as_deref()) {
+                            location["file"] = json!(file);
+                        } else if segment.file.is_some() {
+                            return None;
+                        }
+                        Some(location)
+                    },
+                );
+                if selection.is_some() {
+                    value["equation_id"] = json!(equation_id(snapshot, &row.equation));
+                }
+                value
+            })
+            .collect::<Vec<_>>()
+    );
+    let range = pages.projection_range("origins", origins.len(), collection_complete);
+    data["origins"] = json!(
+        origins[range]
+            .iter()
+            .map(|origin| {
+                let mut value = json!({"index":origin.index});
+                if has_heterogeneous {
+                    value["scope_index"] = json!(origin.scope_index);
+                    value["scope"] = json!(if origin.dimension.is_some() {
+                        "heterogeneous"
+                    } else {
+                        "aggregate"
+                    });
+                    if let Some(dimension) = &origin.dimension {
+                        value["dimension"] = json!(dimension);
+                        value["block_index"] = json!(origin.block_index);
+                    }
+                }
+                attach_snapshot_origin(snapshot, &mut value, origin);
+                value
+            })
+            .collect::<Vec<_>>()
+    );
+    if let Some(selection) = selection {
+        data["selected_expanded_range"] = super::range_json(selection, full);
+    }
+    if let Some(occurrence) = selected_occurrence {
+        data["selected_occurrence"] = occurrence;
+    }
     let mut result = ToolResult::new(data);
     if omitted > 0 {
         result.data["omitted_navigation_count"] = json!(omitted);
         result.cause("partial","PARTIAL_ROW_ORIGINS",format!("The selected text is returned. Written navigation for {omitted} partly selected rows was withheld because a complete row range is required. Select their equation identity to inspect their verified origins."));
     }
+    *projected = Some(pages);
     Ok(result)
+}
+
+fn indexed_range(
+    index: &crate::engine::language::span::LineIndex,
+    text: &str,
+    span: crate::engine::language::span::Span,
+) -> Value {
+    let start = index.position(text, span.start);
+    let end = index.position(text, span.end);
+    json!({"line":start.line+1,"column":start.character+1,"end_line":end.line+1,"end_column":end.character+1})
+}
+
+fn snapshot_range(
+    snapshot: &SourceSnapshot,
+    file: Option<&str>,
+    span: crate::engine::language::span::Span,
+) -> Value {
+    let file = file.unwrap_or(&snapshot.root);
+    let text = &snapshot.sources[file];
+    indexed_range(&snapshot.line_indexes[file], text, span)
+}
+
+fn mapped_file(snapshot: &SourceSnapshot, file: Option<&str>) -> Option<String> {
+    snapshot.root_file.as_ref()?;
+    file.map(str::to_owned)
+}
+
+fn attach_snapshot_origin(
+    snapshot: &SourceSnapshot,
+    value: &mut Value,
+    origin: &crate::engine::language::expand::EquationOrigin,
+) {
+    let file = origin.origin_uri.as_deref();
+    if snapshot.text(file).is_none() {
+        return;
+    }
+    value["origin"] = snapshot_range(snapshot, file, origin.origin_span);
+    if let Some(file) = mapped_file(snapshot, file) {
+        value["origin_uri"] = json!(file);
+    }
+    if !super::publish_origin_frames(&origin.origin_frames) {
+        return;
+    }
+    let frames = origin
+        .origin_frames
+        .iter()
+        .filter_map(|frame| {
+            snapshot.text(frame.origin_uri.as_deref())?;
+            let mut value =
+                snapshot_range(snapshot, frame.origin_uri.as_deref(), frame.origin_span);
+            value["kind"] = json!(frame.kind);
+            if let Some(variable) = &frame.variable {
+                value["variable"] = json!(variable);
+            }
+            if let Some(value_) = &frame.value {
+                value["value"] = json!(value_);
+            }
+            if let Some(file) = mapped_file(snapshot, frame.origin_uri.as_deref()) {
+                value["origin_uri"] = json!(file);
+            }
+            Some(value)
+        })
+        .collect::<Vec<_>>();
+    if super::publish_origin_frames_json(&frames) {
+        value["origin_frames"] = json!(frames);
+    }
 }
 
 pub(crate) fn selected_equation(
@@ -970,6 +1194,8 @@ pub(crate) fn equation_id(
 fn equation_query(
     snapshot: &mut SourceSnapshot,
     params: &Params,
+    arguments: &Value,
+    projected: &mut Option<Pages>,
 ) -> Result<ToolResult, rmcp::ErrorData> {
     if params.index.is_some() && params.equation.is_some() {
         return Err(invalid("Use index or equation, not both"));
@@ -984,7 +1210,6 @@ fn equation_query(
     if params.scope.as_deref() == Some("dimension") && params.dimension.is_none() {
         return Err(invalid("Dimension scope requires dimension"));
     }
-    let mut data = super::equations_with_unit(&unit(snapshot), None, None);
     let selected_id = params
         .equation_id
         .as_ref()
@@ -998,106 +1223,175 @@ fn equation_query(
         match selected {
             Ok(Some(binding)) => Some((model, binding)),
             Ok(None) => {
+                let mut data = super::equations_with_unit(&unit(snapshot), None, None);
                 data["equations"] = json!([]);
                 data["heterogeneous_equations"] = json!([]);
                 return Ok(ToolResult::new(data));
             }
             Err(error) => {
                 let mut result = ToolResult::refused(error.reason.code, error.reason.message);
-                result.data = json!({"candidates":error.candidates.iter().map(|candidate|binding_json(snapshot,candidate)).collect::<Vec<_>>()});
+                result.data = json!({"candidates":error.candidates.iter().map(|candidate| binding_json(snapshot,candidate)).collect::<Vec<_>>()});
                 return Ok(result);
             }
         }
     } else {
         None
     };
-    let uses = if let Some((model, binding)) = &symbol {
-        model.references(binding, false)
-    } else {
-        Vec::new()
+    if snapshot.coverage["complete"] != true {
+        return Ok(ToolResult::new(super::equations_with_unit(
+            &unit(snapshot),
+            None,
+            None,
+        )));
+    }
+    let Ok(mut pages) = prepare_pages("dynare_equations", arguments, params, &snapshot.revision)
+    else {
+        return Ok(ToolResult::new(Value::Null));
     };
-    let attach = |rows: &mut Vec<Value>, dimension: Option<&str>| {
-        rows.retain_mut(|row| {
-            let index = row["index"].as_u64().unwrap_or(usize::MAX as u64) as usize;
-            let fact = snapshot
+    let complete = snapshot
+        .analyses
+        .values()
+        .all(|analysis| analysis.coverage["complete"] == true);
+    let rows = super::equations(&snapshot.model);
+    let heterogeneous = super::heterogeneous_equations(&snapshot.model);
+    let gap = crate::engine::analysis::equations::count_gap_with_rows(&snapshot.model, &rows);
+    let mut gap = super::count_gap_json(&gap);
+    if params.agent_output {
+        let names = gap["unreferenced_endogenous"]
+            .as_array_mut()
+            .expect("count gap names");
+        let range =
+            pages.projection_range("count_gap.unreferenced_endogenous", names.len(), complete);
+        *names = names.drain(range).collect();
+    }
+    // The shared map supplies the accepted equation identity once, rather than
+    // rescanning it for each projected row.
+    let mut facts = HashMap::new();
+    for (index, fact) in snapshot.report.model_map.equations.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            break;
+        }
+        if fact.active
+            && !fact.local
+            && !fact.static_only
+            && let Some(counted_index) = fact.number.and_then(|number| number.checked_sub(1))
+        {
+            facts
+                .entry((fact.dimension.as_deref(), counted_index))
+                .or_insert((index, fact));
+        }
+    }
+    let uses = symbol
+        .as_ref()
+        .map(|(model, binding)| model.references(binding, false))
+        .unwrap_or_default();
+    let matches = |row: &crate::engine::analysis::equations::EquationRow,
+                   dimension: Option<&str>| {
+        let Some((fact_index, _)) = facts.get(&(dimension, row.index)) else {
+            return false;
+        };
+        !(params.name.as_ref().is_some_and(|name| row.name != *name)
+            || params
+                .index
+                .is_some_and(|want| dimension.is_some() || want != row.index)
+            || params
+                .dimension
+                .as_deref()
+                .is_some_and(|want| dimension != Some(want))
+            || params.scope.as_deref() == Some("aggregate") && dimension.is_some()
+            || params.scope.as_deref() == Some("dimension") && dimension.is_none()
+            || params.equation.as_ref().is_some_and(|want| {
+                want.index != row.index
+                    || want.dimension.as_deref() != dimension
+                    || (want.scope == "aggregate") != dimension.is_none()
+            })
+            || selected_id.is_some_and(|want| want != *fact_index)
+            || params
+                .tags
+                .iter()
+                .any(|(tag, value)| row.tags.get(tag) != Some(value))
+            || symbol.is_some()
+                && !uses.iter().any(|use_| {
+                    snapshot.model.written_equations[*fact_index]
+                        .equation
+                        .active_tokens
+                        .contains(&use_.order)
+                }))
+    };
+    let serialize =
+        |row: &crate::engine::analysis::equations::EquationRow,
+         dimension: Option<&str>,
+         origin: Option<&crate::engine::language::expand::EquationOrigin>| {
+            let (_, fact) = facts[&(dimension, row.index)];
+            let mut value = super::equation_facts_json(row, false);
+            if let Some(origin) = origin {
+                attach_snapshot_origin(snapshot, &mut value, origin);
+            }
+            value["equation_id"] = json!(equation_id(snapshot, fact));
+            value["scope"] = json!(if dimension.is_some() {
+                "dimension"
+            } else {
+                "aggregate"
+            });
+            value["dimension"] = json!(dimension);
+            value["index_base"] = json!(0);
+            value
+        };
+    let selected = rows
+        .iter()
+        .take_while(|_| !crate::engine::control::cancelled())
+        .filter(|row| matches(row, None))
+        .collect::<Vec<_>>();
+    let range = pages.projection_range("equations", selected.len(), complete);
+    let aggregate = selected[range]
+        .iter()
+        .map(|row| {
+            let origin = snapshot
                 .report
-                .model_map
+                .aggregate_origins
+                .get(row.index)
+                .filter(|origin| origin.scope_index == row.index);
+            serialize(row, None, origin)
+        })
+        .collect::<Vec<_>>();
+    let mut data = json!({"count_gap":gap,"equations":aggregate});
+    if !heterogeneous.is_empty() {
+        let mut blocks = Vec::new();
+        for block in &heterogeneous {
+            if crate::engine::control::cancelled() {
+                break;
+            }
+            let selected = block
                 .equations
                 .iter()
                 .enumerate()
-                .find(|(_, fact)| {
-                    fact.active
-                        && !fact.local
-                        && !fact.static_only
-                        && fact.dimension.as_deref() == dimension
-                        && fact.number == Some(index + 1)
-                });
-            let Some((fact_index, fact)) = fact else {
-                return false;
-            };
-            if params
-                .name
-                .as_ref()
-                .is_some_and(|name| row["name"] != *name)
-                || params
-                    .index
-                    .is_some_and(|want| dimension.is_some() || want != index)
-                || params
-                    .dimension
-                    .as_deref()
-                    .is_some_and(|want| dimension != Some(want))
-                || params.scope.as_deref() == Some("aggregate") && dimension.is_some()
-                || params.scope.as_deref() == Some("dimension") && dimension.is_none()
-                || params.equation.as_ref().is_some_and(|want| {
-                    want.index != index
-                        || want.dimension.as_deref() != dimension
-                        || (want.scope == "aggregate") != dimension.is_none()
-                })
-                || selected_id.is_some_and(|want| want != fact_index)
-                || params
-                    .tags
-                    .iter()
-                    .any(|(tag, value)| row["tags"][tag] != *value)
-                || symbol.is_some()
-                    && !uses.iter().any(|use_| {
-                        snapshot.model.written_equations[fact_index]
-                            .equation
-                            .active_tokens
-                            .contains(&use_.order)
-                    })
-            {
-                return false;
+                .filter(|(_, row)| matches(row, Some(&block.dimension)))
+                .collect::<Vec<_>>();
+            if selected.is_empty() {
+                continue;
             }
-            row["equation_id"] = json!(equation_id(snapshot, fact));
-            row["scope"] = json!(if dimension.is_none() {
-                "aggregate"
+            let collection = if params.agent_output {
+                format!("heterogeneous_equations:{}.equations", block.dimension)
             } else {
-                "dimension"
-            });
-            row["dimension"] = json!(dimension);
-            row["index_base"] = json!(0);
-            true
-        });
-    };
-    if let Some(rows) = data["equations"].as_array_mut() {
-        attach(rows, None);
-    }
-    if let Some(blocks) = data
-        .get_mut("heterogeneous_equations")
-        .and_then(Value::as_array_mut)
-    {
-        for block in blocks.iter_mut() {
-            let dimension = block["dimension"].as_str().map(str::to_owned);
-            if let Some(rows) = block["equations"].as_array_mut() {
-                attach(rows, dimension.as_deref());
-            }
+                format!("equations:{}", block.dimension)
+            };
+            let range = pages.projection_range(&collection, selected.len(), complete);
+            let rows = selected[range]
+                .iter()
+                .map(|(local_index, row)| {
+                    let origin = snapshot
+                        .report
+                        .heterogeneous_origins
+                        .get(block.block_index)
+                        .and_then(|origins| origins.get(*local_index));
+                    serialize(row, Some(&block.dimension), origin)
+                })
+                .collect::<Vec<_>>();
+            blocks.push(json!({"block_index":block.block_index,"dimension":block.dimension,"equations":rows}));
         }
-        blocks.retain(|block| {
-            block["equations"]
-                .as_array()
-                .is_some_and(|rows| !rows.is_empty())
-        });
+        data["heterogeneous_equations"] = json!(blocks);
     }
+    *projected = Some(pages);
     Ok(ToolResult::new(data))
 }
 
@@ -1553,6 +1847,7 @@ fn catalog(
         params,
         env!("CARGO_PKG_VERSION"),
         &mut result,
+        None,
     )?;
     Ok(result.wire())
 }
@@ -1563,21 +1858,15 @@ fn project_and_page(
     params: &Params,
     revision: &str,
     result: &mut ToolResult,
+    prepared: Option<Pages>,
 ) -> Result<(), rmcp::ErrorData> {
     if result.proposal.is_some() {
         return Ok(());
     }
-    let canonical_tool = format!("v3:{tool}");
-    let mut pages = match Pages::new(
-        if params.agent_output {
-            &canonical_tool
-        } else {
-            tool
-        },
-        revision,
-        arguments,
-        &params.output,
-    ) {
+    let mut pages = match prepared
+        .map(Ok)
+        .unwrap_or_else(|| prepare_pages(tool, arguments, params, revision))
+    {
         Ok(pages) => pages,
         Err(message) if message.starts_with("INPUT_CHANGED") => {
             *result = ToolResult::refused("INPUT_CHANGED", message);
@@ -1585,9 +1874,6 @@ fn project_and_page(
         }
         Err(message) => return Err(invalid(message)),
     };
-    if params.agent_output {
-        pages.share_budget();
-    }
     let complete = result.coverage.as_ref().is_none_or(|coverage| {
         coverage
             .as_array()
@@ -1626,6 +1912,29 @@ fn project_and_page(
     Ok(())
 }
 
+fn prepare_pages(
+    tool: &str,
+    arguments: &Value,
+    params: &Params,
+    revision: &str,
+) -> Result<Pages, String> {
+    let canonical_tool = format!("v3:{tool}");
+    let mut pages = Pages::new(
+        if params.agent_output {
+            &canonical_tool
+        } else {
+            tool
+        },
+        revision,
+        arguments,
+        &params.output,
+    )?;
+    if params.agent_output {
+        pages.share_budget();
+    }
+    Ok(pages)
+}
+
 fn remove_prose(data: &mut Value) {
     match data {
         Value::Object(object) => {
@@ -1654,6 +1963,152 @@ mod tests {
             .unwrap()
     }
     const MODEL: &str = "var y;\nmodel;\ny=1;\nend;\n";
+    fn projection_source() -> Value {
+        let rows = (0..32)
+            .map(|i| format!("#l{i}=y(-1); [name='e{i}'] y=l{i};\n"))
+            .collect::<String>();
+        json!({"kind":"text","text":format!("var y; model;\n{rows}end;")})
+    }
+
+    #[test]
+    fn selected_and_paged_equations_project_only_returned_rows() {
+        // Guards serializing every equation before a named selection or page.
+        for selector in [
+            json!({"name":"e17"}),
+            json!({"name":"absent"}),
+            json!({"symbol":{"kind":"name","name":"l17"}}),
+            json!({"page_size":2}),
+        ] {
+            super::super::EQUATION_ROW_PROJECTIONS.with(|count| count.set(0));
+            let mut args = json!({"source":projection_source()});
+            args.as_object_mut()
+                .unwrap()
+                .extend(selector.as_object().unwrap().clone());
+            let result = super::super::canonical::dispatch(
+                "dynare_equations",
+                args,
+                RequestControl::default(),
+            )
+            .unwrap()
+            .structured_content
+            .unwrap();
+            assert_eq!(
+                super::super::EQUATION_ROW_PROJECTIONS.with(std::cell::Cell::get),
+                result["data"]["equations"].as_array().unwrap().len(),
+                "{selector}"
+            );
+        }
+    }
+
+    #[test]
+    fn selected_expansion_projects_only_returned_navigation() {
+        // Guards building full navigation before selecting one verified equation.
+        let input = projection_source();
+        let equation = super::super::canonical::dispatch(
+            "dynare_equations",
+            json!({"source":input,"name":"e17"}),
+            RequestControl::default(),
+        )
+        .unwrap()
+        .structured_content
+        .unwrap();
+        crate::engine::preview::preview_navigation::NAVIGATION_ROW_PROJECTIONS
+            .with(|count| count.set(0));
+        let result = super::super::canonical::dispatch("dynare_expand",json!({"source":input,"equation":{"kind":"id","equation_id":equation["data"]["equations"][0]["equation_id"]},"expected_revision":equation["inputs"][0]["revision"]}),RequestControl::default()).unwrap().structured_content.unwrap();
+        assert_eq!(
+            crate::engine::preview::preview_navigation::NAVIGATION_ROW_PROJECTIONS
+                .with(std::cell::Cell::get),
+            result["data"]["navigation"].as_array().unwrap().len()
+        );
+        assert_eq!(result["data"]["navigation"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn projection_obeys_the_shared_allowance_before_serializing_rows() {
+        // Guards navigation or equations being projected after an earlier
+        // collection has consumed the response's shared row allowance.
+        super::super::EQUATION_ROW_PROJECTIONS.with(|count| count.set(0));
+        let equations = super::super::canonical::dispatch("dynare_equations",json!({"source":{"kind":"text","text":"var y unused; model; y=y(-1); end;"},"page_size":1}),RequestControl::default()).unwrap().structured_content.unwrap();
+        assert_eq!(
+            equations["selection"]["collections"]["equations"]["available_matches"],
+            1
+        );
+        assert!(
+            equations["data"]["equations"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            super::super::EQUATION_ROW_PROJECTIONS.with(std::cell::Cell::get),
+            0
+        );
+        crate::engine::preview::preview_navigation::NAVIGATION_ROW_PROJECTIONS
+            .with(|count| count.set(0));
+        let expanded = super::super::canonical::dispatch(
+            "dynare_expand",
+            json!({"source":projection_source(),"page_size":2}),
+            RequestControl::default(),
+        )
+        .unwrap()
+        .structured_content
+        .unwrap();
+        let returned = expanded["data"]["navigation"].as_array().unwrap().len();
+        assert_eq!(returned, 2);
+        assert_eq!(
+            crate::engine::preview::preview_navigation::NAVIGATION_ROW_PROJECTIONS
+                .with(std::cell::Cell::get),
+            returned
+        );
+    }
+
+    #[test]
+    fn counted_equation_ids_keep_the_written_row_after_model_locals() {
+        // Guards using a counted index in place of the source map's row index.
+        let source = projection_source();
+        let selected = super::super::canonical::dispatch(
+            "dynare_equations",
+            json!({"source":source,"name":"e17"}),
+            RequestControl::default(),
+        )
+        .unwrap()
+        .structured_content
+        .unwrap();
+        let by_id = super::super::canonical::dispatch("dynare_equations",json!({"source":source,"equation":{"kind":"id","equation_id":selected["data"]["equations"][0]["equation_id"]},"expected_revision":selected["inputs"][0]["revision"]}),RequestControl::default()).unwrap().structured_content.unwrap();
+        assert_eq!(by_id["data"]["equations"], selected["data"]["equations"]);
+    }
+
+    #[test]
+    fn focused_queries_keep_invalid_and_changed_continuation_outcomes() {
+        // Guards an early projection error escaping as successful null data.
+        let source = projection_source();
+        for tool in ["dynare_equations", "dynare_expand"] {
+            let first = super::super::canonical::dispatch(
+                tool,
+                json!({"source":source,"page_size":1}),
+                RequestControl::default(),
+            )
+            .unwrap()
+            .structured_content
+            .unwrap();
+            let args = json!({"source":source,"page_size":1,"continuation":"invalid JSON","expected_revision":first["inputs"][0]["revision"]});
+            assert!(
+                super::super::canonical::dispatch(tool, args, RequestControl::default()).is_err()
+            );
+            let mut args = json!({"source":source,"page_size":1,"continuation":first["selection"]["continuation"],"expected_revision":first["inputs"][0]["revision"]});
+            if tool == "dynare_equations" {
+                args["name"] = json!("e17");
+            } else {
+                args["line_range"] = json!({"start_line":1,"end_line":1});
+            }
+            let result = super::super::canonical::dispatch(tool, args, RequestControl::default())
+                .unwrap()
+                .structured_content
+                .unwrap();
+            assert_eq!(result["outcome"]["status"], "refused");
+            assert_eq!(result["outcome"]["reasons"][0]["code"], "INPUT_CHANGED");
+        }
+    }
     #[test]
     fn formatting_distinguishes_changes_unchanged_and_partial_input() {
         // Guards proposed formatting on incomplete source being reported as complete.

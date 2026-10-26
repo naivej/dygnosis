@@ -270,6 +270,7 @@ pub(crate) struct Pages {
     more: bool,
     filters: Value,
     remaining: Option<usize>,
+    projected: std::collections::HashSet<String>,
 }
 
 impl Pages {
@@ -352,6 +353,7 @@ impl Pages {
             more: false,
             filters,
             remaining: None,
+            projected: Default::default(),
         })
     }
 
@@ -366,7 +368,31 @@ impl Pages {
     }
 
     pub fn collection_with_coverage(&mut self, name: &str, rows: &mut Vec<Value>, complete: bool) {
-        let total = rows.len();
+        if self.projected.contains(name) {
+            return;
+        }
+        let range = self.collection_range(name, rows.len(), complete);
+        *rows = rows.drain(range).collect();
+    }
+
+    /// Select before projecting expensive rows. The final generic walk must
+    /// retain these rows and the original collection accounting unchanged.
+    pub fn projection_range(
+        &mut self,
+        name: &str,
+        total: usize,
+        complete: bool,
+    ) -> std::ops::Range<usize> {
+        self.projected.insert(name.into());
+        self.collection_range(name, total, complete)
+    }
+
+    fn collection_range(
+        &mut self,
+        name: &str,
+        total: usize,
+        complete: bool,
+    ) -> std::ops::Range<usize> {
         let offset = self
             .cursor
             .offsets
@@ -376,14 +402,13 @@ impl Pages {
             .min(total);
         let allowance = self.remaining.or(self.size).unwrap_or(total);
         let end = offset.saturating_add(allowance).min(total);
-        let selected = rows.drain(offset..end).collect();
-        *rows = selected;
         if let Some(remaining) = &mut self.remaining {
-            *remaining = remaining.saturating_sub(rows.len());
+            *remaining = remaining.saturating_sub(end - offset);
         }
         self.cursor.offsets.insert(name.into(), end);
         self.more |= end < total;
-        self.collections.insert(name.into(), json!({"total_matches":complete.then_some(total),"available_matches":total,"returned_count":rows.len(),"offset":offset}));
+        self.collections.insert(name.into(), json!({"total_matches":complete.then_some(total),"available_matches":total,"returned_count":end-offset,"offset":offset}));
+        offset..end
     }
 
     pub fn finish(self, options: &ResultOptions) -> Option<Value> {

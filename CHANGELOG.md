@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.11.37
+
+- MCP equation queries and pages select matching rows before projecting their
+  details. Expansion selects navigation and origins for the requested range or
+  equation. Results keep their existing counts, paging and source locations.
+
 ## v0.11.36
 
 - Choose the **Dygnosis** file icon theme for colored `dy` icons on `.mod`,
