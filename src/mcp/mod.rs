@@ -1932,16 +1932,22 @@ impl ServerHandler for DygnosisMcp {
             #[cfg(feature = "experimental-mcp-reuse")]
             retention::reset_work();
             #[cfg(feature = "experimental-mcp-reuse")]
+            retention::reset_timings(retention_trace);
+            #[cfg(feature = "experimental-mcp-reuse")]
             let retained = control.retention.clone();
             #[cfg(feature = "experimental-mcp-reuse")]
             let _allocations = retained.as_ref().map(|session| session.enter());
             #[cfg(feature = "experimental-mcp-reuse")]
             let caller_cancelled = Arc::clone(&control.cancelled);
-            let result = crate::engine::control::run(Some(Arc::clone(&control.cancelled)), || {
-                canonical::dispatch(&name, arguments, control)
-            })
-            .map_err(|_| rmcp::ErrorData::internal_error("Request cancelled", None))
-            .and_then(|result| result);
+            let result = {
+                #[cfg(feature = "experimental-mcp-reuse")]
+                let _measurement = retention::measure(retention::Phase::Dispatch);
+                crate::engine::control::run(Some(Arc::clone(&control.cancelled)), || {
+                    canonical::dispatch(&name, arguments, control)
+                })
+                .map_err(|_| rmcp::ErrorData::internal_error("Request cancelled", None))
+                .and_then(|result| result)
+            };
             #[cfg(feature = "experimental-mcp-reuse")]
             if let Some(session) = retained {
                 session.finish(&result, &caller_cancelled);

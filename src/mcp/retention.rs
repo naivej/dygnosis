@@ -21,6 +21,75 @@ use super::source::{RequestControl, ReusableSource, SourceInput, SourceSnapshot}
 use crate::engine::analysis_configuration::AnalysisConfiguration;
 use crate::retained_memory::{self as memory, Owner, Scope};
 
+/// Inclusive durations of existing work. Identity, source and capture are
+/// inside dispatch; proof includes checks inside source and its final result
+/// guard. Publish follows dispatch. Nested values must not be summed.
+#[derive(Clone, Copy)]
+pub(super) enum Phase {
+    Identity,
+    Source,
+    Proof,
+    Dispatch,
+    Capture,
+    Publish,
+}
+
+#[derive(Default)]
+struct Timings {
+    enabled: bool,
+    elapsed: [Duration; 6],
+    calls: [usize; 6],
+}
+
+thread_local! {
+    static TIMINGS:std::cell::RefCell<Timings> = std::cell::RefCell::new(Timings::default());
+}
+
+pub(super) fn reset_timings(enabled: bool) {
+    TIMINGS.with(|slot| {
+        *slot.borrow_mut() = Timings {
+            enabled,
+            ..Default::default()
+        }
+    });
+}
+
+pub(super) struct Measurement {
+    started: Option<(Phase, Instant)>,
+    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+pub(super) fn measure(phase: Phase) -> Measurement {
+    Measurement {
+        started: TIMINGS.with(|slot| slot.borrow().enabled.then(|| (phase, Instant::now()))),
+        _thread_bound: std::marker::PhantomData,
+    }
+}
+
+impl Drop for Measurement {
+    fn drop(&mut self) {
+        if let Some((phase, started)) = self.started {
+            let elapsed = started.elapsed();
+            TIMINGS.with(|slot| {
+                let mut timings = slot.borrow_mut();
+                timings.elapsed[phase as usize] += elapsed;
+                timings.calls[phase as usize] += 1;
+            });
+        }
+    }
+}
+
+fn timings() -> Value {
+    TIMINGS.with(|slot| {
+        let timings = slot.borrow();
+        let mut values = serde_json::Map::new();
+        for (index, name) in ["identity", "source", "proof", "dispatch", "capture", "publish"].iter().enumerate() {
+            values.insert((*name).into(), json!({"microseconds":timings.elapsed[index].as_secs_f64()*1_000_000.0,"calls":timings.calls[index]}));
+        }
+        Value::Object(values)
+    })
+}
+
 pub(super) fn reset_work() {
     crate::engine::language::parser::PARSE_EXPANDED_BUILDS.with(|count| count.set(0));
     crate::engine::workspace::INPUT_FILE_READS.with(|count| count.set(0));
@@ -37,7 +106,7 @@ pub(super) fn trace_disabled(trace: bool) {
             std::io::stderr().lock(),
             "MCP_RETENTION {}",
             json!({"event":"complete","cache_enabled":false,
-            "hit":false,"admitted":false,"entry_bytes":0,"retained_bytes":0,"entries":0,"work":work()})
+            "hit":false,"admitted":false,"entry_bytes":0,"retained_bytes":0,"entries":0,"work":work(),"timings":timings()})
         );
     }
 }
@@ -372,14 +441,17 @@ impl Session {
                     .is_some_and(|value| value["outcome"]["status"] != "refused")
         });
         let entry_bytes = owner.bytes();
-        let admitted = if successful && !cancelled.load(Ordering::Relaxed) {
-            candidate.is_some_and(|mut entry| {
-                entry.used = Instant::now();
-                self.store.publish(entry)
-            })
-        } else {
-            drop(candidate);
-            false
+        let admitted = {
+            let _measurement = measure(Phase::Publish);
+            if successful && !cancelled.load(Ordering::Relaxed) {
+                candidate.is_some_and(|mut entry| {
+                    entry.used = Instant::now();
+                    self.store.publish(entry)
+                })
+            } else {
+                drop(candidate);
+                false
+            }
         };
         if self.store.trace {
             let (entries, retained_bytes) = {
@@ -389,7 +461,7 @@ impl Session {
             self.store
             .emit(json!({"event":"complete","hit":hit,"admitted":admitted,
             "entry_bytes":entry_bytes,"retained_bytes":retained_bytes,"entries":entries,
-            "budget_bytes":self.store.limits.bytes,"owner_peak_bytes":owner.peak_bytes(),"work":work(),"cache_enabled":true}));
+            "budget_bytes":self.store.limits.bytes,"owner_peak_bytes":owner.peak_bytes(),"work":work(),"cache_enabled":true,"timings":timings()}));
         }
     }
 }
@@ -404,6 +476,7 @@ impl Lease {
         self.seed.as_ref().map(|entry| &entry.source)
     }
     pub(super) fn complete(self, snapshot: &SourceSnapshot, control: &RequestControl) {
+        let _measurement = measure(Phase::Capture);
         if control.check().is_err() {
             return;
         }
@@ -426,6 +499,7 @@ fn fingerprint(
     control: &RequestControl,
     analysis: Option<&AnalysisConfiguration>,
 ) -> Option<String> {
+    let _measurement = measure(Phase::Identity);
     if !identity_eligible(input, control, analysis) {
         return None;
     }

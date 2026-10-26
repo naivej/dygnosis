@@ -558,15 +558,19 @@ fn dispatch_query(
         &mut result,
         projected_pages,
     )?;
-    if snapshot.source_structure.is_some()
-        && !snapshot
-            .workspace
-            .source_guards_are_current(&snapshot.guards)
-        || snapshot
-            .owner_roots
-            .iter()
-            .any(|root| !snapshot.workspace.input_snapshot_is_current(root))
-    {
+    let changed = {
+        #[cfg(feature = "experimental-mcp-reuse")]
+        let _measurement = super::retention::measure(super::retention::Phase::Proof);
+        snapshot.source_structure.is_some()
+            && !snapshot
+                .workspace
+                .source_guards_are_current(&snapshot.guards)
+            || snapshot
+                .owner_roots
+                .iter()
+                .any(|root| !snapshot.workspace.input_snapshot_is_current(root))
+    };
+    if changed {
         return Ok(ToolResult::refused("INPUT_CHANGED","Source inputs changed before the result was returned. No stale facts or edits were returned.").wire());
     }
     if agent_output {

@@ -84,6 +84,8 @@ fn captured_owners_current(
     workspace: &Workspace,
     proofs: &BTreeMap<String, (String, InputStamps)>,
 ) -> Result<(), SourceError> {
+    #[cfg(feature = "experimental-mcp-reuse")]
+    let _measurement = super::retention::measure(super::retention::Phase::Proof);
     workspace
         .check_cancelled()
         .map_err(|_| SourceError::failure("CANCELLED", "The request was cancelled"))?;
@@ -497,6 +499,8 @@ fn resolve_source_configured_inner(
     inspection: Option<&SourceStructureQuery>,
     previous: Option<ReuseView<'_>>,
 ) -> Result<SourceSnapshot, SourceError> {
+    #[cfg(feature = "experimental-mcp-reuse")]
+    let _measurement = super::retention::measure(super::retention::Phase::Source);
     control.check()?;
     let (mut workspace, root, owner_roots, kind, include_dirs, root_file, reused) = match input {
         SourceInput::Text { text } => {
@@ -681,7 +685,12 @@ fn resolve_source_configured_inner(
                 .unwrap_or_else(|| acquisition_error(&workspace, owner))
         })?;
         control.check()?;
-        if !workspace.input_snapshot_is_current(owner) {
+        let snapshot_current = {
+            #[cfg(feature = "experimental-mcp-reuse")]
+            let _measurement = super::retention::measure(super::retention::Phase::Proof);
+            workspace.input_snapshot_is_current(owner)
+        };
+        if !snapshot_current {
             return Err(SourceError::failure(
                 "INPUT_CHANGED",
                 "Source inputs changed while reading them; repeat the request",
@@ -817,7 +826,12 @@ fn resolve_source_configured_inner(
     }
     for owner in &owner_roots {
         control.check()?;
-        if !workspace.input_snapshot_is_current(owner) {
+        let snapshot_current = {
+            #[cfg(feature = "experimental-mcp-reuse")]
+            let _measurement = super::retention::measure(super::retention::Phase::Proof);
+            workspace.input_snapshot_is_current(owner)
+        };
+        if !snapshot_current {
             return Err(SourceError::failure(
                 "INPUT_CHANGED",
                 "Source inputs changed while reading the checked owners; repeat the request",
@@ -825,7 +839,12 @@ fn resolve_source_configured_inner(
         }
     }
     let guards: Vec<_> = guards.into_values().collect();
-    if source_structure.is_some() && !workspace.source_guards_are_current(&guards) {
+    let structure_current = source_structure.is_none() || {
+        #[cfg(feature = "experimental-mcp-reuse")]
+        let _measurement = super::retention::measure(super::retention::Phase::Proof);
+        workspace.source_guards_are_current(&guards)
+    };
+    if !structure_current {
         return Err(SourceError::failure(
             "INPUT_CHANGED",
             "Source or lookup facts changed while capturing this request; repeat the request.",

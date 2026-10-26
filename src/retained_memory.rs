@@ -12,6 +12,9 @@ use std::sync::{
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static ACCOUNTING_FAILED: AtomicBool = AtomicBool::new(false);
+// Ordinary LSP work has no scoped allocation owner. Keep its headers for
+// correct later free/realloc, but avoid initializing/reading owner TLS.
+static ACTIVE_SCOPES: AtomicUsize = AtomicUsize::new(0);
 thread_local! {
     static CURRENT: RefCell<Option<Arc<Owner>>> = const { RefCell::new(None) };
 }
@@ -68,6 +71,7 @@ pub(crate) struct Scope {
 
 impl Scope {
     pub(crate) fn enter(owner: Arc<Owner>) -> Self {
+        ACTIVE_SCOPES.fetch_add(1, Ordering::Relaxed);
         let previous = CURRENT.with(|slot| slot.replace(Some(owner)));
         Self {
             previous,
@@ -79,6 +83,7 @@ impl Scope {
 impl Drop for Scope {
     fn drop(&mut self) {
         CURRENT.with(|slot| slot.replace(self.previous.take()));
+        ACTIVE_SCOPES.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -196,15 +201,23 @@ unsafe fn allocate(layout: Layout, zeroed: bool) -> *mut u8 {
     }
     // TLS access has a constant, allocation-free initializer. During thread
     // teardown, unavailable TLS means an untracked allocation, not a panic.
-    let owner = CURRENT
-        .try_with(|slot| match slot.try_borrow() {
-            Ok(current) => current.as_ref().map_or(ptr::null(), Arc::as_ptr),
-            Err(_) => {
-                ACCOUNTING_FAILED.store(true, Ordering::Relaxed);
-                ptr::null()
-            }
-        })
-        .unwrap_or(ptr::null());
+    // This thread's live Scope contributes to ACTIVE_SCOPES before installing
+    // its owner and until after restoring TLS. A zero count therefore proves
+    // this allocation has no owner; other threads can only make us take the
+    // conservative TLS path. Headers and their original ownership stay intact.
+    let owner = if ACTIVE_SCOPES.load(Ordering::Relaxed) == 0 {
+        ptr::null()
+    } else {
+        CURRENT
+            .try_with(|slot| match slot.try_borrow() {
+                Ok(current) => current.as_ref().map_or(ptr::null(), Arc::as_ptr),
+                Err(_) => {
+                    ACCOUNTING_FAILED.store(true, Ordering::Relaxed);
+                    ptr::null()
+                }
+            })
+            .unwrap_or(ptr::null())
+    };
     if !owner.is_null() {
         // SAFETY: an active Scope keeps this owner alive; the header acquires
         // its own strong reference for use after that scope/thread finishes.
