@@ -9,6 +9,9 @@ edit Dynare models directly. Editing tools return proposed changes for your
 agent to apply. For example, ask “Find the equations that use `k`” or “Compare
 this model with `HEAD~1`.”
 
+Repeated model requests reuse completed analysis automatically. Each request
+still checks its inputs.
+
 ## Understand the model
 
 | Tool | What it provides |

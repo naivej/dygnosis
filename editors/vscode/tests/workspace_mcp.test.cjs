@@ -78,6 +78,7 @@ Module._load = function(id, ...args) {
   };
   if (importedModule(id, args[0]) === "binary") return {
     resolveBinary: async () => { ++host.resolved; return host.binary; },
+    resolveMcpBinary: async () => { ++host.resolved; return host.binary; },
     validateMcpBinary: async () => { ++host.validated; },
   };
   return originalLoad.call(this, id, ...args);
@@ -97,22 +98,23 @@ async function directory(t) {
   return folder;
 }
 function bundle(version, contents = `engine ${version}`, target = `${process.platform}-${process.arch}`) {
-  const bytes = Buffer.from(contents), commit = "a".repeat(40);
+  const bytes = Buffer.from(contents), mcpBytes = Buffer.from(contents.replace("engine", "mcp")), commit = "a".repeat(40);
   const rust = { "win32-x64": "x86_64-pc-windows-msvc", "win32-arm64": "aarch64-pc-windows-msvc", "darwin-x64": "x86_64-apple-darwin", "darwin-arm64": "aarch64-apple-darwin", "linux-x64": "x86_64-unknown-linux-gnu", "linux-arm64": "aarch64-unknown-linux-gnu" };
-  return { bytes, provenance: { schema_version: 1, name: "dygnosis", publisher: "CoconutWater", version, target, rust_target: rust[target], commit, source: `https://github.com/naivej/dygnosis/tree/${commit}`, source_archive: `https://github.com/naivej/dygnosis/archive/${commit}.tar.gz`, binary_sha256: createHash("sha256").update(bytes).digest("hex"), release: false, tag: null, dirty: true, test_provenance: { retained: true } } };
+  return { bytes, mcpBytes, provenance: { schema_version: 1, name: "dygnosis", publisher: "CoconutWater", version, target, rust_target: rust[target], commit, source: `https://github.com/naivej/dygnosis/tree/${commit}`, source_archive: `https://github.com/naivej/dygnosis/archive/${commit}.tar.gz`, binary_sha256: createHash("sha256").update(bytes).digest("hex"), mcp_binary_name: target.startsWith("win32-") ? "dygnosis-mcp.exe" : "dygnosis-mcp", mcp_binary_sha256: createHash("sha256").update(mcpBytes).digest("hex"), mcp_binary_size: mcpBytes.length, release: false, tag: null, dirty: true, test_provenance: { retained: true } } };
 }
-const fixtureVersion = async file => `dygnosis ${(await fs.readFile(file, "utf8")).split(" ")[1]}`;
+const fixtureVersion = async file => `${path.basename(file).includes("-mcp") ? "dygnosis-mcp" : "dygnosis"} ${(await fs.readFile(file, "utf8")).split(" ")[1]}`;
 const options = { version: fixtureVersion, lockAttempts: 50, lockDelayMs: 5 };
 function files(folder, platform = process.platform) {
-  const bin = path.join(folder, "bin"); return { bin, binary: path.join(bin, platform === "win32" ? "dygnosis.exe" : "dygnosis"), active: path.join(bin, "managed.json"), pending: path.join(bin, "pending.json"), stage: path.join(bin, ".dygnosis.pending"), lock: path.join(bin, ".dygnosis.lock") };
+  const bin = path.join(folder, "bin"); return { bin, binary: path.join(bin, platform === "win32" ? "dygnosis-mcp.exe" : "dygnosis-mcp"), mainBinary: path.join(bin, platform === "win32" ? "dygnosis.exe" : "dygnosis"), active: path.join(bin, "managed-mcp.json"), pending: path.join(bin, "pending-mcp.json"), stage: path.join(bin, ".dygnosis-mcp.pending"), lock: path.join(bin, ".dygnosis-mcp.lock"), legacyActive: path.join(bin, "managed.json") };
 }
 async function packagedContext(t, scheme = "file") {
   const folder = await directory(t), extensionPath = path.join(folder, "package"), source = bundle("0.11.2");
   await fs.mkdir(files(extensionPath).bin, { recursive: true });
-  await fs.writeFile(files(extensionPath).binary, source.bytes);
+  await fs.writeFile(files(extensionPath).mainBinary, source.bytes);
+  await fs.writeFile(files(extensionPath).binary, source.mcpBytes);
   await fs.writeFile(path.join(extensionPath, "SOURCE.json"), JSON.stringify(source.provenance));
   host.folders = [{ name: "workspace", uri: Uri.file(folder) }];
-  host.binary = { path: files(extensionPath).binary, override: false, version: source.provenance.version };
+  host.binary = { path: files(extensionPath).binary, args: [], override: false, version: source.provenance.version };
   host.versionFiles = [];
   return { extensionPath, globalStorageUri: Uri.file(path.join(folder, "storage")).with({ scheme }), extension: { packageJSON: { name: "dygnosis", publisher: "CoconutWater", version: source.provenance.version } } };
 }
@@ -157,11 +159,22 @@ test("Git root choice uses the nearest containing file repository, with visible 
 test("managed install writes frozen bytes and complete source provenance, then is a no-op", async t => {
   const folder = await directory(t), source = bundle("0.11.2"), selected = await ensureManagedBinary(folder, source, options);
   assert.equal(selected.changed, true); assert.equal(selected.version, "0.11.2"); assert.ok(path.isAbsolute(selected.path));
-  assert.deepEqual(await fs.readFile(selected.path), source.bytes);
+  assert.deepEqual(await fs.readFile(selected.path), source.mcpBytes);
   assert.deepEqual(JSON.parse(await fs.readFile(files(folder).active, "utf8")), source.provenance);
   const before = await fs.stat(selected.path);
   assert.deepEqual(await ensureManagedBinary(folder, source, options), { path: selected.path, version: "0.11.2", changed: false });
   assert.equal((await fs.stat(selected.path)).mtimeMs, before.mtimeMs);
+});
+test("companion staging leaves prior managed launcher paths and metadata intact", async t => {
+  const folder = await directory(t), old = files(folder);
+  await fs.mkdir(old.bin, { recursive: true });
+  await fs.writeFile(old.mainBinary, "legacy managed launcher");
+  await fs.writeFile(old.legacyActive, '{"version":"0.11.1","binary_sha256":"legacy"}');
+  const selected = await ensureManagedBinary(folder, bundle("0.11.2"), options);
+  assert.equal(selected.path, old.binary);
+  assert.deepEqual(await fs.readFile(old.binary), bundle("0.11.2").mcpBytes);
+  assert.equal(await fs.readFile(old.mainBinary, "utf8"), "legacy managed launcher");
+  assert.equal(await fs.readFile(old.legacyActive, "utf8"), '{"version":"0.11.1","binary_sha256":"legacy"}');
 });
 test("two windows cannot downgrade a managed copy or install different bytes for one version", async t => {
   const folder = await directory(t);
@@ -169,31 +182,31 @@ test("two windows cannot downgrade a managed copy or install different bytes for
   assert.equal(JSON.parse(await fs.readFile(files(folder).active, "utf8")).version, "0.11.10");
   assert.ok(results.every(result => ["0.11.2", "0.11.10"].includes(result.version)));
   await assert.rejects(ensureManagedBinary(folder, bundle("0.11.10", "different bytes"), options), /different package bytes/);
-  assert.equal(await fs.readFile(files(folder).binary, "utf8"), "engine 0.11.10");
+  assert.equal(await fs.readFile(files(folder).binary, "utf8"), "mcp 0.11.10");
 });
 test("staging version/hash failures preserve the working engine and source record", async t => {
   const folder = await directory(t); await ensureManagedBinary(folder, bundle("0.11.1"), options);
   const active = await fs.readFile(files(folder).active);
-  await assert.rejects(ensureManagedBinary(folder, bundle("0.11.2"), { ...options, version: async () => "dygnosis 9.0.0" }), /version verification/);
-  const mutated = bundle("0.11.2"); mutated.bytes[0] = 42;
+  await assert.rejects(ensureManagedBinary(folder, bundle("0.11.2"), { ...options, version: async () => "dygnosis-mcp 9.0.0" }), /version verification/);
+  const mutated = bundle("0.11.2"); mutated.mcpBytes[0] = 42;
   await assert.rejects(ensureManagedBinary(folder, mutated, options), /changed before installation/);
-  assert.equal(await fs.readFile(files(folder).binary, "utf8"), "engine 0.11.1"); assert.deepEqual(await fs.readFile(files(folder).active), active);
+  assert.equal(await fs.readFile(files(folder).binary, "utf8"), "mcp 0.11.1"); assert.deepEqual(await fs.readFile(files(folder).active), active);
 });
 test("Windows sharing violations retain old engine and verified pending update then replace at the same path", async t => {
   const folder = await directory(t), windows = { ...options, platform: "win32" }, old = await ensureManagedBinary(folder, bundle("0.11.1"), windows);
   const locked = await ensureManagedBinary(folder, bundle("0.11.2"), { ...windows, replace: async () => { throw Object.assign(new Error("locked by MCP"), { code: "EPERM" }); } });
   assert.deepEqual(locked, { path: old.path, version: "0.11.1", pendingVersion: "0.11.2", changed: false });
-  assert.equal(await fs.readFile(old.path, "utf8"), "engine 0.11.1");
+  assert.equal(await fs.readFile(old.path, "utf8"), "mcp 0.11.1");
   assert.equal(JSON.parse(await fs.readFile(files(folder, "win32").pending, "utf8")).version, "0.11.2");
   // An older extension retries the already-verified newer pending version, never its own older bundle.
   const updated = await ensureManagedBinary(folder, bundle("0.11.1"), windows);
   assert.equal(updated.path, old.path); assert.equal(updated.version, "0.11.2");
-  assert.equal(await fs.readFile(old.path, "utf8"), "engine 0.11.2");
+  assert.equal(await fs.readFile(old.path, "utf8"), "mcp 0.11.2");
 });
 test("non-sharing replacement failure and interrupted metadata commit are recoverable", async t => {
   const folder = await directory(t); await ensureManagedBinary(folder, bundle("0.11.1"), options);
   await assert.rejects(ensureManagedBinary(folder, bundle("0.11.2"), { ...options, replace: async () => { throw Object.assign(new Error("disk failure"), { code: "EIO" }); } }), /disk failure/);
-  assert.equal(await fs.readFile(files(folder).binary, "utf8"), "engine 0.11.1");
+  assert.equal(await fs.readFile(files(folder).binary, "utf8"), "mcp 0.11.1");
   // Simulate process interruption after binary rename, before the active metadata rename.
   await fs.rename(files(folder).stage, files(folder).binary);
   const result = await ensureManagedBinary(folder, bundle("0.11.1"), options);
@@ -208,7 +221,7 @@ test("corrupt working copy, wrong source/target and incomplete newer pending sta
   assert.equal(await fs.readFile(files(folder).binary, "utf8"), "tampered");
   const bad = bundle("0.11.2"); bad.provenance.source = "https://other.test/source";
   await assert.rejects(ensureManagedBinary(folder, bad, options), /provenance/);
-  await fs.writeFile(files(folder).binary, bundle("0.11.1").bytes);
+  await fs.writeFile(files(folder).binary, bundle("0.11.1").mcpBytes);
   await fs.writeFile(files(folder).pending, JSON.stringify(bundle("0.11.3").provenance));
   await assert.rejects(ensureManagedBinary(folder, bundle("0.11.2"), options), /incomplete/);
   const other = bundle("0.11.3", "engine 0.11.3", process.platform === "win32" ? "linux-x64" : "win32-x64");
@@ -226,6 +239,16 @@ test("package verification rejects mismatched extension metadata before launchin
   await assert.rejects(verifyPackagedBundle(context), /provenance/);
   context.extension.packageJSON.publisher = "CoconutWater"; context.extension.packageJSON.version = "0.11.1";
   await assert.rejects(verifyPackagedBundle(context), /version or native target/);
+});
+test("package verification requires the MCP companion hash and version from provenance", async t => {
+  reset(); const context = await packagedContext(t), companion = files(context.extensionPath).binary;
+  const source = JSON.parse(await fs.readFile(path.join(context.extensionPath, "SOURCE.json"), "utf8"));
+  await fs.writeFile(companion, "tampered companion");
+  await assert.rejects(verifyPackagedBundle(context), /MCP executable checksum/);
+  await fs.writeFile(companion, bundle("0.11.2").mcpBytes);
+  source.mcp_binary_size += 1;
+  await fs.writeFile(path.join(context.extensionPath, "SOURCE.json"), JSON.stringify(source));
+  await assert.rejects(verifyPackagedBundle(context), /MCP executable checksum/);
 });
 
 test("a real child process owns the lock; contender waits and enters only after release", async t => {
@@ -367,8 +390,8 @@ test("bundled workspace MCP setup accepts disk storage with a vscode-userdata UR
     assert.deepEqual(host.errors, []);
     const config = JSON.parse(await fs.readFile(path.join(host.folders[0].uri.fsPath, ".mcp.json"), "utf8"));
     assert.deepEqual(config.mcpServers.dygnosis, { type: "stdio", command: files(storage).binary, args: ["mcp"] });
-    assert.deepEqual(await fs.readFile(files(storage).binary), bundle("0.11.2").bytes);
-    assert.deepEqual(host.versionFiles, [files(context.extensionPath).binary, files(storage).stage]);
+    assert.deepEqual(await fs.readFile(files(storage).binary), bundle("0.11.2").mcpBytes);
+    assert.deepEqual(host.versionFiles, [files(context.extensionPath).mainBinary, files(context.extensionPath).binary, files(storage).stage]);
     assert.equal(JSON.parse(await fs.readFile(files(storage).active, "utf8")).version, "0.11.2");
   });
 });
@@ -384,9 +407,9 @@ test("activation updates a managed copy in vscode-userdata storage without editi
   });
   const registration = registerWorkspaceMcp(context, { log: completed });
   t.after(() => { registration.dispose(); clearTimeout(timer); });
-  try { assert.match(await maintenance, /executable updated to 0.11.2/); }
+  try { assert.match(await maintenance, /companion updated to 0.11.2/); }
   finally { clearTimeout(timer); }
-  assert.deepEqual(await fs.readFile(files(storage).binary), bundle("0.11.2").bytes);
+  assert.deepEqual(await fs.readFile(files(storage).binary), bundle("0.11.2").mcpBytes);
   assert.equal(JSON.parse(await fs.readFile(files(storage).active, "utf8")).version, "0.11.2");
   assert.equal(await fs.readFile(configPath, "utf8"), source);
   assert.equal(host.resolved, 0); assert.equal(host.saved, 0); assert.equal(host.opened.length, 0);

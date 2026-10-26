@@ -4,6 +4,7 @@ description = "Dynare analysis core"
 # Product version source. After editing, run: node scripts/version.cjs --sync
 version = "0.11.37"
 edition = "2024"
+default-run = "dygnosis"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/naivej/dygnosis"
 exclude = ["editors/**"]
@@ -12,9 +13,18 @@ exclude = ["editors/**"]
 name = "dygnosis"
 path = "src/main.rs"
 
+[[bin]]
+name = "dygnosis-mcp"
+path = "src/mcp_main.rs"
+required-features = ["mcp-reuse"]
+
 [features]
-# Developer experiment; ordinary builds retain the system allocator and no store.
-experimental-mcp-reuse = []
+default = ["mcp-reuse"]
+# Only the MCP executable installs the allocation ledger.
+mcp-reuse = []
+# Work counters for the developer benchmarks, excluded from ordinary LSP builds.
+mcp-perf = ["mcp-reuse"]
+experimental-mcp-reuse = ["mcp-perf"]
 
 [dependencies]
 # Musl libm, pure Rust. Used for `tgamma` / `lgamma` / `erf` / `erfc` so those

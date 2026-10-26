@@ -29,16 +29,19 @@ async function fixture(t) {
     await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await fs.writeFile(path.join(root, file), text);
   }
-  const state = { builds: 0, executable: path.join(root, 'custom target', 'debug', 'dygnosis.exe'), calls: [], tools: [], version: '0.1.0' };
+  const state = { builds: 0, lsp: path.join(root, 'custom target', 'debug', 'dygnosis.exe'),
+    executable: path.join(root, 'custom target', 'debug', 'dygnosis-mcp.exe'), calls: [], tools: [], version: '0.1.0' };
   t.mock.method(childProcess, 'execFileSync', (command, args, options) => {
     assert.equal(command, 'cargo');
     assert.equal(options.cwd, root);
     assert.ok(args.includes('--locked'));
+    assert.deepEqual(args.flatMap((value, index) => value === '--bin' ? [args[index + 1]] : []), ['dygnosis', 'dygnosis-mcp']);
     assert.ok(args.includes('--message-format=json'));
     state.builds++;
     return [
       { reason: 'compiler-artifact', target: { name: 'other', kind: ['bin'] }, executable: 'wrong' },
-      { reason: 'compiler-artifact', target: { name: 'dygnosis', kind: ['bin'] }, executable: state.executable },
+      { reason: 'compiler-artifact', target: { name: 'dygnosis', kind: ['bin'] }, executable: state.lsp },
+      { reason: 'compiler-artifact', target: { name: 'dygnosis-mcp', kind: ['bin'] }, executable: state.executable },
     ].map(item => JSON.stringify(item)).join('\n');
   });
   t.mock.method(common, 'rpc', executable => {
@@ -144,7 +147,10 @@ test('a source change during refresh keeps the previous reference and stamp', as
   const before = await fs.readFile(reference, 'utf8'), oldStamp = await fs.readFile(stamp, 'utf8');
   t.mock.method(childProcess, 'execFileSync', () => {
     fsSync.appendFileSync(path.join(root, 'src/mcp/mod.rs'), '// Edited during build\n');
-    return JSON.stringify({ reason: 'compiler-artifact', target: { name: 'dygnosis', kind: ['bin'] }, executable: state.executable });
+    return [
+      { reason: 'compiler-artifact', target: { name: 'dygnosis', kind: ['bin'] }, executable: state.lsp },
+      { reason: 'compiler-artifact', target: { name: 'dygnosis-mcp', kind: ['bin'] }, executable: state.executable },
+    ].map(item => JSON.stringify(item)).join('\n');
   });
   await assert.rejects(help.ensureReference({ root, force: true }), /source changed during Help generation/);
   assert.equal(await fs.readFile(reference, 'utf8'), before);

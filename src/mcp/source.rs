@@ -84,7 +84,7 @@ fn captured_owners_current(
     workspace: &Workspace,
     proofs: &BTreeMap<String, (String, InputStamps)>,
 ) -> Result<(), SourceError> {
-    #[cfg(feature = "experimental-mcp-reuse")]
+    #[cfg(feature = "mcp-reuse")]
     let _measurement = super::retention::measure(super::retention::Phase::Proof);
     workspace
         .check_cancelled()
@@ -222,7 +222,7 @@ impl Default for SourceLimits {
 
 #[derive(Clone, Default)]
 pub struct RequestControl {
-    #[cfg(feature = "experimental-mcp-reuse")]
+    #[cfg(feature = "mcp-reuse")]
     pub(super) retention: Option<Arc<super::retention::Session>>,
     pub cancelled: Arc<AtomicBool>,
     pub limits: SourceLimits,
@@ -350,7 +350,7 @@ impl<'a> ReuseView<'a> {
     }
 }
 
-#[cfg(feature = "experimental-mcp-reuse")]
+#[cfg(feature = "mcp-reuse")]
 pub(super) struct ReusableSource {
     workspace: Workspace,
     root: String,
@@ -359,7 +359,7 @@ pub(super) struct ReusableSource {
     model: std::sync::Weak<Model>,
 }
 
-#[cfg(feature = "experimental-mcp-reuse")]
+#[cfg(feature = "mcp-reuse")]
 impl ReusableSource {
     #[cfg(test)]
     pub(super) fn model_weak(&self) -> std::sync::Weak<Model> {
@@ -376,7 +376,7 @@ impl ReusableSource {
 }
 
 impl SourceSnapshot {
-    #[cfg(feature = "experimental-mcp-reuse")]
+    #[cfg(feature = "mcp-reuse")]
     pub(super) fn reusable(&self) -> ReusableSource {
         let mut workspace = self.workspace.snapshot_with_root_settings(&self.root);
         workspace.clear_request_cancellation();
@@ -461,12 +461,12 @@ pub(super) fn resolve_source_configured_reusing(
     #[cfg(test)]
     let previous = previous.or_else(|| probe.previous());
     let previous = previous.map(|(snapshot, exact)| ReuseView::snapshot(snapshot, exact));
-    #[cfg(feature = "experimental-mcp-reuse")]
+    #[cfg(feature = "mcp-reuse")]
     let lease = control
         .retention
         .as_ref()
         .and_then(|session| session.checkout(&input, control, analysis, previous.is_none()));
-    #[cfg(feature = "experimental-mcp-reuse")]
+    #[cfg(feature = "mcp-reuse")]
     let previous = previous.or_else(|| {
         lease
             .as_ref()
@@ -484,7 +484,7 @@ pub(super) fn resolve_source_configured_reusing(
     if let Ok(snapshot) = &result {
         probe.retain(snapshot, control);
     }
-    #[cfg(feature = "experimental-mcp-reuse")]
+    #[cfg(feature = "mcp-reuse")]
     if let (Some(lease), Ok(snapshot)) = (lease, &result) {
         lease.complete(snapshot, control);
     }
@@ -499,7 +499,7 @@ fn resolve_source_configured_inner(
     inspection: Option<&SourceStructureQuery>,
     previous: Option<ReuseView<'_>>,
 ) -> Result<SourceSnapshot, SourceError> {
-    #[cfg(feature = "experimental-mcp-reuse")]
+    #[cfg(feature = "mcp-reuse")]
     let _measurement = super::retention::measure(super::retention::Phase::Source);
     control.check()?;
     let (mut workspace, root, owner_roots, kind, include_dirs, root_file, reused) = match input {
@@ -686,7 +686,7 @@ fn resolve_source_configured_inner(
         })?;
         control.check()?;
         let snapshot_current = {
-            #[cfg(feature = "experimental-mcp-reuse")]
+            #[cfg(feature = "mcp-reuse")]
             let _measurement = super::retention::measure(super::retention::Phase::Proof);
             workspace.input_snapshot_is_current(owner)
         };
@@ -827,7 +827,7 @@ fn resolve_source_configured_inner(
     for owner in &owner_roots {
         control.check()?;
         let snapshot_current = {
-            #[cfg(feature = "experimental-mcp-reuse")]
+            #[cfg(feature = "mcp-reuse")]
             let _measurement = super::retention::measure(super::retention::Phase::Proof);
             workspace.input_snapshot_is_current(owner)
         };
@@ -840,7 +840,7 @@ fn resolve_source_configured_inner(
     }
     let guards: Vec<_> = guards.into_values().collect();
     let structure_current = source_structure.is_none() || {
-        #[cfg(feature = "experimental-mcp-reuse")]
+        #[cfg(feature = "mcp-reuse")]
         let _measurement = super::retention::measure(super::retention::Phase::Proof);
         workspace.source_guards_are_current(&guards)
     };

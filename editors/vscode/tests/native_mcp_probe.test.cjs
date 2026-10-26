@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { canonicalMcpResult, mcpProbeCases } = require('../scripts/common.cjs');
+const { canonicalMcpResult, mcpProbeCases, rpc } = require('../scripts/common.cjs');
 const { probeNativeMcp } = require('../scripts/native-mcp-host.cjs');
 
 test('package probes read contract 3 from structured or text results and reject legacy envelopes', () => {
@@ -11,6 +11,19 @@ test('package probes read contract 3 from structured or text results and reject 
   ] }), result);
   assert.throws(() => canonicalMcpResult({ structuredContent: { schema_version: 2 } }), /contract 3/);
   assert.throws(() => canonicalMcpResult({ content: [{ type: 'text', text: '{"schema_version":2}' }] }), /schema_version 3/);
+});
+
+test('stdio probe preserves a child reuse override and captures MCP retention trace from stderr', async () => {
+  const source = `let buffer=''; process.stdin.on('data', chunk => { buffer += chunk; let end; while ((end=buffer.indexOf('\\n')) >= 0) { const line=buffer.slice(0,end); buffer=buffer.slice(end+1); if (!line) continue; const request=JSON.parse(line); process.stderr.write('MCP_RETENTION '+JSON.stringify({event:'complete',cache_enabled:false})+'\\n'); process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result:{reuse:process.env.DYGNOSIS_MCP_REUSE}})+'\\n'); } });`;
+  const session = rpc(process.execPath, ['-e', source], false, { env: { ...process.env, DYGNOSIS_MCP_REUSE: '0' } });
+  try {
+    const result = await session.request('probe', {});
+    assert.equal(result.reuse, '0');
+    for (let attempt = 0; attempt < 50 && session.retentionEvents().length === 0; ++attempt) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.deepEqual(session.retentionEvents(), [{ event: 'complete', cache_enabled: false }]);
+  } finally { session.close(); }
 });
 
 // This fake workbench checks native routing and guarded inputs. Real stdio and

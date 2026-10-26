@@ -10,7 +10,7 @@ mod multi_request;
 pub(crate) mod repository_compare;
 mod request;
 mod result;
-#[cfg(feature = "experimental-mcp-reuse")]
+#[cfg(feature = "mcp-reuse")]
 mod retention;
 #[cfg(test)]
 mod reuse_probe;
@@ -1217,12 +1217,12 @@ fn related_file_path(resolved: &Path, files: &HashMap<String, String>) -> String
 /// MCP stdio entry. Wired from `dygnosis mcp`.
 pub async fn run_stdio() {
     use rmcp::transport::stdio;
-    #[cfg(feature = "experimental-mcp-reuse")]
+    #[cfg(feature = "mcp-reuse")]
     let connection = retention::Connection::from_env();
     let handler = DygnosisMcp {
-        #[cfg(feature = "experimental-mcp-reuse")]
+        #[cfg(feature = "mcp-reuse")]
         retention: connection.as_ref().map(|connection| connection.store()),
-        #[cfg(feature = "experimental-mcp-reuse")]
+        #[cfg(feature = "mcp-reuse")]
         retention_trace: std::env::var("DYGNOSIS_MCP_REUSE_TRACE").as_deref() == Ok("1"),
     };
     let service = match handler.serve(stdio()).await {
@@ -1699,9 +1699,9 @@ fn workspace_diag_json(diag: &WorkspaceDiagnostic) -> Value {
 
 #[derive(Clone, Default)]
 struct DygnosisMcp {
-    #[cfg(feature = "experimental-mcp-reuse")]
+    #[cfg(feature = "mcp-reuse")]
     retention: Option<std::sync::Arc<retention::Store>>,
-    #[cfg(feature = "experimental-mcp-reuse")]
+    #[cfg(feature = "mcp-reuse")]
     retention_trace: bool,
 }
 
@@ -1920,27 +1920,27 @@ impl ServerHandler for DygnosisMcp {
         let arguments = Value::Object(request.arguments.unwrap_or_default());
         let control = source::RequestControl {
             cancelled: Arc::clone(&cancelled),
-            #[cfg(feature = "experimental-mcp-reuse")]
+            #[cfg(feature = "mcp-reuse")]
             retention: self.retention.as_ref().map(retention::Session::new),
             ..Default::default()
         };
         let progress = Arc::clone(&control.progress);
         let progress_token = context.meta.get_progress_token();
-        #[cfg(feature = "experimental-mcp-reuse")]
+        #[cfg(feature = "mcp-reuse")]
         let retention_trace = self.retention_trace;
         let mut worker = tokio::task::spawn_blocking(move || {
-            #[cfg(feature = "experimental-mcp-reuse")]
+            #[cfg(feature = "mcp-reuse")]
             retention::reset_work();
-            #[cfg(feature = "experimental-mcp-reuse")]
+            #[cfg(feature = "mcp-reuse")]
             retention::reset_timings(retention_trace);
-            #[cfg(feature = "experimental-mcp-reuse")]
+            #[cfg(feature = "mcp-reuse")]
             let retained = control.retention.clone();
-            #[cfg(feature = "experimental-mcp-reuse")]
+            #[cfg(feature = "mcp-reuse")]
             let _allocations = retained.as_ref().map(|session| session.enter());
-            #[cfg(feature = "experimental-mcp-reuse")]
+            #[cfg(feature = "mcp-reuse")]
             let caller_cancelled = Arc::clone(&control.cancelled);
             let result = {
-                #[cfg(feature = "experimental-mcp-reuse")]
+                #[cfg(feature = "mcp-reuse")]
                 let _measurement = retention::measure(retention::Phase::Dispatch);
                 crate::engine::control::run(Some(Arc::clone(&control.cancelled)), || {
                     canonical::dispatch(&name, arguments, control)
@@ -1948,7 +1948,7 @@ impl ServerHandler for DygnosisMcp {
                 .map_err(|_| rmcp::ErrorData::internal_error("Request cancelled", None))
                 .and_then(|result| result)
             };
-            #[cfg(feature = "experimental-mcp-reuse")]
+            #[cfg(feature = "mcp-reuse")]
             if let Some(session) = retained {
                 session.finish(&result, &caller_cancelled);
             } else {

@@ -1,4 +1,4 @@
-//! Allocation accounting for the disabled MCP retention experiment.
+//! Allocation accounting for completed analysis in the MCP executable.
 //! Owners count live requested allocation bytes, including tracking layout.
 //! This is neither an allocator-fragmentation estimate nor a process RSS cap.
 

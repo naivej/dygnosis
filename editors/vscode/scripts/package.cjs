@@ -6,11 +6,12 @@ const vsce = require("@vscode/vsce");
 const { collectLicenses } = require("./licenses.cjs");
 const { bundle } = require("./bundle.cjs");
 const { sourceFileHashes } = require("./source-hash.cjs");
-const { assertNative, execute, extensionRoot, productRoot, binaryName, hostFacts, sha256, writeJson } = require("./common.cjs");
+const { assertNative, execute, extensionRoot, productRoot, binaryName, mcpBinaryName, hostFacts, sha256, writeJson } = require("./common.cjs");
+const { buildEngine } = require("../../../scripts/build-engine.cjs");
 const { checkVersion } = require("../../../scripts/version.cjs");
 
 async function main() {
-  const { values } = parseArgs({ options: { target: { type: "string" }, tag: { type: "string" }, candidate: { type: "boolean" }, binary: { type: "string" } } });
+  const { values } = parseArgs({ options: { target: { type: "string" }, tag: { type: "string" }, candidate: { type: "boolean" }, binary: { type: "string" }, "mcp-binary": { type: "string" } } });
   const target = values.target ?? (values.candidate ? `${process.platform}-${process.arch}` : undefined);
   const info = assertNative(target);
   const manifest = JSON.parse(await fs.readFile(path.join(extensionRoot, "package.json"), "utf8"));
@@ -26,26 +27,34 @@ async function main() {
     assert.equal(values.tag, `v${version}`, "A matching product version tag is required");
     assert.equal(execute("git", ["rev-parse", `${values.tag}^{commit}`], { cwd: productRoot }).trim(), commit);
     assert.ok((await fs.readFile(path.join(productRoot, "CHANGELOG.md"), "utf8")).split(/\r?\n/).includes(`## ${values.tag}`), "Missing release notes for the tag");
-    assert.ok(!values.binary, "Release builds must build their own engine from the tagged checkout");
+    assert.ok(!values.binary && !values["mcp-binary"], "Release builds must build their own engines from the tagged checkout");
   }
-  let binary;
+  assert.equal(Boolean(values.binary), Boolean(values["mcp-binary"]), "Candidate artifacts require both --binary and --mcp-binary from the same build.");
+  let binaries;
   const rustFlags = [process.env.RUSTFLAGS, info.platform === "win32" ? "-C target-feature=+crt-static" : ""].filter(Boolean).join(" ");
-  if (values.binary) { assert.ok(values.candidate); binary = path.resolve(values.binary); }
-  else {
-    execute("cargo", ["build", "--locked", "--release", "--target", info.rust], { cwd: productRoot, stdio: "inherit", timeout: 20 * 60 * 1000, env: { ...process.env, RUSTFLAGS: rustFlags } });
-    binary = path.join(process.env.CARGO_TARGET_DIR ? path.resolve(productRoot, process.env.CARGO_TARGET_DIR) : path.join(productRoot, "target"), info.rust, "release", binaryName(target));
+  if (values.binary) {
+    assert.ok(values.candidate);
+    binaries = { lsp: path.resolve(values.binary), mcp: path.resolve(values["mcp-binary"]) };
+    assert.notEqual(binaries.lsp, binaries.mcp, "Candidate LSP and MCP executables must be separate files.");
   }
-  assert.equal(execute(binary, ["--version"]).trim(), `dygnosis ${version}`);
+  else {
+    binaries = buildEngine(productRoot, { release: true, target: info.rust, env: { ...process.env, RUSTFLAGS: rustFlags } });
+  }
+  assert.equal(execute(binaries.lsp, ["--version"]).trim(), `dygnosis ${version}`);
+  assert.equal(execute(binaries.mcp, ["--version"]).trim(), `dygnosis-mcp ${version}`);
   // Package Help references from the exact engine selected for this artifact.
-  await require("./help.cjs").generate(binary);
+  await require("./help.cjs").generate(binaries.mcp);
   await require("./help.cjs").build();
   assert.equal(await sha256(path.join(extensionRoot, manifest.icon)), await sha256(path.join(productRoot, "media/logo_s.png")), "Extension logo differs from the product source");
   const logo = await fs.readFile(path.join(productRoot, "media/logo_s.png"));
   assert.equal(logo.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
   assert.ok(logo.readUInt32BE(16) >= 128 && logo.readUInt32BE(20) >= 128, "Marketplace icon must be at least 128px");
   await fs.mkdir(path.join(extensionRoot, "bin"), { recursive: true });
-  await fs.copyFile(binary, path.join(extensionRoot, "bin", binaryName(target)));
-  if (info.platform !== "win32") await fs.chmod(path.join(extensionRoot, "bin", binaryName(target)), 0o755);
+  for (const [kind, name] of [["lsp", binaryName(target)], ["mcp", mcpBinaryName(target)]]) {
+    const destination = path.join(extensionRoot, "bin", name);
+    await fs.copyFile(binaries[kind], destination);
+    if (info.platform !== "win32") await fs.chmod(destination, 0o755);
+  }
   for (const file of ["LICENSE", "CHANGELOG.md"]) await fs.copyFile(path.join(productRoot, file), path.join(extensionRoot, file));
   // CHANGELOG originates at the product root. vsce joins relative links onto editors/vscode.
   // A help/ link must be absolute, or the listing resolves it under editors/vscode/help/.
@@ -63,10 +72,12 @@ async function main() {
     commit, tag: values.tag ?? null, release: !values.candidate, dirty,
     source: `https://github.com/naivej/dygnosis/tree/${commit}`,
     source_archive: `https://github.com/naivej/dygnosis/archive/${commit}.tar.gz`,
-    binary_sha256: await sha256(binary), logo_sha256: await sha256(path.join(productRoot, "media/logo_s.png")),
+    binary_sha256: await sha256(binaries.lsp), mcp_binary_name: mcpBinaryName(target),
+    mcp_binary_sha256: await sha256(binaries.mcp),
+    mcp_binary_size: (await fs.stat(binaries.mcp)).size, logo_sha256: await sha256(path.join(productRoot, "media/logo_s.png")),
     license: { spdx: "GPL-3.0-or-later", source_file: "LICENSE", source_sha256: await sha256(path.join(productRoot, "LICENSE")), vsix_path: "extension/LICENSE.txt", standalone_path: "LICENSE" },
     rustc: execute("rustc", ["--version"]).trim(), cargo_lock_sha256: cargoLock.committed, cargo_lock_checkout_sha256: cargoLock.checkout,
-    build: values.binary ? "provided candidate binary" : "native cargo --locked --release", rustflags: values.binary ? null : rustFlags,
+    build: values.binary ? "provided candidate binary pair" : "native cargo --locked --release", rustflags: values.binary ? null : rustFlags,
     npm_lock_sha256: npmLock.committed, npm_lock_checkout_sha256: npmLock.checkout, host: hostFacts(),
     client, runtime_dependencies: [],
   };
@@ -85,9 +96,12 @@ async function main() {
   await fs.mkdir(standalone, { recursive: true });
   for (const file of ["LICENSE", "SOURCE.json", "THIRD-PARTY-NOTICES.json"]) await fs.copyFile(path.join(extensionRoot, file), path.join(standalone, file));
   await fs.cp(path.join(extensionRoot, "licenses"), path.join(standalone, "licenses"), { recursive: true });
-  await fs.copyFile(binary, path.join(standalone, binaryName(target)));
-  if (info.platform !== "win32") await fs.chmod(path.join(standalone, binaryName(target)), 0o755);
-  await fs.writeFile(path.join(standalone, "README.txt"), `Dygnosis ${version} (${target})\nSource: ${provenance.source}\nLicense: GPL-3.0-or-later; see LICENSE and THIRD-PARTY-NOTICES.json.\n\nExtract the archive to a persistent directory. No Rust, Node.js, VS Code, MATLAB or Dynare install is needed.\nConfigure your MCP client's executable field with the absolute path to ${binaryName(target)} and its argument list with ["mcp"]. Each tool describes its inputs.\nUse --version to identify the executable. Reconnect your MCP client after replacing it.\nAn LSP client starts the executable without arguments.\nInstallation and runtime requirements: https://github.com/naivej/dygnosis/blob/${commit}/help/get-started.md\n`);
+  for (const [kind, name] of [["lsp", binaryName(target)], ["mcp", mcpBinaryName(target)]]) {
+    const destination = path.join(standalone, name);
+    await fs.copyFile(binaries[kind], destination);
+    if (info.platform !== "win32") await fs.chmod(destination, 0o755);
+  }
+  await fs.writeFile(path.join(standalone, "README.txt"), `Dygnosis ${version} (${target})\nSource: ${provenance.source}\nLicense: GPL-3.0-or-later; see LICENSE and THIRD-PARTY-NOTICES.json.\n\nExtract the archive to a persistent directory. No Rust, Node.js, VS Code, MATLAB or Dynare install is needed.\nConfigure your MCP client's executable field with the absolute path to ${mcpBinaryName(target)}. No arguments are required. Each tool describes its inputs.\nUse --version to identify each executable. Reconnect your MCP client after replacing it.\nAn LSP client starts ${binaryName(target)} without arguments.\nInstallation and runtime requirements: https://github.com/naivej/dygnosis/blob/${commit}/help/get-started.md\n`);
   const archive = `${standalone}.tar.gz`;
   execute("tar", ["-czf", archive, "-C", output, path.basename(standalone)]);
   const files = [vsix, archive];

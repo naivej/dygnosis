@@ -559,7 +559,7 @@ fn dispatch_query(
         projected_pages,
     )?;
     let changed = {
-        #[cfg(feature = "experimental-mcp-reuse")]
+        #[cfg(feature = "mcp-reuse")]
         let _measurement = super::retention::measure(super::retention::Phase::Proof);
         snapshot.source_structure.is_some()
             && !snapshot

@@ -1,5 +1,5 @@
-//! Connection-owned completed analysis. Enabled only by an experimental build
-//! and an explicit runtime switch. No cache lock covers acquisition/projection.
+//! Connection-owned completed analysis. Only the MCP process installs the
+//! allocation ledger. No cache lock covers acquisition/projection.
 
 #[cfg(test)]
 #[path = "retention_tests.rs"]
@@ -91,13 +91,23 @@ fn timings() -> Value {
 }
 
 pub(super) fn reset_work() {
-    crate::engine::language::parser::PARSE_EXPANDED_BUILDS.with(|count| count.set(0));
-    crate::engine::workspace::INPUT_FILE_READS.with(|count| count.set(0));
+    #[cfg(any(test, feature = "mcp-perf"))]
+    {
+        crate::engine::language::parser::PARSE_EXPANDED_BUILDS.with(|count| count.set(0));
+        crate::engine::workspace::INPUT_FILE_READS.with(|count| count.set(0));
+    }
 }
 
 fn work() -> Value {
-    json!({"parse_builds":crate::engine::language::parser::PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get),
+    #[cfg(any(test, feature = "mcp-perf"))]
+    {
+        json!({"parse_builds":crate::engine::language::parser::PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get),
         "input_checks":crate::engine::workspace::INPUT_FILE_READS.with(std::cell::Cell::get)})
+    }
+    #[cfg(not(any(test, feature = "mcp-perf")))]
+    {
+        json!({})
+    }
 }
 
 pub(super) fn trace_disabled(trace: bool) {
@@ -323,7 +333,7 @@ pub(super) struct Connection {
 }
 impl Connection {
     pub(super) fn from_env() -> Option<Self> {
-        if std::env::var("DYGNOSIS_MCP_REUSE").as_deref() != Ok("1") || !memory::installed() {
+        if std::env::var("DYGNOSIS_MCP_REUSE").as_deref() == Ok("0") || !memory::installed() {
             return None;
         }
         Some(Self::new(

@@ -3,7 +3,7 @@ const { Buffer } = require("node:buffer");
 const crypto = require("node:crypto");
 const path = require("node:path");
 const yauzl = require("yauzl");
-const { binaryName, productRoot, sha256, targetInfo } = require("./common.cjs");
+const { binaryName, mcpBinaryName, productRoot, sha256, targetInfo } = require("./common.cjs");
 
 function readZip(file) {
   return new Promise((resolve, reject) => {
@@ -66,11 +66,20 @@ async function inspectVsix(file, expected) {
   assert.ok(xml.includes(`TargetPlatform="${source.target}"`), "VSIX has no matching target platform");
   assert.ok(xml.includes(`Version="${source.version}"`) && xml.includes(`Publisher="${source.publisher}"`));
   const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
-  const binary = entries.get(`extension/bin/${binaryName(source.target)}`);
-  assert.deepEqual([...entries.keys()].filter(name => name.startsWith("extension/bin/")), [`extension/bin/${binaryName(source.target)}`], "VSIX must contain exactly one platform binary");
-  assert.ok(binary); assert.equal(hash(binary.data), source.binary_sha256);
-  assertBinaryTarget(binary.data, source.target);
-  if (targetInfo(source.target).platform !== "win32") assert.ok(binary.mode & 0o111, "VSIX lost the executable permission");
+  const binaries = [
+    { name: binaryName(source.target), hash: source.binary_sha256 },
+    { name: mcpBinaryName(source.target), hash: source.mcp_binary_sha256 },
+  ];
+  assert.equal(source.mcp_binary_name, mcpBinaryName(source.target), "SOURCE.json MCP binary name does not match its target platform");
+  assert.ok(Number.isSafeInteger(source.mcp_binary_size) && source.mcp_binary_size > 0, "SOURCE.json has no MCP binary size");
+  assert.deepEqual([...entries.keys()].filter(name => name.startsWith("extension/bin/")).sort(), binaries.map(binary => `extension/bin/${binary.name}`).sort(), "VSIX must contain exactly the LSP and MCP platform binaries");
+  for (const binary of binaries) {
+    const entry = entries.get(`extension/bin/${binary.name}`);
+    assert.ok(entry); assert.equal(hash(entry.data), binary.hash);
+    assertBinaryTarget(entry.data, source.target);
+    if (binary.name === mcpBinaryName(source.target)) assert.equal(entry.data.length, source.mcp_binary_size);
+    if (targetInfo(source.target).platform !== "win32") assert.ok(entry.mode & 0o111, "VSIX lost an executable permission");
+  }
   assert.equal(hash(data("extension/media/logo_s.png")), source.logo_sha256);
   assert.equal(source.logo_sha256, await sha256(path.join(productRoot, "media/logo_s.png")));
   assert.equal(source.license.spdx, "GPL-3.0-or-later");
@@ -114,6 +123,9 @@ async function inspectVsix(file, expected) {
     assert.ok(!filename.endsWith(".ts") && !filename.endsWith(".map"), `Source file in VSIX: ${filename}`);
     assert.ok(!filename.endsWith(".log"), `Test log in VSIX: ${filename}`);
   }
-  return { files: entries.size, sha256: await sha256(file), executablePermission: targetInfo(source.target).platform === "win32" ? "not applicable" : true };
+  return { files: entries.size, sha256: await sha256(file), binary_sha256: source.binary_sha256,
+    mcp_binary_name: source.mcp_binary_name,
+    mcp_binary_sha256: source.mcp_binary_sha256, mcp_binary_size: source.mcp_binary_size,
+    executablePermission: targetInfo(source.target).platform === "win32" ? "not applicable" : true };
 }
 module.exports = { inspectVsix, assertBinaryTarget };

@@ -91,13 +91,20 @@ jobs:
           else
             npm run package:target -- --target "$TARGET" --tag "$RELEASE_TAG"
           fi
+          : > "dist/$TARGET/runtime-libraries.txt"
           if [ "$RUNNER_OS" = Linux ]; then
-            ldd "bin/dygnosis" > "dist/$TARGET/runtime-libraries.txt"
-            readelf --version-info "bin/dygnosis" >> "dist/$TARGET/runtime-libraries.txt"
+            for executable in bin/dygnosis bin/dygnosis-mcp; do
+              echo "=== $executable ===" >> "dist/$TARGET/runtime-libraries.txt"
+              ldd "$executable" >> "dist/$TARGET/runtime-libraries.txt"
+              readelf --version-info "$executable" >> "dist/$TARGET/runtime-libraries.txt"
+            done
             ldd --version >> "dist/$TARGET/runtime-libraries.txt"
           elif [ "$RUNNER_OS" = macOS ]; then
-            otool -L "bin/dygnosis" > "dist/$TARGET/runtime-libraries.txt"
-            otool -l "bin/dygnosis" >> "dist/$TARGET/runtime-libraries.txt"
+            for executable in bin/dygnosis bin/dygnosis-mcp; do
+              echo "=== $executable ===" >> "dist/$TARGET/runtime-libraries.txt"
+              otool -L "$executable" >> "dist/$TARGET/runtime-libraries.txt"
+              otool -l "$executable" >> "dist/$TARGET/runtime-libraries.txt"
+            done
           else
             powershell -NoProfile -Command 'Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,OSArchitecture | Format-List' > "dist/$TARGET/runtime-libraries.txt"
           fi

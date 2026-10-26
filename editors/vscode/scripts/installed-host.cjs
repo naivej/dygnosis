@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const vscode = require("vscode");
-const { binaryName, model, probeMcp, sha256, writeJson } = require("./common.cjs");
+const { binaryName, mcpBinaryName, model, probeMcp, sha256, writeJson } = require("./common.cjs");
 const { probeNativeMcp } = require("./native-mcp-host.cjs");
 const samePath = (left, right) => process.platform === "win32"
   ? path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase()
@@ -37,6 +37,10 @@ exports.run = async function run() {
     assert.ok(!config?.globalValue && !config?.workspaceValue && !config?.workspaceFolderValue, "The first launch must use the packaged binary");
     const binary = path.join(extension.extensionPath, "bin", binaryName(source.target));
     assert.equal(await sha256(binary), source.binary_sha256);
+    assert.equal(source.mcp_binary_name, mcpBinaryName(source.target));
+    const mcpBinary = path.join(extension.extensionPath, "bin", source.mcp_binary_name);
+    assert.equal((await fs.stat(mcpBinary)).size, source.mcp_binary_size);
+    assert.equal(await sha256(mcpBinary), source.mcp_binary_sha256);
     const workspace = vscode.workspace.workspaceFolders[0].uri.fsPath;
     // Guard real executable verification and staging against the installed
     // artifact, independently of generated files left in the source checkout.
@@ -44,9 +48,9 @@ exports.run = async function run() {
     const { verifyPackagedBundle, ensureManagedBinary } = require(path.join(extension.extensionPath, extension.packageJSON.main));
     const frozen = await verifyPackagedBundle({ extensionPath: extension.extensionPath, extension });
     const managed = await ensureManagedBinary(path.join(workspace, "managed engine with spaces"), frozen);
-    assert.deepEqual(await fs.readFile(managed.path), frozen.bytes);
+    assert.deepEqual(await fs.readFile(managed.path), frozen.mcpBytes);
     assert.equal(managed.version, source.version);
-    evidence.checks.push("installed bundle provenance, checksum and real version verification; frozen bytes stage and run from a managed path");
+    evidence.checks.push("installed LSP/MCP pair provenance, checksum and real version verification; frozen MCP bytes stage and run from a managed path");
     service = await extension.activate();
     await checkpoint("offline Help before opening a model");
     const helpBundle = JSON.parse(await fs.readFile(path.join(extension.extensionPath, "help/bundle.json"), "utf8"));
@@ -57,19 +61,20 @@ exports.run = async function run() {
     assert.equal(vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab => tab.label === "Dygnosis Help").length, 1, "Help reuses one panel");
     evidence.checks.push("installed Help before a model, exact-code route and one panel");
     const launchLogs = [];
-    const originalLog = service.log;
-    service.log = message => { launchLogs.push(message); originalLog(message); };
+    const originalAppendLine = service.output.appendLine.bind(service.output);
+    service.output.appendLine = message => { launchLogs.push(message); originalAppendLine(message); };
     const workspaceDiagnostics = extension.packageJSON.contributes.configuration.some(group => Object.hasOwn(group.properties, "dynare.workspaceDiagnostics"));
     if (!workspaceDiagnostics) assert.equal(service.client, undefined, "Before workspace diagnostics ships, activation before a model must leave LSP idle");
     else await service.restart(); // Later releases may already analyze the unopened workspace.
     evidence.checks.push("installed extension activation before opening a Dynare document");
     await checkpoint("installed bundled MCP initialize, discovery and model-info call");
-    evidence.mcp = await probeMcp(binary, source.version);
+    evidence.mcp = await probeMcp(mcpBinary, source.version);
     evidence.checks.push("installed bundled MCP initialize/tools/list/tool call before opening a model");
     await checkpoint("native VS Code MCP discovery and model-info invocation");
     evidence.native_vscode_mcp = await probeNativeMcp(vscode, extension.id);
+    assert.ok(launchLogs.some(message => message.startsWith("MCP executable: ") && message.endsWith(` (dygnosis-mcp ${source.version})`) && samePath(message.slice(16, -` (dygnosis-mcp ${source.version})`.length), mcpBinary)), "The native provider must select the packaged MCP companion directly");
     if (!workspaceDiagnostics) assert.equal(service.client, undefined, "Native MCP must work before the first LSP launch");
-    evidence.checks.push("native VS Code MCP discovery and actual invocation of all fifteen tools before opening a model");
+    evidence.checks.push("native VS Code MCP discovery and actual invocation of all published tools before opening a model");
     await checkpoint("bundled LSP counts, symbols and Problems diagnostics");
     const file = path.join(workspace, "installed model.mod");
     await fs.writeFile(file, model);
@@ -90,17 +95,24 @@ exports.run = async function run() {
     await waitFor(() => vscode.languages.getDiagnostics(document.uri).some(diagnostic => diagnostic.severity === vscode.DiagnosticSeverity.Error), "real bundled LSP error reaches VS Code Problems");
     evidence.checks.push("bundled language-client handshake, model counts, native symbols and Problems diagnostics");
     await checkpoint("explicit user override LSP and MCP launch");
-    const override = path.join(workspace, "explicit override with spaces", binaryName(source.target));
+    const overrideRoot = path.join(workspace, "explicit override with spaces");
+    const override = path.join(overrideRoot, binaryName(source.target));
+    const overrideMcp = path.join(overrideRoot, source.mcp_binary_name);
     await fs.mkdir(path.dirname(override), { recursive: true });
     await fs.copyFile(binary, override);
-    if (process.platform !== "win32") await fs.chmod(override, 0o755);
+    await fs.copyFile(mcpBinary, overrideMcp);
+    if (process.platform !== "win32") {
+      for (const executable of [override, overrideMcp]) await fs.chmod(executable, 0o755);
+    }
     await vscode.workspace.getConfiguration("dynare").update("serverPath", override, vscode.ConfigurationTarget.Global);
     await service.restart();
     await waitFor(() => service.client && service.supportsModelInfo, "explicit override LSP restart");
     assert.ok(launchLogs.some(message => message.startsWith("LSP executable: ") && samePath(message.slice(16), override)), "The restarted LSP must select the explicit override path");
     const overrideSymbols = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", document.uri);
     assert.ok(overrideSymbols.length > 0, "Override must provide actual language results after restart");
-    evidence.overrideMcp = await probeMcp(override, source.version);
+    evidence.overrideMcp = await probeMcp(overrideMcp, source.version);
+    evidence.override_native_vscode_mcp = await probeNativeMcp(vscode, extension.id);
+    assert.ok(launchLogs.some(message => message.startsWith("MCP executable: ") && message.endsWith(` (dygnosis ${source.version})`) && samePath(message.slice(16, -` (dygnosis ${source.version})`.length), override)), "The global override must route native MCP through the selected main executable");
     evidence.selected_lsp_paths = launchLogs.filter(message => message.startsWith("LSP executable:"));
     evidence.checks.push("explicit user override with spaces launches LSP and MCP");
     await service.shutdown();

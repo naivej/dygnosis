@@ -38,13 +38,16 @@ function execute(file, args, options = {}) {
 async function sha256(file) { return crypto.createHash("sha256").update(await fs.readFile(file)).digest("hex"); }
 async function writeJson(file, value) { await fs.writeFile(file, JSON.stringify(value, null, 2) + "\n"); }
 function binaryName(target) { return targetInfo(target).platform === "win32" ? "dygnosis.exe" : "dygnosis"; }
+function mcpBinaryName(target) { return targetInfo(target).platform === "win32" ? "dygnosis-mcp.exe" : "dygnosis-mcp"; }
 function hostFacts() { return { platform: process.platform, arch: process.arch, os: os.release(), node: process.version }; }
 
 // Both protocols have bounded buffers and waits. A failed/early exit cannot count
 // as a successful launch. The test owns and terminates every child it starts.
-function rpc(executable, args, framed) {
-  const child = spawn(executable, args, { stdio: "pipe", windowsHide: true, shell: false });
+function rpc(executable, args, framed, { env = process.env } = {}) {
+  const child = spawn(executable, args, { stdio: "pipe", windowsHide: true, shell: false, env });
   const pending = new Map();
+  const retentionEvents = [];
+  let stderrRemainder = "";
   let buffer = Buffer.alloc(0), nextId = 1, failure;
   const fail = error => {
     failure = error;
@@ -54,7 +57,19 @@ function rpc(executable, args, framed) {
   child.on("error", fail);
   child.on("exit", (code, signal) => fail(new Error(`Engine exited (${code ?? signal}) before the reply`)));
   child.stdin.on("error", fail);
-  child.stderr.resume();
+  child.stderr.on("data", chunk => {
+    stderrRemainder += chunk.toString("utf8");
+    const lines = stderrRemainder.split(/\r?\n/);
+    stderrRemainder = lines.pop() ?? "";
+    if (stderrRemainder.length > 65536) stderrRemainder = stderrRemainder.slice(-65536);
+    for (const line of lines) {
+      if (!line.startsWith("MCP_RETENTION ")) continue;
+      try {
+        retentionEvents.push(JSON.parse(line.slice("MCP_RETENTION ".length)));
+        if (retentionEvents.length > 2048) retentionEvents.shift();
+      } catch { /* Ignore malformed diagnostic output; the protocol reply remains authoritative. */ }
+    }
+  });
   child.stdout.on("data", chunk => {
     try {
       buffer = Buffer.concat([buffer, chunk]);
@@ -100,6 +115,7 @@ function rpc(executable, args, framed) {
         try { send({ jsonrpc: "2.0", id, method, params }); } catch (error) { fail(error); }
       });
     },
+    retentionEvents() { return retentionEvents.slice(); },
     close() { fail(new Error("Probe finished")); child.kill(); },
   };
 }
@@ -108,8 +124,8 @@ const modelSource = { kind: "text", text: model };
 const mcpProbeCases = {
   dynare_syntax: { name: "stoch_simul", kind: "command", context: "top_level" },
   dynare_diagnostic_info: { code: "E001" },
-  dynare_diagnose: { source: { kind: "map", root: "/main.mod", files: { "/main.mod": "var y; model;\n@#include \"body.inc\"\nend;", "/body.inc": "y=0;" } } },
   dynare_model_info: { source: modelSource, sections: ["structure"] },
+  dynare_diagnose: { source: { kind: "map", root: "/main.mod", files: { "/main.mod": "var y; model;\n@#include \"body.inc\"\nend;", "/body.inc": "y=0;" } } },
   dynare_symbol_info: { source: modelSource, symbol: { kind: "name", name: "y" } },
   dynare_equations: { source: modelSource },
   dynare_expand: { source: modelSource },
@@ -133,8 +149,13 @@ function canonicalMcpResult(result) {
   }
   throw new Error("MCP tool result has no canonical schema_version 3 object");
 }
-async function probeMcp(executable, version) {
-  const session = rpc(executable, ["mcp"], false);
+async function probeMcp(executable, version, { reuse = undefined } = {}) {
+  assert.ok(reuse === undefined || reuse === "0" || reuse === "1", "MCP reuse override must be unset, 0, or 1");
+  assert.equal(execute(executable, ["--version"]).trim(), `dygnosis-mcp ${version}`);
+  const env = { ...process.env, DYGNOSIS_MCP_REUSE_TRACE: "1" };
+  if (reuse === undefined) delete env.DYGNOSIS_MCP_REUSE;
+  else env.DYGNOSIS_MCP_REUSE = reuse;
+  const session = rpc(executable, ["mcp"], false, { env });
   try {
     const initialized = await session.request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "dygnosis-package-check", version: "1" } });
     assert.equal(initialized.serverInfo.name, "dygnosis");
@@ -144,10 +165,40 @@ async function probeMcp(executable, version) {
     const list = await session.request("tools/list", {});
     assert.deepEqual(list.tools.map(tool => tool.name).sort(), Object.keys(mcpProbeCases).sort());
     const results = {};
-    for (const [name, args] of Object.entries(mcpProbeCases)) {
+    let completedCalls = 0;
+    async function callTool(name, args) {
       const response = await session.request("tools/call", { name, arguments: args });
       assert.ok(!response.isError, `${name} returned an error`);
-      results[name] = canonicalMcpResult(response);
+      completedCalls += 1;
+      for (let attempt = 0; attempt < 100
+        && session.retentionEvents().filter(event => event.event === "complete").length < completedCalls; ++attempt) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      assert.ok(session.retentionEvents().filter(event => event.event === "complete").length >= completedCalls,
+        "MCP retention trace did not flush a completed tool call");
+      return canonicalMcpResult(response);
+    }
+    for (const [name, args] of Object.entries(mcpProbeCases)) {
+      const eventsBeforeModelInfo = name === "dynare_model_info" ? session.retentionEvents().length : undefined;
+      results[name] = await callTool(name, args);
+      if (name === "dynare_model_info") {
+        const repeatedResult = await callTool(name, args);
+        assert.deepEqual(repeatedResult, results[name], "Repeated model query changed its canonical response");
+        const queryEvents = session.retentionEvents().slice(eventsBeforeModelInfo);
+        if (reuse === "0") {
+          assert.deepEqual(queryEvents.map(event => event.event), ["complete", "complete"]);
+          assert.ok(queryEvents.every(event => event.cache_enabled === false && event.hit === false), "Reuse opt-out must bypass MCP retention");
+        } else {
+          assert.deepEqual(queryEvents.map(event => event.event), ["checkout", "complete", "checkout", "complete"]);
+          assert.equal(queryEvents[0].hit, false, "The first model query must miss an empty source slot");
+          assert.equal(queryEvents[1].cache_enabled, true);
+          assert.equal(queryEvents[1].admitted, true, "The first model query must publish its completed source");
+          assert.equal(queryEvents[2].hit, true, "The repeated model query must check out its completed source");
+          assert.equal(queryEvents[3].cache_enabled, true);
+          assert.equal(queryEvents[3].hit, true);
+        }
+        results.retention = { enabled: reuse !== "0", events: queryEvents };
+      }
     }
     const info = results.dynare_model_info.data.structure;
     assert.equal(info.n_endogenous, 1); assert.equal(info.n_equations, 1);
@@ -159,7 +210,8 @@ async function probeMcp(executable, version) {
     assert.deepEqual(list.tools, reference.tools, "Packaged MCP metadata differs from Help");
     assert.match(results.dynare_diagnostic_info.data.diagnostics[0].explanation, /E001/);
     assert.ok(results.dynare_rename.proposal);
-    return { initialize: true, discovery: true, tool: "dynare_model_info", tools: Object.keys(results), metadata_matches_help: true, n_equations: info.n_equations };
+    return { initialize: true, discovery: true, tool: "dynare_model_info", tools: Object.keys(results).filter(name => name !== "retention"),
+      metadata_matches_help: true, n_equations: info.n_equations, retention: results.retention };
   } finally { session.close(); }
 }
 async function probeBinary(executable, version, workspace) {
@@ -178,6 +230,6 @@ async function probeBinary(executable, version, workspace) {
     await session.request("shutdown");
     session.notify("exit");
   } finally { session.close(); }
-  return { version, lsp: { initialize: true, symbols: true }, mcp: await probeMcp(executable, version) };
+  return { version, lsp: { initialize: true, symbols: true } };
 }
-module.exports = { extensionRoot, productRoot, targets, targetInfo, assertNative, execute, sha256, writeJson, binaryName, hostFacts, probeBinary, probeMcp, model, mcpProbeCases, canonicalMcpResult, rpc };
+module.exports = { extensionRoot, productRoot, targets, targetInfo, assertNative, execute, sha256, writeJson, binaryName, mcpBinaryName, hostFacts, probeBinary, probeMcp, model, mcpProbeCases, canonicalMcpResult, rpc };

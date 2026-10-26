@@ -2,6 +2,11 @@ const { compiledModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const Module = require("node:module");
+const { Buffer } = require("node:buffer");
+const { EventEmitter } = require("node:events");
+const fs = require("node:fs/promises");
+const childProcess = require("node:child_process");
+const os = require("node:os");
 const path = require("node:path");
 const globals = { searchPaths: ["user"], formatIndent: 2, "nameDetails.tex": false };
 const workspace = { searchPaths: ["workspace"], formatIndent: 6, "outline.sections": ["blocks", "blocks", "invented"] };
@@ -17,7 +22,7 @@ const vscode = { workspace: {
 const originalLoad = Module._load;
 Module._load = function(id, ...args) { return id === "vscode" ? vscode : originalLoad.call(this, id, ...args); };
 const { configurationSnapshot, listSetting, booleanSetting } = require(compiledModule("settings"));
-const { executablePath, validateMcpBinary } = require(compiledModule("binary"));
+const { executablePath, mcpExecutablePath, resolveMcpBinary, validateMcpBinary } = require(compiledModule("binary"));
 Module._load = originalLoad;
 
 test("loose files use user defaults while folders receive complete workspace settings", () => {
@@ -123,6 +128,54 @@ test("one absolute executable resolver supports spaces and never selects PATH", 
   assert.throws(() => executablePath(extension, "dygnosis"));
   assert.throws(() => executablePath(extension, 123));
 });
+test("bundled MCP resolves to its companion while a global override keeps the legacy mcp argument", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dygnosis-binary-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const bundled = mcpExecutablePath(root), override = path.join(root, "user override.exe");
+  await fs.mkdir(path.dirname(bundled), { recursive: true });
+  await fs.writeFile(bundled, "companion"); await fs.writeFile(override, "override");
+  const context = { extensionPath: root, extension: { packageJSON: { version: "0.11.2" } } };
+  delete globals.serverPath;
+  const defaultBinary = await resolveMcpBinary(context, () => {});
+  assert.equal(defaultBinary.path, bundled); assert.deepEqual(defaultBinary.args, ["mcp"]); assert.equal(defaultBinary.override, false);
+  globals.serverPath = override;
+  try {
+    const selected = await resolveMcpBinary(context, () => {});
+    assert.equal(selected.path, override); assert.deepEqual(selected.args, ["mcp"]); assert.equal(selected.override, true);
+  } finally { delete globals.serverPath; }
+});
+test("MCP startup failures include a bounded stderr cause in the action error", async () => {
+  const filename = compiledModule("binary"), resolved = require.resolve(filename), originalLoad = Module._load;
+  const errorText = `missing sibling companion ${"x".repeat(900)}`;
+  delete require.cache[resolved];
+  Module._load = function(id, ...args) {
+    if (id === "vscode") return vscode;
+    if (id === "node:child_process") return {
+      ...childProcess,
+      execFile: (_file, _args, _options, callback) => callback(null, "dygnosis 0.11.2", ""),
+      spawn: () => {
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+        child.stdin = { write() {} }; child.kill = () => {};
+        process.nextTick(() => { child.stderr.emit("data", Buffer.from(errorText)); child.emit("exit", 2, null); });
+        return child;
+      },
+    };
+    return originalLoad.call(this, id, ...args);
+  };
+  try {
+    const { validateMcpBinary: validate } = require(filename);
+    await assert.rejects(validate({ path: "launcher", args: ["mcp"], override: true, version: "test" }, () => {}), error => {
+      assert.match(error.message, /exited with code 2/);
+      assert.match(error.message, /MCP stderr: missing sibling companion/);
+      assert.ok(error.message.length < 800, "the action error should include only a bounded stderr excerpt");
+      return true;
+    });
+  } finally {
+    Module._load = originalLoad;
+    delete require.cache[resolved];
+  }
+});
 test("selected engine answers a real MCP initialize probe", { skip: !process.env.DYGNOSIS_TEST_BINARY }, async () => {
-  await validateMcpBinary({ path: process.env.DYGNOSIS_TEST_BINARY, override: true, version: "test" }, () => {});
+  await validateMcpBinary({ path: process.env.DYGNOSIS_TEST_BINARY, args: ["mcp"], override: true, version: "test" }, () => {});
 });

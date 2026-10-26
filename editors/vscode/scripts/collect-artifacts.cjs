@@ -16,6 +16,10 @@ async function main() {
     assert.equal(source.target, target);
     assert.equal(source.vsix, `dygnosis-${source.version}-${target}.vsix`);
     assert.equal(source.standalone, `dygnosis-${source.version}-${target}.tar.gz`);
+    assert.match(source.binary_sha256, /^[a-f0-9]{64}$/);
+    assert.match(source.mcp_binary_sha256, /^[a-f0-9]{64}$/);
+    assert.equal(source.mcp_binary_name, targets[target].platform === "win32" ? "dygnosis-mcp.exe" : "dygnosis-mcp");
+    assert.ok(Number.isSafeInteger(source.mcp_binary_size) && source.mcp_binary_size > 0);
     const current = { commit: source.commit, version: source.version, publisher: source.publisher, tag: source.tag, release: source.release, cargo_lock_sha256: source.cargo_lock_sha256, npm_lock_sha256: source.npm_lock_sha256, logo_sha256: source.logo_sha256, rustc: source.rustc };
     if (!identity) identity = current; else assert.deepEqual(current, identity, "All artifacts must share the same product commit, version, publisher and tag");
     const checksums = await fs.readFile(path.join(directory, "SHA256SUMS.txt"), "utf8");
@@ -27,6 +31,10 @@ async function main() {
       assert.equal(result.target, target); assert.equal(result.commit, source.commit); assert.equal(result.version, source.version);
       assert.equal(result.release, source.release);
       assert.equal(result.package.sha256, vsixHash); assert.equal(result.standalone.sha256, standaloneHash);
+      assert.equal(result.package.binary_sha256, source.binary_sha256);
+      assert.equal(result.package.mcp_binary_name, source.mcp_binary_name);
+      assert.equal(result.package.mcp_binary_sha256, source.mcp_binary_sha256);
+      assert.equal(result.package.mcp_binary_size, source.mcp_binary_size);
       assert.equal(result.host.platform, targets[target].platform); assert.equal(result.host.arch, targets[target].arch);
       assert.equal(result.standalone.launch.lsp.initialize, true); assert.equal(result.standalone.launch.lsp.symbols, true);
       assert.equal(result.standalone.launch.mcp.tool, "dynare_model_info");
@@ -42,7 +50,11 @@ async function main() {
       assert.equal(result.installed.passed, true);
       assert.equal(result.installed.platform, targets[target].platform); assert.equal(result.installed.arch, targets[target].arch);
     }
-    matrix.push({ target, vsix: source.vsix, vsix_sha256: vsixHash, standalone: source.standalone, standalone_sha256: standaloneHash, native: true, vscode: verified.map(result => result.installed.vscode) });
+    matrix.push({ target, vsix: source.vsix, vsix_sha256: vsixHash, standalone: source.standalone,
+      standalone_sha256: standaloneHash, binary_sha256: source.binary_sha256,
+      mcp_binary_name: source.mcp_binary_name, mcp_binary_sha256: source.mcp_binary_sha256,
+      mcp_binary_size: source.mcp_binary_size,
+      native: true, vscode: verified.map(result => result.installed.vscode) });
   }
   await writeJson(path.join(root, "verified-artifacts.json"), { schema_version: 1, ...identity, matrix });
   await fs.writeFile(path.join(root, "SHA256SUMS.txt"), matrix.flatMap(item => [`${item.vsix_sha256}  ${item.vsix}`, `${item.standalone_sha256}  ${item.standalone}`]).join("\n") + "\n");

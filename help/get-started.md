@@ -50,8 +50,12 @@ details.
 
 Requires **VS Code 1.102.0 or later**. Install from the [VS Code
 Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis)
-or download packages and standalone binaries from [GitHub
+or download packages and standalone bundles from [GitHub
 Releases](https://github.com/naivej/dygnosis/releases).
+
+For a standalone installation, extract the whole bundle and keep `dygnosis`
+and `dygnosis-mcp` together. Start LSP with `dygnosis`; an MCP client can use
+`dygnosis mcp` or the MCP executable directly.
 
 Unsaved (`Untitled`) files support single-file editing and checks; save the
 file to resolve `@#include` and companion file paths through its

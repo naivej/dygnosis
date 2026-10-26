@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { resolveBinary, validateMcpBinary } from "../client/binary";
+import { resolveMcpBinary, validateMcpBinary } from "../client/binary";
 import { Log } from "../client/settings";
 import { failureText } from "../client/failure";
 
@@ -9,15 +9,15 @@ export function registerMcp(context: vscode.ExtensionContext, log: Log): vscode.
     onDidChangeMcpServerDefinitions: changed.event,
     provideMcpServerDefinitions: async () => {
       try {
-        const binary = await resolveBinary(context, log);
-        return [new vscode.McpStdioServerDefinition("Dygnosis", binary.path, ["mcp"], {}, binary.version)];
+        const binary = await resolveMcpBinary(context, log);
+        return [new vscode.McpStdioServerDefinition("Dygnosis", binary.path, binary.args, {}, binary.version)];
       } catch (error) { log(`MCP discovery failed: ${failureText(error)}`); throw error; }
     },
     resolveMcpServerDefinition: async () => {
       try {
-        const binary = await resolveBinary(context, log);
+        const binary = await resolveMcpBinary(context, log);
         await validateMcpBinary(binary, log);
-        return new vscode.McpStdioServerDefinition("Dygnosis", binary.path, ["mcp"], {}, binary.version);
+        return new vscode.McpStdioServerDefinition("Dygnosis", binary.path, binary.args, {}, binary.version);
       } catch (error) {
         log(`MCP start failed: ${failureText(error)}`); throw error;
       }

@@ -8,11 +8,11 @@ pub mod lsp;
 pub mod mcp;
 mod test_support;
 
-#[cfg(feature = "experimental-mcp-reuse")]
+#[cfg(feature = "mcp-reuse")]
 #[doc(hidden)]
 pub mod retained_memory;
 
-#[cfg(all(test, feature = "experimental-mcp-reuse"))]
+#[cfg(all(test, feature = "mcp-reuse"))]
 #[global_allocator]
 static TEST_ALLOCATOR: retained_memory::TrackingAllocator = retained_memory::TrackingAllocator;
 

@@ -41,7 +41,7 @@ mod resid_parser;
 mod shock_parser;
 mod statement_keywords;
 
-#[cfg(any(test, feature = "experimental-mcp-reuse"))]
+#[cfg(any(test, feature = "mcp-perf"))]
 thread_local! {
     pub(crate) static PARSE_EXPANDED_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
@@ -215,7 +215,7 @@ pub(crate) fn parse_expanded_context_controlled(
     context: Option<Arc<crate::engine::analysis_configuration::MacroExecutionInputs>>,
     discarded: Option<Arc<[Span]>>,
 ) -> (Model, EquationTokenRanges) {
-    #[cfg(any(test, feature = "experimental-mcp-reuse"))]
+    #[cfg(any(test, feature = "mcp-perf"))]
     PARSE_EXPANDED_BUILDS.with(|builds| builds.set(builds.get() + 1));
     let cancellation = cancellation.or_else(crate::engine::control::current);
     let mut p = Parser {

@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { resolveBinary, validateMcpBinary } from "../client/binary";
+import { resolveMcpBinary, validateMcpBinary } from "../client/binary";
 import { record } from "../client/protocol";
 import { Log } from "../client/settings";
 
@@ -102,12 +102,16 @@ export function compareVersions(a: string, b: string): number {
 export interface PackageProvenance extends Record<string, unknown> {
   schema_version: 1; name: string; publisher: string; version: string; target: string;
   rust_target: string; commit: string; source: string; source_archive: string; binary_sha256: string;
+  mcp_binary_name: string; mcp_binary_sha256: string; mcp_binary_size: number;
 }
 function provenance(value: unknown, manifest?: { name: string; publisher: string }): PackageProvenance {
   if (!record(value) || value.schema_version !== 1 || value.name !== "dygnosis" || typeof value.publisher !== "string" || !value.publisher
     || typeof value.version !== "string" || typeof value.target !== "string" || !targets[value.target]
     || value.rust_target !== targets[value.target] || typeof value.commit !== "string" || !/^[a-f0-9]{40}$/.test(value.commit)
     || typeof value.binary_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.binary_sha256)
+    || value.mcp_binary_name !== (String(value.target).startsWith("win32-") ? "dygnosis-mcp.exe" : "dygnosis-mcp")
+    || typeof value.mcp_binary_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.mcp_binary_sha256)
+    || typeof value.mcp_binary_size !== "number" || !Number.isSafeInteger(value.mcp_binary_size) || value.mcp_binary_size <= 0
     || value.source !== `https://github.com/naivej/dygnosis/tree/${value.commit}`
     || value.source_archive !== `https://github.com/naivej/dygnosis/archive/${value.commit}.tar.gz`
     || typeof value.release !== "boolean" || typeof value.dirty !== "boolean"
@@ -121,7 +125,7 @@ function executableVersion(file: string): Promise<string> {
     if (error) reject(new Error(error.message, { cause: error })); else resolve(stdout.trim());
   }));
 }
-export interface VerifiedBundle { bytes: Buffer; provenance: PackageProvenance }
+export interface VerifiedBundle { bytes: Buffer; mcpBytes: Buffer; provenance: PackageProvenance }
 export async function verifyPackagedBundle(context: vscode.ExtensionContext): Promise<VerifiedBundle> {
   const manifest: unknown = context.extension.packageJSON;
   if (!record(manifest) || typeof manifest.name !== "string" || typeof manifest.publisher !== "string" || typeof manifest.version !== "string") throw new Error("Dygnosis extension metadata is invalid.");
@@ -133,7 +137,11 @@ export async function verifyPackagedBundle(context: vscode.ExtensionContext): Pr
   const bytes = await optionalBytes(binary);
   if (!bytes || digest(bytes) !== facts.binary_sha256) throw new Error("Dygnosis package executable checksum does not match SOURCE.json. Reinstall the extension.");
   if (await executableVersion(binary) !== `dygnosis ${facts.version}`) throw new Error("Dygnosis package executable version does not match SOURCE.json.");
-  return { bytes, provenance: facts };
+  const mcpBinary = path.join(context.extensionPath, "bin", facts.mcp_binary_name);
+  const mcpBytes = await optionalBytes(mcpBinary);
+  if (!mcpBytes || mcpBytes.length !== facts.mcp_binary_size || digest(mcpBytes) !== facts.mcp_binary_sha256) throw new Error("Dygnosis MCP executable checksum does not match SOURCE.json. Reinstall the extension.");
+  if (await executableVersion(mcpBinary) !== `dygnosis-mcp ${facts.version}`) throw new Error("Dygnosis MCP executable version does not match SOURCE.json.");
+  return { bytes, mcpBytes, provenance: facts };
 }
 export interface ManagedOptions {
   platform?: NodeJS.Platform;
@@ -145,7 +153,7 @@ export interface ManagedOptions {
 export interface ManagedBinary { path: string; version: string; pendingVersion?: string; changed: boolean }
 function storagePaths(storage: string, platform: NodeJS.Platform): { directory: string; binary: string; active: string; pending: string; stage: string; lock: string } {
   const directory = path.join(storage, "bin");
-  return { directory, binary: path.join(directory, platform === "win32" ? "dygnosis.exe" : "dygnosis"), active: path.join(directory, "managed.json"), pending: path.join(directory, "pending.json"), stage: path.join(directory, ".dygnosis.pending"), lock: path.join(directory, ".dygnosis.lock") };
+  return { directory, binary: path.join(directory, platform === "win32" ? "dygnosis-mcp.exe" : "dygnosis-mcp"), active: path.join(directory, "managed-mcp.json"), pending: path.join(directory, "pending-mcp.json"), stage: path.join(directory, ".dygnosis-mcp.pending"), lock: path.join(directory, ".dygnosis-mcp.lock") };
 }
 async function storedProvenance(file: string, expected: PackageProvenance): Promise<PackageProvenance | undefined> {
   const bytes = await optionalBytes(file);
@@ -154,12 +162,12 @@ async function storedProvenance(file: string, expected: PackageProvenance): Prom
   if (stored.target !== expected.target) throw new Error("The managed Dygnosis copy belongs to another native target. Set up MCP on this host again using separate extension storage.");
   return stored;
 }
-/** Uses frozen, verified package bytes; updates never read an override or download an engine. */
+/** Stages only the frozen MCP companion; existing managed launcher paths stay intact. */
 export async function ensureManagedBinary(storage: string, bundle: VerifiedBundle, options: ManagedOptions = {}): Promise<ManagedBinary> {
   if (!path.isAbsolute(storage)) throw new Error("Dygnosis extension storage must be an absolute file path.");
   const platform = options.platform ?? process.platform, files = storagePaths(storage, platform);
   const incoming = provenance(bundle.provenance);
-  if (digest(bundle.bytes) !== incoming.binary_sha256) throw new Error("Verified Dygnosis package bytes changed before installation.");
+  if (!bundle.mcpBytes || digest(bundle.mcpBytes) !== incoming.mcp_binary_sha256 || bundle.mcpBytes.length !== incoming.mcp_binary_size) throw new Error("Verified Dygnosis MCP package bytes changed before installation.");
   await fs.mkdir(files.directory, { recursive: true });
   return withWorkspaceLock(files.lock, async () => {
     let active = await storedProvenance(files.active, incoming);
@@ -167,29 +175,29 @@ export async function ensureManagedBinary(storage: string, bundle: VerifiedBundl
     const working = await optionalBytes(files.binary);
     const workingHash = working && digest(working);
     // Binary replacement is the commit point. A crash before the metadata rename is recoverable.
-    if (pending && workingHash === pending.binary_sha256) {
+    if (pending && workingHash === pending.mcp_binary_sha256) {
       await atomicBytes(files.active, Buffer.from(JSON.stringify(pending, null, 2) + "\n"));
       active = pending; pending = undefined;
       await fs.rm(files.pending, { force: true }); await fs.rm(files.stage, { force: true });
     }
-    if (working && (!active || workingHash !== active.binary_sha256)) throw new Error("The managed Dygnosis executable does not match its recorded checksum. It was left intact; reinstall or choose a standalone binary.");
-    if (!working && active) throw new Error("The managed Dygnosis executable is missing. Its metadata was left intact; restore extension storage or choose a standalone binary.");
-    let desired = incoming, bytes = bundle.bytes;
+    if (working && (!active || workingHash !== active.mcp_binary_sha256)) throw new Error("The managed Dygnosis MCP executable does not match its recorded checksum. It was left intact; reinstall or choose a standalone binary.");
+    if (!working && active) throw new Error("The managed Dygnosis MCP executable is missing. Its metadata was left intact; restore extension storage or choose a standalone binary.");
+    let desired = incoming, bytes = bundle.mcpBytes;
     if (pending && compareVersions(pending.version, desired.version) > 0) {
       desired = pending;
       const staged = await optionalBytes(files.stage);
-      if (!staged || digest(staged) !== pending.binary_sha256) throw new Error("The pending Dygnosis update is incomplete. The working executable was left intact.");
+      if (!staged || digest(staged) !== pending.mcp_binary_sha256) throw new Error("The pending Dygnosis MCP update is incomplete. The working executable was left intact.");
       bytes = staged;
     }
     if (active) {
       const order = compareVersions(active.version, desired.version);
-      if (order === 0 && active.binary_sha256 !== desired.binary_sha256) throw new Error(`Dygnosis ${active.version} has different package bytes. The managed copy was left intact.`);
+      if (order === 0 && active.mcp_binary_sha256 !== desired.mcp_binary_sha256) throw new Error(`Dygnosis MCP ${active.version} has different package bytes. The managed copy was left intact.`);
       if (order >= 0) return { path: files.binary, version: active.version, changed: false };
     }
-    if (pending && compareVersions(pending.version, desired.version) === 0 && pending.binary_sha256 !== desired.binary_sha256) throw new Error(`Dygnosis ${desired.version} has conflicting pending package bytes. The working copy was left intact.`);
+    if (pending && compareVersions(pending.version, desired.version) === 0 && pending.mcp_binary_sha256 !== desired.mcp_binary_sha256) throw new Error(`Dygnosis MCP ${desired.version} has conflicting pending package bytes. The working copy was left intact.`);
     await atomicBytes(files.stage, bytes, platform === "win32" ? 0o600 : 0o755);
-    if (digest((await optionalBytes(files.stage)) ?? Buffer.alloc(0)) !== desired.binary_sha256) throw new Error("Staged Dygnosis checksum verification failed.");
-    if (await (options.version ?? executableVersion)(files.stage) !== `dygnosis ${desired.version}`) throw new Error("Staged Dygnosis executable version verification failed.");
+    if (digest((await optionalBytes(files.stage)) ?? Buffer.alloc(0)) !== desired.mcp_binary_sha256) throw new Error("Staged Dygnosis MCP checksum verification failed.");
+    if (await (options.version ?? executableVersion)(files.stage) !== `dygnosis-mcp ${desired.version}`) throw new Error("Staged Dygnosis MCP executable version verification failed.");
     await atomicBytes(files.pending, Buffer.from(JSON.stringify(desired, null, 2) + "\n"));
     try { await (options.replace ?? fs.rename)(files.stage, files.binary); }
     catch (error) {
@@ -352,7 +360,7 @@ export function registerWorkspaceMcp(context: vscode.ExtensionContext, service?:
         void vscode.window.showWarningMessage(`Dygnosis MCP ${binary.pendingVersion} is pending. Stop the other client's Dygnosis MCP server so the working ${binary.version} can be replaced, then restart it. Setup will retry while this window is active and on the next activation.`);
       }
       if (!disposed && retries < 5 && !retry) { ++retries; retry = setTimeout(() => { retry = undefined; void maintain(); }, 15000); }
-    } else if (binary.changed) log(`Workspace MCP executable updated to ${binary.version}: ${binary.path}. Restart other clients' MCP server to load it; .mcp.json does not change.`);
+    } else if (binary.changed) log(`Workspace MCP companion updated to ${binary.version}: ${binary.path}. Restart other clients' MCP server to load it; .mcp.json does not change.`);
   };
   const maintain = async (): Promise<void> => {
     try {
@@ -379,7 +387,7 @@ export function registerWorkspaceMcp(context: vscode.ExtensionContext, service?:
       const uri = await workspaceDestination();
       if (!uri || disposed) return;
       log(`Workspace MCP destination: ${uri.fsPath}`);
-      const selected = await resolveBinary(context, log);
+      const selected = await resolveMcpBinary(context, log);
       let executable = selected.path;
       if (selected.override) {
         await validateMcpBinary(selected, log);

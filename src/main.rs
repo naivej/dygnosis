@@ -1,10 +1,8 @@
 use clap::{Parser, Subcommand};
 use dygnosis::VERSION;
 
-#[cfg(feature = "experimental-mcp-reuse")]
-#[global_allocator]
-static ALLOCATOR: dygnosis::retained_memory::TrackingAllocator =
-    dygnosis::retained_memory::TrackingAllocator;
+mod cli_logging;
+mod mcp_launcher;
 
 #[derive(Parser)]
 #[command(name = "dygnosis", version = VERSION, about = env!("CARGO_PKG_DESCRIPTION"))]
@@ -28,22 +26,31 @@ enum Commands {
     Mcp,
 }
 
-#[tokio::main]
-async fn main() {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
+fn main() {
+    cli_logging::init();
     let cli = Cli::parse();
-    match cli.command {
-        Some(Commands::Mcp) => dygnosis::mcp::run_stdio().await,
-        None if cli.tcp => dygnosis::server::run_tcp(&cli.host, cli.port).await,
-        None => dygnosis::server::run_stdio().await,
+    if matches!(cli.command, Some(Commands::Mcp)) {
+        match mcp_launcher::run() {
+            Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
     }
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Could not start the language server runtime");
+    runtime.block_on(async {
+        match cli.command {
+            Some(Commands::Mcp) => {
+                unreachable!("MCP delegates before starting a language server runtime")
+            }
+            None if cli.tcp => dygnosis::server::run_tcp(&cli.host, cli.port).await,
+            None => dygnosis::server::run_stdio().await,
+        }
+    });
 }
 
 #[cfg(test)]

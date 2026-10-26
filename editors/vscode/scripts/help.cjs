@@ -73,7 +73,7 @@ async function ensureReference({ root = productRoot, force = false, executable }
   if (!force && reference?.version === await readVersion(root)
       && state?.fingerprint === fingerprint && state.reference_sha256 === referenceHash(text)) return;
   console.log('Refreshing Help reference.');
-  await generate(executable ?? buildEngine(root), { root, fingerprint });
+  await generate(executable ?? buildEngine(root).mcp, { root, fingerprint });
 }
 
 function resultEnvelope(result) {

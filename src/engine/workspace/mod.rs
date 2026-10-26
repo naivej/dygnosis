@@ -533,7 +533,7 @@ thread_local! {
     pub(crate) static INPUT_REVISION_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-#[cfg(any(test, feature = "experimental-mcp-reuse"))]
+#[cfg(any(test, feature = "mcp-perf"))]
 thread_local! {
     pub(crate) static INPUT_FILE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
@@ -1416,7 +1416,7 @@ impl Workspace {
         self.cancellation = Some(cancellation);
     }
 
-    #[cfg(feature = "experimental-mcp-reuse")]
+    #[cfg(feature = "mcp-reuse")]
     pub(crate) fn clear_request_cancellation(&mut self) {
         self.cancellation = None;
     }
@@ -2217,7 +2217,7 @@ impl Workspace {
     }
 
     fn input_file(&self, key: &str) -> InputFile {
-        #[cfg(any(test, feature = "experimental-mcp-reuse"))]
+        #[cfg(any(test, feature = "mcp-perf"))]
         INPUT_FILE_READS.with(|reads| reads.set(reads.get() + 1));
         let identity = if self.overlay_only || is_virtual_uri(key) {
             None
