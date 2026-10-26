@@ -377,6 +377,39 @@ pub(super) fn resolve_source_configured_reusing(
     inspection: Option<&SourceStructureQuery>,
     previous: Option<(&SourceSnapshot, bool)>,
 ) -> Result<SourceSnapshot, SourceError> {
+    #[cfg(test)]
+    let probe = super::reuse_probe::Checkout::new(
+        &input,
+        control,
+        analysis,
+        inspection.is_some(),
+        previous.is_none(),
+    );
+    #[cfg(test)]
+    let previous = previous.or_else(|| probe.previous());
+    let result = resolve_source_configured_inner(
+        input,
+        expected_revision,
+        control,
+        analysis,
+        inspection,
+        previous,
+    );
+    #[cfg(test)]
+    if let Ok(snapshot) = &result {
+        probe.retain(snapshot, control);
+    }
+    result
+}
+
+fn resolve_source_configured_inner(
+    input: SourceInput,
+    expected_revision: Option<&str>,
+    control: &RequestControl,
+    analysis: Option<&AnalysisConfiguration>,
+    inspection: Option<&SourceStructureQuery>,
+    previous: Option<(&SourceSnapshot, bool)>,
+) -> Result<SourceSnapshot, SourceError> {
     control.check()?;
     let (mut workspace, root, owner_roots, kind, include_dirs, root_file) = match input {
         SourceInput::Text { text } => {
@@ -510,6 +543,14 @@ pub(super) fn resolve_source_configured_reusing(
             && control.macro_work_limit == previous.workspace.root_macro_work_limit(&previous.root)
         {
             workspace = previous.workspace.snapshot_with_root_settings(&root);
+            // A retained workspace can outlive its worker. Bind the new
+            // caller's controls before configuration validation or acquisition.
+            workspace.set_cancellation(Arc::clone(&control.cancelled));
+            workspace.set_source_limits(
+                control.limits.max_file_bytes,
+                control.limits.max_source_bytes,
+                control.limits.max_files,
+            );
             // A copied selection is request-local. Omission still selects Source.
             workspace
                 .set_root_analysis_configuration(&root, analysis.cloned().unwrap_or_default())
@@ -601,6 +642,19 @@ pub(super) fn resolve_source_configured_reusing(
             },
         );
         for guard in workspace.input_guards(owner) {
+            // Check the captured fact during the existing collection pass;
+            // a reused document must obey this caller's per-file ceiling too.
+            if guard.exists
+                && !guard.directory
+                && guard
+                    .length
+                    .is_some_and(|length| length > control.limits.max_file_bytes as u64)
+            {
+                return Err(SourceError::failure(
+                    "SOURCE_LIMIT",
+                    "A checked file exceeds the request file byte limit",
+                ));
+            }
             guards.insert(guard.file.clone(), guard);
         }
         if guards.len() > control.limits.max_files
@@ -973,6 +1027,300 @@ mod tests {
         assert_eq!(result.code, "CANCELLED");
         assert_eq!(control.progress.completed.load(Ordering::SeqCst), 0);
     }
+    #[test]
+    fn reused_analysis_uses_the_next_requests_cancellation() {
+        // A completed worker cancels its flag on disposal. That flag must not
+        // cancel the next caller, or disconnect it from its own cancellation.
+        let input = SourceInput::Text { text: MODEL.into() };
+        let old = RequestControl::default();
+        let before = resolve_source(input.clone(), None, &old).unwrap();
+        old.cancelled.store(true, Ordering::Relaxed);
+        let current = RequestControl::default();
+        let after = resolve_source_configured_reusing(
+            input.clone(),
+            None,
+            &current,
+            None,
+            None,
+            Some((&before, true)),
+        )
+        .unwrap();
+        assert!(Arc::ptr_eq(&before.model, &after.model));
+        assert!(Arc::ptr_eq(&before.report, &after.report));
+        assert!(Arc::ptr_eq(
+            &after.workspace.cancellation().unwrap(),
+            &current.cancelled
+        ));
+        current.cancelled.store(true, Ordering::Relaxed);
+        let Err(error) = resolve_source_configured_reusing(
+            input,
+            None,
+            &current,
+            None,
+            None,
+            Some((&after, true)),
+        ) else {
+            panic!("a cancelled request must not acquire a snapshot")
+        };
+        assert_eq!(error.code, "CANCELLED");
+    }
+
+    #[test]
+    fn reused_disk_analysis_obeys_the_next_requests_source_limits() {
+        // A copied Workspace must not restore weaker acquisition ceilings.
+        let fixture = DiskFixture::new();
+        fixture.write("root.mod", MODEL);
+        let input = SourceInput::Disk {
+            root: fixture.key("root.mod"),
+            include_dirs: vec![],
+            owner_roots: vec![],
+        };
+        let before = resolve_source(input.clone(), None, &RequestControl::default()).unwrap();
+        let mut current = RequestControl::default();
+        current.limits.max_file_bytes = 1;
+        let Err(error) = resolve_source_configured_reusing(
+            input,
+            None,
+            &current,
+            None,
+            None,
+            Some((&before, true)),
+        ) else {
+            panic!("the next request must enforce its file byte limit")
+        };
+        assert_eq!(error.code, "SOURCE_LIMIT");
+    }
+
+    #[test]
+    fn reused_disk_analysis_rejects_changed_include_then_reads_new_facts() {
+        // Guards old model facts being returned after a resolved include changes.
+        let fixture = DiskFixture::new();
+        fixture.write(
+            "root.mod",
+            "@#include \"child.inc\"\nvar y; model; y=beta; end;",
+        );
+        fixture.write("child.inc", "var alpha;");
+        let input = SourceInput::Disk {
+            root: fixture.key("root.mod"),
+            include_dirs: vec![],
+            owner_roots: vec![],
+        };
+        let before = resolve_source(input.clone(), None, &RequestControl::default()).unwrap();
+        assert!(!declared(&before.model, "beta"));
+
+        fixture.write("child.inc", "parameters beta;");
+        let stale = match resolve_source_configured_reusing(
+            input.clone(),
+            Some(&before.revision),
+            &RequestControl::default(),
+            None,
+            None,
+            Some((&before, true)),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("changed include facts must not satisfy the old revision"),
+        };
+        assert_eq!(stale.code, "INPUT_CHANGED");
+
+        let after = resolve_source_configured_reusing(
+            input,
+            None,
+            &RequestControl::default(),
+            None,
+            None,
+            Some((&before, true)),
+        )
+        .unwrap();
+        assert_ne!(before.revision, after.revision);
+        assert!(!std::sync::Arc::ptr_eq(&before.model, &after.model));
+        assert!(declared(&after.model, "beta"));
+    }
+
+    #[test]
+    fn reused_disk_analysis_detects_a_newly_present_missing_include() {
+        // Guards a recorded missing candidate becoming present without reusing incomplete facts.
+        let fixture = DiskFixture::new();
+        fixture.write(
+            "root.mod",
+            "@#include \"child.inc\"\nvar y; model; y=beta; end;",
+        );
+        let input = SourceInput::Disk {
+            root: fixture.key("root.mod"),
+            include_dirs: vec![],
+            owner_roots: vec![],
+        };
+        let before = resolve_source(input.clone(), None, &RequestControl::default()).unwrap();
+        assert_eq!(before.coverage["complete"], false);
+        assert!(before.guards.iter().any(|guard| {
+            guard.file == normalize_uri(&fixture.key("child.inc")) && !guard.exists
+        }));
+
+        fixture.write("child.inc", "parameters beta;");
+        let stale = match resolve_source_configured_reusing(
+            input.clone(),
+            Some(&before.revision),
+            &RequestControl::default(),
+            None,
+            None,
+            Some((&before, true)),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("a new include must not satisfy the old revision"),
+        };
+        assert_eq!(stale.code, "INPUT_CHANGED");
+
+        let after = resolve_source_configured_reusing(
+            input,
+            None,
+            &RequestControl::default(),
+            None,
+            None,
+            Some((&before, true)),
+        )
+        .unwrap();
+        assert_ne!(before.revision, after.revision);
+        assert_eq!(after.coverage["complete"], true);
+        assert!(declared(&after.model, "beta"));
+    }
+
+    #[test]
+    fn concurrent_reused_snapshots_keep_cancellation_request_local() {
+        // Guards one caller's canceled flag from poisoning another caller sharing model/report Arcs.
+        let input = SourceInput::Text { text: MODEL.into() };
+        let original = resolve_source(input.clone(), None, &RequestControl::default()).unwrap();
+        let left_seed = resolve_source_configured_reusing(
+            input.clone(),
+            None,
+            &RequestControl::default(),
+            None,
+            None,
+            Some((&original, true)),
+        )
+        .unwrap();
+        let right_seed = resolve_source_configured_reusing(
+            input.clone(),
+            None,
+            &RequestControl::default(),
+            None,
+            None,
+            Some((&original, true)),
+        )
+        .unwrap();
+        assert!(std::sync::Arc::ptr_eq(&left_seed.model, &right_seed.model));
+        assert!(std::sync::Arc::ptr_eq(
+            &left_seed.report,
+            &right_seed.report
+        ));
+        left_seed
+            .workspace
+            .cancellation()
+            .unwrap()
+            .store(true, Ordering::Relaxed);
+
+        let live_input = input.clone();
+        let cancelled_input = input;
+        let (live, cancelled) = std::thread::scope(|scope| {
+            let live = scope.spawn(move || {
+                resolve_source_configured_reusing(
+                    live_input,
+                    None,
+                    &RequestControl::default(),
+                    None,
+                    None,
+                    Some((&left_seed, true)),
+                )
+            });
+            let cancelled = scope.spawn(move || {
+                let control = RequestControl::default();
+                control.cancelled.store(true, Ordering::Relaxed);
+                resolve_source_configured_reusing(
+                    cancelled_input,
+                    None,
+                    &control,
+                    None,
+                    None,
+                    Some((&right_seed, true)),
+                )
+            });
+            (live.join().unwrap(), cancelled.join().unwrap())
+        });
+
+        let live = live.expect("a sibling request must survive another request's cancellation");
+        assert!(std::sync::Arc::ptr_eq(&original.model, &live.model));
+        assert!(std::sync::Arc::ptr_eq(&original.report, &live.report));
+        let Err(cancelled) = cancelled else {
+            panic!("the canceled request must not acquire a snapshot")
+        };
+        assert_eq!(cancelled.code, "CANCELLED");
+    }
+
+    #[test]
+    fn reused_disk_analysis_respects_changed_search_paths_and_work_limit() {
+        // Guards same-root requests from sharing facts across include paths or macro allowances.
+        let fixture = DiskFixture::new();
+        std::fs::create_dir(fixture.0.join("first")).unwrap();
+        std::fs::create_dir(fixture.0.join("second")).unwrap();
+        fixture.write(
+            "root.mod",
+            "@#include \"child.inc\"\nvar y; model; y=1; end;",
+        );
+        fixture.write("first/child.inc", "parameters beta;");
+        fixture.write("second/child.inc", "parameters gamma;");
+        let root = fixture.key("root.mod");
+        let first_path = fixture.key("first");
+        let first_input = SourceInput::Disk {
+            root: root.clone(),
+            include_dirs: vec![first_path],
+            owner_roots: vec![],
+        };
+        let before = resolve_source(first_input, None, &RequestControl::default()).unwrap();
+        assert!(declared(&before.model, "beta"));
+
+        let second_input = SourceInput::Disk {
+            root,
+            include_dirs: vec![fixture.key("second")],
+            owner_roots: vec![],
+        };
+        let after_path_change = resolve_source_configured_reusing(
+            second_input.clone(),
+            None,
+            &RequestControl::default(),
+            None,
+            None,
+            Some((&before, false)),
+        )
+        .unwrap();
+        assert_ne!(before.revision, after_path_change.revision);
+        assert!(!std::sync::Arc::ptr_eq(
+            &before.model,
+            &after_path_change.model
+        ));
+        assert!(!declared(&after_path_change.model, "beta"));
+        assert!(declared(&after_path_change.model, "gamma"));
+
+        let different_limit = RequestControl {
+            macro_work_limit: crate::engine::macro_work::MacroWorkLimit::new(
+                (crate::engine::macro_work::MacroWorkLimit::DEFAULT + 1) as u64,
+            )
+            .unwrap(),
+            ..Default::default()
+        };
+        let after_limit_change = resolve_source_configured_reusing(
+            second_input,
+            None,
+            &different_limit,
+            None,
+            None,
+            Some((&after_path_change, true)),
+        )
+        .unwrap();
+        assert_ne!(after_path_change.revision, after_limit_change.revision);
+        assert!(!std::sync::Arc::ptr_eq(
+            &after_path_change.model,
+            &after_limit_change.model
+        ));
+    }
+
     struct DiskFixture(PathBuf);
     impl DiskFixture {
         fn new() -> Self {

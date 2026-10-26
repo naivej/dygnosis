@@ -10,6 +10,8 @@ mod multi_request;
 pub(crate) mod repository_compare;
 mod request;
 mod result;
+#[cfg(test)]
+mod reuse_probe;
 pub(crate) mod source;
 mod source_views;
 pub(crate) mod workspace_diagnose;
