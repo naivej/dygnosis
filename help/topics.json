@@ -3,7 +3,7 @@
   {"id":"model-and-includes","title":"Understand the model and files","keywords":["model overview","counts","timing","equations","owner","root","CodeLens","searchPaths"]},
   {"id":"navigate-code","title":"Follow equations and names","keywords":["navigation","definition","Peek","references","rename","Outline","folding","call hierarchy"]},
   {"id":"edit-models","title":"Write equations and commands","keywords":["editing","declarations","parameters","steady state","shocks","completion","hover","snippets","signature","format","fix","selection","linked editing","model-local"]},
-  {"id":"appearance","title":"Read labels, hints and colors","keywords":["appearance","semantic tokens","tint","theme","long_name","TeX","inlay"]},
+  {"id":"appearance","title":"Read labels, hints and colors","keywords":["appearance","semantic tokens","tint","theme","file icons",".mod",".inc",".dyn","long_name","TeX","inlay"]},
   {"id":"effective-model","title":"Inspect macro expansion","keywords":["expand","macro","origins","written source","refresh"]},
   {"id":"diagnostics","title":"Check the model","keywords":["diagnostics","Problems","Error","Warning","Information","Explain","ignore","restore"]},
   {"id":"structural-diff","title":"Review model changes","keywords":["comparison","variants","Diff","semantic","Before","After","groups","rows","pairing","filter","priors","text diff","source","model-local","timing","references"]},

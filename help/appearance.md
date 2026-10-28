@@ -4,6 +4,12 @@ Dygnosis uses metadata labels, inline value hints, block shading and semantic
 colors to make models easier to read. Click any setting link below to open it
 in VS Code's Settings editor.
 
+## File icons
+
+Run **Preferences: File Icon Theme** and select **Dygnosis** for dy icons:
+blue for `.mod`, amber for `.inc` and violet for `.dyn`. Other file icon
+themes can show the same blue Dynare icon for all three extensions.
+
 ## Name details
 
 Hover, completion and **Outline** can show a symbol's `long_name` and literal
