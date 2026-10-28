@@ -76,29 +76,12 @@ async function ensureReference({ root = productRoot, force = false, executable }
   await generate(executable ?? buildEngine(root).mcp, { root, fingerprint });
 }
 
-function resultEnvelope(result) {
-  if (result?.structuredContent) {
-    assert.equal(result.structuredContent.schema_version, 3, 'Help requires canonical MCP tool contract 3');
-    return result.structuredContent;
-  }
-  for (const item of [...(result?.content ?? [])].reverse()) {
-    if (typeof item.text !== 'string') continue;
-    try {
-      const value = JSON.parse(item.text);
-      if (value?.schema_version === 3) return value;
-    } catch { /* Leading legacy text items are not necessarily JSON. */ }
-  }
-  throw new Error('MCP tool result has no canonical schema_version 3 object');
-}
-
-function resultData(result) { return resultEnvelope(result).data; }
-
 async function collectPages(call, name, args = {}) {
   const query = { page_size: 1000, ...args };
   const pages = [], seen = new Set();
   let continuation;
   do {
-    const result = resultEnvelope(await call(name, { ...query, ...(continuation ? { continuation } : {}) }));
+    const result = common.canonicalMcpResult(await call(name, { ...query, ...(continuation ? { continuation } : {}) }));
     assert.equal(result.outcome?.status, 'ok', `${name}: ${JSON.stringify(result.outcome)}`);
     pages.push(result.data);
     continuation = result.selection?.continuation;
@@ -155,9 +138,9 @@ async function referenceData(call, pageSize = 1000) {
 
 async function generate(executable, { root = productRoot, fingerprint } = {}) {
   fingerprint ??= await engineFingerprint(root);
-  const session = common.rpc(executable, ['mcp'], false);
+  const session = common.rpc(executable, [], false);
   try {
-    const init = await session.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dygnosis-help-build', version: '1' } });
+    const init = await session.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'dygnosis-help-build', version: '1' } });
     const manifest = JSON.parse(await fs.readFile(path.join(root, 'editors/vscode/package.json'), 'utf8'));
     const version = await readVersion(root);
     assert.equal(manifest.version, version, 'Synchronize the extension version before generating Help');
@@ -231,4 +214,4 @@ if (require.main === module) (async () => {
   }
   await build();
 })().catch(error => { console.error(error); process.exitCode = 1; });
-module.exports = { build, generate, ensureReference, engineFingerprint, copyHelpAssets, resultData, collectPages, referenceData };
+module.exports = { build, generate, ensureReference, engineFingerprint, copyHelpAssets, collectPages, referenceData };

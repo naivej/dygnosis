@@ -90,19 +90,16 @@ function semanticRow(value: unknown): SemanticRow {
   return result;
 }
 function reference(value: unknown): Reference { const r = object(value, ["pointer", "symbol", "side", "equation_pointer", "equation_index", "label", "scope", "occurrence", "timing"]); return { pointer: pointer(r.pointer), symbol: text(r.symbol), side: one(r.side, ["before", "after"]), equation_pointer: pointer(r.equation_pointer), equation_index: integer(r.equation_index), label: text(r.label), scope: scope(r.scope), occurrence: integer(r.occurrence), timing: timing(r.timing) }; }
-/** Missing additive advertisements mean legacy support; partial/unknown advertisements fail. */
-export function semanticCapability(value: unknown): boolean {
-  if (!record(value)) return false;
+/** Require the semantic schemas supported by current snapshot results. */
+export function validateSemanticCapability(value: unknown): void {
+  if (!record(value)) invalid();
   const keys = ["semantic_schema_version", "source_changes_schema_version", "coverage_schema_version"];
-  if (keys.every(key => !Object.hasOwn(value, key))) return false;
   if (keys.some(key => value[key] !== 1)) invalid();
-  return true;
 }
 /** Validate closed v1 data before it can enter the webview or source-action registry. */
-export function parseSemantic(value: Record<string, unknown>, ids: Record<"before" | "after", string | null>, registry: SourceRegistry, expected?: boolean): SemanticPayload | undefined {
+export function parseSemantic(value: Record<string, unknown>, ids: Record<"before" | "after", string | null>, registry: SourceRegistry): SemanticPayload {
   const present = ["comparison_versions", "semantic", "source_changes", "coverage"].some(key => Object.hasOwn(value, key));
-  if (!present) { if (expected) invalid(); return undefined; }
-  if (expected === false) invalid();
+  if (!present) invalid();
   const versions = object(value.comparison_versions, ["semantic", "source_changes", "coverage"]);
   if (Object.values(versions).some(v => v !== 1)) invalid();
   const s = object(value.semantic, ["schema_version", "availability", "budgets", "rows", "references", "limits"]);

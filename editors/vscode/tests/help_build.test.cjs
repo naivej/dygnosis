@@ -44,7 +44,8 @@ async function fixture(t) {
       { reason: 'compiler-artifact', target: { name: 'dygnosis-mcp', kind: ['bin'] }, executable: state.executable },
     ].map(item => JSON.stringify(item)).join('\n');
   });
-  t.mock.method(common, 'rpc', executable => {
+  t.mock.method(common, 'rpc', (executable, args) => {
+    assert.deepEqual(args, [], 'Help must launch the MCP executable directly');
     state.calls.push(executable);
     return {
       notify() {}, close() {},

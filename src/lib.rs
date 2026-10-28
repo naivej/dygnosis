@@ -73,7 +73,6 @@ pub use engine::workspace::companion;
 pub use engine::workspace::include_resolver;
 pub use engine::workspace::model_map;
 pub use lsp as server;
-pub use lsp::settings as server_settings;
 pub use test_support::preprocessor;
 
 pub use auto_fix::{apply_fix, auto_fix};

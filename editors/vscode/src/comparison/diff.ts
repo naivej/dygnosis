@@ -5,7 +5,7 @@ import { changeKinds, DiffPreferences, normalizeChangeKinds } from "./diff_view"
 
 export function diffPreferences(root: vscode.Uri, log: (message: string) => void): DiffPreferences {
   return {
-    changeKinds: normalizeChangeKinds(listSetting("diff.defaultChangeKinds", root, [...changeKinds, "unpaired"], [...changeKinds], log), [...changeKinds]),
+    changeKinds: normalizeChangeKinds(listSetting("diff.defaultChangeKinds", root, [...changeKinds], [...changeKinds], log), [...changeKinds]),
   };
 }
 

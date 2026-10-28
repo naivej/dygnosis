@@ -10,14 +10,14 @@ export function registerMcp(context: vscode.ExtensionContext, log: Log): vscode.
     provideMcpServerDefinitions: async () => {
       try {
         const binary = await resolveMcpBinary(context, log);
-        return [new vscode.McpStdioServerDefinition("Dygnosis", binary.path, binary.args, {}, binary.version)];
+        return [new vscode.McpStdioServerDefinition("Dygnosis", binary.path, [], {}, binary.version)];
       } catch (error) { log(`MCP discovery failed: ${failureText(error)}`); throw error; }
     },
     resolveMcpServerDefinition: async () => {
       try {
         const binary = await resolveMcpBinary(context, log);
         await validateMcpBinary(binary, log);
-        return new vscode.McpStdioServerDefinition("Dygnosis", binary.path, binary.args, {}, binary.version);
+        return new vscode.McpStdioServerDefinition("Dygnosis", binary.path, [], {}, binary.version);
       } catch (error) {
         log(`MCP start failed: ${failureText(error)}`); throw error;
       }

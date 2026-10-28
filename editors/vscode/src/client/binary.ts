@@ -7,7 +7,7 @@ import { record } from "./protocol";
 import { ActionFailure } from "./failure";
 
 export interface Binary { path: string; override: boolean; version: string }
-export interface McpBinary extends Binary { args: string[] }
+export type McpBinary = Binary;
 export function executablePath(extensionPath: string, globalValue: unknown, platform = process.platform): { path: string; override: boolean } {
   if (globalValue !== undefined && typeof globalValue !== "string") throw new Error("dynare.serverPath must be an absolute path or empty.");
   const override = typeof globalValue === "string" && globalValue.trim() !== "";
@@ -35,9 +35,11 @@ export async function resolveBinary(context: vscode.ExtensionContext, log: Log):
 }
 export async function resolveMcpBinary(context: vscode.ExtensionContext, log: Log): Promise<McpBinary> {
   const selected = selectedPath(context, log);
-  const executable = selected.override ? selected.path : mcpExecutablePath(context.extensionPath);
+  const executable = selected.override
+    ? path.join(path.dirname(selected.path), process.platform === "win32" ? "dygnosis-mcp.exe" : "dygnosis-mcp")
+    : mcpExecutablePath(context.extensionPath);
   const binary = await binaryVersion(context, { ...selected, path: executable }, "MCP executable");
-  return { ...binary, args: ["mcp"] };
+  return binary;
 }
 function stderrExcerpt(stderr: string): string {
   return stderr.trim().replace(/\s+/g, " ").slice(0, 640);
@@ -54,11 +56,11 @@ function runVersion(executable: string): Promise<string> {
 }
 export async function validateMcpBinary(binary: McpBinary, log: Log): Promise<void> {
   const version = await runVersion(binary.path);
-  const validVersion = binary.override ? /^dygnosis(?:-mcp)?\s+\d+\./i : /^dygnosis-mcp\s+\d+\./i;
+  const validVersion = /^dygnosis-mcp\s+\d+\./i;
   if (!validVersion.test(version)) throw new ActionFailure(`MCP engine ${binary.path} reported ${version.slice(0, 100) || "no version"}; a Dygnosis MCP engine is required.`, "ENGINE_INCOMPATIBLE");
   log(`MCP executable: ${binary.path} (${version})`);
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(binary.path, binary.args, { windowsHide: true, shell: false, stdio: "pipe" });
+    const child = spawn(binary.path, [], { windowsHide: true, shell: false, stdio: "pipe" });
     let buffer = "", stderr = "", stderrBytes = 0, settled = false;
     const finish = (error?: Error): void => {
       if (settled) return;

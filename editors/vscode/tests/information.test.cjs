@@ -34,7 +34,7 @@ test("early MCP exit retains the selected executable, exit code and bounded stde
   Module._load = function (id, ...args) {
     if (id === "vscode") return {};
     if (id === "node:child_process") return {
-      execFile: (_file, _args, _options, done) => done(null, "dygnosis 0.11.35"),
+      execFile: (_file, _args, _options, done) => done(null, "dygnosis-mcp 0.11.35"),
       spawn: () => {
         const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = () => {};
         child.stdin = { write: () => { void Promise.resolve().then(() => { child.stderr.emit("data", Buffer.alloc(32000, "x")); child.emit("exit", 7, null); }); } };

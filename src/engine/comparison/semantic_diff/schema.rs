@@ -21,7 +21,7 @@ impl Default for ComparisonVersions {
     }
 }
 
-/// Limits bound optional detail, not the legacy structural comparison.
+/// Limits bound optional detail, not the structural comparison.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ComparisonBudgets {
     pub token_alignment_cells: usize,
@@ -29,7 +29,7 @@ pub struct ComparisonBudgets {
     pub references_per_side: usize,
     pub source_hunks: usize,
     /// Serialized rows, references and hunks. Fixed availability/file-action
-    /// envelopes and the preserved legacy payload are outside this detail cap.
+    /// envelopes and the structural payload are outside this detail cap.
     pub serialized_output_bytes: usize,
 }
 
@@ -413,7 +413,7 @@ pub struct EquationReference {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct SemanticRow {
-    /// Exact legacy pointer, or the independently owned /semantic/rows/N entry.
+    /// Exact structural-row pointer, or the independently owned /semantic/rows/N entry.
     pub pointer: String,
     pub family: SemanticFamily,
     pub change: ChangeKind,

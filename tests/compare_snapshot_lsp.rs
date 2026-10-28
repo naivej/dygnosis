@@ -67,7 +67,7 @@ fn snapshot_capability_is_additive_and_advertises_bounded_source_negotiation() {
             .contains(&"dynare/compareModelSnapshots".to_owned())
     );
     let extensions = capabilities.experimental.unwrap();
-    for command in ["compareModels", "compareModelSnapshots"] {
+    for command in ["compareModelSnapshots"] {
         for field in [
             "semantic_schema_version",
             "source_changes_schema_version",
@@ -79,10 +79,7 @@ fn snapshot_capability_is_additive_and_advertises_bounded_source_negotiation() {
             );
         }
     }
-    assert_eq!(
-        extensions["dygnosis"]["compareModels"]["navigation_schema_version"],
-        1
-    );
+    assert!(extensions["dygnosis"].get("compareModels").is_none());
     assert_eq!(
         extensions["dygnosis"]["compareModelSnapshots"]["schema_version"],
         1
@@ -162,14 +159,6 @@ async fn two_fixed_inputs_survive_live_edits_and_keep_legacy_file_comparison() {
         command(server, "dynare/compareModelSnapshots", request).await,
         result
     );
-    let legacy = command(
-        server,
-        "dynare/compareModels",
-        json!({"uri_a":live,"uri_b":live}),
-    )
-    .await;
-    assert_eq!(legacy["navigation"]["schema_version"], 1);
-    assert_eq!(legacy["changed_equations"], json!([]));
     let invalid = command(
         server,
         "dynare/compareModelSnapshots",

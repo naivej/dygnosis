@@ -495,7 +495,7 @@
             "type": "string",
             "default": "",
             "scope": "machine",
-            "description": "Absolute path to a Dygnosis executable. Empty uses the binary included with the extension. Set only in user/machine settings."
+            "description": "Absolute path to a custom Dygnosis LSP executable. Empty uses the bundled LSP. MCP uses dygnosis-mcp beside the selected LSP executable. Set only in user/machine settings."
           },
           "dynare.searchPaths": {
             "type": "array",

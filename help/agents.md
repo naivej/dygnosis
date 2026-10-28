@@ -9,9 +9,6 @@ edit Dynare models directly. Editing tools return proposed changes for your
 agent to apply. For example, ask “Find the equations that use `k`” or “Compare
 this model with `HEAD~1`.”
 
-Repeated model requests reuse completed analysis automatically. Each request
-still checks its inputs.
-
 ## Understand the model
 
 | Tool | What it provides |
@@ -43,23 +40,20 @@ still checks its inputs.
 
 For VS Code agents such as GitHub Copilot, run **MCP: List Servers** from the
 Command Palette and select **Dygnosis** to start, stop or inspect the server's
-output.
+output. [Dynare: Server Path](settings:dynare.serverPath) selects a custom
+server for VS Code and workspace MCP setup.
 
 For external agents, open a trusted workspace folder and run **Dygnosis: Set up
 MCP for this workspace** from the Command Palette. This creates or updates
 `.mcp.json` in the selected folder's Git repository root (or workspace folder).
-Use [Dynare: Server Path](settings:dynare.serverPath) to select a custom
-executable instead of the bundled one. A manual stdio configuration uses:
+A manual stdio configuration uses:
 
 ```json
 {
   "mcpServers": {
     "dygnosis": {
       "type": "stdio",
-      "command": "<absolute path to dygnosis executable>",
-      "args": [
-        "mcp"
-      ]
+      "command": "<absolute path to dygnosis-mcp executable>"
     }
   }
 }

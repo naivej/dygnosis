@@ -1,4 +1,6 @@
 const { compiledModule, importedModule } = require("./extension_modules.cjs");
+const { currentSnapshot } = require("./current_snapshot.cjs");
+const { parseSnapshotDiff } = require(compiledModule("diff_view"));
 // Native-like VS Code surface for comparison document, capture, and source lifetime tests.
 const Module = require("node:module");
 const path = require("node:path");
@@ -50,7 +52,12 @@ const deferred = () => { let resolve, reject; const promise = new Promise((done,
 const flush = async () => { for (let index = 0; index < 12; index++) await new Promise(resolve => setImmediate(resolve)); };
 
 function diffData(changed = true) {
-  const data = { symbols_changed: [], changed_parameter_values: [], added_equations: [], removed_equations: [], changed_equations: [], unmatched_same_name: [], heterogeneous_equations: [], shock_setup_changes: [] };
+  const data = { semantic_schema_version: 1, source_changes_schema_version: 1, coverage_schema_version: 1,
+    comparison_versions: { semantic: 1, source_changes: 1, coverage: 1 },
+    semantic: { schema_version: 1, availability: "complete", budgets: { token_alignment_cells: 1, source_alignment_cells: 1, references_per_side: 1, source_hunks: 1, serialized_output_bytes: 1 }, rows: [], references: [], limits: [] },
+    source_changes: { schema_version: 1, availability: "complete", files: [], limits: [] },
+    coverage: { schema_version: 1, availability: "complete", source_boundary: "captured_roots_and_executed_includes", families: [], limits: [] },
+    symbols_changed: [], changed_parameter_values: [], added_equations: [], removed_equations: [], changed_equations: [], unmatched_same_name: [], heterogeneous_equations: [], shock_setup_changes: [] };
   for (const category of ["endogenous", "exogenous", "parameters"]) for (const kind of ["added", "removed", "common"]) data[`${kind}_${category}`] = [];
   if (changed) data.changed_equations.push({ index_old: 1, index_new: 1, text_old: "y = 1", text_new: "y = 2", name_old: "goods", name_new: "goods", tags_old: { name: "goods" }, tags_new: { name: "goods" } });
   return data;
@@ -66,10 +73,16 @@ function captured(resource, history, host, instance = 1, changed = true) {
     if (input.kind === "working") { for (const [key, text] of Object.entries(texts[side])) host.document(Uri.parse(key), text); workingInputs.push({ root: Uri.parse(input.root_uri), expected: `revision:${input.root_uri}` }); }
     inputs[side] = { kind: input.kind, input_id: side, root_file: root, revision: input.kind === "git" ? input.commit : `revision:${input.root_uri}`, complete: true, file_keys: Object.keys(texts[side]), dependency_candidates: input.kind === "working" ? [Uri.joinPath(Uri.parse(input.root_uri), "..", "missing.data").toString()] : [], search_paths: ["common"] };
   }
-  const location = side => ({ uri: sourceUris[side].get(Object.keys(texts[side])[1]).toString(), range: { start: { line: 0, character: 3 }, end: { line: 0, character: 5 } } });
-  const target = side => ({ occurrence_id: `${side}:equation:1`, domain: "aggregate", dimension: null, written_locations: [location(side)] });
-  const row = { id: "/changed_equations/0", section: "equations", group: "Equations", kind: "changed", label: "goods", before: "y=1", after: "y=2", scopes: ["aggregate"], sideScopes: { before: "aggregate", after: "aggregate" }, navigation: { id: "/changed_equations/0", kind: "equation", before: target("before"), after: target("after") } };
-  return { snapshot: { before: { root_uri: "before", revision: inputs.before.revision, complete: true }, after: { root_uri: "after", revision: inputs.after.revision, complete: true }, rows: changed ? [row] : [], complete: true }, inputs, texts, sourceUris, working: workingInputs, holder, instance };
+  const target = side => ({ occurrence_id: `${side}:equation:1`, domain: "aggregate", dimension: null,
+    written_locations: [{ file_key: Object.keys(texts[side])[1], ...(inputs[side].kind === "git" ? { commit: inputs[side].revision } : {}), range: { start: { line: 0, character: 3 }, end: { line: 0, character: 5 } } }] });
+  const receipt = currentSnapshot({ beforeRoot: inputs.before.root_file, afterRoot: inputs.after.root_file, revisions: { before: inputs.before.revision, after: inputs.after.revision },
+    diff: diffData(changed), sources: texts,
+    navigationRows: changed ? [{ id: "/changed_equations/0", kind: "equation", before: target("before"), after: target("after") }] : [] });
+  const snapshot = parseSnapshotDiff(receipt, { before: "before", after: "after" }, (side, key) => {
+    const uri = sourceUris[side].get(key); if (!uri) throw new Error("unsupported current snapshot source key"); return uri.toString();
+  }, { before: { root_file: inputs.before.root_file, revision: inputs.before.revision, ...(inputs.before.kind === "git" ? { commit: inputs.before.revision } : {}) },
+    after: { root_file: inputs.after.root_file, revision: inputs.after.revision, ...(inputs.after.kind === "git" ? { commit: inputs.after.revision } : {}) } });
+  return { snapshot, inputs, texts, sourceUris, working: workingInputs, holder, instance };
 }
 function snapshotResponse(request, changed = true) {
   const inputs = { schema_version: 1 }, sources = {}, navigation = { schema_version: 2, rows: [] };
@@ -213,7 +226,7 @@ function createHost() {
       showTextDocument: async (document, options) => { host.shown.push({ document, options }); return { document }; },
     },
   };
-  const service = { currentInstance: 1, client: { initializeResult: { capabilities: { experimental: { dygnosis: { compareModelSnapshots: { schema_version: 1, navigation_schema_version: 2 } } }, executeCommandProvider: { commands: ["dynare/showEffectiveModel"] } } } },
+  const service = { currentInstance: 1, client: { initializeResult: { capabilities: { experimental: { dygnosis: { compareModelSnapshots: { schema_version: 1, navigation_schema_version: 2, semantic_schema_version: 1, source_changes_schema_version: 1, coverage_schema_version: 1 } } }, executeCommandProvider: { commands: ["dynare/showEffectiveModel"] } } } },
     onDidInvalidate: host.changed.event, onDidChange: host.changed.event, onDidUpdateModelInfo: host.modelUpdated.event, log: message => host.logs.push(message), failure: async message => host.failures.push(message), ensureStarted: async () => {},
     rootForDocument: async document => host.rootFor ? host.rootFor(document) : document.uri,
     knownOwners: uri => host.knownOwners?.(uri) ?? [], knownIncludedFiles: () => host.includedFiles ?? [],

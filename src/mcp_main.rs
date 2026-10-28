@@ -2,7 +2,7 @@
 
 mod cli_logging;
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use dygnosis::VERSION;
 
 #[global_allocator]
@@ -11,16 +11,7 @@ static ALLOCATOR: dygnosis::retained_memory::TrackingAllocator =
 
 #[derive(Parser)]
 #[command(name = "dygnosis-mcp", version = VERSION, about = "Dygnosis MCP server")]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Start MCP over stdio (also the default)
-    Mcp,
-}
+struct Cli {}
 
 fn main() {
     cli_logging::init();

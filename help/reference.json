@@ -39,7 +39,7 @@
                 "type": "null"
               }
             ],
-            "description": "Compact by default. Full includes optional explanation, never legacy mirrors."
+            "description": "Compact by default. Full includes optional explanation."
           },
           "kind": {
             "type": [
@@ -77,6 +77,88 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Outcome": {
+            "properties": {
+              "reasons": {
+                "items": {
+                  "$ref": "#/definitions/Reason"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "ok",
+                  "changed",
+                  "unchanged",
+                  "partial",
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reasons"
+            ],
+            "type": "object"
+          },
+          "Reason": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "target": true
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "The root object is identical in JSON text and supported structuredContent.",
+        "properties": {
+          "coverage": true,
+          "data": true,
+          "inputs": {
+            "items": true,
+            "type": "array"
+          },
+          "limits": {
+            "items": true,
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/definitions/Outcome"
+          },
+          "proposal": {
+            "description": "Complete edit proposal, or null. inputs[] holds file, exists, directory, identity, text_sha256, byte_sha256 and length guards; missing candidates have exists=false and null hashes. revision binds these guards, source_policy, checked_owners and include_dirs. edits[] holds file, range (line, column, end_line, end_column), expected_text and new_text. Range positions are one-based Unicode scalars with exclusive ends. Verify all guards and expected text before applying the complete proposal with external file tools."
+          },
+          "schema_version": {
+            "const": 3
+          },
+          "selection": {
+            "description": "Collection paging: collections.<name> has returned_count, available_matches, total_matches (null when unknown) and offset. continuation is the opaque next-page token, or null when no available matches remain."
+          }
+        },
+        "required": [
+          "schema_version",
+          "outcome",
+          "inputs",
+          "coverage",
+          "selection",
+          "data",
+          "proposal",
+          "limits"
+        ],
         "type": "object"
       },
       "annotations": {
@@ -123,7 +205,7 @@
                 "type": "null"
               }
             ],
-            "description": "Compact by default. Full includes optional explanation, never legacy mirrors."
+            "description": "Compact by default. Full includes optional explanation."
           },
           "kind": {
             "type": [
@@ -154,6 +236,88 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Outcome": {
+            "properties": {
+              "reasons": {
+                "items": {
+                  "$ref": "#/definitions/Reason"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "ok",
+                  "changed",
+                  "unchanged",
+                  "partial",
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reasons"
+            ],
+            "type": "object"
+          },
+          "Reason": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "target": true
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "The root object is identical in JSON text and supported structuredContent.",
+        "properties": {
+          "coverage": true,
+          "data": true,
+          "inputs": {
+            "items": true,
+            "type": "array"
+          },
+          "limits": {
+            "items": true,
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/definitions/Outcome"
+          },
+          "proposal": {
+            "description": "Complete edit proposal, or null. inputs[] holds file, exists, directory, identity, text_sha256, byte_sha256 and length guards; missing candidates have exists=false and null hashes. revision binds these guards, source_policy, checked_owners and include_dirs. edits[] holds file, range (line, column, end_line, end_column), expected_text and new_text. Range positions are one-based Unicode scalars with exclusive ends. Verify all guards and expected text before applying the complete proposal with external file tools."
+          },
+          "schema_version": {
+            "const": 3
+          },
+          "selection": {
+            "description": "Collection paging: collections.<name> has returned_count, available_matches, total_matches (null when unknown) and offset. continuation is the opaque next-page token, or null when no available matches remain."
+          }
+        },
+        "required": [
+          "schema_version",
+          "outcome",
+          "inputs",
+          "coverage",
+          "selection",
+          "data",
+          "proposal",
+          "limits"
+        ],
         "type": "object"
       },
       "annotations": {
@@ -670,7 +834,7 @@
                 "type": "null"
               }
             ],
-            "description": "Compact by default. Full includes optional explanation, never legacy mirrors."
+            "description": "Compact by default. Full includes optional explanation."
           },
           "expected_revision": {
             "description": "Original revision, required for reused identities and continuations.",
@@ -733,6 +897,88 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Outcome": {
+            "properties": {
+              "reasons": {
+                "items": {
+                  "$ref": "#/definitions/Reason"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "ok",
+                  "changed",
+                  "unchanged",
+                  "partial",
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reasons"
+            ],
+            "type": "object"
+          },
+          "Reason": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "target": true
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "The root object is identical in JSON text and supported structuredContent.",
+        "properties": {
+          "coverage": true,
+          "data": true,
+          "inputs": {
+            "items": true,
+            "type": "array"
+          },
+          "limits": {
+            "items": true,
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/definitions/Outcome"
+          },
+          "proposal": {
+            "description": "Complete edit proposal, or null. inputs[] holds file, exists, directory, identity, text_sha256, byte_sha256 and length guards; missing candidates have exists=false and null hashes. revision binds these guards, source_policy, checked_owners and include_dirs. edits[] holds file, range (line, column, end_line, end_column), expected_text and new_text. Range positions are one-based Unicode scalars with exclusive ends. Verify all guards and expected text before applying the complete proposal with external file tools."
+          },
+          "schema_version": {
+            "const": 3
+          },
+          "selection": {
+            "description": "Collection paging: collections.<name> has returned_count, available_matches, total_matches (null when unknown) and offset. continuation is the opaque next-page token, or null when no available matches remain."
+          }
+        },
+        "required": [
+          "schema_version",
+          "outcome",
+          "inputs",
+          "coverage",
+          "selection",
+          "data",
+          "proposal",
+          "limits"
+        ],
         "type": "object"
       },
       "annotations": {
@@ -1062,7 +1308,7 @@
                 "type": "null"
               }
             ],
-            "description": "Compact by default. Full includes optional explanation, never legacy mirrors."
+            "description": "Compact by default. Full includes optional explanation."
           },
           "expected_revision": {
             "description": "Original revision, required for reused identities and continuations.",
@@ -1125,6 +1371,88 @@
         },
         "required": [
           "source"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Outcome": {
+            "properties": {
+              "reasons": {
+                "items": {
+                  "$ref": "#/definitions/Reason"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "ok",
+                  "changed",
+                  "unchanged",
+                  "partial",
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reasons"
+            ],
+            "type": "object"
+          },
+          "Reason": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "target": true
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "The root object is identical in JSON text and supported structuredContent.",
+        "properties": {
+          "coverage": true,
+          "data": true,
+          "inputs": {
+            "items": true,
+            "type": "array"
+          },
+          "limits": {
+            "items": true,
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/definitions/Outcome"
+          },
+          "proposal": {
+            "description": "Complete edit proposal, or null. inputs[] holds file, exists, directory, identity, text_sha256, byte_sha256 and length guards; missing candidates have exists=false and null hashes. revision binds these guards, source_policy, checked_owners and include_dirs. edits[] holds file, range (line, column, end_line, end_column), expected_text and new_text. Range positions are one-based Unicode scalars with exclusive ends. Verify all guards and expected text before applying the complete proposal with external file tools."
+          },
+          "schema_version": {
+            "const": 3
+          },
+          "selection": {
+            "description": "Collection paging: collections.<name> has returned_count, available_matches, total_matches (null when unknown) and offset. continuation is the opaque next-page token, or null when no available matches remain."
+          }
+        },
+        "required": [
+          "schema_version",
+          "outcome",
+          "inputs",
+          "coverage",
+          "selection",
+          "data",
+          "proposal",
+          "limits"
         ],
         "type": "object"
       },
@@ -1581,7 +1909,7 @@
                 "type": "null"
               }
             ],
-            "description": "Compact by default. Full includes optional explanation, never legacy mirrors."
+            "description": "Compact by default. Full includes optional explanation."
           },
           "expected_revision": {
             "description": "Original revision, required for reused identities and continuations.",
@@ -1681,6 +2009,88 @@
         "required": [
           "source",
           "symbol"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Outcome": {
+            "properties": {
+              "reasons": {
+                "items": {
+                  "$ref": "#/definitions/Reason"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "ok",
+                  "changed",
+                  "unchanged",
+                  "partial",
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reasons"
+            ],
+            "type": "object"
+          },
+          "Reason": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "target": true
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "The root object is identical in JSON text and supported structuredContent.",
+        "properties": {
+          "coverage": true,
+          "data": true,
+          "inputs": {
+            "items": true,
+            "type": "array"
+          },
+          "limits": {
+            "items": true,
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/definitions/Outcome"
+          },
+          "proposal": {
+            "description": "Complete edit proposal, or null. inputs[] holds file, exists, directory, identity, text_sha256, byte_sha256 and length guards; missing candidates have exists=false and null hashes. revision binds these guards, source_policy, checked_owners and include_dirs. edits[] holds file, range (line, column, end_line, end_column), expected_text and new_text. Range positions are one-based Unicode scalars with exclusive ends. Verify all guards and expected text before applying the complete proposal with external file tools."
+          },
+          "schema_version": {
+            "const": 3
+          },
+          "selection": {
+            "description": "Collection paging: collections.<name> has returned_count, available_matches, total_matches (null when unknown) and offset. continuation is the opaque next-page token, or null when no available matches remain."
+          }
+        },
+        "required": [
+          "schema_version",
+          "outcome",
+          "inputs",
+          "coverage",
+          "selection",
+          "data",
+          "proposal",
+          "limits"
         ],
         "type": "object"
       },
@@ -2180,7 +2590,7 @@
                 "type": "null"
               }
             ],
-            "description": "Compact by default. Full includes optional explanation, never legacy mirrors."
+            "description": "Compact by default. Full includes optional explanation."
           },
           "dimension": {
             "type": [
@@ -2291,6 +2701,88 @@
         },
         "required": [
           "source"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Outcome": {
+            "properties": {
+              "reasons": {
+                "items": {
+                  "$ref": "#/definitions/Reason"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "ok",
+                  "changed",
+                  "unchanged",
+                  "partial",
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reasons"
+            ],
+            "type": "object"
+          },
+          "Reason": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "target": true
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "The root object is identical in JSON text and supported structuredContent.",
+        "properties": {
+          "coverage": true,
+          "data": true,
+          "inputs": {
+            "items": true,
+            "type": "array"
+          },
+          "limits": {
+            "items": true,
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/definitions/Outcome"
+          },
+          "proposal": {
+            "description": "Complete edit proposal, or null. inputs[] holds file, exists, directory, identity, text_sha256, byte_sha256 and length guards; missing candidates have exists=false and null hashes. revision binds these guards, source_policy, checked_owners and include_dirs. edits[] holds file, range (line, column, end_line, end_column), expected_text and new_text. Range positions are one-based Unicode scalars with exclusive ends. Verify all guards and expected text before applying the complete proposal with external file tools."
+          },
+          "schema_version": {
+            "const": 3
+          },
+          "selection": {
+            "description": "Collection paging: collections.<name> has returned_count, available_matches, total_matches (null when unknown) and offset. continuation is the opaque next-page token, or null when no available matches remain."
+          }
+        },
+        "required": [
+          "schema_version",
+          "outcome",
+          "inputs",
+          "coverage",
+          "selection",
+          "data",
+          "proposal",
+          "limits"
         ],
         "type": "object"
       },
@@ -2723,7 +3215,7 @@
                 "type": "null"
               }
             ],
-            "description": "Compact by default. Full includes optional explanation, never legacy mirrors."
+            "description": "Compact by default. Full includes optional explanation."
           },
           "equation": {
             "anyOf": [
@@ -2802,6 +3294,88 @@
         },
         "required": [
           "source"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Outcome": {
+            "properties": {
+              "reasons": {
+                "items": {
+                  "$ref": "#/definitions/Reason"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "ok",
+                  "changed",
+                  "unchanged",
+                  "partial",
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reasons"
+            ],
+            "type": "object"
+          },
+          "Reason": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "target": true
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "The root object is identical in JSON text and supported structuredContent.",
+        "properties": {
+          "coverage": true,
+          "data": true,
+          "inputs": {
+            "items": true,
+            "type": "array"
+          },
+          "limits": {
+            "items": true,
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/definitions/Outcome"
+          },
+          "proposal": {
+            "description": "Complete edit proposal, or null. inputs[] holds file, exists, directory, identity, text_sha256, byte_sha256 and length guards; missing candidates have exists=false and null hashes. revision binds these guards, source_policy, checked_owners and include_dirs. edits[] holds file, range (line, column, end_line, end_column), expected_text and new_text. Range positions are one-based Unicode scalars with exclusive ends. Verify all guards and expected text before applying the complete proposal with external file tools."
+          },
+          "schema_version": {
+            "const": 3
+          },
+          "selection": {
+            "description": "Collection paging: collections.<name> has returned_count, available_matches, total_matches (null when unknown) and offset. continuation is the opaque next-page token, or null when no available matches remain."
+          }
+        },
+        "required": [
+          "schema_version",
+          "outcome",
+          "inputs",
+          "coverage",
+          "selection",
+          "data",
+          "proposal",
+          "limits"
         ],
         "type": "object"
       },
@@ -3178,7 +3752,7 @@
                 "type": "null"
               }
             ],
-            "description": "Compact by default. Full includes optional explanation, never legacy mirrors."
+            "description": "Compact by default. Full includes optional explanation."
           },
           "diagnostic_ids": {
             "default": [],
@@ -3250,6 +3824,88 @@
         },
         "required": [
           "source"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Outcome": {
+            "properties": {
+              "reasons": {
+                "items": {
+                  "$ref": "#/definitions/Reason"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "ok",
+                  "changed",
+                  "unchanged",
+                  "partial",
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reasons"
+            ],
+            "type": "object"
+          },
+          "Reason": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "target": true
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "The root object is identical in JSON text and supported structuredContent.",
+        "properties": {
+          "coverage": true,
+          "data": true,
+          "inputs": {
+            "items": true,
+            "type": "array"
+          },
+          "limits": {
+            "items": true,
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/definitions/Outcome"
+          },
+          "proposal": {
+            "description": "Complete edit proposal, or null. inputs[] holds file, exists, directory, identity, text_sha256, byte_sha256 and length guards; missing candidates have exists=false and null hashes. revision binds these guards, source_policy, checked_owners and include_dirs. edits[] holds file, range (line, column, end_line, end_column), expected_text and new_text. Range positions are one-based Unicode scalars with exclusive ends. Verify all guards and expected text before applying the complete proposal with external file tools."
+          },
+          "schema_version": {
+            "const": 3
+          },
+          "selection": {
+            "description": "Collection paging: collections.<name> has returned_count, available_matches, total_matches (null when unknown) and offset. continuation is the opaque next-page token, or null when no available matches remain."
+          }
+        },
+        "required": [
+          "schema_version",
+          "outcome",
+          "inputs",
+          "coverage",
+          "selection",
+          "data",
+          "proposal",
+          "limits"
         ],
         "type": "object"
       },
@@ -3652,7 +4308,7 @@
                 "type": "null"
               }
             ],
-            "description": "Compact by default. Full includes optional explanation, never legacy mirrors."
+            "description": "Compact by default. Full includes optional explanation."
           },
           "expected_revision": {
             "description": "Original revision, required for reused identities and continuations.",
@@ -3737,6 +4393,88 @@
           "source",
           "symbol",
           "new_name"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Outcome": {
+            "properties": {
+              "reasons": {
+                "items": {
+                  "$ref": "#/definitions/Reason"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "ok",
+                  "changed",
+                  "unchanged",
+                  "partial",
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reasons"
+            ],
+            "type": "object"
+          },
+          "Reason": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "target": true
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "The root object is identical in JSON text and supported structuredContent.",
+        "properties": {
+          "coverage": true,
+          "data": true,
+          "inputs": {
+            "items": true,
+            "type": "array"
+          },
+          "limits": {
+            "items": true,
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/definitions/Outcome"
+          },
+          "proposal": {
+            "description": "Complete edit proposal, or null. inputs[] holds file, exists, directory, identity, text_sha256, byte_sha256 and length guards; missing candidates have exists=false and null hashes. revision binds these guards, source_policy, checked_owners and include_dirs. edits[] holds file, range (line, column, end_line, end_column), expected_text and new_text. Range positions are one-based Unicode scalars with exclusive ends. Verify all guards and expected text before applying the complete proposal with external file tools."
+          },
+          "schema_version": {
+            "const": 3
+          },
+          "selection": {
+            "description": "Collection paging: collections.<name> has returned_count, available_matches, total_matches (null when unknown) and offset. continuation is the opaque next-page token, or null when no available matches remain."
+          }
+        },
+        "required": [
+          "schema_version",
+          "outcome",
+          "inputs",
+          "coverage",
+          "selection",
+          "data",
+          "proposal",
+          "limits"
         ],
         "type": "object"
       },
@@ -4088,7 +4826,7 @@
                 "type": "null"
               }
             ],
-            "description": "Compact by default. Full includes optional explanation, never legacy mirrors."
+            "description": "Compact by default. Full includes optional explanation."
           },
           "expected_revision": {
             "description": "Original revision, required for reused identities and continuations.",
@@ -4154,6 +4892,88 @@
         },
         "required": [
           "source"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Outcome": {
+            "properties": {
+              "reasons": {
+                "items": {
+                  "$ref": "#/definitions/Reason"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "ok",
+                  "changed",
+                  "unchanged",
+                  "partial",
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reasons"
+            ],
+            "type": "object"
+          },
+          "Reason": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "target": true
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "The root object is identical in JSON text and supported structuredContent.",
+        "properties": {
+          "coverage": true,
+          "data": true,
+          "inputs": {
+            "items": true,
+            "type": "array"
+          },
+          "limits": {
+            "items": true,
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/definitions/Outcome"
+          },
+          "proposal": {
+            "description": "Complete edit proposal, or null. inputs[] holds file, exists, directory, identity, text_sha256, byte_sha256 and length guards; missing candidates have exists=false and null hashes. revision binds these guards, source_policy, checked_owners and include_dirs. edits[] holds file, range (line, column, end_line, end_column), expected_text and new_text. Range positions are one-based Unicode scalars with exclusive ends. Verify all guards and expected text before applying the complete proposal with external file tools."
+          },
+          "schema_version": {
+            "const": 3
+          },
+          "selection": {
+            "description": "Collection paging: collections.<name> has returned_count, available_matches, total_matches (null when unknown) and offset. continuation is the opaque next-page token, or null when no available matches remain."
+          }
+        },
+        "required": [
+          "schema_version",
+          "outcome",
+          "inputs",
+          "coverage",
+          "selection",
+          "data",
+          "proposal",
+          "limits"
         ],
         "type": "object"
       },
@@ -4534,7 +5354,7 @@
                 "type": "null"
               }
             ],
-            "description": "Compact by default. Full includes optional explanation, never legacy mirrors."
+            "description": "Compact by default. Full includes optional explanation."
           },
           "dimension": {
             "type": [
@@ -4613,6 +5433,88 @@
         },
         "required": [
           "source"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Outcome": {
+            "properties": {
+              "reasons": {
+                "items": {
+                  "$ref": "#/definitions/Reason"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "ok",
+                  "changed",
+                  "unchanged",
+                  "partial",
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reasons"
+            ],
+            "type": "object"
+          },
+          "Reason": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "target": true
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "The root object is identical in JSON text and supported structuredContent.",
+        "properties": {
+          "coverage": true,
+          "data": true,
+          "inputs": {
+            "items": true,
+            "type": "array"
+          },
+          "limits": {
+            "items": true,
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/definitions/Outcome"
+          },
+          "proposal": {
+            "description": "Complete edit proposal, or null. inputs[] holds file, exists, directory, identity, text_sha256, byte_sha256 and length guards; missing candidates have exists=false and null hashes. revision binds these guards, source_policy, checked_owners and include_dirs. edits[] holds file, range (line, column, end_line, end_column), expected_text and new_text. Range positions are one-based Unicode scalars with exclusive ends. Verify all guards and expected text before applying the complete proposal with external file tools."
+          },
+          "schema_version": {
+            "const": 3
+          },
+          "selection": {
+            "description": "Collection paging: collections.<name> has returned_count, available_matches, total_matches (null when unknown) and offset. continuation is the opaque next-page token, or null when no available matches remain."
+          }
+        },
+        "required": [
+          "schema_version",
+          "outcome",
+          "inputs",
+          "coverage",
+          "selection",
+          "data",
+          "proposal",
+          "limits"
         ],
         "type": "object"
       },
@@ -5075,7 +5977,7 @@
                 "type": "null"
               }
             ],
-            "description": "Compact by default. Full includes optional explanation, never legacy mirrors."
+            "description": "Compact by default. Full includes optional explanation."
           },
           "expected_revision_a": {
             "type": [
@@ -5132,6 +6034,88 @@
         },
         "required": [
           "comparison"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Outcome": {
+            "properties": {
+              "reasons": {
+                "items": {
+                  "$ref": "#/definitions/Reason"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "ok",
+                  "changed",
+                  "unchanged",
+                  "partial",
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reasons"
+            ],
+            "type": "object"
+          },
+          "Reason": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "target": true
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "The root object is identical in JSON text and supported structuredContent.",
+        "properties": {
+          "coverage": true,
+          "data": true,
+          "inputs": {
+            "items": true,
+            "type": "array"
+          },
+          "limits": {
+            "items": true,
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/definitions/Outcome"
+          },
+          "proposal": {
+            "description": "Complete edit proposal, or null. inputs[] holds file, exists, directory, identity, text_sha256, byte_sha256 and length guards; missing candidates have exists=false and null hashes. revision binds these guards, source_policy, checked_owners and include_dirs. edits[] holds file, range (line, column, end_line, end_column), expected_text and new_text. Range positions are one-based Unicode scalars with exclusive ends. Verify all guards and expected text before applying the complete proposal with external file tools."
+          },
+          "schema_version": {
+            "const": 3
+          },
+          "selection": {
+            "description": "Collection paging: collections.<name> has returned_count, available_matches, total_matches (null when unknown) and offset. continuation is the opaque next-page token, or null when no available matches remain."
+          }
+        },
+        "required": [
+          "schema_version",
+          "outcome",
+          "inputs",
+          "coverage",
+          "selection",
+          "data",
+          "proposal",
+          "limits"
         ],
         "type": "object"
       },

@@ -273,7 +273,7 @@ fn push_condition_row(
     diff.semantic.push_row(row);
 }
 
-/// Supplement legacy rows only for retained conditions that legacy body/tag
+/// Supplement structural rows only for retained conditions that structural body/tag
 /// comparison does not inspect. Unique names have the existing engine meaning;
 /// other unchanged bodies pair only when their exact scoped candidate is unique.
 /// Cancelling equal repeated facts establishes no cross-side occurrence pair.

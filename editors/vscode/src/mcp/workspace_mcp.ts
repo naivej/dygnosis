@@ -242,7 +242,7 @@ function jsonTree(text: string): JsonNode {
   };
   return value();
 }
-export interface WorkspaceEntry { type: "stdio"; command: string; args: ["mcp"] }
+export interface WorkspaceEntry { type: "stdio"; command: string; args: [] }
 export interface WorkspaceMerge { text: string; identical: boolean; conflict: boolean }
 export function mergeWorkspaceConfig(text: string, command: string): WorkspaceMerge {
   if (!path.isAbsolute(command)) throw new Error("The workspace MCP command must be an absolute executable path.");
@@ -252,11 +252,11 @@ export function mergeWorkspaceConfig(text: string, command: string): WorkspaceMe
   const root = jsonTree(text);
   const servers = root.properties?.get("mcpServers");
   if (servers && !servers.properties) throw new Error(".mcp.json mcpServers must be a JSON object. The file was left intact.");
-  const entry: WorkspaceEntry = { type: "stdio", command, args: ["mcp"] };
+  const entry: WorkspaceEntry = { type: "stdio", command, args: [] };
   const current = servers?.properties?.get("dygnosis");
   if (current) {
     const old: unknown = JSON.parse(text.slice(current.start, current.end));
-    if (record(old) && Object.keys(old).length === 3 && old.type === "stdio" && old.command === command && Array.isArray(old.args) && old.args.length === 1 && old.args[0] === "mcp") return { text, identical: true, conflict: false };
+    if (record(old) && Object.keys(old).length === 3 && old.type === "stdio" && old.command === command && Array.isArray(old.args) && old.args.length === 0) return { text, identical: true, conflict: false };
     return { text: text.slice(0, current.start) + JSON.stringify(entry, null, 2) + text.slice(current.end), identical: false, conflict: true };
   }
   const owner = servers ?? root, properties = owner.properties;

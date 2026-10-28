@@ -586,15 +586,27 @@ async fn open(backend: &Backend, uri: Url, text: &str) {
 }
 
 async fn lsp_compare(backend: &Backend, before: &Url, after: &Url) -> Value {
-    backend
+    let before_revision = backend
+        .model_input_revision(before)
+        .expect("before revision");
+    let after_revision = backend.model_input_revision(after).expect("after revision");
+    let result = backend
         .execute_command(ExecuteCommandParams {
-            command: "dynare/compareModels".to_owned(),
-            arguments: vec![serde_json::json!({"uri_a": before, "uri_b": after})],
+            command: "dynare/compareModelSnapshots".to_owned(),
+            arguments: vec![serde_json::json!({"schema_version":1,
+                "before":{"kind":"working","input_id":"before","root_uri":before,"expected_revision":before_revision},
+                "after":{"kind":"working","input_id":"after","root_uri":after,"expected_revision":after_revision}})],
             work_done_progress_params: WorkDoneProgressParams::default(),
         })
         .await
         .unwrap()
-        .unwrap()
+        .unwrap();
+    assert_eq!(result["state"], "result", "{result}");
+    let mut diff = result["diff"].clone();
+    diff["navigation"] = result["navigation"].clone();
+    diff["sources"] = result["sources"].clone();
+    diff["inputs"] = result["inputs"].clone();
+    diff
 }
 
 #[tokio::test]
@@ -609,18 +621,28 @@ async fn lsp_uses_utf16_and_current_overlay_revisions() {
     open(backend, after_uri.clone(), &after).await;
     let diff = lsp_compare(backend, &before_uri, &after_uri).await;
     let location = &row(&diff, "/changed_equations/0")["before"]["written_locations"][0];
-    assert_eq!(location["uri"], before_uri.as_str());
+    assert_eq!(location["input_id"], "before");
+    let root_key = location["file_key"].as_str().expect("snapshot file key");
+    assert_eq!(diff["sources"]["before"][root_key], source);
     assert_eq!(
         location["range"]["start"]["character"],
         source[..source.find("y=1").unwrap()].encode_utf16().count()
     );
     assert_eq!(
-        diff["navigation"]["before"]["revision"],
+        diff["inputs"]["before"]["expected_revision"],
         backend.model_input_revision(&before_uri).unwrap()
     );
     assert_eq!(
-        diff["navigation"]["after"]["revision"],
+        diff["inputs"]["after"]["expected_revision"],
         backend.model_input_revision(&after_uri).unwrap()
+    );
+    assert_eq!(
+        diff["navigation"]["before"]["revision"],
+        diff["inputs"]["before"]["revision"]
+    );
+    assert_eq!(
+        diff["navigation"]["after"]["revision"],
+        diff["inputs"]["after"]["revision"]
     );
     backend
         .did_change(DidChangeTextDocumentParams {
@@ -641,8 +663,8 @@ async fn lsp_uses_utf16_and_current_overlay_revisions() {
         edited["navigation"]["before"]["revision"]
     );
     assert_ne!(
-        diff["navigation"]["after"]["revision"],
-        edited["navigation"]["after"]["revision"]
+        diff["inputs"]["after"]["revision"],
+        edited["inputs"]["after"]["revision"]
     );
     assert_eq!(
         row(&edited, "/changed_equations/0")["after"]["written_locations"][0]["range"]["start"]["line"],
@@ -650,8 +672,8 @@ async fn lsp_uses_utf16_and_current_overlay_revisions() {
     );
     let capability = serde_json::to_value(dygnosis::server::initialize_result()).unwrap();
     assert_eq!(
-        capability["capabilities"]["experimental"]["dygnosis"]["compareModels"]["navigation_schema_version"],
-        1
+        capability["capabilities"]["experimental"]["dygnosis"]["compareModelSnapshots"]["navigation_schema_version"],
+        2
     );
 }
 
@@ -688,37 +710,39 @@ impl Drop for TempFiles {
 async fn lsp_each_root_keeps_its_settings_disk_dependencies_and_include_overlays() {
     let files = TempFiles::new();
     let source = "@#include \"values.inc\"\nvar y; model; y=p; end;";
-    let before_uri = files.write("before.mod", source);
-    let after_uri = files.write("after.mod", source);
-    let before_include = files.write("a/values.inc", "parameters p; p=1;\n");
+    let before_uri = files.write("before/root.mod", source);
+    let after_uri = files.write("after/root.mod", source);
+    files.write("a/values.inc", "parameters p; p=1;\n");
     let after_include = files.write("b/values.inc", "parameters p; p=2;\n");
     files.write("c/values.inc", "parameters p; p=5;\n");
+    let before_folder = Url::from_directory_path(files.0.join("before")).unwrap();
+    let after_folder = Url::from_directory_path(files.0.join("after")).unwrap();
     let (service, _socket) = new_service();
     let backend = service.inner();
-    let configure = |after: &str| {
-        serde_json::json!({"dynare":{"searchPathsByRoot": {
-            before_uri.as_str(): [files.0.join("a")], after_uri.as_str(): [files.0.join(after)],
-        }}})
-    };
-    backend
-        .did_change_configuration(DidChangeConfigurationParams {
-            settings: configure("b"),
-        })
-        .await;
+    backend.initialize(InitializeParams {
+        workspace_folders: Some(vec![
+            WorkspaceFolder { uri: before_folder.clone(), name: "before".into() },
+            WorkspaceFolder { uri: after_folder.clone(), name: "after".into() },
+        ]),
+        initialization_options: Some(serde_json::json!({"dynare":{"configuration":{"schemaVersion":1,"loose":{},"folders":[
+            {"uri":before_folder,"settings":{"searchPaths":[files.0.join("a")]}},
+            {"uri":after_folder,"settings":{"searchPaths":[files.0.join("b")]}}
+        ]}}})),
+        ..InitializeParams::default()
+    }).await.unwrap();
     let diff = lsp_compare(backend, &before_uri, &after_uri).await;
     assert_pointers(&diff);
     assert_eq!(diff["changed_parameter_values"][0]["old_value"], 1.0);
     assert_eq!(diff["changed_parameter_values"][0]["new_value"], 2.0);
     let parameter = row(&diff, "/changed_parameter_values/0");
-    for (side, uri) in [("before", &before_include), ("after", &after_include)] {
-        assert_eq!(
-            dygnosis::include_resolver::normalize_uri(
-                parameter[side]["written_locations"][0]["uri"]
-                    .as_str()
-                    .unwrap()
-            ),
-            dygnosis::include_resolver::normalize_uri(uri.as_str())
-        );
+    for (side, expected_text) in [
+        ("before", "parameters p; p=1;\n"),
+        ("after", "parameters p; p=2;\n"),
+    ] {
+        let location = &parameter[side]["written_locations"][0];
+        assert_eq!(location["input_id"], side);
+        let file_key = location["file_key"].as_str().expect("snapshot file key");
+        assert_eq!(diff["sources"][side][file_key], expected_text);
     }
     // No watched-file event: comparing itself must observe changed disk input.
     files.write("b/values.inc", "parameters p; p=3;\n");
@@ -739,11 +763,12 @@ async fn lsp_each_root_keeps_its_settings_disk_dependencies_and_include_overlays
         disk_edit["navigation"]["after"]["revision"],
         overlay["navigation"]["after"]["revision"]
     );
-    backend
-        .did_change_configuration(DidChangeConfigurationParams {
-            settings: configure("c"),
-        })
-        .await;
+    backend.did_change_configuration(DidChangeConfigurationParams {
+        settings: serde_json::json!({"dynare":{"configuration":{"schemaVersion":1,"loose":{},"folders":[
+            {"uri":before_folder,"settings":{"searchPaths":[files.0.join("a")]}},
+            {"uri":after_folder,"settings":{"searchPaths":[files.0.join("c")]}}
+        ]}}}),
+    }).await;
     let settings = lsp_compare(backend, &before_uri, &after_uri).await;
     assert_eq!(settings["changed_parameter_values"][0]["old_value"], 1.0);
     assert_eq!(settings["changed_parameter_values"][0]["new_value"], 5.0);

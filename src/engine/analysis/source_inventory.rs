@@ -5,7 +5,6 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 use crate::engine::analysis_configuration::DirectiveSite;
 use crate::engine::language::lexer::{Token, TokenKind, tokenize};
-use crate::engine::language::macro_expand::MacroEvalError;
 use crate::engine::language::macro_expr::MacroBudget;
 use crate::engine::language::macro_source::MacroSource;
 use crate::engine::language::model::{ExecutionStep, MacroDirective, Model, StatementKind};
@@ -110,40 +109,6 @@ struct MacroFrame<'a> {
 }
 
 impl SourceInventory {
-    /// Standalone compatibility entry point. Workspace consumers acquire one
-    /// MacroSource and call build_from_macro_source without scanning it again.
-    pub(crate) fn build(
-        text: &str,
-        work_limit: MacroWorkLimit,
-        cancellation: Option<Arc<AtomicBool>>,
-    ) -> Option<Self> {
-        let mut budget = MacroBudget::with_limit(work_limit, cancellation);
-        if crate::engine::control::flag_cancelled(budget.cancellation().as_deref()) {
-            return None;
-        }
-        // The borrowed input needs one owned handle only in this compatibility
-        // path. Production documents already supply their immutable handle.
-        let shared = budget
-            .spend_work(text.len().max(1))
-            .and_then(|()| MacroSource::build(Arc::new(text.to_owned()), &mut budget));
-        if crate::engine::control::flag_cancelled(budget.cancellation().as_deref()) {
-            return None;
-        }
-        match shared {
-            Ok(source) => Self::build_from_macro_source(source, work_limit, budget.cancellation()),
-            Err(error) => {
-                let cause = match error {
-                    MacroEvalError::Limit("iteration work") => "Written source inspection reached the work allowance; source rows and guarded macro targets are unavailable.".into(),
-                    MacroEvalError::Limit(limit) => format!("Written source inspection stopped at the {limit} limit; source rows and guarded macro targets are unavailable."),
-                    _ => "Written source inspection could not acquire the macro source facts; source rows and guarded macro targets are unavailable.".into(),
-                };
-                let mut result = Self::unavailable(cause);
-                result.work_used = work_limit.get() - budget.remaining_work();
-                Some(result)
-            }
-        }
-    }
-
     fn empty() -> Self {
         Self {
             source_revision: String::new(),
@@ -914,7 +879,10 @@ mod tests {
     use crate::engine::analysis_configuration::source_revision;
 
     fn inventory(text: &str) -> SourceInventory {
-        SourceInventory::build(text, Default::default(), None).unwrap()
+        let source = MacroSource::build(Arc::new(text.to_owned()), &mut MacroBudget::new())
+            .expect("test source macro scan should succeed");
+        SourceInventory::build_from_macro_source(source, Default::default(), None)
+            .expect("test inventory should not be canceled")
     }
 
     #[test]
@@ -1165,12 +1133,21 @@ mod tests {
     fn bounded_and_canceled_inspection_withholds_unbuilt_facts() {
         // Guards a source budget failure becoming a successful empty inventory,
         // and canceled source facts entering a shared document cache.
-        let source =
-            SourceInventory::build("var y;", MacroWorkLimit::new(1).unwrap(), None).unwrap();
+        let macro_source =
+            MacroSource::build(Arc::new("var y;".to_owned()), &mut MacroBudget::new()).unwrap();
+        let source = SourceInventory::build_from_macro_source(
+            macro_source.clone(),
+            MacroWorkLimit::new(1).unwrap(),
+            None,
+        )
+        .unwrap();
         assert!(source.coverage_cause.is_some());
         assert!(source.items.is_empty());
         let flag = Arc::new(AtomicBool::new(true));
-        assert!(SourceInventory::build("var y;", Default::default(), Some(flag)).is_none());
+        assert!(
+            SourceInventory::build_from_macro_source(macro_source, Default::default(), Some(flag))
+                .is_none()
+        );
     }
 
     #[test]

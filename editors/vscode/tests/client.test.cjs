@@ -847,11 +847,12 @@ test("navigation checks a caller guard after loading and before ownership or edi
   await client.shutdown();
 });
 
-test("navigation capabilities advertise the agreed comparison and effective-preview schemas", () => {
+test("navigation capabilities advertise snapshot comparisons and effective-preview support", () => {
   const capabilities = { experimental: { retained: true } };
   extendCapabilities(capabilities);
   assert.equal(capabilities.experimental.retained, true);
-  assert.deepEqual(capabilities.experimental.dygnosis.compareModels, { navigation_schema_version: 1 });
+  assert.equal(Object.hasOwn(capabilities.experimental.dygnosis, "compareModels"), false);
+  assert.deepEqual(capabilities.experimental.dygnosis.compareModelSnapshots, { schema_version: 1, navigation_schema_version: 2 });
   assert.deepEqual(capabilities.experimental.dygnosis.effectivePreview, { navigation_schema_version: 1, dependency_candidates: true });
   assert.equal(capabilities.experimental.dygnosis.modelInfo.schema_version, 1);
   assert.equal(capabilities.experimental.dygnosis.workspaceStatusChanged, true);

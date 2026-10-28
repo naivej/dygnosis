@@ -105,7 +105,7 @@ Module._load = function(id, ...args) {
   return originalLoad.call(this, id, ...args);
 };
 const { lensPreferences, declarationLensGroups, registerLenses } = require(compiledModule("lenses"));
-const { registerEffectivePreview } = require(compiledModule("preview"));
+const { effectivePreviewArguments, registerEffectivePreview } = require(compiledModule("preview"));
 Module._load = originalLoad;
 const lensContributions = { configuration: require("../package.json").contributes.configuration.find(group => group.title === "Dygnosis: Actions") };
 
@@ -140,6 +140,7 @@ function setup(doc = document(), extraDocs = []) {
     loads: [], shown: [], languages: [], content: new Map() };
   const changed = new Emitter();
   const service = { currentInstance: 1, roots: [], requests: [], validations: [], logged: [], engineRequests: [],
+    client: { initializeResult: { capabilities: { experimental: { dygnosis: { effectivePreview: { command: "dynare/showEffectiveModel", source_layout: true } } } } } },
     log: message => service.logged.push(message), onDidChange: changed.event,
     ensureStarted: async () => {},
     rootForDocument: async current => {
@@ -312,13 +313,20 @@ test("effective lens needs a safe opener but does not need an authoritative equa
   env.service.info = () => facts(env.doc, { statements: [statement("s1", { equation_count: null })], equations: [equation("e1", { location: null })] });
   assert.deepEqual((await env.provide()).map(row => row.command.title), ["Expand macros"]); env.registration.dispose();
 });
+test("effective preview requires a current advertised layout", () => {
+  const root = uri("file:///workspace/main.mod");
+  const service = layout => ({ client: { initializeResult: { capabilities: { experimental: { dygnosis: { effectivePreview: layout } } } } } });
+  assert.deepEqual(effectivePreviewArguments(service({ command: "dynare/showEffectiveModel", source_layout: true }), root), [{ root_uri: root.toString(), layout: "source" }]);
+  assert.throws(() => effectivePreviewArguments(service({ command: "dynare/showEffectiveModel", readable_layout: true }), root), /does not advertise the source-preserving macro expansion layout/);
+  assert.throws(() => effectivePreviewArguments(service({ navigation_schema_version: 1 }), root), /does not advertise the source-preserving macro expansion layout/);
+});
 test("optional effective lens uses only the first safe opener and passes the explicit validated context", async () => {
   const env = setup(); env.configure("dynare.codeLens.effectiveModel", true);
   env.service.info = () => facts(env.doc, { statements: [statement(), statement("s2", { lens_anchor: location(undefined, 20), equation_count: 0 })] });
   const preview = registerEffectivePreview(env.service); const lenses = await env.provide();
   assert.equal(lenses.filter(row => row.command.title === "Expand macros").length, 1);
   await env.run(lenses.find(row => row.command.title === "Expand macros"));
-  assert.deepEqual(env.service.engineRequests, [{ command: "dynare/showEffectiveModel", args: [env.doc.uri.toString()] }]);
+  assert.deepEqual(env.service.engineRequests, [{ command: "dynare/showEffectiveModel", args: [{ root_uri: env.doc.uri.toString(), layout: "source" }] }]);
   assert.equal(env.host.shown[0].doc.uri.scheme, "dygnosis-effective"); assert.deepEqual(env.host.languages, ["dynare"]);
   assert.equal(env.host.shown[0].options.viewColumn, 2); preview.dispose(); env.registration.dispose();
 });
@@ -345,7 +353,7 @@ test("effective preview expected context refuses owner/version/revision/instance
 test("ordinary effective-preview menu URI arguments retain the native root picker and preview action", async () => {
   const env = setup(); const preview = registerEffectivePreview(env.service);
   await env.host.commands.get("dygnosis.showEffectiveModel")(env.doc.uri);
-  assert.deepEqual(env.service.engineRequests, [{ command: "dynare/showEffectiveModel", args: [env.doc.uri.toString()] }]);
+  assert.deepEqual(env.service.engineRequests, [{ command: "dynare/showEffectiveModel", args: [{ root_uri: env.doc.uri.toString(), layout: "source" }] }]);
   assert.equal(env.host.shown.length, 1); assert.equal(env.service.validations.length, 0);
   preview.dispose(); env.registration.dispose();
 });

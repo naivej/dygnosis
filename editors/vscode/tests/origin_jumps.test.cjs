@@ -166,7 +166,7 @@ function setup(options = {}) {
   const service = { currentInstance: 1, changed, presentation, analysis, onDidChangeAnalysis: analysis.event, onDidChange: presentation.event, onDidInvalidate: changed.event,
     logged: [], requests: [], validations: [], jumps: [],
     client: { initializeResult: { capabilities: { experimental: { dygnosis: { effectivePreview: {
-      command: "dynare/showEffectiveModel", navigation_schema_version: 1, dependency_candidates: true,
+      command: "dynare/showEffectiveModel", navigation_schema_version: 1, dependency_candidates: true, source_layout: true,
     } } } } } },
     log: message => service.logged.push(message), failure: async error => service.logged.push(error instanceof Error ? error.message : String(error)),
     ensureStarted: async () => {},
@@ -212,7 +212,7 @@ async function realClientSetup() {
     create: (_binary, _output, _middleware, _settings, capture) => {
       const client = {
         initializeResult: { capabilities: { documentSymbolProvider: true, executeCommandProvider: { commands: ["dynare/modelInfo", "dynare/showEffectiveModel"] },
-          experimental: { dygnosis: { modelInfo: { schema_version: 1 }, effectivePreview: { command: "dynare/showEffectiveModel", navigation_schema_version: 1, dependency_candidates: true } } } } },
+          experimental: { dygnosis: { modelInfo: { schema_version: 1 }, effectivePreview: { command: "dynare/showEffectiveModel", navigation_schema_version: 1, dependency_candidates: true, source_layout: true } } } } },
         sendNotification: async () => {}, onNotification: () => new Disposable(), onDidChangeState: () => new Disposable(),
         getFeature: () => ({ clear() {}, unregister() {}, register() {} }),
         sendRequest: (_method, params, token) => {
@@ -532,29 +532,13 @@ test("several previews retain independent roots and refresh an unopened root", a
   env.registration.dispose(); env.previews.dispose();
 });
 
-test("older override preserves basic preview and refresh while origins remain unavailable", async () => {
-  const env = setup(); delete env.service.client.initializeResult.capabilities.experimental;
-  env.service.value = { effective_text: "model;\ny = 1;\nend;" };
-  const session = await env.show(); assert.ok(session.text.includes("y = 1"));
-  assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
-  await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 0);
-  env.service.value = { effective_text: "model;\ny = 2;\nend;" }; await env.run("refreshEffectiveModel");
-  assert.ok(env.previews.sessions().at(-1).text.includes("y = 2"));
-  assert.ok(session.text.includes("y = 1"));
-  assert.equal(env.host.messages.length, 1);
-  assert.match(env.host.messages[0], /engine does not support verified source jumps/);
-  assert.deepEqual(env.service.requests[0].args, [main]);
-  assert.deepEqual(env.service.requests.at(-1).args, [{ root_uri: main }]);
-  env.registration.dispose(); env.previews.dispose();
-});
-
-test("readable preview open Refresh and both jump proofs use one layout and display the returned text", async () => {
+test("source-layout preview open Refresh and both jump proofs use one layout and display the returned text", async () => {
   const env = setup();
   env.service.client.initializeResult.capabilities.experimental.dygnosis.effectivePreview.readable_layout = true;
   const displayed = "model;\n    y = 1;\nend;", mapped = row({ effective_range: new Range(1, 4, 1, 9),
     macro_frames: [{ kind: "for", variable: "i", value: "1", directive_locations: [target()], body_locations: [target()] }] });
   env.service.executeHook = (_command, args) => {
-    assert.deepEqual(args, [{ root_uri: main, layout: "readable" }]);
+    assert.deepEqual(args, [{ root_uri: main, layout: "source" }]);
     return payload({ effective_text: displayed, navigation: [mapped] });
   };
   const session = await env.show();
@@ -592,19 +576,6 @@ test("source preview open Refresh and jump proofs prefer source_layout over read
   env.registration.dispose(); env.previews.dispose();
 });
 
-test("a navigation-capable older server keeps its compact layout in open Refresh and source proofs", async () => {
-  const env = setup(), compact = "model; y = 1; end;";
-  env.service.value = payload({ effective_text: compact, navigation: [row({ effective_range: new Range(0, 7, 0, 12) })] });
-  const session = await env.show(); assert.equal(session.document.getText(), compact);
-  env.host.editor.selection = new Range(0, 7); await env.run("goToWrittenSource");
-  assert.equal(env.service.jumps.length, 1);
-  env.activate(session); await env.run("refreshEffectiveModel");
-  assert.equal(session.document.getText(), compact);
-  assert.deepEqual(env.service.requests[0].args, [main]);
-  for (const request of env.service.requests.slice(1)) assert.deepEqual(request.args, [{ root_uri: main }]);
-  env.registration.dispose(); env.previews.dispose();
-});
-
 test("incomplete text keeps its label and supplies no origins", async () => {
   const env = setup(); env.service.value = payload({ complete: false, status: "incomplete", navigation: [] });
   const session = await env.show(); assert.match(session.text, /^\/\/ INCOMPLETE EXPANSION/);
@@ -615,7 +586,7 @@ test("incomplete text keeps its label and supplies no origins", async () => {
 
 test("unsupported advertised schema reports recovery without guessed targets", async () => {
   const env = setup(); env.service.value.navigation_schema_version = 2; await env.show();
-  assert.match(env.service.logged[0], /Update dynare.serverPath/);
+  assert.match(env.service.logged[0], /Unsupported or invalid effective-model navigation/);
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
   env.registration.dispose(); env.previews.dispose();
 });

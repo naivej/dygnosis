@@ -178,7 +178,7 @@ pub fn enforce_output_budget(diff: &mut ModelDiff) {
     add_limit(
         &mut diff.semantic.limits,
         "serialized_output_limit",
-        "Semantic rows were omitted by the serialized detail limit; legacy structural rows remain available.",
+        "Semantic rows were omitted by the serialized detail limit; structural comparison rows remain available.",
         omitted_rows,
         "semantic_diff",
     );
@@ -210,7 +210,7 @@ pub fn enforce_output_budget(diff: &mut ModelDiff) {
     add_limit(
         &mut diff.semantic.limits,
         "serialized_output_limit",
-        "Semantic rows were omitted by the serialized detail limit; legacy structural rows remain available.",
+        "Semantic rows were omitted by the serialized detail limit; structural comparison rows remain available.",
         additional_rows,
         "semantic_diff",
     );

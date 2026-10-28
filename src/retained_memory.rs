@@ -12,7 +12,7 @@ use std::sync::{
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static ACCOUNTING_FAILED: AtomicBool = AtomicBool::new(false);
-// Ordinary LSP work has no scoped allocation owner. Keep its headers for
+// Unscoped allocations have no allocation owner. Keep its headers for
 // correct later free/realloc, but avoid initializing/reading owner TLS.
 static ACTIVE_SCOPES: AtomicUsize = AtomicUsize::new(0);
 thread_local! {

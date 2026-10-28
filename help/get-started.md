@@ -53,9 +53,7 @@ Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dy
 or download packages and standalone bundles from [GitHub
 Releases](https://github.com/naivej/dygnosis/releases).
 
-For a standalone installation, extract the whole bundle and keep `dygnosis`
-and `dygnosis-mcp` together. Start LSP with `dygnosis`; an MCP client can use
-`dygnosis mcp` or the MCP executable directly.
+The standalone bundle includes `dygnosis` for LSP and `dygnosis-mcp` for MCP clients.
 
 Unsaved (`Untitled`) files support single-file editing and checks; save the
 file to resolve `@#include` and companion file paths through its

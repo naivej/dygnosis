@@ -136,18 +136,16 @@ const mcpProbeCases = {
   dynare_compare_models: { comparison: { kind: "sources", before: modelSource, after: { kind: "text", text: model.replace("1/2", "1/3") } } },
 };
 function canonicalMcpResult(result) {
-  if (result?.structuredContent) {
-    assert.equal(result.structuredContent.schema_version, 3, "Expected canonical MCP tool contract 3");
-    return result.structuredContent;
+  // VS Code's LanguageModelToolResult carries the canonical object as one text
+  // part; direct MCP calls also provide structuredContent.
+  let value = result?.structuredContent;
+  if (value === undefined) {
+    assert.equal(result?.content?.length, 1, "Expected one canonical MCP JSON text part");
+    assert.equal(result.content[0].type, "text", "Expected canonical MCP JSON text");
+    value = JSON.parse(result.content[0].text);
   }
-  for (const item of [...(result?.content ?? [])].reverse()) {
-    if (item.type !== "text" || typeof item.text !== "string") continue;
-    try {
-      const parsed = JSON.parse(item.text);
-      if (parsed?.schema_version === 3) return parsed;
-    } catch { /* Leading legacy content may not be JSON. */ }
-  }
-  throw new Error("MCP tool result has no canonical schema_version 3 object");
+  assert.equal(value?.schema_version, 3, "Expected canonical MCP tool contract 3");
+  return value;
 }
 async function probeMcp(executable, version, { reuse = undefined } = {}) {
   assert.ok(reuse === undefined || reuse === "0" || reuse === "1", "MCP reuse override must be unset, 0, or 1");
@@ -155,9 +153,9 @@ async function probeMcp(executable, version, { reuse = undefined } = {}) {
   const env = { ...process.env, DYGNOSIS_MCP_REUSE_TRACE: "1" };
   if (reuse === undefined) delete env.DYGNOSIS_MCP_REUSE;
   else env.DYGNOSIS_MCP_REUSE = reuse;
-  const session = rpc(executable, ["mcp"], false, { env });
+  const session = rpc(executable, [], false, { env });
   try {
-    const initialized = await session.request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "dygnosis-package-check", version: "1" } });
+    const initialized = await session.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "dygnosis-package-check", version: "1" } });
     assert.equal(initialized.serverInfo.name, "dygnosis");
     assert.equal(initialized.serverInfo.version, version);
     assert.ok(initialized.capabilities.tools);

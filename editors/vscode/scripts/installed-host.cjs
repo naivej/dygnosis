@@ -74,7 +74,7 @@ exports.run = async function run() {
     evidence.native_vscode_mcp = await probeNativeMcp(vscode, extension.id);
     assert.ok(launchLogs.some(message => message.startsWith("MCP executable: ") && message.endsWith(` (dygnosis-mcp ${source.version})`) && samePath(message.slice(16, -` (dygnosis-mcp ${source.version})`.length), mcpBinary)), "The native provider must select the packaged MCP companion directly");
     if (!workspaceDiagnostics) assert.equal(service.client, undefined, "Native MCP must work before the first LSP launch");
-    evidence.checks.push("native VS Code MCP discovery and actual invocation of all published tools before opening a model");
+    evidence.checks.push("native VS Code MCP discovery and direct companion invocation of all published tools before opening a model");
     await checkpoint("bundled LSP counts, symbols and Problems diagnostics");
     const file = path.join(workspace, "installed model.mod");
     await fs.writeFile(file, model);

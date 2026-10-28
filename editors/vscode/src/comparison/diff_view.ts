@@ -23,22 +23,22 @@ export interface DiffRow {
   semantic?: SemanticRow;
 }
 export interface DiffReference extends Reference { navigation: DiffNavigationRow }
-export interface DiffSnapshot { before: DiffEnvelope; after: DiffEnvelope; rows: DiffRow[]; complete: boolean; semantic?: Semantic; sourceChanges?: SourceChanges; coverage?: Coverage; references?: DiffReference[]; semanticMessage?: string }
+export interface DiffSnapshot { before: DiffEnvelope; after: DiffEnvelope; rows: DiffRow[]; complete: boolean; semantic: Semantic; sourceChanges: SourceChanges; coverage: Coverage; references: DiffReference[] }
 
-/** Retired Unpaired selections now include both independent side appearances. */
+/** Read supported change kinds from stored selections. */
 export function normalizeChangeKinds(value: unknown, fallback: ChangeKind[]): ChangeKind[] {
   if (!Array.isArray(value)) return [...fallback];
-  return [...new Set(value.flatMap(item => item === "unpaired" ? ["added", "removed"] : typeof item === "string" && changeKinds.includes(item as ChangeKind) ? [item] : []))] as ChangeKind[];
+  return [...new Set(value.filter((item): item is ChangeKind => typeof item === "string" && changeKinds.includes(item as ChangeKind)))];
 }
 function malformed(): never { throw new Error("This engine returned an unsupported comparison. Update dynare.serverPath or use the bundled binary."); }
 const string = (value: unknown): string => typeof value === "string" ? value : malformed();
 const object = (value: unknown): Record<string, unknown> => record(value) ? value : malformed();
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : malformed();
 const nullableString = (value: unknown): string | null => value === null ? null : string(value);
-function target(value: unknown, snapshots = false): DiffTarget | null {
+function target(value: unknown): DiffTarget | null {
   if (value === null) return null;
   const row = object(value), locations = array(row.written_locations);
-  if (!locations.every(item => location(item) && (snapshots ? /^(file|untitled|dygnosis-history):/ : /^(file|untitled):/).test(item.uri))) malformed();
+  if (!locations.every(item => location(item) && /^(file|untitled|dygnosis-history):/.test(item.uri))) malformed();
   return { occurrence_id: string(row.occurrence_id), domain: string(row.domain), dimension: nullableString(row.dimension),
     written_locations: (locations as Location[]).map(item => ({ uri: item.uri, range: { start: { ...item.range.start }, end: { ...item.range.end } } })) };
 }
@@ -47,16 +47,8 @@ function envelope(value: unknown, root: string): DiffEnvelope {
   if (row.root_uri !== root || typeof row.complete !== "boolean") malformed();
   return { root_uri: root, revision: nullableString(row.revision), complete: row.complete };
 }
-/** Project legacy rows for display; their exact pointers carry the engine's pairing. */
-export function parseDiff(value: unknown, beforeRoot: string, afterRoot: string, expectedSemantic?: boolean, registeredSource?: (side: DiffSide, uri: string) => boolean): DiffSnapshot {
-  return projectDiff(value, beforeRoot, afterRoot, false, { before: null, after: null }, expectedSemantic, registeredSource);
-}
-function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snapshots = false, ids: Record<DiffSide, string | null> = { before: null, after: null }, expectedSemantic?: boolean, registeredSource?: (side: DiffSide, uri: string) => boolean): DiffSnapshot {
+function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, ids: Record<DiffSide, string>): DiffSnapshot {
   const result = object(value);
-  if (typeof result.error === "string") throw new Error(result.error);
-  if (result.status === "incomplete") return {
-    before: { root_uri: beforeRoot, revision: null, complete: false }, after: { root_uri: afterRoot, revision: null, complete: false }, rows: [], complete: false,
-  };
   const nav = object(result.navigation);
   if (nav.schema_version !== 1) malformed();
   const before = envelope(nav.before, beforeRoot), after = envelope(nav.after, afterRoot);
@@ -64,10 +56,10 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
   for (const raw of array(nav.rows)) {
     const row = object(raw), id = string(row.id);
     if (navigation.has(id)) malformed();
-    navigation.set(id, { id, kind: string(row.kind), dimension: row.dimension === undefined ? undefined : nullableString(row.dimension), family: row.family === undefined ? undefined : string(row.family), name: row.name === undefined ? undefined : string(row.name), equation_pointer: row.equation_pointer === undefined ? undefined : string(row.equation_pointer), before: target(row.before, snapshots), after: target(row.after, snapshots) });
+    navigation.set(id, { id, kind: string(row.kind), dimension: row.dimension === undefined ? undefined : nullableString(row.dimension), family: row.family === undefined ? undefined : string(row.family), name: row.name === undefined ? undefined : string(row.name), equation_pointer: row.equation_pointer === undefined ? undefined : string(row.equation_pointer), before: target(row.before), after: target(row.after) });
     if (row.block_openers !== undefined) {
       const openers = object(row.block_openers);
-      navigation.get(id)!.block_openers = { before: target(openers.before, snapshots), after: target(openers.after, snapshots) };
+      navigation.get(id)!.block_openers = { before: target(openers.before), after: target(openers.after) };
     }
   }
   const rows: DiffRow[] = [];
@@ -158,8 +150,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
     const sources = object(result.sources);
     for (const side of ["before", "after"] as const) registry[side] = Object.fromEntries(Object.entries(object(sources[side])).map(([key, value]) => [key, string(value)]));
   }
-  const details = parseSemantic(result, ids, registry, expectedSemantic);
-  if (!details) return { before, after, rows: complete ? rows : [], complete, semanticMessage: "This engine shows fewer model details. Use Text diff to review the files." };
+  const details = parseSemantic(result, ids, registry);
   const rowMap = new Map(rows.map(row => [row.id, row]));
   const isLocal = (row: SemanticRow): boolean => row.family === "symbols" && row.fields.some(field => field.name === "role" && [field.before, field.after].some(side => side.value?.kind === "text" && ["model_local_definition", "model_local_declaration"].includes(side.value.value)));
   const section = (row: SemanticRow): DiffSection => {
@@ -180,22 +171,18 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
     return row.family === "equations" || isLocal(row) ? "equations" : mapped[row.family];
   };
   for (const [index, row] of details.semantic.rows.entries()) {
-    const source = navigation.get(row.pointer), legacy = rowMap.get(row.pointer);
-    if (!legacy && row.pointer !== `/semantic/rows/${index}`) malformed();
-    // The shared view group must not let typed detail change a legacy equation's domain.
-    if (legacy && row.family === "equations" && legacy.id.startsWith("/heterogeneous_equations/") !== Boolean(row.before?.scope.dimension || row.after?.scope.dimension)) malformed();
-    if (!source || legacy && (legacy.kind !== row.change || section(row) !== legacy.section && row.family !== "shocks") || !legacy && (source.kind !== "semantic" || source.family !== row.family || source.name !== row.name)) malformed();
+    const source = navigation.get(row.pointer), structural = rowMap.get(row.pointer);
+    if (!structural && row.pointer !== `/semantic/rows/${index}`) malformed();
+    if (structural && row.family === "equations" && structural.id.startsWith("/heterogeneous_equations/") !== Boolean(row.before?.scope.dimension || row.after?.scope.dimension)) malformed();
+    if (!source || structural && (structural.kind !== row.change || section(row) !== structural.section && row.family !== "shocks") || !structural && (source.kind !== "semantic" || source.family !== row.family || source.name !== row.name)) malformed();
     for (const side of ["before", "after"] as const) {
       if (!row[side] && source[side] || row[side] && source[side] && (source[side].domain !== (row[side].scope.dimension === null ? "aggregate" : "heterogeneous") || source[side].dimension !== row[side].scope.dimension)) malformed();
       const opener = source.block_openers?.[side], other = row[side === "before" ? "after" : "before"];
       if (opener && (row[side] || !other || opener.dimension !== other.scope.dimension || opener.domain !== (other.scope.dimension === null ? "aggregate" : "heterogeneous"))) malformed();
-      for (const location of [...source[side]?.written_locations ?? [], ...opener?.written_locations ?? []]) {
-        if (!snapshots && !(registeredSource ? registeredSource(side, location.uri) : Object.hasOwn(registry[side], location.uri))) malformed();
-      }
     }
     const sideScopes = { before: row.before?.scope.dimension ?? (row.before ? row.before.scope.domain : null), after: row.after?.scope.dimension ?? (row.after ? row.after.scope.domain : null) };
-    const projected: DiffRow = { id: row.pointer, section: legacy?.section ?? section(row), group: isLocal(row) ? "Model-local variables" : row.family === "parameters" ? "Parameters" : legacy?.group ?? semanticGroup(section(row)), kind: row.change, label: row.name, before: row.before?.name ?? null, after: row.after?.name ?? null, scopes: [...new Set(Object.values(sideScopes).filter((s): s is string => s !== null))], sideScopes, navigation: source, semantic: row };
-    if (legacy) Object.assign(legacy, projected); else rows.push(projected);
+    const projected: DiffRow = { id: row.pointer, section: structural?.section ?? section(row), group: isLocal(row) ? "Model-local variables" : row.family === "parameters" ? "Parameters" : structural?.group ?? semanticGroup(section(row)), kind: row.change, label: row.name, before: row.before?.name ?? null, after: row.after?.name ?? null, scopes: [...new Set(Object.values(sideScopes).filter((s): s is string => s !== null))], sideScopes, navigation: source, semantic: row };
+    if (structural) Object.assign(structural, projected); else rows.push(projected);
   }
   const equationOwners = new Map(rows.filter(row => row.section === "equations").map(row => [row.id, row]));
   const references = details.semantic.references.map(ref => {
@@ -205,7 +192,6 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
     const equationOwner = equationOwners.get(ref.equation_pointer);
     if (ref.equation_pointer !== ref.pointer && (!equationOwner || equationOwner[ref.side] === null)) malformed();
     if (ref.equation_pointer !== ref.pointer && !(equationTarget?.kind === "equation" || equationTarget?.kind === "semantic" && equationTarget.family === "equations")) malformed();
-    for (const location of source[ref.side]?.written_locations ?? []) if (!snapshots && !(registeredSource ? registeredSource(ref.side, location.uri) : Object.hasOwn(registry[ref.side], location.uri))) malformed();
     return { ...ref, navigation: source };
   });
   return { before, after, rows: complete ? rows : [], complete, ...details, references: complete ? references : [] };
@@ -218,7 +204,7 @@ export function semanticGroup(section: DiffSection): string {
 
 /** Schema 2 keys are mapped only through the host's retained captured source registry. */
 export function parseSnapshotDiff(value: unknown, ids: Record<DiffSide, string>, source: (side: DiffSide, key: string) => string,
-  inputs: Record<DiffSide, { root_file: string; revision: string; commit?: string }>, expectedSemantic?: boolean): DiffSnapshot {
+  inputs: Record<DiffSide, { root_file: string; revision: string; commit?: string }>): DiffSnapshot {
   const response = object(value), nav = object(response.navigation);
   if (response.state !== "result" || nav.schema_version !== 2) malformed();
   const envelope = (side: DiffSide) => {
@@ -244,17 +230,12 @@ export function parseSnapshotDiff(value: unknown, ids: Record<DiffSide, string>,
     return { ...row, before: mapped("before", row.before), after: mapped("after", row.after),
       ...(openers ? { block_openers: { before: mapped("before", openers.before), after: mapped("after", openers.after) } } : {}) };
   });
-  return projectDiff({ ...object(response.diff), sources: response.sources, navigation: { schema_version: 1, before: envelope("before"), after: envelope("after"), rows } }, ids.before, ids.after, true, ids, expectedSemantic);
+  return projectDiff({ ...object(response.diff), sources: response.sources, navigation: { schema_version: 1, before: envelope("before"), after: envelope("after"), rows } }, ids.before, ids.after, ids);
 }
 
 export function normalizeChoices(value: unknown, defaults: DiffPreferences): DiffChoices {
   const row = record(value) ? value : {};
-  let group = typeof row.group === "string" ? row.group.slice(0, 1000) : null;
-  if (group?.startsWith("aggregateEquations:") || group?.startsWith("heterogeneousEquations:")) {
-    group = group.endsWith(":Model-local variables") ? "equations:Model-local variables" : "equations:Equations";
-  }
-  if (group === "moments:Moments and IRFs") group = "moments:Method of moments";
-  if (group === "observables:Observables") group = "data:Data";
+  const group = typeof row.group === "string" ? row.group.slice(0, 1000) : null;
   // Retired presentation, selection, layout, section and scope state do not hide rows.
   return {
     changeKinds: normalizeChangeKinds(row.changeKinds, defaults.changeKinds),

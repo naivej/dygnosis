@@ -49,7 +49,6 @@ use crate::engine::analysis::model_info::{
     TimingClass, assigned_number, classify_variable_timing, format_timing_line,
 };
 use crate::engine::catalog::{HET_SHOCKS_OVERWRITE, HETEROGENEITY_OPTION, option_doc};
-use crate::engine::comparison::{CompareSource, compare_models_with_sources};
 use crate::engine::diagnostics::explain;
 use crate::engine::diagnostics::{DiagnosticSet, check_file, check_in_workspace_with_origins};
 use crate::engine::editing::equation_names::{
@@ -2189,7 +2188,6 @@ impl Backend {
         }
         let result = match command {
             "dynare/explainDiagnostic" => explain_command(arguments),
-            "dynare/compareModels" => self.compare_command(arguments),
             "dynare/compareModelSnapshots" => self.compare_snapshot_command(arguments),
             "dynare/validateComparisonInputs" => {
                 comparison_inputs::validate(&self.lock_inner(), arguments)
@@ -2356,120 +2354,6 @@ impl Backend {
             &companions,
             |path| path.to_string_lossy().into_owned(),
         );
-        result
-    }
-
-    fn compare_command(&self, arguments: &[Value]) -> Value {
-        let (uri_a, uri_b) = match parse_compare_args(arguments) {
-            Ok(pair) => pair,
-            Err(v) => return v,
-        };
-        let mut inner = self.lock_inner();
-        let revision_a = Url::parse(&uri_a)
-            .ok()
-            .and_then(|uri| inner.root_revision(&uri));
-        let revision_b = Url::parse(&uri_b)
-            .ok()
-            .and_then(|uri| inner.root_revision(&uri));
-        let Some(model_a) = inner.workspace.effective_model_snapshot(uri_a.as_str()) else {
-            return json!({"error": format!("No parsed model for uri_a: {uri_a}"), "code": "URI_A_NOT_FOUND"});
-        };
-        let Some(model_b) = inner.workspace.effective_model_snapshot(uri_b.as_str()) else {
-            return json!({"error": format!("No parsed model for uri_b: {uri_b}"), "code": "URI_B_NOT_FOUND"});
-        };
-        let mut incomplete = Vec::new();
-        for (side, uri, model) in [("before", &uri_a, &model_a), ("after", &uri_b, &model_b)] {
-            if crate::engine::analysis::model_info::incomplete_model_status(
-                model,
-                inner.workspace.includes_complete(uri.as_str()),
-            )
-            .is_some()
-            {
-                let root = Url::parse(uri).expect("validated comparison URI");
-                incomplete.push(json!({"side":side,"root_uri":uri,"incomplete_reasons":self.model_info_reasons(&mut inner, &root)}));
-            }
-        }
-        if !incomplete.is_empty() {
-            return json!({"status":"incomplete", "message":"Comparison inputs are incomplete; change arrays and source navigation were withheld.", "inputs":incomplete});
-        }
-        let mut diff = compare_models_with_sources(
-            &model_a,
-            &model_b,
-            inner
-                .workspace
-                .get_source(uri_a.as_str())
-                .map(|text| CompareSource {
-                    text,
-                    origin_uri: Some(uri_a.as_str()),
-                }),
-            inner
-                .workspace
-                .get_source(uri_b.as_str())
-                .map(|text| CompareSource {
-                    text,
-                    origin_uri: Some(uri_b.as_str()),
-                }),
-        );
-        let before = crate::engine::comparison::compare_navigation::ComparisonInput::capture(
-            &mut inner.workspace,
-            &uri_a,
-            Some(&uri_a),
-            revision_a,
-            &model_a,
-            diff.shock_setup_changes
-                .iter()
-                .map(|change| change.before.as_ref()),
-        )
-        .with_written_facts(
-            &mut inner.workspace,
-            &uri_a,
-            &model_a,
-            &diff,
-            crate::engine::comparison::semantic_diff::Side::Before,
-        );
-        let after = crate::engine::comparison::compare_navigation::ComparisonInput::capture(
-            &mut inner.workspace,
-            &uri_b,
-            Some(&uri_b),
-            revision_b,
-            &model_b,
-            diff.shock_setup_changes
-                .iter()
-                .map(|change| change.after.as_ref()),
-        )
-        .with_written_facts(
-            &mut inner.workspace,
-            &uri_b,
-            &model_b,
-            &diff,
-            crate::engine::comparison::semantic_diff::Side::After,
-        );
-        let include_pairs = before.same_file_pairs(&after);
-        crate::engine::comparison::compare_navigation::populate_written_statements(
-            &mut diff, &before, &after,
-        );
-        let boundary =
-            crate::engine::comparison::semantic_diff::CaptureBoundary::RootAndExecutedIncludes;
-        let _ = crate::engine::comparison::semantic_diff::populate_captured_sources(
-            &mut diff,
-            before.source_input(boundary),
-            after.source_input(boundary),
-            &include_pairs,
-        );
-        crate::engine::comparison::semantic_diff::enforce_output_budget(&mut diff);
-        if !inner.workspace.input_snapshot_is_current(&uri_a)
-            || !inner.workspace.input_snapshot_is_current(&uri_b)
-        {
-            return json!({"error": "Comparison inputs changed while reading them; refresh the comparison", "code": "INPUT_CHANGED"});
-        }
-        let mut result = diff.to_json();
-        result["navigation"] = crate::engine::comparison::compare_navigation::navigation_json(
-            &diff,
-            &before,
-            &after,
-            crate::engine::comparison::compare_navigation::Coordinates::Lsp,
-        );
-        result["sources"] = json!({"before":before.sources(),"after":after.sources()});
         result
     }
 
@@ -3880,7 +3764,6 @@ pub fn initialize_result() -> InitializeResult {
             execute_command_provider: Some(ExecuteCommandOptions {
                 commands: vec![
                     "dynare/explainDiagnostic".into(),
-                    "dynare/compareModels".into(),
                     "dynare/compareModelSnapshots".into(),
                     "dynare/validateComparisonInputs".into(),
                     "dynare/showEffectiveModel".into(),
@@ -3911,7 +3794,6 @@ pub fn initialize_result() -> InitializeResult {
                 "documentContext": {"command":"dynare/setDocumentContext", "schema_version":1},
                 "analysisConfiguration": {"schema_version":1,"context_command":"dynare/analysisContext","set_command":"dynare/setAnalysisConfiguration","source_candidates_command":"dynare/sourceCandidates"},
                 "rename": {"command":"dynare/captureRename", "schema_version":1, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES},
-                "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
                 "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
                 "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::engine::preview::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::engine::preview::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true, "macro_messages":true, "document_symbols":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
@@ -3926,7 +3808,7 @@ pub fn initialize_result() -> InitializeResult {
     }
 }
 
-/// Library diagnostics as LSP items. Uses [`check_file`] (same families as CLI).
+/// Library diagnostics as LSP items, using the shared [`check_file`] checks.
 pub fn diagnostics_for(uri: &str, text: &str) -> Vec<Diagnostic> {
     library_to_lsp(text, &check_file(text, uri))
 }
@@ -5272,39 +5154,6 @@ fn extract_explain_code(arguments: &[Value]) -> Option<String> {
         return Some(s.to_string());
     }
     obj.get("code")?.as_str().map(|s| s.to_string())
-}
-
-fn parse_compare_args(arguments: &[Value]) -> std::result::Result<(String, String), Value> {
-    let values: &[Value] = if arguments.len() == 1 && arguments[0].is_array() {
-        arguments[0]
-            .as_array()
-            .map(|a| a.as_slice())
-            .unwrap_or(arguments)
-    } else {
-        arguments
-    };
-    if values.len() >= 2
-        && let (Some(a), Some(b)) = (values[0].as_str(), values[1].as_str())
-    {
-        return Ok((a.to_string(), b.to_string()));
-    }
-    if let Some(obj) = values.first().and_then(|v| v.as_object()) {
-        let a = obj
-            .get("uri_a")
-            .or_else(|| obj.get("uriA"))
-            .and_then(|v| v.as_str());
-        let b = obj
-            .get("uri_b")
-            .or_else(|| obj.get("uriB"))
-            .and_then(|v| v.as_str());
-        if let (Some(a), Some(b)) = (a, b) {
-            return Ok((a.to_string(), b.to_string()));
-        }
-    }
-    Err(json!({
-        "error": "compareModels requires uri_a and uri_b arguments",
-        "code": "BAD_ARGS",
-    }))
 }
 
 fn ch_variable_item(

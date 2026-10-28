@@ -114,8 +114,7 @@ enum ComparisonInput {
     },
 }
 
-/// Projection inventory shared by discovery and decoding. Selectors are typed,
-/// and legacy source aliases are absent from this contract.
+/// Typed projection inventory shared by discovery and decoding.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[allow(dead_code)] // Most fields pass unchanged to the common worker after typed decoding.
 struct Params {
@@ -184,7 +183,7 @@ struct Params {
     #[schemars(range(min = 1, max = 1000))]
     page_size: Option<usize>,
     continuation: Option<String>,
-    /// Compact by default. Full includes optional explanation, never legacy mirrors.
+    /// Compact by default. Full includes optional explanation.
     detail: Option<Detail>,
 }
 

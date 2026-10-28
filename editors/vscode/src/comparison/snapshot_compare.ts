@@ -5,14 +5,14 @@ import { DygnosisClient } from "../client/client";
 import type { ModelSnapshot } from "../client/client";
 import { ComparisonResource, ModelSelector } from "./changes_resource";
 import { GitSources, HistoricalCapture, HistoricalInput } from "./git_source";
-import { DiffSide, DiffSnapshot, parseDiff, parseSnapshotDiff } from "./diff_view";
+import { DiffSide, DiffSnapshot, parseSnapshotDiff } from "./diff_view";
 import { HistoricalSources } from "./history_sources";
 import { engineSettings } from "../client/settings";
 import { analysisConfiguration, parseAnalysisContext, parseAnalysisMetadata, record } from "../client/protocol";
 import type { AnalysisConfiguration, AnalysisMetadata } from "../client/protocol";
 import type { AnalysisSide } from "../editor/analysis_configuration";
 import { normalizeGitText } from "./git_provenance";
-import { semanticCapability } from "./semantic_view";
+import { validateSemanticCapability } from "./semantic_view";
 import { fileLabel } from "../client/failure";
 
 interface WorkingInput { kind: "working"; input_id: string; root_uri: string; expected_revision: string; search_paths?: string[]; analysis?: AnalysisConfiguration }
@@ -55,7 +55,6 @@ export async function freezeWorkingSelector(service: DygnosisClient, input: Mode
 export interface CapturedComparison {
   snapshot: DiffSnapshot; inputs: Record<DiffSide, SnapshotEnvelope>; sourceUris: Record<DiffSide, Map<string, vscode.Uri>>;
   texts: Record<DiffSide, Record<string, string>>; working: { root: vscode.Uri; expected: string }[]; holder: object;
-  legacy?: boolean;
   instance: number;
 }
 export class ComparisonFailure extends Error {
@@ -159,13 +158,8 @@ export async function captureComparison(service: DygnosisClient, git: () => Prom
   const supported = record(experimental) && record(experimental.dygnosis) && record(experimental.dygnosis.compareModelSnapshots) &&
     experimental.dygnosis.compareModelSnapshots.schema_version === 1 && experimental.dygnosis.compareModelSnapshots.navigation_schema_version === 2;
   const capability = record(experimental) && record(experimental.dygnosis) ? experimental.dygnosis.compareModelSnapshots : undefined;
-  if (record(capability) && !supported) throw new Error("This engine advertises an unsupported comparison. Update dynare.serverPath or use the bundled binary.");
-  const semantic = semanticCapability(capability);
-  if (!supported) {
-    if (resource.before.analysis !== undefined || resource.after.analysis !== undefined) throw new ComparisonFailure("UNSUPPORTED_ANALYSIS", "This engine cannot compare explicit analysis configurations. Use the bundled binary or update dynare.serverPath.");
-    if (resource.before.kind === "working" && resource.after.kind === "working") return captureLegacy(service, resource, token);
-    throw new Error("This engine does not support history comparison. Update dynare.serverPath or use the bundled binary.");
-  }
+  if (!supported) throw new Error("This engine does not support current model comparisons. Use the bundled Dygnosis engine or update dynare.serverPath to a current LSP engine.");
+  validateSemanticCapability(capability);
   const abort = new AbortController(), cancellation = token.onCancellationRequested(() => abort.abort());
   const captures = new Map<DiffSide, HistoricalCapture>(), working: CapturedComparison["working"] = [];
   const ids = { before: randomBytes(16).toString("hex"), after: randomBytes(16).toString("hex") };
@@ -247,7 +241,7 @@ export async function captureComparison(service: DygnosisClient, git: () => Prom
         const uri = sourceUris[side].get(key);
         if (!uri) throw new Error("The engine returned a source target outside its captured input.");
         return uri.toString();
-      }, envelopes, semantic);
+      }, envelopes);
       if (!snapshot.complete) throw new ComparisonFailure("INCOMPLETE_INPUT", "The model inputs are incomplete. Fix them before comparing.");
       for (const [side, capture] of captures) service.log(`${side} historical capture: ${JSON.stringify(capture.stats)}`);
       return { snapshot, inputs: envelopes, texts, sourceUris, working, holder, instance };
@@ -255,44 +249,4 @@ export async function captureComparison(service: DygnosisClient, git: () => Prom
     throw new ComparisonFailure("CAPTURE_LIMIT", "Historical capture exceeded the source-loading limit.");
   } catch (error) { if (holder) history.release(holder); throw error; }
   finally { cancellation.dispose(); }
-}
-
-async function captureLegacy(service: DygnosisClient, resource: ComparisonResource, token: vscode.CancellationToken): Promise<CapturedComparison> {
-  if (resource.before.kind !== "working" || resource.after.kind !== "working") throw new Error("History comparison requires snapshot support.");
-  const roots = { before: vscode.Uri.parse(resource.before.root_uri), after: vscode.Uri.parse(resource.after.root_uri) }, instance = service.currentInstance;
-  const infos = { before: await service.modelInfo(roots.before, roots.before, true, token), after: await service.modelInfo(roots.after, roots.after, true, token) };
-  requireCompleteModel(infos.before, "before");
-  requireCompleteModel(infos.after, "after");
-  const experimental: unknown = service.client?.initializeResult?.capabilities.experimental;
-  const capability = record(experimental) && record(experimental.dygnosis) ? experimental.dygnosis.compareModels : undefined;
-  if (record(capability) && capability.navigation_schema_version !== 1) throw new Error("This engine advertises an unsupported comparison. Update dynare.serverPath or use the bundled binary.");
-  const raw = await service.execute("dynare/compareModels", [roots.before.toString(), roots.after.toString()], token);
-  const texts = record(raw) && record(raw.sources) ? { before: sourceTexts(raw.sources.before), after: sourceTexts(raw.sources.after) } : { before: {}, after: {} };
-  const registered = { before: new Set<string>(), after: new Set<string>() };
-  const currentUri = (side: DiffSide, key: string): vscode.Uri => {
-    if (/^(file|untitled):/.test(key)) return vscode.Uri.parse(key);
-    // compareModels is the current LSP namespace: Workspace keys are absolute
-    // native paths. Snapshot and supplied-map keys never enter this conversion.
-    if (!path.isAbsolute(key)) throw new Error("The engine returned an unsupported current source key.");
-    const sameRoot = process.platform === "win32" ? path.normalize(key).toLowerCase() === path.normalize(roots[side].fsPath).toLowerCase() : key === roots[side].fsPath;
-    return sameRoot ? roots[side] : vscode.Uri.file(key);
-  };
-  for (const side of ["before", "after"] as const) for (const key of Object.keys(texts[side])) registered[side].add(currentUri(side, key).toString());
-  const snapshot = parseDiff(raw, roots.before.toString(), roots.after.toString(), semanticCapability(capability), (side, uri) => registered[side].has(vscode.Uri.parse(uri).toString()));
-  const sourceUris = { before: new Map<string, vscode.Uri>(), after: new Map<string, vscode.Uri>() };
-  const working = ["before", "after"].map(side => ({ root: roots[side as DiffSide], expected: infos[side as DiffSide]!.revision }));
-  const verified = await Promise.all(working.map(input => service.revalidate(input.root, input.expected, instance, input.root, token)));
-  if (!snapshot.complete || verified.some(info => !info) || snapshot.before.revision !== infos.before.revision || snapshot.after.revision !== infos.after.revision)
-    throw new ComparisonFailure("INPUT_CHANGED", "The model inputs changed. Refresh the comparison.");
-  const inputs = {} as Record<DiffSide, SnapshotEnvelope>;
-  for (const side of ["before", "after"] as const) {
-    if (snapshot.semantic) for (const key of Object.keys(texts[side])) sourceUris[side].set(key, currentUri(side, key));
-    else {
-      sourceUris[side].set(roots[side].toString(), roots[side]);
-      for (const row of snapshot.rows) for (const target of row.navigation[side]?.written_locations ?? []) sourceUris[side].set(target.uri, vscode.Uri.parse(target.uri));
-    }
-    inputs[side] = { kind: "working", input_id: roots[side].toString(), root_file: roots[side].toString(), revision: infos[side]!.revision,
-      complete: true, file_keys: [...sourceUris[side].keys()], dependency_candidates: infos[side]!.dependency_candidates ?? [], search_paths: [] };
-  }
-  return { snapshot, inputs, sourceUris, texts, working, holder: {}, legacy: !snapshot.semantic, instance };
 }

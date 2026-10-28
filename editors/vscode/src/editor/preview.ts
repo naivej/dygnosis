@@ -90,18 +90,15 @@ function previewSymbols(result: unknown, text: string): vscode.DocumentSymbol[] 
   return convert(result.document_symbols) ?? [];
 }
 /** Open, Refresh, and jump proofs must use the same advertised display layout. */
-export function effectivePreviewArguments(service: Pick<DygnosisClient, "client">, root: vscode.Uri, legacyUriString = false): unknown[] {
+export function effectivePreviewArguments(service: Pick<DygnosisClient, "client">, root: vscode.Uri): unknown[] {
   const experimental: unknown = service.client?.initializeResult?.capabilities.experimental;
   const preview = record(experimental) && record(experimental.dygnosis) && record(experimental.dygnosis.effectivePreview) &&
     experimental.dygnosis.effectivePreview.command === "dynare/showEffectiveModel"
     ? experimental.dygnosis.effectivePreview : undefined;
-  if (preview && preview.source_layout === true) {
+  if (preview?.source_layout === true) {
     return [{ root_uri: root.toString(), layout: "source" }];
   }
-  if (preview && preview.readable_layout === true) {
-    return [{ root_uri: root.toString(), layout: "readable" }];
-  }
-  return [legacyUriString ? root.toString() : { root_uri: root.toString() }];
+  throw new Error("The selected engine does not advertise the source-preserving macro expansion layout. Use the bundled Dygnosis engine or update dynare.serverPath to a current LSP engine.");
 }
 export function registerEffectivePreview(service: DygnosisClient): EffectivePreviewRegistry {
   const text = new Map<string, string>();
@@ -149,7 +146,7 @@ export function registerEffectivePreview(service: DygnosisClient): EffectivePrev
       const validRoot = async (): Promise<boolean> => !selectionChanged && await valid() && service.currentInstance === instance &&
         (await service.rootForDocument(document))?.toString() === root.toString() && await valid() && service.currentInstance === instance;
       if (!await validRoot()) { expired(); }
-      const result = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, root, true));
+      const result = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, root));
       if (!await validRoot()) { expired(); }
       if (record(result) && result.success === false && typeof result.message === "string")
         refuse(`Macro expansion is unavailable: ${result.message}`);

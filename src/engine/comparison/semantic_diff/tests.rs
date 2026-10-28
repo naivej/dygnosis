@@ -105,7 +105,7 @@ fn numeric_tolerance_unknown_absent_zero_and_overflow_are_preserved() {
 }
 
 #[test]
-fn log_and_convention_changes_have_independent_rows_without_legacy_changes() {
+fn log_and_convention_changes_have_independent_rows_without_structural_changes() {
     let diff = compare_models(
         &parse("var y; model; y=0; end;"),
         &parse("var(log) y; predetermined_variables y; model; y=0; end;"),
@@ -124,7 +124,7 @@ fn log_and_convention_changes_have_independent_rows_without_legacy_changes() {
 }
 
 #[test]
-fn metadata_absence_empty_and_duplicate_selection_follow_legacy() {
+fn metadata_absence_empty_and_duplicate_selection_preserve_structural_selection() {
     let diff = compare_models(&parse("var y;"), &parse("var y (long_name='');"));
     let detail = row(&diff, SemanticFamily::Symbols, "y");
     assert_eq!(field(detail, "long_name").before.state, ValueState::Absent);
@@ -448,7 +448,7 @@ fn reference_caps_reindex_pointers_and_keep_row_links_valid() {
 }
 
 #[test]
-fn zero_detail_budget_keeps_legacy_rows_and_explicit_omission() {
+fn zero_detail_budget_keeps_structural_rows_and_explicit_omission() {
     let diff = compare_models_with_budgets(
         &parse("parameters p; p=1;"),
         &parse("parameters p; p=2;"),
@@ -528,7 +528,7 @@ fn hunk_caps_keep_exact_captured_file_actions_and_count_omissions() {
 }
 
 #[test]
-fn all_existing_shock_forms_have_named_fields_at_their_legacy_pointer() {
+fn all_existing_shock_forms_have_named_fields_at_their_structural_pointer() {
     let cases = [
         (
             "varexo e; shocks; var e; stderr 1; end;",
@@ -569,7 +569,7 @@ fn all_existing_shock_forms_have_named_fields_at_their_legacy_pointer() {
             !diff.shock_setup_changes.is_empty(),
             "accepted shock fixture: {after}"
         );
-        for (index, legacy) in diff.shock_setup_changes.iter().enumerate() {
+        for (index, structural) in diff.shock_setup_changes.iter().enumerate() {
             let pointer = format!("/shock_setup_changes/{index}");
             let row = diff
                 .semantic
@@ -583,7 +583,7 @@ fn all_existing_shock_forms_have_named_fields_at_their_legacy_pointer() {
                     .value
                     .as_ref()
                     .or(field(row, "form").before.value.as_ref()),
-                Some(&FieldValue::Text(legacy.form.clone()))
+                Some(&FieldValue::Text(structural.form.clone()))
             );
             assert!(row.fields.iter().any(|field| field.changed));
             let statement = row

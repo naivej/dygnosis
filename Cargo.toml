@@ -24,7 +24,6 @@ default = ["mcp-reuse"]
 mcp-reuse = []
 # Work counters for the developer benchmarks, excluded from ordinary LSP builds.
 mcp-perf = ["mcp-reuse"]
-experimental-mcp-reuse = ["mcp-perf"]
 
 [dependencies]
 # Musl libm, pure Rust. Used for `tgamma` / `lgamma` / `erf` / `erfc` so those

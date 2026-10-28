@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use dygnosis::Workspace;
-use dygnosis::server::{diagnostics_for, initialize_result, new_service};
+use dygnosis::server::{Backend, diagnostics_for, initialize_result, new_service};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -11,6 +11,20 @@ const OUT: &[&str] = &[
 ];
 
 const I050_MESSAGE: &str = "No initval or steady_state_model block. Add an initval block with initial guesses, or a steady_state_model block with closed-form assignments.";
+
+async fn compare_working(backend: &Backend, before: &Url, after: &Url) -> serde_json::Value {
+    let before_revision = backend
+        .model_input_revision(before)
+        .expect("before revision");
+    let after_revision = backend.model_input_revision(after).expect("after revision");
+    backend.execute_command(ExecuteCommandParams {
+        command: "dynare/compareModelSnapshots".into(),
+        arguments: vec![serde_json::json!({"schema_version":1,
+            "before":{"kind":"working","input_id":"before","root_uri":before,"expected_revision":before_revision},
+            "after":{"kind":"working","input_id":"after","root_uri":after,"expected_revision":after_revision}})],
+        work_done_progress_params: Default::default(),
+    }).await.unwrap().unwrap()
+}
 
 fn copilot_mod(archive_dir: &str) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -2349,14 +2363,13 @@ fn initialize_capabilities_wave_c() {
         .expect("executeCommand")
         .commands
         .clone();
-    assert_eq!(commands.len(), 14, "commands: {commands:?}");
+    assert_eq!(commands.len(), 13, "commands: {commands:?}");
     assert!(commands.contains(&"dynare/validateComparisonInputs".into()));
     assert!(commands.contains(&"dynare/analysisContext".into()));
     assert!(commands.contains(&"dynare/setAnalysisConfiguration".into()));
     assert!(commands.contains(&"dynare/sourceCandidates".into()));
     assert!(commands.contains(&"dynare/setDocumentContext".into()));
     assert!(commands.contains(&"dynare/explainDiagnostic".into()));
-    assert!(commands.contains(&"dynare/compareModels".into()));
     assert!(commands.contains(&"dynare/compareModelSnapshots".into()));
     assert!(commands.contains(&"dynare/showEffectiveModel".into()));
     assert!(commands.contains(&"dynare/captureRename".into()));
@@ -3105,19 +3118,9 @@ async fn compare_models_trend_vs_sims_no_ss_fields() {
         .inner()
         .did_open(open_params(uri_b.clone(), sims, 1))
         .await;
-    let value = service
-        .inner()
-        .execute_command(ExecuteCommandParams {
-            command: "dynare/compareModels".into(),
-            arguments: vec![serde_json::json!({
-                "uri_a": uri_a.as_str(),
-                "uri_b": uri_b.as_str(),
-            })],
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .expect("compare rpc")
-        .expect("diff");
+    let snapshot = compare_working(service.inner(), &uri_a, &uri_b).await;
+    assert_eq!(snapshot["state"], "result", "{snapshot}");
+    let value = snapshot["diff"].clone();
     let obj = value.as_object().expect("json object");
     assert!(obj.contains_key("added_endogenous") || obj.contains_key("removed_endogenous"));
     assert!(obj.contains_key("added_equations") || obj.contains_key("removed_equations"));
@@ -3127,7 +3130,7 @@ async fn compare_models_trend_vs_sims_no_ss_fields() {
             !lower.contains("steady_state")
                 && !lower.contains("steadystate")
                 && !lower.contains("computed"),
-            "SS field in compareModels: {key}"
+            "SS field in compareModelSnapshots: {key}"
         );
     }
 }
@@ -3152,19 +3155,9 @@ async fn compare_shock_locations_follow_open_document_edits() {
         .inner()
         .did_change(change_params(uri_b.clone(), edited, 2))
         .await;
-    let diff = service
-        .inner()
-        .execute_command(ExecuteCommandParams {
-            command: "dynare/compareModels".into(),
-            arguments: vec![serde_json::json!({
-                "uri_a": uri_a.as_str(),
-                "uri_b": uri_b.as_str(),
-            })],
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .expect("compare rpc")
-        .expect("diff");
+    let snapshot = compare_working(service.inner(), &uri_a, &uri_b).await;
+    assert_eq!(snapshot["state"], "result", "{snapshot}");
+    let diff = snapshot["diff"].clone();
     let changes = diff["shock_setup_changes"]
         .as_array()
         .expect("shock changes");
@@ -3335,7 +3328,7 @@ async fn show_effective_payload(
 }
 
 #[tokio::test]
-async fn compare_models_declines_incomplete_macro_in_root_and_include() {
+async fn compare_snapshots_decline_incomplete_macro_in_root_and_include() {
     let (service, _socket) = new_service();
     let complete = Url::parse("file:///macro_compare_complete.mod").unwrap();
     let incomplete = Url::parse("file:///macro_compare_incomplete.mod").unwrap();
@@ -3374,21 +3367,10 @@ async fn compare_models_declines_incomplete_macro_in_root_and_include() {
         ))
         .await;
     for source in [incomplete, included_root] {
-        let result = service
-            .inner()
-            .execute_command(ExecuteCommandParams {
-                command: "dynare/compareModels".into(),
-                arguments: vec![serde_json::json!({
-                    "uri_a": source.as_str(),
-                    "uri_b": complete.as_str(),
-                })],
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .expect("compare rpc")
-            .expect("compare result");
-        assert_eq!(result["status"], "incomplete", "{result}");
-        assert!(result.get("removed_equations").is_none(), "{result}");
+        let result = compare_working(service.inner(), &source, &complete).await;
+        assert_eq!(result["state"], "failure", "{result}");
+        assert_eq!(result["code"], "INCOMPLETE_INPUT", "{result}");
+        assert!(result.get("diff").is_none(), "{result}");
     }
 }
 

@@ -1,10 +1,13 @@
 //! Written shock-path diagnostics through live LSP overlays and stdio MCP.
 
+#[cfg(feature = "mcp-reuse")]
 use std::io::{BufRead, BufReader, Write};
+#[cfg(feature = "mcp-reuse")]
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use dygnosis::server::{Backend, new_service};
 use dygnosis::span::LineIndex;
+#[cfg(feature = "mcp-reuse")]
 use serde_json::{Value, json};
 use tower_lsp::{LanguageServer, lsp_types::*};
 
@@ -284,6 +287,7 @@ async fn path_pairs_keep_written_ranges_and_clear_after_unsaved_lsp_edits() {
     }
 }
 
+#[cfg(feature = "mcp-reuse")]
 struct McpWire {
     child: Child,
     input: ChildStdin,
@@ -291,10 +295,10 @@ struct McpWire {
     next_id: u64,
 }
 
+#[cfg(feature = "mcp-reuse")]
 impl McpWire {
     fn new() -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_dygnosis"))
-            .arg("mcp")
+        let mut child = Command::new(env!("CARGO_BIN_EXE_dygnosis-mcp"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -357,6 +361,7 @@ impl McpWire {
     }
 }
 
+#[cfg(feature = "mcp-reuse")]
 impl Drop for McpWire {
     fn drop(&mut self) {
         let _ = self.child.kill();
@@ -364,6 +369,7 @@ impl Drop for McpWire {
     }
 }
 
+#[cfg(feature = "mcp-reuse")]
 #[test]
 fn path_pairs_keep_written_owners_and_scalar_columns_on_stdio_mcp() {
     let mut wire = McpWire::new();
@@ -422,6 +428,7 @@ fn path_pairs_keep_written_owners_and_scalar_columns_on_stdio_mcp() {
     }
 }
 
+#[cfg(feature = "mcp-reuse")]
 #[tokio::test]
 async fn path_macro_copies_keep_per_root_multiplicity_and_source_navigation() {
     let mut wire = McpWire::new();

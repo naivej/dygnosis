@@ -1077,7 +1077,7 @@ pub fn dynare_list_options(command: Option<&str>) -> Value {
     serde_json::to_value(list_options(command)).expect("list_options is serializable")
 }
 
-/// Accepted uses of one unique symbol binding, in the legacy coordinate shape.
+/// Accepted uses of one unique symbol binding, with 1-based line and column coordinates.
 ///
 /// No map: `[{ line, column, end_column }]`. With a nonempty map: objects also
 /// have `file` (caller key). Missing `active_file` or empty symbol → `[]`.
@@ -1214,7 +1214,7 @@ fn related_file_path(resolved: &Path, files: &HashMap<String, String>) -> String
         .unwrap_or_else(|| resolved.to_string_lossy().into_owned())
 }
 
-/// MCP stdio entry. Wired from `dygnosis mcp`.
+/// MCP stdio entry for the `dygnosis-mcp` executable.
 pub async fn run_stdio() {
     use rmcp::transport::stdio;
     #[cfg(feature = "mcp-reuse")]

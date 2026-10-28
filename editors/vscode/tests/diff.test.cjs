@@ -6,7 +6,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { URL } = require("node:url");
-const { parseDiff, normalizeChoices, diffSections, changeKinds } = require(compiledModule("diff_view"));
+const { parseSnapshotDiff, normalizeChoices, diffSections, changeKinds } = require(compiledModule("diff_view"));
+const { currentSnapshot, parseCurrentSnapshot } = require("./helpers/current_snapshot.cjs");
 const before = "file:///before/main.mod", after = "file:///after/variant.mod";
 function uri(value) { const parsed = new URL(value); return { scheme: parsed.protocol.slice(0, -1), path: parsed.pathname, fsPath: decodeURIComponent(parsed.pathname), toString: () => value }; }
 function location(value = before, line = 3) { return { uri: value, range: { start: { line, character: 2 }, end: { line, character: 12 } } }; }
@@ -28,17 +29,22 @@ function fixture(options = {}) {
   nav("/symbols_changed/0", "symbol", true, true); nav("/changed_parameter_values/0", "parameter", true, true); nav("/added_equations/0", "equation", false, true); nav("/changed_equations/0", "equation", true, true);
   nav("/unmatched_same_name/0/removed/0", "equation", true, false); nav("/unmatched_same_name/0/added/0", "equation", false, true);
   nav("/heterogeneous_equations/0/changed/0", "equation", true, true, "households"); nav("/shock_setup_changes/0", "shock", true, true); nav("/shock_setup_changes/1", "shock", false, true);
-  return Object.assign(result, options);
+  Object.assign(result, options);
+  const navigation = result.navigation;
+  delete result.navigation; delete result.markdown;
+  const diff = result;
+  return currentSnapshot({ beforeRoot: before, afterRoot: after, diff, sources: { before: { [before]: "before source" }, after: { [after]: "after source" } }, navigationRows: navigation.rows, revisions: { before: "old", after: "new" } });
 }
 function noChanges() {
   const result = fixture();
-  for (const key of Object.keys(result)) if (Array.isArray(result[key])) result[key] = [];
+  for (const key of Object.keys(result.diff)) if (Array.isArray(result.diff[key])) result.diff[key] = [];
   result.navigation.rows = []; return result;
 }
+const parseCurrent = snapshot => parseCurrentSnapshot(parseSnapshotDiff, snapshot);
 const defaults = { sections: [...diffSections], changeKinds: [...changeKinds] };
 
-test("every legacy comparison section keeps exact pointer, values, direction and engine pairing", () => {
-  const parsed = parseDiff(fixture(), before, after);
+test("current snapshot rows keep exact pointers, values, direction and engine pairing", () => {
+  const parsed = parseCurrent(fixture());
   assert.equal(parsed.rows.length, 11); assert.equal(parsed.complete, true);
   assert.deepEqual([...new Set(parsed.rows.map(row => row.section))], [...diffSections]);
   assert.equal(parsed.rows.find(row => row.id === "/added_endogenous/0").before, null);
@@ -53,46 +59,42 @@ test("symbol scope moves keep both independent dimensions and missing navigation
   const result = fixture(), source = result.navigation.rows.find(row => row.id === "/symbols_changed/0");
   source.before.dimension = "firms"; source.after.dimension = "households";
   result.navigation.rows.find(row => row.id === "/added_equations/0").after = null;
-  const rows = parseDiff(result, before, after).rows;
+  const rows = parseCurrent(result).rows;
   assert.deepEqual(rows.find(row => row.id === source.id).scopes, ["firms", "households"]);
   assert.equal(rows.find(row => row.id === "/added_equations/0").navigation.after, null);
 });
-test("unmapped shock rows retain supplied navigation and independent legacy dimensions", () => {
-  for (const legacy of [false, true]) {
+test("unmapped shock rows retain navigation and side-specific dimensions", () => {
+  for (const useSideDimensions of [false, true]) {
     const result = fixture(), nav = result.navigation.rows.find(row => row.id === "/shock_setup_changes/0");
     nav.before = null; nav.after = null;
-    if (legacy) {
-      result.shock_setup_changes[0].before.heterogeneity = "households";
-      result.shock_setup_changes[0].after.heterogeneity = "firms";
+    if (useSideDimensions) {
+      result.diff.shock_setup_changes[0].before.heterogeneity = "households";
+      result.diff.shock_setup_changes[0].after.heterogeneity = "firms";
     } else nav.dimension = "households";
-    const row = parseDiff(result, before, after).rows.find(row => row.id === nav.id);
-    assert.deepEqual(row.scopes, legacy ? ["households", "firms"] : ["households"]);
-    assert.equal(row.sideScopes.before, "households"); assert.equal(row.sideScopes.after, legacy ? "firms" : "households");
+    const row = parseCurrent(result).rows.find(row => row.id === nav.id);
+    assert.deepEqual(row.scopes, useSideDimensions ? ["households", "firms"] : ["households"]);
+    assert.equal(row.sideScopes.before, "households"); assert.equal(row.sideScopes.after, useSideDimensions ? "firms" : "households");
     assert.equal(row.navigation.before, null); assert.equal(row.navigation.after, null);
   }
 });
 test("malformed, wrong-root, duplicate pointers and unsafe source schemes fail visibly", () => {
-  const cases = [value => delete value.navigation, value => value.navigation.schema_version = 2,
-    value => value.navigation.before.root_uri = after, value => value.navigation.rows.push(value.navigation.rows[0]),
-    value => value.navigation.rows.shift(), value => value.navigation.rows[0].after.written_locations[0].uri = "command:bad",
-    value => value.changed_parameter_values[0].old_value = {}, value => value.changed_equations[0].text_new = {}];
-  for (const mutate of cases) { const value = fixture(); mutate(value); assert.throws(() => parseDiff(value, before, after), /unsupported comparison/); }
+  const cases = [value => delete value.navigation, value => value.navigation.schema_version = 3,
+    value => value.navigation.before.root_file = after, value => value.navigation.rows.push(value.navigation.rows[0]),
+    value => value.navigation.rows.shift(), value => value.navigation.rows[0].after.written_locations[0].file_key = "command:bad",
+    value => value.diff.changed_parameter_values[0].old_value = {}, value => value.diff.changed_equations[0].text_new = {}];
+  for (const mutate of cases) { const value = fixture(); mutate(value); assert.throws(() => parseCurrent(value), /unsupported comparison/); }
 });
-test("incomplete expansion withholds rows and no-change responses remain complete", () => {
-  assert.equal(parseDiff(noChanges(), before, after).rows.length, 0);
-  assert.equal(parseDiff({ status: "incomplete", message: "partial" }, before, after).complete, false);
+test("current snapshot receipts require complete inputs and preserve no-change results", () => {
+  assert.equal(parseCurrent(noChanges()).rows.length, 0);
   const result = fixture(); result.navigation.after.complete = false;
-  assert.deepEqual(parseDiff(result, before, after).rows, []);
+  assert.throws(() => parseCurrent(result), /unsupported comparison/);
 });
 test("control state normalizes kinds and ignores retired section and scope filters", () => {
   const choices = normalizeChoices({ layout: "stacked", expansion: "none", sections: [], changeKinds: ["changed", "changed", "bad"], search: "<img>", scope: "firms", expanded: { x: true, y: 3 }, group: "symbols:Symbols" }, defaults);
   assert.equal(Object.hasOwn(choices, "sections"), false); assert.deepEqual(choices.changeKinds, ["changed"]); assert.equal(choices.group, "symbols:Symbols");
   assert.equal(Object.hasOwn(choices, "expanded"), false); assert.equal(Object.hasOwn(choices, "expansion"), false);
   assert.equal(Object.hasOwn(choices, "layout"), false); assert.equal(Object.hasOwn(choices, "scope"), false); assert.equal(choices.search, "<img>");
-  for (const group of ["aggregateEquations:Aggregate equations", "heterogeneousEquations:Equations · households"]) {
-    assert.equal(normalizeChoices({ group }, defaults).group, "equations:Equations");
-  }
-  assert.equal(normalizeChoices({ group: "heterogeneousEquations:Model-local variables" }, defaults).group, "equations:Model-local variables");
+  assert.equal(normalizeChoices({ group: "aggregateEquations:Aggregate equations" }, defaults).group, "aggregateEquations:Aggregate equations");
 });
 
 const preferenceScopes = [], preferenceLogs = [];
@@ -109,12 +111,6 @@ test("launching model Kind preferences use resource scope and ignore retired sec
   const result = diffPreferences(uri(after), message => preferenceLogs.push(message));
   assert.equal(Object.hasOwn(result, "layout"), false); assert.equal(Object.hasOwn(result, "sections"), false); assert.deepEqual(result.changeKinds, ["removed"]);
   assert.ok(preferenceScopes.every(scope => scope.uri.toString() === after && scope.languageId === "dynare"));
-});
-
-test("a saved Unpaired setting enables Added and Removed in new views", () => {
-  preferenceKinds = ["changed", "unpaired"];
-  try { assert.deepEqual(diffPreferences(uri(after), message => preferenceLogs.push(message)).changeKinds, ["changed", "added", "removed"]); }
-  finally { preferenceKinds = ["removed", "removed", "bad"]; }
 });
 
 class Element {
@@ -136,12 +132,12 @@ function webview() {
   const sandbox = { document: { getElementById: id => elements[id] ?? descendants(elements.results).find(element => element.id === id), createElement: tag => new Element(tag), querySelectorAll: () => descendants(elements.results).filter(element => element.attributes["data-group"]) }, window: { addEventListener: (name, callback) => events[name] = callback },
     acquireVsCodeApi: () => ({ getState: () => undefined, setState: value => states.push(value), postMessage: message => posted.push(message) }) };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../media/diff_view.js"), "utf8"), sandbox);
-  const render = (extra = {}) => events.message({ data: { type: "render", key: "view", token: 4, before, after, rows: parseDiff(fixture(), before, after).rows,
+  const render = (extra = {}) => events.message({ data: { type: "render", key: "view", token: 4, before, after, rows: parseCurrent(fixture()).rows,
     status: "ready", message: "Current comparison", choices: normalizeChoices({}, defaults), ...extra } });
   return { elements, posted, states, render };
 }
 test("webview uses text nodes, labels source sides and disables missing/stale locations", () => {
-  const env = webview(); const rows = parseDiff(fixture(), before, after).rows; rows[0].label = "<img src=x onerror=bad()>";
+  const env = webview(); const rows = parseCurrent(fixture()).rows; rows[0].label = "<img src=x onerror=bad()>";
   env.render({ rows }); assert.match(env.elements.results.textContent, /<img src=x onerror=bad\(\)>/);
   assert.equal(descendants(env.elements.results).some(element => element.tag === "img"), false);
   const buttons = descendants(env.elements.results).filter(element => element.tag === "button" && element.attributes["aria-label"]?.startsWith("Open")); assert.equal(buttons[0].disabled, true); assert.equal(buttons[1].disabled, false);
@@ -213,7 +209,7 @@ test("incomplete comparison headers keep both choices and explain unavailable co
   assert.doesNotMatch(text, /0 equations|0 endogenous/);
 });
 test("every model change renders its own Before and After cards in its group", () => {
-  const env = webview(), rows = parseDiff(fixture(), before, after).rows; env.render();
+  const env = webview(), rows = parseCurrent(fixture()).rows; env.render();
   const groups = descendants(env.elements.results).filter(element => element.attributes["data-group"]).map(element => element.attributes["data-group"]);
   assert.deepEqual(groups.filter(group => group.startsWith("equations:")), ["equations:Equations"]);
   const visited = [];
@@ -249,7 +245,7 @@ test("webview text and kind filters preserve state and choose a visible group", 
 test("side labels retain unmapped heterogeneous shock rows without a scope filter", () => {
   const result = fixture(), nav = result.navigation.rows.find(row => row.id === "/shock_setup_changes/0");
   nav.before = null; nav.after = null; nav.dimension = "households";
-  const rows = parseDiff(result, before, after).rows.filter(row => row.id === nav.id), env = webview(); env.render({ rows });
+  const rows = parseCurrent(result).rows.filter(row => row.id === nav.id), env = webview(); env.render({ rows });
   assert.match(env.elements.results.textContent, /Dimension: households/);
   assert.match(env.elements.counts.textContent, /1 of 1 model rows match filters/);
   assert.ok(descendants(env.elements.results).filter(element => element.className === "source-link").every(button => button.disabled));

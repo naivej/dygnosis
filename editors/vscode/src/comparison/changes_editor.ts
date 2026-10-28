@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { DygnosisClient } from "../client/client";
 import { diffHtml, diffPreferences } from "./diff";
 import { ComparisonResource, changesScheme, changesViewType, GitSelector, historyScheme, inputLabel, ModelSelector, resourceData, resourceName, resourceQuery } from "./changes_resource";
-import { DiffChoices, DiffRow, DiffSide, normalizeChoices, parseDiff, sameTarget } from "./diff_view";
+import { DiffChoices, DiffRow, DiffSide, normalizeChoices } from "./diff_view";
 import { createGitSources } from "./git_source_host";
 import { GitRepository, GitSources, HistoryCursor, PinnedCommit, RevisionRef } from "./git_source";
 import { decodeGitDocument, normalizeGitText } from "./git_provenance";
@@ -105,7 +105,7 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       inputNames: Object.fromEntries((["before", "after"] as const).map(side => [side, sourceName(modelUri(doc.resource[side]).path)])),
       rows: doc.result?.snapshot.rows.map(row => ({ ...row, sourceFiles: { before: cardSourceFiles(doc.result!, row, "before"), after: cardSourceFiles(doc.result!, row, "after") } })) ?? [], choices: view.choices,
       defaults: diffPreferences(vscode.Uri.parse(doc.resource.context_uri), service.log), semantic: doc.result?.snapshot.semantic,
-      sourceChanges: doc.result?.snapshot.sourceChanges, coverage: doc.result?.snapshot.coverage, references: doc.result?.snapshot.references, semanticMessage: doc.result?.snapshot.semanticMessage,
+      sourceChanges: doc.result?.snapshot.sourceChanges, coverage: doc.result?.snapshot.coverage, references: doc.result?.snapshot.references,
       analysisSummaries: doc.result ? Object.fromEntries((["before", "after"] as const).map(side => [side, { analysis: doc.result!.inputs[side].analysis, complete: doc.result!.inputs[side].complete, counts: doc.result!.inputs[side].counts ?? null, search_paths: doc.result!.inputs[side].search_paths }])) : doc.analysisSummaries });
   };
   const release = (doc: ChangesDocument): void => { if (doc.result) { history.release(doc.result.holder); capturedText.release(doc.result.holder); } doc.result = undefined; };
@@ -147,7 +147,7 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       });
       if (!current(doc, generation, result.instance) || token.token.isCancellationRequested) { history.release(result.holder); return; }
       doc.instance = result.instance; doc.result = result; doc.status = "ready";
-      doc.message = result.snapshot.rows.length ? "Current comparison" : result.snapshot.sourceChanges?.files.length ? "No model changes. File text differs; use Text diff." : result.snapshot.semantic ? "No model changes shown." : "No model changes found. File text may still differ.";
+      doc.message = result.snapshot.rows.length ? "Current comparison" : result.snapshot.sourceChanges.files.length ? "No model changes. File text differs; use Text diff." : "No model changes shown.";
       watchInputs(doc); send(doc);
     } catch (error) {
       if (!current(doc, generation, service.currentInstance)) return;
@@ -395,17 +395,12 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     } catch (error) { if (!disposed && request === opening && !token.isCancellationRequested) await explainFailure(service, error); }
     finally { selection.dispose(); }
   };
-  const validateWorking = async (doc: ChangesDocument, row?: Pick<DiffRow, "id" | "navigation">): Promise<void> => {
+  const validateWorking = async (doc: ChangesDocument): Promise<void> => {
     const generation = doc.generation, result = doc.result, instance = doc.instance;
     const expired = (): never => refuse("Comparison inputs changed. Refresh the comparison before opening source.");
     if (!result || doc.status !== "ready" || !current(doc, generation, instance)) return expired();
     const verified = await validateCapturedInputs(service, result);
     if (!current(doc, generation, instance) || !verified) expired();
-    if (row && result.legacy) {
-      const fresh = parseDiff(await service.execute("dynare/compareModels", [modelUri(doc.resource.before).toString(), modelUri(doc.resource.after).toString()]), modelUri(doc.resource.before).toString(), modelUri(doc.resource.after).toString());
-      const matched = fresh.rows.find(candidate => candidate.id === row.id);
-      if (!matched || !sameTarget(matched.navigation.before, row.navigation.before) || !sameTarget(matched.navigation.after, row.navigation.after)) expired();
-    }
     if (!current(doc, generation, instance)) expired();
   };
   const sourceAction = async (doc: ChangesDocument, action: () => Promise<void>): Promise<void> => {
@@ -423,7 +418,7 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     const locations = target?.written_locations ?? (own ? cardSourceFiles(result, own, side) : []).map(uri => ({ uri, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } }));
     if (!locations.length) { refuse(`${side === "before" ? "Before" : "After"} source for ${own?.label ?? "the selected change"} has no verified location. No source jump was made.`, "SOURCE_LOCATION_UNAVAILABLE"); }
     const expired = (): never => refuse("Comparison inputs changed. Refresh the comparison before opening source.");
-    await validateWorking(doc, row);
+    await validateWorking(doc);
     const selected = locations.length === 1 ? locations[0] : (await vscode.window.showQuickPick(locations.map(location => ({
       label: location.uri, description: `${side === "before" ? "Before" : "After"}${target ? ` · line ${location.range.start.line + 1}` : " · row not present"}`, location,
     })), { placeHolder: "Choose a contributing written source" }))?.location;
@@ -432,10 +427,10 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     let written = await vscode.workspace.openTextDocument(source);
     if (source.scheme === historyScheme) written = await vscode.languages.setTextDocumentLanguage(written, "dynare");
     if (!current(doc, generation, instance)) return;
-    await validateWorking(doc, row);
+    await validateWorking(doc);
     if (!current(doc, generation, instance)) return;
     const key = [...result.sourceUris[side]].find(([, uri]) => uri.toString() === source.toString())?.[0];
-    if (!key || !result.legacy && normalizeGitText(written.getText()) !== normalizeGitText(result.texts[side][key])) expired();
+    if (!key || normalizeGitText(written.getText()) !== normalizeGitText(result.texts[side][key])) expired();
     const input = doc.resource[side]; if (input.kind === "working") service.selectOwner(written.uri, modelUri(input));
     const range = new vscode.Range(selected.range.start.line, selected.range.start.character, selected.range.end.line, selected.range.end.character);
     await vscode.window.showTextDocument(written, { selection: range });

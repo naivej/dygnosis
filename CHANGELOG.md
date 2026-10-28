@@ -5,9 +5,9 @@
 - MCP equation queries and pages select matching rows before projecting their
   details. Expansion selects navigation and origins for the requested range or
   equation. Results keep their existing counts, paging and source locations.
-- MCP runs in a dedicated `dygnosis-mcp` companion; `dygnosis mcp` remains
-  supported. Completed source analysis is reused by default for each connection.
-  Set `DYGNOSIS_MCP_REUSE=0` in the MCP server environment to disable reuse.
+- Launch MCP with the `dygnosis-mcp` companion. Completed source analysis is
+  reused by default for each connection. Set `DYGNOSIS_MCP_REUSE=0` in the MCP
+  server environment to disable reuse.
 
 ## v0.11.36
 

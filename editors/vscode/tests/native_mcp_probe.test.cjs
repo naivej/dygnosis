@@ -3,14 +3,13 @@ const test = require('node:test');
 const { canonicalMcpResult, mcpProbeCases, rpc } = require('../scripts/common.cjs');
 const { probeNativeMcp } = require('../scripts/native-mcp-host.cjs');
 
-test('package probes read contract 3 from structured or text results and reject legacy envelopes', () => {
+test('package probes accept current MCP and VS Code tool results', () => {
+  // Guards shared decoding for MCP structured data and VS Code's one JSON part.
   const result = { schema_version: 3, data: { summary: {} } };
   assert.equal(canonicalMcpResult({ structuredContent: result }), result);
-  assert.deepEqual(canonicalMcpResult({ content: [
-    { type: 'text', text: 'Explanation' }, { type: 'text', text: JSON.stringify(result) },
-  ] }), result);
+  assert.deepEqual(canonicalMcpResult({ content: [{ type: 'text', text: JSON.stringify(result) }] }), result);
   assert.throws(() => canonicalMcpResult({ structuredContent: { schema_version: 2 } }), /contract 3/);
-  assert.throws(() => canonicalMcpResult({ content: [{ type: 'text', text: '{"schema_version":2}' }] }), /schema_version 3/);
+  assert.throws(() => canonicalMcpResult({ content: [{ type: 'text', text: 'extra' }, { type: 'text', text: JSON.stringify(result) }] }), /one canonical/);
 });
 
 test('stdio probe preserves a child reuse override and captures MCP retention trace from stderr', async () => {

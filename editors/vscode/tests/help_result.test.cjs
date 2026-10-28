@@ -3,24 +3,7 @@ const test = require('node:test');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { resultData, collectPages, referenceData, engineFingerprint } = require('../scripts/help.cjs');
-
-test('Help generation reads canonical data without joining legacy and canonical JSON documents', () => {
-  const data = [{ code: 'E001' }];
-  const result = {
-    content: [
-      { type: 'text', text: JSON.stringify(data) },
-      { type: 'text', text: JSON.stringify({ schema_version: 3, data }) },
-    ],
-  };
-  assert.deepEqual(resultData(result), data);
-  assert.deepEqual(resultData({ structuredContent: { schema_version: 3, data } }), data);
-  assert.throws(() => resultData({ structuredContent: { schema_version: 2, data } }), /requires canonical MCP tool contract 3/);
-});
-
-test('Help generation rejects a result with no canonical schema-versioned object', () => {
-  assert.throws(() => resultData({ content: [{ type: 'text', text: 'legacy Markdown' }] }), /canonical schema_version 3/);
-});
+const { collectPages, referenceData, engineFingerprint } = require('../scripts/help.cjs');
 
 function envelope(data, continuation = null, count = 1) {
   return { structuredContent: { schema_version: 3, outcome: { status: 'ok', reasons: [] }, data,

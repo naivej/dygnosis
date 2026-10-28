@@ -111,7 +111,6 @@ pub(crate) struct SettingsStore {
     pub folders: Vec<WorkspaceFolder>,
     loose: ResourceSettings,
     folder_settings: HashMap<String, ResourceSettings>,
-    legacy_root_paths: HashMap<String, Vec<PathBuf>>,
     pub workspace_diagnostics: bool,
 }
 
@@ -121,7 +120,6 @@ impl Default for SettingsStore {
             folders: Vec::new(),
             loose: ResourceSettings::default(),
             folder_settings: HashMap::new(),
-            legacy_root_paths: HashMap::new(),
             workspace_diagnostics: true,
         }
     }
@@ -167,7 +165,7 @@ impl SettingsStore {
         self.set_folders(folders);
     }
 
-    /// Complete snapshots replace all values; the legacy route remains partial.
+    /// Complete snapshots replace all values; partial notifications update loose settings.
     pub fn apply(&mut self, value: &Value) -> Vec<String> {
         let value = value.get("dynare").unwrap_or(value);
         let Some(object) = value.as_object() else {
@@ -228,7 +226,6 @@ impl SettingsStore {
                 })
                 .unwrap_or(true);
             self.folder_settings = settings;
-            self.legacy_root_paths.clear();
         } else {
             if let Some(value) = object.get("workspaceDiagnostics") {
                 self.workspace_diagnostics = value.as_bool().unwrap_or_else(|| {
@@ -240,18 +237,6 @@ impl SettingsStore {
             // The new window switch alone does not replace resource scopes.
             if object.len() != 1 || !object.contains_key("workspaceDiagnostics") {
                 self.folder_settings.clear();
-            }
-            if let Some(raw) = object.get("searchPathsByRoot") {
-                self.legacy_root_paths.clear();
-                if let Some(roots) = raw.as_object() {
-                    for (root, paths) in roots {
-                        self.legacy_root_paths
-                            .insert(normalize_uri(root), read_paths(paths, &mut explanations));
-                    }
-                } else {
-                    explanations
-                        .push("Invalid dynare.searchPathsByRoot; use searchPaths only.".to_owned());
-                }
             }
         }
         explanations
@@ -277,16 +262,6 @@ impl SettingsStore {
             })
             .unwrap_or(&self.loose)
             .clone();
-        let root_key = normalize_uri(uri.as_str());
-        let extra = self.legacy_root_paths.get(&root_key).or_else(|| {
-            folder.as_ref().and_then(|(_, folder)| {
-                self.legacy_root_paths
-                    .get(&normalize_uri(folder.uri.as_str()))
-            })
-        });
-        if let Some(extra) = extra {
-            settings.search_paths.extend(extra.iter().cloned());
-        }
         let base = folder
             .as_ref()
             .map(|(path, _)| path.as_path())

@@ -422,7 +422,6 @@
     if (!payload || !choices) return;
     controls.results.className = "results"; controls.results.replaceChildren();
     modelRows();
-    if (payload.semanticMessage) controls.results.append(node("p", payload.semanticMessage, "empty"));
   }
   controls.refresh.addEventListener("click", () => post("refresh"));
   for (const name of ["changeComparison", "swap", "rootTextDiff", "capturedTextDiff", "choosePath", "help"]) document.getElementById(name)?.addEventListener("click", () => post(name));

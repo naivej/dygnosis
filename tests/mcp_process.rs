@@ -1,4 +1,4 @@
-//! Exercise the shipped MCP launcher, default retention and explicit opt-out.
+//! Exercise the MCP executable, default retention and explicit opt-out.
 #![cfg(feature = "mcp-reuse")]
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -8,13 +8,12 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 #[test]
-fn launcher_preserves_stdio_and_defaults_to_completed_analysis_reuse() {
-    // Guards a packaged launcher that loses stdio, leaves its child alive,
-    // or silently starts without the default completed-analysis store.
+fn mcp_process_defaults_to_completed_analysis_reuse() {
+    // Guards direct MCP startup without the default store, changed responses
+    // across retained tool calls, or a process that survives stdin closure.
     for enabled in [true, false] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_dygnosis"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_dygnosis-mcp"));
         command
-            .arg("mcp")
             .env_remove("DYGNOSIS_MCP_REUSE")
             .env("DYGNOSIS_MCP_REUSE_TRACE", "1")
             .stdin(Stdio::piped())
@@ -35,7 +34,7 @@ fn launcher_preserves_stdio_and_defaults_to_completed_analysis_reuse() {
         let writer = std::thread::spawn(move || {
             let source = json!({"kind":"text","text":"var y; model; y=0; end;"});
             let messages = [
-                json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"launcher-test","version":"1"}}}),
+                json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mcp-process-test","version":"1"}}}),
                 json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
                 json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"dynare_model_info","arguments":{"source":source}}}),
                 json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"dynare_equations","arguments":{"source":source,"equation":{"kind":"index","scope":"aggregate","index":0}}}}),
@@ -49,7 +48,7 @@ fn launcher_preserves_stdio_and_defaults_to_completed_analysis_reuse() {
                     let mut line = String::new();
                     assert!(
                         output.read_line(&mut line).unwrap() > 0,
-                        "launcher closed stdout before its response"
+                        "MCP server closed stdout before its response"
                     );
                     responses.push(serde_json::from_str::<Value>(&line).unwrap());
                 }
@@ -65,7 +64,7 @@ fn launcher_preserves_stdio_and_defaults_to_completed_analysis_reuse() {
             if Instant::now() >= deadline {
                 child.kill().unwrap();
                 child.wait().unwrap();
-                panic!("MCP launcher did not stop after stdin closed");
+                panic!("MCP server did not stop after stdin closed");
             }
             std::thread::sleep(Duration::from_millis(10));
         };

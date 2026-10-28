@@ -538,63 +538,6 @@ async fn snapshots_clear_removed_values_and_folder_events_reselect_settings() {
 }
 
 #[tokio::test]
-async fn legacy_single_folder_and_by_root_settings_remain_usable_and_isolated() {
-    let files = Files::new();
-    files.write("folder/lib/values.inc", "parameters p; p=1;\n");
-    files.write("other/lib/values.inc", "parameters p; p=2;\n");
-    let a = files.uri("folder/root.mod");
-    let b = files.uri("other/root.mod");
-    let (service, _socket) = new_service();
-    let backend = service.inner();
-    let mut params = initialize(
-        Vec::new(),
-        json!({"dynare":{"searchPaths":["lib"],"formatIndent":2}}),
-    );
-    params.workspace_folders = None;
-    #[allow(deprecated)]
-    {
-        params.root_uri = Some(files.uri("folder"));
-    }
-    backend.initialize(params).await.unwrap();
-    let source = "@#include \"values.inc\"\nvar y;\nmodel;\ny=p;\nend;\n";
-    open(backend, a.clone(), source).await;
-    assert!(!codes(backend, a.clone()).await.contains(&"E061".to_owned()));
-    backend
-        .did_change_configuration(DidChangeConfigurationParams {
-            settings: json!({"dynare":{"searchPaths":[],"searchPathsByRoot":{
-                a.as_str():[files.0.join("folder/lib")], b.as_str():[files.0.join("other/lib")]
-            }}}),
-        })
-        .await;
-    open(backend, b.clone(), source).await;
-    assert!(!codes(backend, a.clone()).await.contains(&"E061".to_owned()));
-    assert!(!codes(backend, b.clone()).await.contains(&"E061".to_owned()));
-    let revision = backend.model_input_revision(&a).unwrap();
-    backend
-        .did_change_configuration(DidChangeConfigurationParams {
-            settings: json!({"dynare":{"formatIndent":4}}),
-        })
-        .await;
-    assert_eq!(backend.model_input_revision(&a).unwrap(), revision);
-    let formatted = backend
-        .formatting(DocumentFormattingParams {
-            text_document: TextDocumentIdentifier { uri: a.clone() },
-            options: FormattingOptions::default(),
-            work_done_progress_params: Default::default(),
-        })
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(
-        formatted[0]
-            .new_text
-            .lines()
-            .any(|line| line == "    y = p;")
-    );
-    assert!(!codes(backend, a).await.contains(&"E061".to_owned()));
-}
-
-#[tokio::test]
 async fn virtual_roots_never_resolve_native_includes_or_companions() {
     let files = Files::new();
     let include = files.write("exists.inc", "var from_disk;\n");

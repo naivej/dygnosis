@@ -238,7 +238,7 @@ fn symbols(before: &Model, after: &Model, diff: &mut ModelDiff) {
         let mut row = SemanticRow::new(SemanticFamily::Symbols, change, name);
         row.before = old_decl.map(|decl| symbol_side(before, decl));
         row.after = new_decl.map(|decl| symbol_side(after, decl));
-        row.pointer = symbol_legacy_pointer(diff, name, change).unwrap_or_default();
+        row.pointer = symbol_structural_pointer(diff, name, change).unwrap_or_default();
         for (field, label, facet) in [
             ("kind", "Symbol kind", ChangeFacet::SymbolKind),
             ("dimension", "Dimension", ChangeFacet::Scope),
@@ -268,8 +268,8 @@ fn symbols(before: &Model, after: &Model, diff: &mut ModelDiff) {
             }
             row.fields.push(detail);
         }
-        // A new/removed parameter or a kind transition has no legacy common
-        // calibration row. Keep its calibration with its one owning object row.
+        // A new/removed parameter or a kind transition has no shared
+        // structural calibration row. Keep its calibration with its owning object row.
         if change != ChangeKind::Changed
             || !diff
                 .changed_parameter_values
@@ -315,7 +315,7 @@ fn symbols(before: &Model, after: &Model, diff: &mut ModelDiff) {
     }
 }
 
-fn symbol_legacy_pointer(diff: &ModelDiff, name: &str, change: ChangeKind) -> Option<String> {
+fn symbol_structural_pointer(diff: &ModelDiff, name: &str, change: ChangeKind) -> Option<String> {
     if change == ChangeKind::Changed {
         return diff
             .symbols_changed

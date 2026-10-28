@@ -5,9 +5,10 @@ const test = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const { parseSemantic, semanticCapability, semanticFamilies } = require(compiledModule("semantic_view"));
-const { parseDiff, parseSnapshotDiff, normalizeChoices, allDiffSections, changeKinds } = require(compiledModule("diff_view"));
+const { parseSemantic, validateSemanticCapability, semanticFamilies } = require(compiledModule("semantic_view"));
+const { parseSnapshotDiff, normalizeChoices, allDiffSections, changeKinds } = require(compiledModule("diff_view"));
 const { createHost, captured, deferred, flush, load, working, comparison, anchorUri, baselineUri } = require("./helpers/changes_host.cjs");
+const { currentSnapshot, parseCurrentSnapshot } = require("./helpers/current_snapshot.cjs");
 const roots = { before: "file:///before/main.mod", after: "file:///after/main.mod" };
 const scope = { domain: "global", dimension: null, block: null };
 const side = name => ({ name, scope, occurrence: 2, equation_index: null, context: { kind: "command", name: "estimated_params", execution_order: 3, scope, pointer: null } });
@@ -31,28 +32,29 @@ function response() {
   for (const category of ["endogenous", "exogenous", "parameters"]) for (const change of ["added", "removed", "common"]) result[change + "_" + category] = [];
   for (const list of ["symbols_changed", "changed_parameter_values", "added_equations", "removed_equations", "changed_equations", "unmatched_same_name", "heterogeneous_equations", "shock_setup_changes"]) result[list] = [];
   const target = side => ({ occurrence_id: side + ":2", domain: "aggregate", dimension: null, written_locations: [{ uri: roots[side], range: { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } } }] });
-  result.navigation = { schema_version: 1, before: { root_uri: roots.before, revision: "old", complete: true }, after: { root_uri: roots.after, revision: "new", complete: true }, rows: [
+  const navigationRows = [
     { id: "/semantic/rows/0", kind: "semantic", family: "priors", name: "rho", before: target("before"), after: target("after") },
     { id: "/semantic/references/0", kind: "reference", name: "rho", equation_pointer: "/semantic/references/0", before: null, after: target("after") },
-  ] };
-  result.sources = registry; return result;
+  ];
+  return currentSnapshot({ beforeRoot: roots.before, afterRoot: roots.after, diff: result, sources: registry, navigationRows, revisions: { before: "old", after: "new" } });
 }
+const parseCurrent = snapshot => parseCurrentSnapshot(parseSnapshotDiff, snapshot);
 const defaults = { sections: [...allDiffSections], changeKinds: [...changeKinds] };
 
-// The real Working/Working LSP producer keeps duplicate-name occurrences in
-// legacy add/remove arrays and keeps their semantic owners as separate side facts.
+// Current snapshots keep duplicate-name equation appearances as separate
+// Removed and Added rows with semantic owners for each appearance.
 function uncertainEquations(dimension = null) {
   const r = response(), prefix = dimension === null ? "" : "/heterogeneous_equations/0";
-  const owner = dimension === null ? r : { dimension, added: [], removed: [], changed: [], unmatched_same_name: [] };
-  if (dimension !== null) r.heterogeneous_equations.push(owner);
+  const owner = dimension === null ? r.diff : { dimension, added: [], removed: [], changed: [], unmatched_same_name: [] };
+  if (dimension !== null) r.diff.heterogeneous_equations.push(owner);
   const suffix = dimension === null ? "_equations" : "", equationScope = { domain: dimension === null ? "aggregate" : "heterogeneous", dimension, block: null };
-  r.semantic.rows = []; r.semantic.references = []; r.navigation.rows = [];
+  r.diff.semantic.rows = []; r.diff.semantic.references = []; r.navigation.rows = [];
   for (const [kind, activeSide, text, index] of [["removed", "before", "k = y", 0], ["removed", "before", "x = 1", 1], ["added", "after", "k = y+1", 0], ["added", "after", "z = 2", 1]]) {
     const equation = { domain: equationScope.domain, dimension, index: index + 1, name: "Ambiguous", tags: { name: "Ambiguous" }, text };
     owner[kind + suffix].push(equation);
-    const pointer = `${prefix}/${kind}${suffix}/${index}`, target = { occurrence_id: activeSide + ":" + index, domain: equationScope.domain, dimension, written_locations: [{ uri: roots[activeSide], range: { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } } }] };
+    const pointer = `${prefix}/${kind}${suffix}/${index}`, target = { occurrence_id: activeSide + ":" + index, domain: equationScope.domain, dimension, written_locations: [{ input_id: activeSide, file_key: roots[activeSide], range: { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } } }] };
     const own = { name: "Ambiguous", scope: equationScope, occurrence: 48 + index, equation_index: index + 1, context: { kind: "block", name: "model", execution_order: 4, scope: equationScope, pointer: null } };
-    r.semantic.rows.push({ pointer, family: "equations", change: kind, name: "Ambiguous", count_unit: "accepted_occurrence", facets: ["expression"], before: activeSide === "before" ? own : null, after: activeSide === "after" ? own : null,
+    r.diff.semantic.rows.push({ pointer, family: "equations", change: kind, name: "Ambiguous", count_unit: "accepted_occurrence", facets: ["expression"], before: activeSide === "before" ? own : null, after: activeSide === "after" ? own : null,
       fields: [{ name: "expression", label: "Expression", before: activeSide === "before" ? value(text) : { state: "absent", value: null }, after: activeSide === "after" ? value(text) : { state: "absent", value: null }, changed: true, comparison_availability: "complete", numeric_difference: null }],
       expressions: [{ field: "expression", before: activeSide === "before" ? { text, runs: [{ text, role: "unchanged" }] } : null, after: activeSide === "after" ? { text, runs: [{ text, role: "unchanged" }] } : null, highlight_basis: "unpaired_text_only", availability: "complete", reason: null }],
       timing: [], references: [], limits: [{ code: "equation_correspondence_unpaired", reason: "Text-only highlights do not establish equation, reference or timing correspondence.", owner: "semantic_equations", omitted: null }] });
@@ -63,42 +65,34 @@ function uncertainEquations(dimension = null) {
   return r;
 }
 
-test("uncertain equations keep legacy add/remove owners and separate side appearances", () => {
+test("uncertain equations keep separate Removed and Added owners and appearances", () => {
   for (const dimension of [null, "households"]) {
     const r = uncertainEquations(dimension);
-    const parsed = parseDiff(r, roots.before, roots.after, true);
+    const parsed = parseCurrent(r);
     assert.equal(parsed.rows.length, 8); assert.ok(parsed.rows.every(row => row.kind === (row.before ? "removed" : "added") && row.section === "equations" && row.group === "Equations"));
     assert.equal(parsed.rows.filter(row => row.semantic).length, 4);
     for (const row of parsed.rows) assert.notEqual(row.before === null, row.after === null);
-    const snapshot = structuredClone(r), ids = { before: "before", after: "after" }, inputs = { before: { root_file: roots.before, revision: "old" }, after: { root_file: roots.after, revision: "new" } };
-    for (const side of ["before", "after"]) {
-      snapshot.navigation[side] = { input_id: ids[side], ...inputs[side], complete: true };
-      snapshot.source_changes.files[0][side].input_id = ids[side];
-      for (const row of snapshot.navigation.rows) if (row[side]) row[side] = { ...row[side], written_locations: row[side].written_locations.map(location => ({ input_id: ids[side], file_key: location.uri, range: location.range })) };
-    }
-    const projected = parseSnapshotDiff({ state: "result", diff: snapshot, navigation: { ...snapshot.navigation, schema_version: 2 }, sources: registry }, ids, (side, key) => key, inputs, true);
-    assert.deepEqual(projected.rows.map(row => [row.id, row.kind]), parsed.rows.map(row => [row.id, row.kind]));
   }
 });
 
 test("typed equation detail cannot replace another family, change domain or reverse an owner side", () => {
-  for (const mutate of [r => r.semantic.rows[0].family = "symbols", r => { r.semantic.rows[0].after = r.semantic.rows[0].before; r.semantic.rows[0].before = null; }, r => r.semantic.rows[0].change = "added"]) {
+  for (const mutate of [r => r.diff.semantic.rows[0].family = "symbols", r => { r.diff.semantic.rows[0].after = r.diff.semantic.rows[0].before; r.diff.semantic.rows[0].before = null; }, r => r.diff.semantic.rows[0].change = "added"]) {
     const r = uncertainEquations(); mutate(r);
-    assert.throws(() => parseDiff(r, roots.before, roots.after, true), /unsupported comparison/);
+    assert.throws(() => parseCurrent(r), /unsupported comparison/);
   }
   for (const dimension of [null, "households"]) {
     const r = uncertainEquations(dimension);
     r.navigation.rows[0].before = null;
-    r.semantic.rows[0].before.scope = { domain: dimension === null ? "heterogeneous" : "aggregate", dimension: dimension === null ? "firms" : null, block: null };
-    assert.throws(() => parseDiff(r, roots.before, roots.after, true), /unsupported comparison/);
+    r.diff.semantic.rows[0].before.scope = { domain: dimension === null ? "heterogeneous" : "aggregate", dimension: dimension === null ? "firms" : null, block: null };
+    assert.throws(() => parseCurrent(r), /unsupported comparison/);
   }
 });
 
 test("v1 retains typed values, exact runs, field limits and source registry identities", () => {
-  const parsed = parseSemantic(fixture(), { before: null, after: null }, registry, true);
+  const parsed = parseSemantic(fixture(), { before: null, after: null }, registry);
   assert.equal(parsed.semantic.rows[0].fields[0].after.value.value, "0.9");
   assert.equal(parsed.sourceChanges.files[0].after.file_key, roots.after);
-  const projection = parseDiff(response(), roots.before, roots.after, true);
+  const projection = parseCurrent(response());
   assert.equal(projection.rows.length, 1); assert.equal(projection.rows[0].section, "priors");
   assert.equal(projection.references.length, 1); assert.equal(projection.rows[0].scopes[0], "global");
 });
@@ -117,44 +111,41 @@ test("closed schemas reject malformed advertised versions, values, runs and cros
     r => r.source_changes.files[0].hunks[0].after_lines = 9,
     r => r.semantic.rows.push(structuredClone(r.semantic.rows[0])),
   ];
-  for (const mutate of mutations) { const r = fixture(); mutate(r); assert.throws(() => parseSemantic(r, { before: null, after: null }, registry, true), /unsupported comparison/); }
-  assert.throws(() => parseSemantic({}, { before: null, after: null }, registry, true), /unsupported/);
-  assert.throws(() => parseSemantic(fixture(), { before: null, after: null }, registry, false), /unsupported/);
+  for (const mutate of mutations) { const r = fixture(); mutate(r); assert.throws(() => parseSemantic(r, { before: null, after: null }, registry), /unsupported comparison/); }
+  assert.throws(() => parseSemantic({}, { before: null, after: null }, registry), /unsupported/);
 });
-test("older advertisement falls back while partial and unsupported advertisements fail", () => {
-  assert.equal(semanticCapability({ schema_version: 1 }), false);
-  assert.equal(semanticCapability({ semantic_schema_version: 1, source_changes_schema_version: 1, coverage_schema_version: 1 }), true);
-  assert.throws(() => semanticCapability({ semantic_schema_version: 1 }), /unsupported/);
-  assert.throws(() => semanticCapability({ semantic_schema_version: 2, source_changes_schema_version: 1, coverage_schema_version: 1 }), /unsupported/);
-  const r = response(); for (const key of ["comparison_versions", "semantic", "source_changes", "coverage"]) delete r[key];
-  const parsed = parseDiff(r, roots.before, roots.after, false); assert.match(parsed.semanticMessage, /This engine shows fewer model details/);
+test("current semantic advertisement is required and partial or unsupported advertisements fail", () => {
+  assert.throws(() => validateSemanticCapability({ schema_version: 1 }), /unsupported/);
+  assert.doesNotThrow(() => validateSemanticCapability({ semantic_schema_version: 1, source_changes_schema_version: 1, coverage_schema_version: 1 }));
+  assert.throws(() => validateSemanticCapability({ semantic_schema_version: 1 }), /unsupported/);
+  assert.throws(() => validateSemanticCapability({ semantic_schema_version: 2, source_changes_schema_version: 1, coverage_schema_version: 1 }), /unsupported/);
 });
 test("wrong navigation kind, identity and reference side fail before rendering", () => {
   for (const mutate of [r => r.navigation.rows[0].family = "commands", r => r.navigation.rows[0].after.dimension = "firms", r => r.navigation.rows[1].before = r.navigation.rows[1].after, r => r.navigation.rows[1].equation_pointer = "/bad"]) {
-    const r = response(); mutate(r); assert.throws(() => parseDiff(r, roots.before, roots.after, true), /unsupported comparison/);
+    const r = response(); mutate(r); assert.throws(() => parseCurrent(r), /unsupported comparison/);
   }
 });
 test("new semantic rows require real owners and unavailable highlights stay plain", () => {
   for (const pointer of ["/missing/row", "/changed_parameter_values/999", "/semantic/rows/9"]) {
-    const r = response(); r.semantic.rows[0].pointer = pointer; r.navigation.rows[0].id = pointer;
-    assert.throws(() => parseDiff(r, roots.before, roots.after, true), /unsupported comparison/);
+    const r = response(); r.diff.semantic.rows[0].pointer = pointer; r.navigation.rows[0].id = pointer;
+    assert.throws(() => parseCurrent(r), /unsupported comparison/);
   }
-  const missing = response(), ref = missing.semantic.references[0];
+  const missing = response(), ref = missing.diff.semantic.references[0];
   ref.equation_pointer = "/missing/equation"; missing.navigation.rows[1].equation_pointer = ref.equation_pointer;
   missing.navigation.rows.push({ id: ref.equation_pointer, kind: "equation", before: null, after: missing.navigation.rows[1].after });
-  assert.throws(() => parseDiff(missing, roots.before, roots.after, true), /unsupported comparison/);
+  assert.throws(() => parseCurrent(missing), /unsupported comparison/);
   const r = fixture(), expression = r.semantic.rows[0].expressions[0];
   expression.availability = "limit_exceeded"; expression.reason = "Alignment budget exceeded.";
-  assert.throws(() => parseSemantic(r, { before: null, after: null }, registry, true), /unsupported comparison/);
+  assert.throws(() => parseSemantic(r, { before: null, after: null }, registry), /unsupported comparison/);
   expression.highlight_basis = "none";
-  assert.throws(() => parseSemantic(r, { before: null, after: null }, registry, true), /unsupported comparison/);
+  assert.throws(() => parseSemantic(r, { before: null, after: null }, registry), /unsupported comparison/);
   for (const side of [expression.before, expression.after]) side.runs = [{ text: side.text, role: "unchanged" }];
-  assert.equal(parseSemantic(r, { before: null, after: null }, registry, true).semantic.rows[0].expressions[0].highlight_basis, "none");
+  assert.equal(parseSemantic(r, { before: null, after: null }, registry).semantic.rows[0].expressions[0].highlight_basis, "none");
 });
 test("all retained families have a frontend section and preserve their count unit", () => {
   for (const family of semanticFamilies) {
-    const r = response(); r.semantic.rows[0].family = family; r.navigation.rows[0].family = family;
-    const row = parseDiff(r, roots.before, roots.after, true).rows[0];
+    const r = response(); r.diff.semantic.rows[0].family = family; r.navigation.rows[0].family = family;
+    const row = parseCurrent(r).rows[0];
     assert.ok(allDiffSections.includes(row.section)); assert.equal(row.semantic.count_unit, "accepted_occurrence");
   }
 });
@@ -162,15 +153,15 @@ test("all retained families have a frontend section and preserve their count uni
 // Guards forecast instructions being filed under their backend collection family.
 test("forecast commands and paths have a Forecast category; state blocks have State", () => {
   for (const [family, command] of [["commands", "forecast"], ["commands", "bvar_forecast"], ["ms_sbvar", "conditional_forecast"], ["ms_sbvar", "conditional_forecast_paths"], ["ms_sbvar", "plot_conditional_forecast"]]) {
-    const r = response(), detail = r.semantic.rows[0];
+    const r = response(), detail = r.diff.semantic.rows[0];
     detail.family = r.navigation.rows[0].family = family;
     detail.before.context.name = detail.after.context.name = command;
-    const row = parseDiff(r, roots.before, roots.after, true).rows[0];
+    const row = parseCurrent(r).rows[0];
     assert.equal(row.section, "forecast"); assert.equal(row.group, "Forecast");
   }
-  const r = response(); r.semantic.rows[0].family = r.navigation.rows[0].family = "steady_state";
-  r.semantic.rows[0].before.context.name = r.semantic.rows[0].after.context.name = "steady_state_model";
-  assert.equal(parseDiff(r, roots.before, roots.after, true).rows[0].group, "State");
+  const r = response(); r.diff.semantic.rows[0].family = r.navigation.rows[0].family = "steady_state";
+  r.diff.semantic.rows[0].before.context.name = r.diff.semantic.rows[0].after.context.name = "steady_state_model";
+  assert.equal(parseCurrent(r).rows[0].group, "State");
 });
 
 // Guards one accepted instruction being spread across its retained family and Commands.
@@ -183,31 +174,31 @@ test("retained facts and residual instruction context share one category", () =>
     ["estimation", "data", "commands", "Commands"],
     ["matched_moments", "moments", "moments", "Method of moments"],
   ]) {
-    const r = response(), retained = r.semantic.rows[0], residual = structuredClone(retained);
+    const r = response(), retained = r.diff.semantic.rows[0], residual = structuredClone(retained);
     retained.family = r.navigation.rows[0].family = family;
     retained.before.context.name = retained.after.context.name = name;
     residual.pointer = "/semantic/rows/1"; residual.family = "commands";
     residual.before.context.name = residual.after.context.name = name;
-    r.semantic.rows.push(residual);
+    r.diff.semantic.rows.push(residual);
     r.navigation.rows.push({ ...r.navigation.rows[0], id: residual.pointer, family: "commands" });
-    const rows = parseDiff(r, roots.before, roots.after, true).rows;
+    const rows = parseCurrent(r).rows;
     assert.deepEqual(rows.map(row => [row.section, row.group]), [[section, group], [section, group]], name);
     assert.deepEqual(rows.map(row => row.id), [retained.pointer, residual.pointer]);
   }
 });
 
-// Guards legacy endval facts keeping their old Shock setup display group.
-test("legacy endval shock rows use State in semantic and structural comparisons", () => {
+// Guards endval facts keeping their Shock setup display group.
+test("endval shock rows use State in semantic and structural comparisons", () => {
   for (const semantic of [true, false]) {
-    const r = response(), retained = r.semantic.rows[0];
+    const r = response(), retained = r.diff.semantic.rows[0];
     retained.pointer = "/shock_setup_changes/0"; retained.family = "shocks";
     retained.name = retained.before.name = retained.after.name = "demand";
     retained.before.context = retained.after.context = null;
     retained.before.scope = retained.after.scope = { ...scope, block: "endval" };
-    r.shock_setup_changes.push({ form: "endval", role: "terminal", target: "demand", change: "changed", before: { block: "endval", values: ["0.1"] }, after: { block: "endval", values: ["0.2"] } });
+    r.diff.shock_setup_changes.push({ form: "endval", role: "terminal", target: "demand", change: "changed", before: { block: "endval", values: ["0.1"] }, after: { block: "endval", values: ["0.2"] } });
     r.navigation.rows[0].id = retained.pointer; r.navigation.rows[0].kind = "shock";
     if (!semantic) for (const key of ["semantic", "comparison_versions", "source_changes", "coverage"]) delete r[key];
-    const row = parseDiff(r, roots.before, roots.after, semantic).rows[0];
+    const row = parseCurrent(r).rows[0];
     assert.equal(row.section, "steadyState"); assert.equal(row.group, "State");
   }
 });
@@ -215,19 +206,19 @@ test("legacy endval shock rows use State in semantic and structural comparisons"
 // Guards each observable using its own target instead of the entire parent list.
 test("observable cards show one declaration per name in the merged Data category", () => {
   for (const [keyword, names, capturedKind] of [["varobs", ["y", "c"], "var"], ["varexobs", ["e", "u"], "varexo"]]) for (const [change, activeSide] of [["added", "after"], ["removed", "before"]]) {
-    const r = response(); r.semantic.rows = []; r.semantic.references = []; r.navigation.rows = [];
+    const r = response(); r.diff.semantic.rows = []; r.diff.semantic.references = []; r.navigation.rows = [];
     for (const [index, name] of names.entries()) {
       const own = side(name); own.context.name = keyword;
       const text = `${keyword} ${names.join(" ")};`;
       const pointer = `/semantic/rows/${index}`;
       const present = { text, runs: [{ text, role: change }] }, absent = { state: "absent", value: null };
-      r.semantic.rows.push({ pointer, family: "observables", change, name, count_unit: "accepted_occurrence", facets: ["target"], before: activeSide === "before" ? own : null, after: activeSide === "after" ? own : null,
+      r.diff.semantic.rows.push({ pointer, family: "observables", change, name, count_unit: "accepted_occurrence", facets: ["target"], before: activeSide === "before" ? own : null, after: activeSide === "after" ? own : null,
         fields: [["role", keyword], ["target", name], ["captured_kind", capturedKind]].map(([name, text]) => ({ name, label: name, before: activeSide === "before" ? value(text) : absent, after: activeSide === "after" ? value(text) : absent, changed: true, comparison_availability: "complete", numeric_difference: null })),
         expressions: [{ field: "statement_text", before: activeSide === "before" ? present : null, after: activeSide === "after" ? present : null, availability: "complete", highlight_basis: "paired_expression", reason: null }], timing: [], references: [], limits: [] });
       const target = { occurrence_id: `${activeSide}:${index}`, domain: "aggregate", dimension: null, written_locations: [] };
       r.navigation.rows.push({ id: pointer, kind: "semantic", family: "observables", name, before: activeSide === "before" ? target : null, after: activeSide === "after" ? target : null });
     }
-    const snapshot = parseDiff(r, roots.before, roots.after, true), env = webview(); env.render(snapshot);
+    const snapshot = parseCurrent(r), env = webview(); env.render(snapshot);
     assert.ok(snapshot.rows.every(row => row.section === "data" && row.group === "Data"));
     const expressions = descendants(env.elements.results).filter(node => node.className === "expression");
     assert.deepEqual(expressions.map(node => node.textContent), names.map(name => `${keyword} ${name};`));
@@ -240,20 +231,20 @@ test("observable cards show one declaration per name in the merged Data category
 // Guards the renderer using engine keyword runs for an added name inside an
 // existing observable declaration, instead of coloring the shared keyword.
 test("a new observable in an existing declaration keeps its keyword plain", () => {
-  const r = response(), row = r.semantic.rows[0];
+  const r = response(), row = r.diff.semantic.rows[0];
   row.family = "observables"; row.name = "c"; row.change = "added";
   row.before = null; row.after = side("c"); row.after.context.name = "varobs";
-  row.references = []; r.semantic.references = [];
+  row.references = []; r.diff.semantic.references = [];
   row.fields = [["role", "varobs"], ["target", "c"], ["captured_kind", "var"]].map(([name, text]) => ({ name, label: name, before: { state: "absent", value: null }, after: value(text), changed: true, comparison_availability: "complete", numeric_difference: null }));
   row.expressions = [{ field: "statement_text", before: null, after: { text: "varobs y c;", runs: [{ text: "varobs", role: "unchanged" }, { text: " y c", role: "added" }, { text: ";", role: "unchanged" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }];
   r.navigation.rows = [{ ...r.navigation.rows[0], family: "observables", name: "c", before: null }];
-  const env = webview(); env.render(parseDiff(r, roots.before, roots.after, true));
+  const env = webview(); env.render(parseCurrent(r));
   assert.deepEqual(descendants(env.elements.results).filter(node => node.className === "expression").map(node => node.textContent), ["varobs c;"]);
   assert.deepEqual(descendants(env.elements.results).filter(node => node.className === "token added").map(node => node.textContent), ["c"]);
 });
 
 test("Unpaired is rejected as a semantic change type", () => {
-  const r = response(), row = r.semantic.rows[0];
+  const r = response(), row = r.diff.semantic.rows[0];
   row.change = "unpaired";
   for (const expression of row.expressions) expression.highlight_basis = "unpaired_text_only";
   assert.throws(() => parseSemantic(r, { before: null, after: null }, registry), /unsupported comparison/);
@@ -262,15 +253,15 @@ test("Unpaired is rejected as a semantic change type", () => {
 // Guards uncertain moment occurrences staying separate while using Added/Removed filters.
 test("uncertain moment occurrences retain engine removal and addition types", () => {
   const r = uncertainEquations();
-  r.added_equations = []; r.removed_equations = []; r.unmatched_same_name = [];
+  r.diff.added_equations = []; r.diff.removed_equations = []; r.diff.unmatched_same_name = [];
   r.navigation.rows = r.navigation.rows.filter(row => !row.id.includes("unmatched_same_name"));
-  for (const [index, row] of r.semantic.rows.entries()) {
+  for (const [index, row] of r.diff.semantic.rows.entries()) {
     const nav = r.navigation.rows[index]; row.pointer = nav.id = `/semantic/rows/${index}`;
     row.family = nav.family = "moments"; row.name = nav.name = "matched moment";
     nav.kind = "semantic";
     for (const side of ["before", "after"]) if (row[side]) row[side].context.name = "matched_moments";
   }
-  const snapshot = parseDiff(r, roots.before, roots.after, true);
+  const snapshot = parseCurrent(r);
   assert.deepEqual(snapshot.rows.map(row => row.kind), ["removed", "removed", "added", "added"]);
   assert.ok(snapshot.rows.every(row => row.semantic.change === row.kind));
   const env = webview();
@@ -282,19 +273,18 @@ test("uncertain moment occurrences retain engine removal and addition types", ()
   assert.doesNotMatch(env.elements.kinds.textContent, /Unpaired/);
 });
 
-test("retired Unpaired filters and renamed groups restore under current choices", () => {
+test("unknown change filters are discarded and stored groups keep their value", () => {
   const choices = normalizeChoices({ changeKinds: ["changed", "unpaired"], customChangeKinds: ["unpaired"], group: "moments:Moments and IRFs" }, defaults);
-  assert.deepEqual(choices.changeKinds, ["changed", "added", "removed"]);
-  assert.deepEqual(choices.customChangeKinds, ["added", "removed"]);
-  assert.equal(choices.group, "moments:Method of moments");
-  assert.equal(normalizeChoices({ group: "observables:Observables" }, defaults).group, "data:Data");
+  assert.deepEqual(choices.changeKinds, ["changed"]);
+  assert.deepEqual(choices.customChangeKinds, []);
+  assert.equal(choices.group, "moments:Moments and IRFs");
 });
-test("typed parameter details enrich the legacy owner under Parameters", () => {
-  const r = response(), row = r.semantic.rows[0];
+test("typed parameter details enrich the structural row under Parameters", () => {
+  const r = response(), row = r.diff.semantic.rows[0];
   row.pointer = "/changed_parameter_values/0"; row.family = "parameters";
-  r.changed_parameter_values = [{ name: "rho", old_raw: "0.8", old_value: 0.8, new_raw: "0.9", new_value: 0.9 }];
+  r.diff.changed_parameter_values = [{ name: "rho", old_raw: "0.8", old_value: 0.8, new_raw: "0.9", new_value: 0.9 }];
   const nav = r.navigation.rows[0]; nav.id = row.pointer; nav.kind = "parameter"; delete nav.family;
-  const parsed = parseDiff(r, roots.before, roots.after, true);
+  const parsed = parseCurrent(r);
   assert.equal(parsed.rows.length, 1); assert.equal(parsed.rows[0].id, row.pointer); assert.equal(parsed.rows[0].group, "Parameters");
 });
 test("unavailable comparisons remain plain and unknown, empty, absent and zero stay distinct", () => {
@@ -321,41 +311,14 @@ test("retired presentation, layout and selection state are ignored while current
   host.settings.delete(anchorUri.toString());
 });
 
-test("current LSP native source keys remain exact while URI navigation uses the registered mapping", async t => {
-  const { host, service, vscode, git, token } = createHost(), { HistoricalSources } = load("history_sources", vscode), history = new HistoricalSources(async () => "unused"); t.after(() => history.dispose());
-  service.client.initializeResult.capabilities.experimental = { dygnosis: { compareModels: { schema_version: 1, navigation_schema_version: 1, semantic_schema_version: 1, source_changes_schema_version: 1, coverage_schema_version: 1 } } };
-  host.engine = () => {
-    const r = response(), selected = { before: baselineUri, after: anchorUri };
-    r.sources = { before: { [baselineUri.fsPath]: "var y;" }, after: { [anchorUri.fsPath]: "var y;" } };
-    for (const side of ["before", "after"]) {
-      r.navigation[side] = { root_uri: selected[side].toString(), revision: "revision:" + selected[side].toString(), complete: true };
-      for (const nav of r.navigation.rows) if (nav[side]) nav[side].written_locations[0].uri = selected[side].toString();
-      r.source_changes.files[0][side].file_key = selected[side].fsPath;
-    }
-    return r;
-  };
-  const { captureComparison } = load("snapshot_compare", vscode), result = await captureComparison(service, async () => git, history, comparison(working(baselineUri), working(anchorUri)), token());
-  assert.equal(result.legacy, false); assert.equal(result.snapshot.rows[0].section, "priors");
-  assert.equal(result.sourceUris.after.get(anchorUri.fsPath).toString(), anchorUri.toString());
-  assert.equal(result.snapshot.sourceChanges.files[0].after.file_key, anchorUri.fsPath);
-});
-test("valid older compareModels capability preserves Working structural fallback", async t => {
+test("engines without the current snapshot capability fail before any comparison request", async t => {
   const { host, service, vscode, git, token } = createHost();
   const { HistoricalSources } = load("history_sources", vscode), history = new HistoricalSources(async () => "unused");
   t.after(() => history.dispose());
   service.client.initializeResult.capabilities.experimental.dygnosis = { compareModels: { command: "dynare/compareModels", navigation_schema_version: 1 } };
-  host.engine = (_command, [before, after]) => {
-    const r = response();
-    for (const key of ["semantic", "source_changes", "coverage", "comparison_versions", "sources"]) delete r[key];
-    r.navigation.rows = [];
-    r.navigation.before = { root_uri: before, revision: `revision:${before}`, complete: true };
-    r.navigation.after = { root_uri: after, revision: `revision:${after}`, complete: true };
-    return r;
-  };
   const { captureComparison } = load("snapshot_compare", vscode);
-  const result = await captureComparison(service, async () => git, history, comparison(working(baselineUri), working(anchorUri)), token());
-  assert.equal(result.legacy, true);
-  assert.match(result.snapshot.semanticMessage, /This engine shows fewer model details/);
+  await assert.rejects(captureComparison(service, async () => git, history, comparison(working(baselineUri), working(anchorUri)), token()), /does not support current model comparisons/);
+  assert.deepEqual(host.engineCalls ?? [], []);
 });
 class Element {
   constructor(tag) { this.tag = tag; this.children = []; this.listeners = {}; this.attributes = {}; this._text = ""; }
@@ -371,35 +334,32 @@ class Element {
 }
 const descendants = element => [element, ...element.children.flatMap(descendants)];
 test("model-local definitions appear with equations and keep their exact source identity", () => {
-  const r = response(), row = r.semantic.rows[0];
+  const r = response(), row = r.diff.semantic.rows[0];
   row.family = "symbols"; row.name = "helper"; row.references = [];
   row.fields.push({ name: "role", label: "Role", before: value("model_local_definition"), after: value("model_local_definition"), changed: false, comparison_availability: "complete", numeric_difference: null });
-  Object.assign(r.navigation.rows[0], { family: "symbols", name: "helper" }); r.semantic.references = []; r.navigation.rows.pop();
-  const parsed = parseDiff(r, roots.before, roots.after, true).rows[0];
+  Object.assign(r.navigation.rows[0], { family: "symbols", name: "helper" }); r.diff.semantic.references = []; r.navigation.rows.pop();
+  const parsed = parseCurrent(r).rows[0];
   assert.equal(parsed.section, "equations");
   assert.equal(parsed.group, "Model-local variables");
   assert.equal(parsed.id, row.pointer);
 });
 
 test("unassigned parameter declarations keep their Symbols category and old section filters cannot hide them", () => {
-  const r = response(), detail = r.semantic.rows[0], source = r.navigation.rows[0];
-  r.added_parameters = ["cdxx"];
+  const r = response(), detail = r.diff.semantic.rows[0], source = r.navigation.rows[0];
+  r.diff.added_parameters = ["cdxx"];
   Object.assign(detail, { pointer: "/added_parameters/0", family: "symbols", change: "added", name: "cdxx", before: null, after: side("cdxx"), expressions: [], references: [], limits: [] });
   detail.fields = [{ name: "kind", label: "Symbol kind", before: { state: "absent", value: null }, after: value("parameters"), changed: true, comparison_availability: "complete", numeric_difference: null }];
   Object.assign(source, { id: detail.pointer, kind: "symbol", name: "cdxx", before: null });
-  r.semantic.references = []; r.navigation.rows.pop();
-  for (const semantic of [true, false]) {
-    const input = structuredClone(r); if (!semantic) { delete input.semantic; delete input.comparison_versions; delete input.coverage; delete input.source_changes; }
-    const snapshot = parseDiff(input, roots.before, roots.after, semantic), env = webview();
-    assert.equal(snapshot.rows[0].section, "symbols");
-    env.render({ ...snapshot, choices: normalizeChoices({ sections: [], groupVisibility: { "symbols:Symbols": false } }, defaults) });
-    assert.match(env.elements.results.textContent, /cdxx/);
-    assert.equal(descendants(env.elements.results).some(element => element.tag === "input"), false);
-  }
+  r.diff.semantic.references = []; r.navigation.rows.pop();
+  const snapshot = parseCurrent(r), env = webview();
+  assert.equal(snapshot.rows[0].section, "symbols");
+  env.render({ ...snapshot, choices: normalizeChoices({ sections: [], groupVisibility: { "symbols:Symbols": false } }, defaults) });
+  assert.match(env.elements.results.textContent, /cdxx/);
+  assert.equal(descendants(env.elements.results).some(element => element.tag === "input"), false);
 });
 
 test("added symbol cards show one declaration and omit repeated or empty metadata", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0], detail = row.semantic;
+  const env = webview(), snapshot = parseCurrent(response()), row = snapshot.rows[0], detail = row.semantic;
   Object.assign(row, { kind: "added", before: null, label: "xxx", after: "xxx", scopes: ["households"], sideScopes: { before: null, after: "households" } });
   Object.assign(detail, { family: "symbols", change: "added", name: "xxx", before: null, after: { ...side("xxx"), scope: { domain: "heterogeneous", dimension: "households", block: null } }, expressions: [], references: [], limits: [] });
   detail.fields = [["kind", "Symbol kind", "var"], ["written_kind", "Written declaration kind", "var"], ["long_name", "Long name", null], ["log_transform", "Log transformed", false], ["dimension", "Dimension", "households"], ["written_dimension", "Written declaration dimension", "households"]].map(([name, label, item]) => ({ name, label, before: { state: "absent", value: null }, after: item === null ? { state: "absent", value: null } : { state: "present", value: { kind: typeof item === "boolean" ? "boolean" : "text", value: item } }, changed: true, comparison_availability: "complete", numeric_difference: null }));
@@ -416,18 +376,18 @@ test("added symbol cards show one declaration and omit repeated or empty metadat
 });
 // Guards repeated uses of a name becoming repeated links to the same equation.
 test("direct references list each scoped equation once per card side", () => {
-  const r = response(), template = r.semantic.references[0], navigation = r.navigation.rows.pop();
-  r.semantic.references = []; r.semantic.rows[0].references = [];
+  const r = response(), template = r.diff.semantic.references[0], navigation = r.navigation.rows.pop();
+  r.diff.semantic.references = []; r.diff.semantic.rows[0].references = [];
   for (const side of ["before", "after"]) {
     for (const [index, label, offset, dimension] of [[1, "Production", -1, null], [3, "Capital accumulation", 0, null], [3, "Capital accumulation", -1, null], [4, "Capital accumulation", 0, null], [3, "Capital accumulation", 0, "firms"]]) {
-      const occurrence = r.semantic.references.length, pointer = `/semantic/references/${occurrence}`;
+      const occurrence = r.diff.semantic.references.length, pointer = `/semantic/references/${occurrence}`;
       const ref = { ...template, pointer, side, equation_pointer: pointer, equation_index: index, label, scope: { domain: dimension ? "heterogeneous" : "aggregate", dimension, block: null }, occurrence, timing: { ...template.timing, written_offset: offset, converted_offset: offset, occurrence } };
-      r.semantic.references.push(ref); r.semantic.rows[0].references.push(pointer);
-      const target = { ...navigation.after, occurrence_id: side + ":" + index, domain: ref.scope.domain, dimension, written_locations: [{ ...navigation.after.written_locations[0], uri: roots[side] }] };
+      r.diff.semantic.references.push(ref); r.diff.semantic.rows[0].references.push(pointer);
+      const target = { ...navigation.after, occurrence_id: side + ":" + index, domain: ref.scope.domain, dimension, written_locations: [{ ...navigation.after.written_locations[0], input_id: side, file_key: roots[side] }] };
       r.navigation.rows.push({ ...navigation, id: pointer, equation_pointer: pointer, before: side === "before" ? target : null, after: side === "after" ? target : null });
     }
   }
-  const env = webview(); env.render(parseDiff(r, roots.before, roots.after, true));
+  const env = webview(); env.render(parseCurrent(r));
   const panels = descendants(env.elements.results).filter(element => ["side before", "side after"].includes(element.className));
   for (const [index, side] of ["before", "after"].entries()) {
     const links = descendants(panels[index]).filter(element => element.attributes["aria-label"]?.startsWith(`Open ${index ? "After" : "Before"} reference:`));
@@ -440,7 +400,7 @@ test("direct references list each scoped equation once per card side", () => {
 
 // Guards the written offset note returning beside a direct equation link.
 test("direct references omit written timing notes", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
+  const env = webview(), snapshot = parseCurrent(response());
   for (const offset of [-1, 1]) {
     snapshot.references[0].timing.written_offset = snapshot.references[0].timing.converted_offset = offset;
     env.render(snapshot);
@@ -456,7 +416,7 @@ test("direct references belong to their card side and retain exact actions", () 
   assert.match(panels[1].textContent, /Direct equation references.*Unchanged production/);
   const button = descendants(panels[1]).find(element => element.attributes["aria-label"]?.startsWith("Open After reference:"));
   button.fire("click"); assert.equal(env.posted.at(-1).pointer, "/semantic/references/0"); assert.equal(env.posted.at(-1).side, "after");
-  const snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+  const snapshot = parseCurrent(response()), row = snapshot.rows[0];
   row.semantic.after.scope = { domain: "heterogeneous", dimension: "households", block: null };
   row.sideScopes.after = "households"; row.scopes.push("households"); snapshot.references[0].scope.dimension = "households";
   env.render(snapshot);
@@ -473,7 +433,7 @@ test("direct references belong to their card side and retain exact actions", () 
 });
 function webview() {
   const elements = Object.fromEntries(["models", "status", "search", "scope", "kinds", "sections", "sectionsSummary", "counts", "results", "refresh", "help", "rootTextDiff", "capturedTextDiff", "filterTools", "kindFilter", "sectionFilter", "scopeFilter", "choosePath", "sourceBoundary"].map(id => [id, new Element(id)]));
-  const events = {}, posted = [], states = [], snapshot = parseDiff(response(), roots.before, roots.after, true);
+  const events = {}, posted = [], states = [], snapshot = parseCurrent(response());
   const sandbox = { document: { getElementById: id => elements[id] ?? descendants(elements.results).find(element => element.id === id), createElement: tag => new Element(tag), querySelectorAll: () => descendants(elements.results).filter(element => element.attributes["data-group"]) }, window: { addEventListener: (name, callback) => events[name] = callback }, acquireVsCodeApi: () => ({ getState: () => undefined, setState: value => states.push(structuredClone(value)), postMessage: value => posted.push(value) }) };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../media/diff_view.js"), "utf8"), sandbox);
   const render = (extra = {}) => events.message({ data: { ...snapshot, type: "render", key: "view", capture: "capture1", token: 3, status: "ready", message: "Current comparison", choices: normalizeChoices({}, defaults), defaults, ...extra, before: typeof extra.before === "string" ? extra.before : roots.before, after: typeof extra.after === "string" ? extra.after : roots.after } });
@@ -495,7 +455,7 @@ test("input cards keep the full model path in the title and a short name in the 
 });
 
 test("all categories stay in the left panel when Find changes filters out their rows", () => {
-  const env = webview(), row = parseDiff(response(), roots.before, roots.after, true).rows[0];
+  const env = webview(), row = parseCurrent(response()).rows[0];
   const rows = [{ ...row, id: "equation", section: "equations", group: "Equations", label: "Output" }, { ...row, id: "local", section: "equations", group: "Model-local variables", label: "helper" }];
   env.render({ rows }); env.elements.search.value = "helper"; env.elements.search.fire("input");
   const groups = descendants(env.elements.results).filter(element => element.attributes["data-group"]);
@@ -507,7 +467,7 @@ test("all categories stay in the left panel when Find changes filters out their 
 });
 
 test("a loading refresh retains the selected category until captured rows return", () => {
-  const env = webview(), row = parseDiff(response(), roots.before, roots.after, true).rows[0];
+  const env = webview(), row = parseCurrent(response()).rows[0];
   const rows = [{ ...row, id: "symbol", section: "symbols", group: "Symbols" }, row];
   env.render({ rows, choices: normalizeChoices({ group: "priors:Priors" }, defaults) });
   env.render({ rows: [], status: "loading", choices: normalizeChoices(env.states.at(-1).choices, defaults) });
@@ -516,7 +476,7 @@ test("a loading refresh retains the selected category until captured rows return
   assert.equal(descendants(env.elements.results).find(element => element.tag === "article").attributes["data-row-id"], row.id);
 });
 test("card source links show decoded file labels and send exact row and side identities", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+  const env = webview(), snapshot = parseCurrent(response()), row = snapshot.rows[0];
   row.navigation.before.written_locations[0].uri = "dygnosis-history:/model%20old.mod%20%C2%B7%20a95df59?%7B%22file_key%22%3A%22private%2Fpath%22%7D";
   row.navigation.before.written_locations[0].range.start.line = 75;
   row.navigation.after.written_locations[0].uri = "file:///models/include%20new.mod";
@@ -534,38 +494,22 @@ test("card source links show decoded file labels and send exact row and side ide
 // or the actual host source action, which previously selected line zero.
 test("missing-side block opener survives projection and labels the source link", () => {
   for (const missing of ["before", "after"]) {
-    const r = response(), nav = r.navigation.rows[0], row = r.semantic.rows[0];
+    const r = response(), nav = r.navigation.rows[0], row = r.diff.semantic.rows[0];
     row.change = missing === "before" ? "added" : "removed"; row[missing] = null;
-    row.references = []; r.semantic.references = [];
+    row.references = []; r.diff.semantic.references = [];
     for (const field of row.fields) field[missing] = { state: "absent", value: null };
     for (const expression of row.expressions) expression[missing] = null;
     nav.block_openers = { before: null, after: null, [missing]: structuredClone(nav[missing]) };
     nav.block_openers[missing].written_locations[0].range = { start: { line: 3, character: 2 }, end: { line: 3, character: 10 } };
     nav[missing] = null;
-    const snapshot = parseDiff(r, roots.before, roots.after, true), env = webview(); env.render(snapshot);
+    const snapshot = parseCurrent(r), env = webview(); env.render(snapshot);
     const card = descendants(env.elements.results).find(element => element.className === "side " + missing);
     const button = descendants(card).find(element => element.className === "source-link");
     assert.equal(button.textContent, "main.mod:4"); assert.equal(button.disabled, false);
     button.fire("click"); assert.equal(env.posted.at(-1).side, missing);
     assert.equal(snapshot.rows[0].navigation[missing], null);
-    const bad = structuredClone(r); bad.navigation.rows[0].block_openers[missing].written_locations[0].uri = "file:///unregistered.mod";
-    assert.throws(() => parseDiff(bad, roots.before, roots.after, true), /unsupported/);
-    const snapshotResponse = structuredClone(r), ids = { before: "before", after: "after" };
-    const inputs = { before: { root_file: roots.before, revision: "old", commit: "a".repeat(40) }, after: { root_file: roots.after, revision: "new" } };
-    for (const side of ["before", "after"]) {
-      snapshotResponse.navigation[side] = { input_id: ids[side], ...inputs[side], complete: true };
-      snapshotResponse.source_changes.files[0][side].input_id = ids[side];
-      for (const row of snapshotResponse.navigation.rows) for (const target of [row[side], row.block_openers?.[side]]) {
-        if (target) target.written_locations = target.written_locations.map(location => ({ input_id: ids[side], file_key: location.uri, commit: inputs[side].commit, range: location.range }));
-      }
-    }
-    const envelope = { state: "result", diff: snapshotResponse, navigation: { ...snapshotResponse.navigation, schema_version: 2 }, sources: registry };
-    const workspace = input => parseSnapshotDiff(input, ids, (side, key) => { assert.ok(Object.hasOwn(registry[side], key)); return key; }, inputs, true);
-    assert.deepEqual(workspace(envelope).rows[0].navigation.block_openers, snapshot.rows[0].navigation.block_openers);
-    for (const change of [location => location.input_id = "wrong", location => location.commit = "wrong"]) {
-      const badSnapshot = structuredClone(envelope); change(badSnapshot.navigation.rows[0].block_openers[missing].written_locations[0]);
-      assert.throws(() => workspace(badSnapshot), /unsupported/);
-    }
+    const bad = structuredClone(r); bad.navigation.rows[0].block_openers[missing].written_locations[0].file_key = "file:///unregistered.mod";
+    assert.throws(() => parseCurrent(bad), /unsupported/);
   }
 });
 
@@ -590,7 +534,7 @@ test("missing-side source actions select the retained block opener in Working an
 });
 
 test("expression cards omit duplicate values and property prefixes but retain changed facts and regime tags", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+  const env = webview(), snapshot = parseCurrent(response()), row = snapshot.rows[0];
   row.label = "Equation"; row.semantic.before.equation_index = 4; row.semantic.after.equation_index = 4;
   row.semantic.expressions[0].field = row.semantic.fields[0].name = "expression";
   row.semantic.fields[0].label = "Expression";
@@ -634,7 +578,7 @@ test("expression cards omit duplicate values and property prefixes but retain ch
   }
 });
 test("equation cards omit timing and convention prose already owned by symbol facts", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), detail = snapshot.rows[0].semantic;
+  const env = webview(), snapshot = parseCurrent(response()), detail = snapshot.rows[0].semantic;
   const before = { name: "rho", class: "endogenous", written_offset: 0, converted_offset: 0, occurrence: 0 };
   detail.timing = [{ before, after: { ...before, written_offset: -1, converted_offset: -1 } }, { before: { ...before, name: "unchanged" }, after: { ...before, name: "unchanged" } }];
   env.render(snapshot); assert.doesNotMatch(env.elements.results.textContent, /rho · after convention|unchanged · after convention|Timing changed/);
@@ -665,7 +609,7 @@ test("Type of changes allows multiple checks and preserves them through reload, 
 
 test("grouped model rows show distinguishing dimensions and keep change kinds accessible", () => {
   for (const dimension of [null, "households"]) {
-    const env = webview(), snapshot = parseDiff(uncertainEquations(dimension), roots.before, roots.after, true);
+    const env = webview(), snapshot = parseCurrent(uncertainEquations(dimension), roots.before, roots.after, true);
     env.render({ ...snapshot, choices: normalizeChoices({ expansion: "none" }, defaults) });
     const rows = descendants(env.elements.results).filter(element => element.attributes["data-row-id"]);
     assert.deepEqual(rows.map(row => row.attributes["data-row-id"]), snapshot.rows.map(row => row.id));
@@ -685,13 +629,13 @@ test("empty filters have a route to All and field rows retain both cards", () =>
   assert.equal(all.checked, false); assert.equal(all.indeterminate, false);
   all.checked = true; all.fire("change");
   assert.match(env.elements.results.textContent, /Prior mean/);
-  const snapshot = parseDiff(response(), roots.before, roots.after, true); snapshot.rows[0].semantic.expressions = [];
+  const snapshot = parseCurrent(response()); snapshot.rows[0].semantic.expressions = [];
   env.render(snapshot); assert.equal(descendants(env.elements.results).filter(element => element.className?.startsWith("side ")).length, 2);
   env.render(); assert.doesNotMatch(env.elements.results.textContent, /Saved selection/); assert.doesNotMatch(env.elements.kinds.textContent, /Saved selection/);
 });
 
 test("absent and explicit empty card values stay blank while zero and unknown remain visible", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
+  const env = webview(), snapshot = parseCurrent(response());
   const field = snapshot.rows[0].semantic.fields[0];
   for (const state of ["absent", "empty"]) {
     field.before = { state, value: state === "empty" ? { kind: "text", value: "" } : null };
@@ -716,7 +660,7 @@ test("direct text diff chooses captured files or root fallback and forwards the 
   env.render({ status: "failure", message: "Unsupported comparison detail" }); assert.equal(env.elements.choosePath.hidden, true);
 });
 test("long retained values remain readable without an expander", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), field = snapshot.rows[0].semantic.fields[0];
+  const env = webview(), snapshot = parseCurrent(response()), field = snapshot.rows[0].semantic.fields[0];
   field.before = { state: "present", value: { kind: "list", value: Array.from({ length: 8 }, () => ({ kind: "record", value: { name: { kind: "text", value: "retained_expression_node_with_a_long_name" } } })) } };
   env.render(snapshot);
   const detail = descendants(env.elements.results).find(element => element.className?.startsWith("field-value ")); assert.ok(detail); assert.equal(detail.tag, "pre");
@@ -724,7 +668,7 @@ test("long retained values remain readable without an expander", () => {
   assert.match(env.elements.results.textContent, /0.9/);
 });
 test("retired comparison explainer contents do not leak into results", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
+  const env = webview(), snapshot = parseCurrent(response());
   env.render({ ...snapshot, rows: [] });
   assert.doesNotMatch(env.elements.results.textContent, /Partial comparison|not captured/);
   assert.doesNotMatch(env.elements.results.textContent, /Effective inherited prior/);
@@ -740,7 +684,7 @@ test("retired comparison explainer contents do not leak into results", () => {
 
 // Guards raw source-boundary terms returning in the visible footer.
 test("diff footer describes the files compared without internal capture terms", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
+  const env = webview(), snapshot = parseCurrent(response());
   env.render(snapshot); assert.equal(env.elements.sourceBoundary.textContent, "Model files and the includes they use");
   snapshot.coverage.source_boundary = "supplied_root_and_executed_includes"; env.render(snapshot);
   assert.equal(env.elements.sourceBoundary.textContent, "Provided model files and the includes they use");
@@ -752,7 +696,7 @@ test("diff footer describes the files compared without internal capture terms", 
 
 // Guards internal notes returning for details that the view does not display.
 test("diff notes omit hidden timing details and routine text comparison explanations", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
+  const env = webview(), snapshot = parseCurrent(response());
   snapshot.rows[0].semantic.limits = ["identifier_correspondence_unpaired", "timing_correspondence_limit", "statement_options_text_only", "matched_irf_expression_positions", "policy_options_context", "is_linear_retained_history"].map(code => ({ code, reason: "Internal correspondence and retained token mechanism.", omitted: null, owner: "semantic" }));
   snapshot.rows[0].semantic.expressions.push({ field: "statement_text", before: { text: "old;", runs: [{ text: "old;", role: "removed" }] }, after: { text: "new;", runs: [{ text: "new;", role: "added" }] }, availability: "complete", highlight_basis: "paired_expression", reason: null });
   env.render(snapshot);
@@ -764,7 +708,7 @@ test("diff notes omit hidden timing details and routine text comparison explanat
 
 // Guards hidden expression limits warning about highlights that are visible and complete.
 test("diff highlight notes follow visible expressions and combine repeated causes", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), detail = snapshot.rows[0].semantic;
+  const env = webview(), snapshot = parseCurrent(response()), detail = snapshot.rows[0].semantic;
   detail.limits = [{ code: "occurrence_token_alignment_limit", reason: "Shared token alignment budget exceeded.", omitted: null, owner: "semantic" }];
   const expression = detail.expressions[0]; expression.availability = "limit_exceeded"; expression.highlight_basis = "none"; expression.reason = "Serialized detail budget exceeded.";
   for (const side of ["before", "after"]) expression[side].runs = [{ text: expression[side].text, role: "unchanged" }];
@@ -778,7 +722,7 @@ test("diff highlight notes follow visible expressions and combine repeated cause
 
 // Guards per-use omission counts being presented as missing equations, and raw future reasons leaking into the view.
 test("diff calculation notes require a missing calculated value", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), detail = snapshot.rows[0].semantic;
+  const env = webview(), snapshot = parseCurrent(response()), detail = snapshot.rows[0].semantic;
   detail.limits = [{ code: "prior_mean_evaluation_unavailable", reason: "The reader retains no expression tree for this slot.", omitted: null, owner: "semantic_priors" }];
   const field = { name: "prior.mean.value", label: "Prior mean: known value", before: { state: "present", value: { kind: "number", value: 0.8 } }, after: { state: "present", value: { kind: "number", value: 0.9 } }, changed: true, comparison_availability: "complete", numeric_difference: null };
   detail.fields.push(field); env.render(snapshot);
@@ -789,7 +733,7 @@ test("diff calculation notes require a missing calculated value", () => {
 
 // Guards per-use omission counts being presented as missing equations, and raw future reasons leaking into the view.
 test("diff notes keep useful missing-detail warnings and a plain fallback", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+  const env = webview(), snapshot = parseCurrent(response()), row = snapshot.rows[0];
   row.semantic.limits = [{ code: "references_partial", reason: "Direct local references were omitted by the comparison-wide reference limit.", omitted: 12, owner: "semantic_equations" }];
   env.render(snapshot);
   assert.equal(descendants(env.elements.results).find(element => element.className === "group-notes").textContent, "Equation reference list is partial. 12 omitted.");
@@ -801,7 +745,7 @@ test("diff notes keep useful missing-detail warnings and a plain fallback", () =
 });
 
 test("row limitations stay with each affected change", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), original = snapshot.rows[0];
+  const env = webview(), snapshot = parseCurrent(response()), original = snapshot.rows[0];
   const reason = "The written copy source is retained; inherited prior or optimizer values are not resolved.", message = "Copied prior and optimizer values are not compared.";
   original.semantic.limits = [{ code: "prior_copy_effective_unavailable", reason, owner: "semantic_priors", omitted: null }];
   const next = structuredClone(original); next.id = next.semantic.pointer = next.navigation.id = "/semantic/rows/1"; next.label = "other"; snapshot.rows.push(next);
@@ -816,7 +760,7 @@ test("row limitations stay with each affected change", () => {
 });
 
 test("shock cards use captured statement text and omit its duplicate named attributes", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+  const env = webview(), snapshot = parseCurrent(response()), row = snapshot.rows[0];
   row.section = "shockSetup"; row.group = "Shock setup"; row.label = row.semantic.name = "e"; row.semantic.family = "shocks"; row.semantic.references = [];
   const before = "shocks;\nvar e; stderr 1;\nend;", after = "shocks(overwrite);\nvar e; stderr 2;\nend;";
   row.semantic.expressions = [{ field: "statement_text", before: { text: before, runs: [{ text: "shocks;\nvar e; stderr ", role: "unchanged" }, { text: "1", role: "removed" }, { text: ";\nend;", role: "unchanged" }] }, after: { text: after, runs: [{ text: "shocks", role: "unchanged" }, { text: "(overwrite)", role: "added" }, { text: ";\nvar e; stderr ", role: "unchanged" }, { text: "2", role: "added" }, { text: ";\nend;", role: "unchanged" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }];
@@ -842,7 +786,7 @@ test("shock cards use captured statement text and omit its duplicate named attri
 });
 
 test("removed commands show the statement without a redundant role or token heading", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+  const env = webview(), snapshot = parseCurrent(response()), row = snapshot.rows[0];
   row.section = "commands"; row.group = "Commands"; row.label = row.semantic.name = "steady"; row.kind = row.semantic.change = "removed";
   row.after = row.semantic.after = null; row.semantic.family = "commands"; row.semantic.references = [];
   row.semantic.expressions = [{ field: "statement_text", before: { text: "steady;", runs: [{ text: "steady;", role: "removed" }] }, after: null, highlight_basis: "paired_expression", availability: "complete", reason: null }];
@@ -857,13 +801,13 @@ test("removed commands show the statement without a redundant role or token head
 // The fallback also has to work when no complete written range was captured.
 test("instruction cards retain changed facts behind identical or unavailable written text", () => {
   for (const family of ["commands", "operations", "ms_sbvar"]) for (const captured of [true, false]) {
-    const r = response(), row = r.semantic.rows[0];
-    row.family = r.navigation.rows[0].family = family; row.references = []; r.semantic.references = []; r.navigation.rows.pop();
+    const r = response(), row = r.diff.semantic.rows[0];
+    row.family = r.navigation.rows[0].family = family; row.references = []; r.diff.semantic.references = []; r.navigation.rows.pop();
     const written = "stoch_simul(order=@{n});", before = "stoch_simul(order = 1) ;", after = "stoch_simul(order = 2) ;";
     row.fields = [{ name: "statement_tokens", label: "Statement", before: value(before), after: value(after), changed: true, comparison_availability: "complete", numeric_difference: null }];
     row.expressions = [{ field: "statement_tokens", before: { text: before, runs: [{ text: before, role: "removed" }] }, after: { text: after, runs: [{ text: after, role: "added" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }];
     if (captured) row.expressions.push({ field: "statement_text", before: { text: written, runs: [{ text: written, role: "unchanged" }] }, after: { text: written, runs: [{ text: written, role: "unchanged" }] }, highlight_basis: "none", availability: "complete", reason: null });
-    const env = webview(); env.render(parseDiff(r, roots.before, roots.after, true));
+    const env = webview(); env.render(parseCurrent(r));
     const cards = descendants(env.elements.results).filter(element => element.className?.startsWith("side "));
     assert.match(cards[0].textContent, /order = 1/); assert.match(cards[1].textContent, /order = 2/);
     assert.equal(cards[0].textContent.split(before).length - 1, 1);
@@ -883,7 +827,7 @@ test("new and removed blocks retain the engine's opener and closer highlights", 
     ["matched_irfs", "var y; varexo e; periods 1; values 0.02;", "moments"],
     ["matched_irfs_weights", "y(1), e, c(2), e, 0.75;", "moments"],
   ]) for (const [kind, activeSide] of [["added", "after"], ["removed", "before"]]) {
-    const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+    const env = webview(), snapshot = parseCurrent(response()), row = snapshot.rows[0];
     const text = block + ";\n" + body + "\nend;";
     row.kind = row.semantic.change = kind; row.semantic.references = []; row.semantic.fields = [];
     row.semantic.family = family;
@@ -899,7 +843,7 @@ test("new and removed blocks retain the engine's opener and closer highlights", 
 
 // Guards an added child with no Before card or other changed rows in its shared parent.
 test("an added prior in an existing block retains plain engine boundary runs", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+  const env = webview(), snapshot = parseCurrent(response()), row = snapshot.rows[0];
   const header = "estimated_params;\n", body = "a, beta_pdf, 0.6, 0.1;", footer = "\nend;";
   row.kind = row.semantic.change = "added"; row.semantic.references = []; row.semantic.fields = [];
   row.before = row.semantic.before = null;
@@ -910,7 +854,7 @@ test("an added prior in an existing block retains plain engine boundary runs", (
 
 test("change cards omit comments across runs and retain code highlights and source actions", () => {
   // Guards the PAC screenshot regression: plain comments must also disappear from displayed code.
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+  const env = webview(), snapshot = parseCurrent(response()), row = snapshot.rows[0];
   const prefix = "pac_target_info(pm);\n\n  target zstar; // hidden target note\n  auxname_target_nonstationary ";
   const suffix = "; /* hidden auxiliary note */\n\n  // hidden component description\n  component y; // hidden inline note\n  kind ll;\nend;";
   row.semantic.family = "semi_structural"; row.semantic.fields = []; row.semantic.references = [];
@@ -947,7 +891,7 @@ test("displayed code removes MATLAB comments but keeps strings, transpose and se
     ["var y(long_name='a  \n\n%literal'); /* hidden */", "var y(long_name='a  \n\n%literal');"],
     ["model_replace('law');\n%{\ny=2;\n%}\nend;", "model_replace('law');\ny=2;\nend;"],
   ]) {
-    const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+    const env = webview(), snapshot = parseCurrent(response()), row = snapshot.rows[0];
     row.semantic.family = "commands"; row.semantic.fields = []; row.semantic.references = [];
     row.semantic.expressions = [{ field: "statement_text", before: null, after: { text, runs: [{ text, role: "added" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }];
     env.render({ ...snapshot, rows: [row] });
@@ -956,16 +900,16 @@ test("displayed code removes MATLAB comments but keeps strings, transpose and se
 });
 
 test("operation cards prefer captured instructions and retain fallback values", () => {
-  const r = response(), row = r.semantic.rows[0], source = "model_replace( 'Consumption' );\n  [name='Consumption'] c = 0.8*y;\nend;";
+  const r = response(), row = r.diff.semantic.rows[0], source = "model_replace( 'Consumption' );\n  [name='Consumption'] c = 0.8*y;\nend;";
   Object.assign(row, { family: "operations", change: "added", name: "model_replace", before: null, after: side("model_replace"), references: [], limits: [] });
   row.fields = [
     { name: "role", label: "Role", before: { state: "absent", value: null }, after: value("equation_surgery"), changed: true, comparison_availability: "complete", numeric_difference: null },
     { name: "removed_equations", label: "Removed equations", before: { state: "absent", value: null }, after: { state: "present", value: { kind: "list", value: [{ kind: "record", value: { expression: { kind: "text", value: "c = y" }, dynamic_tag: { kind: "boolean", value: false } } }] } }, changed: true, comparison_availability: "complete", numeric_difference: null },
   ];
   row.expressions = [{ field: "statement_text", before: null, after: { text: source, runs: [{ text: source, role: "added" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }];
-  Object.assign(r.navigation.rows[0], { family: "operations", name: row.name, before: null }); r.navigation.rows.pop(); r.semantic.references = [];
+  Object.assign(r.navigation.rows[0], { family: "operations", name: row.name, before: null }); r.navigation.rows.pop(); r.diff.semantic.references = [];
   r.sources.after[roots.after] = source;
-  const snapshot = parseDiff(r, roots.before, roots.after, true), env = webview(); env.render(snapshot);
+  const snapshot = parseCurrent(r), env = webview(); env.render(snapshot);
   assert.equal(descendants(env.elements.results).find(element => element.className === "expression").textContent, source);
   assert.doesNotMatch(env.elements.results.textContent, /Removed equations|Dynamic tag|equation_surgery/);
   snapshot.rows[0].semantic.expressions = []; env.render(snapshot);
@@ -976,11 +920,11 @@ test("operation cards prefer captured instructions and retain fallback values", 
 });
 
 test("MS-SBVAR cards render written path context with only replaced numbers highlighted", () => {
-  const r = response(), row = r.semantic.rows[0], prefix = "conditional_forecast_paths;\nvar y;\nperiods 1 2 3;\nvalues ", suffix = " 0.25 0.1;\nend;";
+  const r = response(), row = r.diff.semantic.rows[0], prefix = "conditional_forecast_paths;\nvar y;\nperiods 1 2 3;\nvalues ", suffix = " 0.25 0.1;\nend;";
   row.family = r.navigation.rows[0].family = "ms_sbvar";
-  row.references = []; r.semantic.references = []; r.navigation.rows.pop();
+  row.references = []; r.diff.semantic.references = []; r.navigation.rows.pop();
   row.expressions = [{ field: "statement_text", before: { text: prefix + "0.1" + suffix, runs: [{ text: prefix, role: "unchanged" }, { text: "0.1", role: "removed" }, { text: suffix, role: "unchanged" }] }, after: { text: prefix + "0.2" + suffix, runs: [{ text: prefix, role: "unchanged" }, { text: "0.2", role: "added" }, { text: suffix, role: "unchanged" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }];
-  const env = webview(); env.render(parseDiff(r, roots.before, roots.after, true));
+  const env = webview(); env.render(parseCurrent(r));
   assert.deepEqual(descendants(env.elements.results).filter(element => element.className === "token added").map(element => element.textContent), ["0.2"]);
   assert.deepEqual(descendants(env.elements.results).filter(element => element.className === "expression").map(element => element.textContent), [prefix + "0.1" + suffix, prefix + "0.2" + suffix]);
   assert.equal(descendants(env.elements.results).some(element => element.attributes["data-field"]), false);
@@ -988,10 +932,10 @@ test("MS-SBVAR cards render written path context with only replaced numbers high
 
 // Guards duplicate RHS/record rendering and whole-assignment highlights in state cards.
 test("state cards show paired written assignments with only changed tokens", () => {
-  const r = response(), row = r.semantic.rows[0], prefix = "histval;\ny(0) = ", suffix = ";\nend;";
-  row.family = r.navigation.rows[0].family = "steady_state"; row.references = []; r.semantic.references = []; r.navigation.rows.pop();
+  const r = response(), row = r.diff.semantic.rows[0], prefix = "histval;\ny(0) = ", suffix = ";\nend;";
+  row.family = r.navigation.rows[0].family = "steady_state"; row.references = []; r.diff.semantic.references = []; r.navigation.rows.pop();
   row.expressions.push({ field: "statement_text", before: { text: prefix + "0.1" + suffix, runs: [{ text: prefix, role: "unchanged" }, { text: "0.1", role: "removed" }, { text: suffix, role: "unchanged" }] }, after: { text: prefix + "0.2" + suffix, runs: [{ text: prefix, role: "unchanged" }, { text: "0.2", role: "added" }, { text: suffix, role: "unchanged" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null });
-  const env = webview(); env.render(parseDiff(r, roots.before, roots.after, true));
+  const env = webview(); env.render(parseCurrent(r));
   assert.deepEqual(descendants(env.elements.results).filter(element => element.className === "expression").map(element => element.textContent), [prefix + "0.1" + suffix, prefix + "0.2" + suffix]);
   assert.deepEqual(descendants(env.elements.results).filter(element => element.className === "token added").map(element => element.textContent), ["0.2"]);
   assert.equal(descendants(env.elements.results).some(element => element.attributes["data-field"]), false);
@@ -999,7 +943,7 @@ test("state cards show paired written assignments with only changed tokens", () 
 
 // Guards fragmented history cards and loss of per-period filters when combining written context.
 test("changed periods of one history variable share a block and retain row filters and source actions", () => {
-  const snapshot = parseDiff(response(), roots.before, roots.after, true), base = snapshot.rows[0];
+  const snapshot = parseCurrent(response()), base = snapshot.rows[0];
   snapshot.rows = [[0, "0.1", "0.2"], [-1, "0.05", "-0.05"]].map(([lag, before, after], index) => {
     const row = structuredClone(base), prefix = `histval;\ny(${lag}) = `, suffix = ";\nend;";
     row.id = row.navigation.id = "/semantic/rows/" + index;
@@ -1034,7 +978,7 @@ test("changed periods of one history variable share a block and retain row filte
 });
 
 test("unchanged named shock-group headings stay plain across added and removed members", () => {
-  const snapshot = parseDiff(response(), roots.before, roots.after, true), base = snapshot.rows[0];
+  const snapshot = parseCurrent(response()), base = snapshot.rows[0];
   const header = "shock_groups(name=drivers);\n", footer = "\nend;";
   snapshot.rows = [["removed", "before", "demand = eps_demand;"], ["added", "after", "joint = eps_demand eps_supply;"]].map(([kind, side, body], index) => {
     const row = structuredClone(base); row.id += index; row.kind = kind; row.before = side === "before" ? "demand" : null; row.after = side === "after" ? "joint" : null;
@@ -1050,7 +994,7 @@ test("unchanged named shock-group headings stay plain across added and removed m
 });
 
 test("an added local definition highlights its whole instruction", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+  const env = webview(), snapshot = parseCurrent(response()), row = snapshot.rows[0];
   row.section = "equations"; row.group = "Model-local variables"; row.kind = row.semantic.change = "added";
   row.before = row.semantic.before = null; row.after = "xdddd"; row.semantic.after = side("xdddd"); row.semantic.family = "symbols"; row.semantic.references = [];
   row.semantic.fields = [{ name: "role", label: "Role", before: { state: "absent", value: null }, after: value("model_local_definition"), changed: true, comparison_availability: "complete", numeric_difference: null }];
@@ -1070,14 +1014,14 @@ test("filters can hide all rows, retired selection cannot hide rows and stale ac
   assert.equal(Object.hasOwn(env.states.at(-1).choices, "selected"), false);
 });
 test("source-only changes lead to native text diff, text cannot inject DOM or source actions", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
+  const env = webview(), snapshot = parseCurrent(response());
   env.render({ rows: [] }); assert.match(env.elements.results.textContent, /File text differs/);
   snapshot.rows[0].label = "<img src=x onerror=bad()>"; snapshot.rows[0].semantic.fields[0].after.value.value = "command:bad";
   env.render(snapshot); assert.match(env.elements.results.textContent, /<img/);
   assert.equal(descendants(env.elements.results).some(e => e.tag === "img" || e.tag === "a"), false);
 });
 test("field limits do not mark budget-unavailable values as added or removed", () => {
-  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
+  const env = webview(), snapshot = parseCurrent(response());
   const field = snapshot.rows[0].semantic.fields[0]; field.changed = false; field.comparison_availability = "limit_exceeded";
   snapshot.rows[0].semantic.expressions = [];
   env.render(snapshot); assert.match(env.elements.results.textContent, /This value could not be compared/);

@@ -8,7 +8,7 @@ const { createRequire } = require('node:module');
 const vm = require('node:vm');
 
 async function listTools(binary) {
-  const child = spawn(binary, ['mcp'], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(binary, [], { stdio: ['pipe', 'pipe', 'pipe'] });
   child.stdout.setEncoding('utf8');
   let buffer = '';
   const pending = new Map();

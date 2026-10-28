@@ -383,7 +383,7 @@ test("superseded capture is cancelled and its late result cannot replace the cur
   const { host, service } = setup(t); await host.openSaved(comparison()); const pending = deferred(); let calls = 0;
   host.capture = (resource, cancel, history) => ++calls === 1 ? pending.promise : captured(resource, history, host, service.currentInstance, false);
   host.message({ type: "refresh" }); await flush(); const older = host.captures.at(-1);
-  host.message({ type: "refresh" }); await flush(); assert.equal(older.cancel.isCancellationRequested, true); assert.equal(host.last().status, "ready"); assert.deepEqual(host.last().rows, []);
+  host.message({ type: "refresh" }); await flush(); assert.equal(older.cancel.isCancellationRequested, true); assert.equal(host.last().status, "ready", host.last().message); assert.deepEqual(host.last().rows, []);
   const current = host.last().token; pending.resolve(captured(older.resource, older.history, host)); await flush(); assert.equal(host.last().token, current); assert.deepEqual(host.last().rows, []);
 });
 
@@ -786,7 +786,7 @@ test("snapshot capture refuses Working changes, cancellation, engine restart and
     if (kind === "changed") host.validate = () => undefined;
     if (kind === "capability") service.client.initializeResult.capabilities.experimental = {};
     host.engine = (_command, [request]) => { if (kind === "cancel") cancel.cancel(); if (kind === "restart") service.currentInstance++; return snapshotResponse(request); };
-    await assert.rejects(captureComparison(service, async () => git, history, comparison(), cancel.token), /changed|cancelled|bundled binary/);
+    await assert.rejects(captureComparison(service, async () => git, history, comparison(), cancel.token), /changed|cancelled|bundled binary|does not support current model comparisons/);
   }
 });
 

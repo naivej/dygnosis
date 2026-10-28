@@ -114,7 +114,7 @@ async function packagedContext(t, scheme = "file") {
   await fs.writeFile(files(extensionPath).binary, source.mcpBytes);
   await fs.writeFile(path.join(extensionPath, "SOURCE.json"), JSON.stringify(source.provenance));
   host.folders = [{ name: "workspace", uri: Uri.file(folder) }];
-  host.binary = { path: files(extensionPath).binary, args: [], override: false, version: source.provenance.version };
+  host.binary = { path: files(extensionPath).binary, override: false, version: source.provenance.version };
   host.versionFiles = [];
   return { extensionPath, globalStorageUri: Uri.file(path.join(folder, "storage")).with({ scheme }), extension: { packageJSON: { name: "dygnosis", publisher: "CoconutWater", version: source.provenance.version } } };
 }
@@ -127,12 +127,12 @@ test("strict workspace merge preserves unrelated text, server data and large num
   assert.ok(result.text.includes('"other": 9007199254740993'));
   assert.ok(result.text.includes('"other": {"type":"http", "url":"https://example.test"}'));
   assert.ok(result.text.includes('"keep": [true,null,{"quote":"a\\"b"}]'));
-  assert.deepEqual(JSON.parse(result.text).mcpServers.dygnosis, { type: "stdio", command, args: ["mcp"] });
+  assert.deepEqual(JSON.parse(result.text).mcpServers.dygnosis, { type: "stdio", command, args: [] });
 });
 test("adds mcpServers to empty and nonempty roots and respects identical property ordering", () => {
   const command = path.resolve("engine");
   for (const source of ["{}\n", '{"unrelated":{}}', '{"mcpServers": {}}']) assert.equal(JSON.parse(mergeWorkspaceConfig(source, command).text).mcpServers.dygnosis.command, command);
-  const identical = JSON.stringify({ mcpServers: { dygnosis: { args: ["mcp"], command, type: "stdio" } } });
+  const identical = JSON.stringify({ mcpServers: { dygnosis: { args: [], command, type: "stdio" } } });
   assert.deepEqual(mergeWorkspaceConfig(identical, command), { text: identical, identical: true, conflict: false });
 });
 test("different existing entry is a conflict and only that value changes", () => {
@@ -294,7 +294,7 @@ test("cancelled conflict/dirty review does not touch buffer or disk", async t =>
 });
 test("identical dirty entry is a no-op and never saves unrelated unsaved text", async t => {
   reset(); const folder = await directory(t), uri = Uri.file(path.join(folder, ".mcp.json")), command = path.resolve("engine");
-  await fs.writeFile(uri.fsPath, "{}"); const source = JSON.stringify({ unsaved: 42, mcpServers: { dygnosis: { type: "stdio", command, args: ["mcp"] } } });
+  await fs.writeFile(uri.fsPath, "{}"); const source = JSON.stringify({ unsaved: 42, mcpServers: { dygnosis: { type: "stdio", command, args: [] } } });
   const document = makeDocument(uri, source, true); host.documents.push(document);
   assert.equal(await writeWorkspaceConfig(uri, command, async () => { assert.fail("no review needed"); }), "identical");
   assert.equal(await fs.readFile(uri.fsPath, "utf8"), "{}"); assert.equal(document.isDirty, true); assert.equal(host.saved, 0);
@@ -389,7 +389,7 @@ test("bundled workspace MCP setup accepts disk storage with a vscode-userdata UR
     await host.commands.get("dygnosis.setupWorkspaceMcp")();
     assert.deepEqual(host.errors, []);
     const config = JSON.parse(await fs.readFile(path.join(host.folders[0].uri.fsPath, ".mcp.json"), "utf8"));
-    assert.deepEqual(config.mcpServers.dygnosis, { type: "stdio", command: files(storage).binary, args: ["mcp"] });
+    assert.deepEqual(config.mcpServers.dygnosis, { type: "stdio", command: files(storage).binary, args: [] });
     assert.deepEqual(await fs.readFile(files(storage).binary), bundle("0.11.2").mcpBytes);
     assert.deepEqual(host.versionFiles, [files(context.extensionPath).mainBinary, files(context.extensionPath).binary, files(storage).stage]);
     assert.equal(JSON.parse(await fs.readFile(files(storage).active, "utf8")).version, "0.11.2");

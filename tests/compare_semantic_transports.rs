@@ -262,15 +262,6 @@ async fn declaration_context_requires_unambiguous_statement_correspondence() {
             }
         }
     }
-    for (before, after) in [
-        ("var first", "var first extra;"),
-        ("var first extra;", "var first"),
-    ] {
-        let (service, _) = new_service();
-        let result = current(service.inner(), before, after).await;
-        assert_eq!(result["status"], "incomplete", "{result}");
-        assert!(result["navigation"].is_null());
-    }
 }
 
 // Guards missing-side source links falling back to line zero when the accepted
@@ -782,15 +773,28 @@ async fn current(backend: &Backend, old: &str, new: &str) -> Value {
             })
             .await;
     }
-    backend
+    let before_revision = backend
+        .model_input_revision(&before)
+        .expect("before revision");
+    let after_revision = backend
+        .model_input_revision(&after)
+        .expect("after revision");
+    let result = backend
         .execute_command(ExecuteCommandParams {
-            command: "dynare/compareModels".into(),
-            arguments: vec![json!({"uri_a":before,"uri_b":after})],
+            command: "dynare/compareModelSnapshots".into(),
+            arguments: vec![json!({"schema_version":1,
+                "before":{"kind":"working","input_id":"before","root_uri":before,"expected_revision":before_revision},
+                "after":{"kind":"working","input_id":"after","root_uri":after,"expected_revision":after_revision}})],
             work_done_progress_params: Default::default(),
         })
         .await
         .unwrap()
-        .unwrap()
+        .unwrap();
+    assert_eq!(result["state"], "result", "{result}");
+    let mut diff = result["diff"].clone();
+    diff["navigation"] = result["navigation"].clone();
+    diff["sources"] = result["sources"].clone();
+    diff
 }
 
 #[tokio::test]

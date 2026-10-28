@@ -4,7 +4,6 @@
 use std::collections::{BTreeMap, HashMap};
 
 use serde_json::{Value, json};
-use tower_lsp::lsp_types::Url;
 
 use crate::engine::comparison::semantic_diff::{
     CaptureBoundary, CapturedSourceInput, OccurrenceProvenance, Side, SourceFilePair,
@@ -14,12 +13,11 @@ use crate::engine::comparison::{EquationChange, IndexedEquation, ModelDiff, Shoc
 use crate::engine::language::model::{AssignmentIndex, Model};
 use crate::engine::language::span::LineIndex;
 use crate::engine::workspace::Workspace;
-use crate::engine::workspace::include_resolver::{is_virtual_uri, normalize_uri};
+use crate::engine::workspace::include_resolver::normalize_uri;
 use crate::engine::workspace::model_map::{SourceOccurrence, WrittenSegment};
 
 pub(crate) enum Coordinates {
     Mcp,
-    Lsp,
     SnapshotMcp,
     SnapshotLsp,
 }
@@ -194,7 +192,7 @@ impl ComparisonInput {
                 );
             }
         }
-        // Match the exact assignment index used by legacy last_assignment. A
+        // Match the exact assignment index used by the structural last_assignment helper. A
         // later macro copy can share its written span and still be the winner.
         for (index, assignment) in model.param_assignments.iter().enumerate() {
             let name = model.name(assignment.name).to_owned();
@@ -621,21 +619,6 @@ impl ComparisonInput {
                     "end_line": end.line + 1, "end_column": end.character + 1}),
                 )
             }
-            Coordinates::Lsp => {
-                let uri = if key == self.root_key {
-                    Url::parse(self.root_uri.as_deref()?).ok()?
-                } else if is_virtual_uri(key) {
-                    Url::parse(key).ok()?
-                } else {
-                    Url::from_file_path(key).ok()?
-                };
-                let start = index.position_utf16(text, segment.span.start);
-                let end = index.position_utf16(text, segment.span.end);
-                Some(
-                    json!({"uri": uri, "range": {"start": {"line": start.line, "character": start.character},
-                    "end": {"line": end.line, "character": end.character}}}),
-                )
-            }
         }
     }
 
@@ -832,7 +815,7 @@ pub(crate) fn navigation_json(
         );
     }
     // A missing child can navigate to its proven counterpart parent without
-    // inventing a child occurrence or changing the legacy row's side presence.
+    // inventing a child occurrence or changing the structural row's side presence.
     let contexts: HashMap<_, _> = diff
         .semantic
         .rows

@@ -139,11 +139,11 @@ pub struct SourceArgs {
     pub macro_work_limit: MacroWorkLimit,
     /// Explicit text, supplied-map or saved server-host disk input. Exclusive with file_content, active_file and files.
     pub source: Option<SourceInput>,
-    /// Legacy unnamed text, or an optional overlay of the exact existing map root. An empty string is an overlay.
+    /// Direct Rust helpers may supply unnamed text or overlay the exact existing map root. Empty text is an overlay.
     pub file_content: Option<String>,
-    /// Legacy exact root key in a nonempty files map. This path never grants disk access.
+    /// Exact root key in a nonempty supplied-files map for direct Rust helpers. This path never grants disk access.
     pub active_file: Option<String>,
-    /// Legacy supplied files only; lookup resolves slash, dot and dot-dot aliases without disk reads or case folding. A nonempty map requires an exact existing active_file key; an empty map uses file_content alone.
+    /// Supplied-files input for direct Rust helpers. Lookup resolves slash, dot and dot-dot aliases without disk reads or case folding. A nonempty map requires an exact existing active_file key; an empty map uses file_content alone.
     pub files: Option<HashMap<String, String>>,
     /// Returned source revision. Required when reusing snapshot-bound selections, proposals or continuation.
     pub expected_revision: Option<String>,
@@ -159,7 +159,7 @@ impl SourceArgs {
             }
             return Ok(source.clone());
         }
-        resolve_legacy(
+        resolve_inputs(
             self.file_content.as_deref(),
             self.active_file.as_deref(),
             self.files.as_ref(),
@@ -167,7 +167,7 @@ impl SourceArgs {
     }
 }
 
-pub fn resolve_legacy(
+pub fn resolve_inputs(
     text: Option<&str>,
     active: Option<&str>,
     files: Option<&HashMap<String, String>>,
@@ -1724,14 +1724,14 @@ mod tests {
         assert!(args.input().unwrap_err().invalid_arguments);
         let files = HashMap::from([("root.mod".into(), MODEL.into())]);
         assert!(matches!(
-            resolve_legacy(None, Some("root.mod"), Some(&files)).unwrap(),
+            resolve_inputs(None, Some("root.mod"), Some(&files)).unwrap(),
             SourceInput::Map {
                 root_text: None,
                 ..
             }
         ));
         assert!(matches!(
-            resolve_legacy(Some(MODEL), None, Some(&HashMap::new())).unwrap(),
+            resolve_inputs(Some(MODEL), None, Some(&HashMap::new())).unwrap(),
             SourceInput::Text { .. }
         ));
     }

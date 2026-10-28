@@ -1,3 +1,4 @@
+#![cfg(feature = "mcp-reuse")]
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
@@ -12,8 +13,7 @@ struct McpWire {
 
 impl McpWire {
     fn new() -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_dygnosis"))
-            .arg("mcp")
+        let mut child = Command::new(env!("CARGO_BIN_EXE_dygnosis-mcp"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

@@ -1,4 +1,5 @@
-//! Exercise canonical discovery, migration and agent workflows over real stdio.
+//! Exercise canonical discovery and agent workflows over real stdio.
+#![cfg(feature = "mcp-reuse")]
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
@@ -12,8 +13,7 @@ struct Wire {
 }
 impl Wire {
     fn new(edition: &str) -> Self {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_dygnosis"));
-        command.arg("mcp");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_dygnosis-mcp"));
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
