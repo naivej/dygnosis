@@ -1439,7 +1439,11 @@ mod tests {
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
             std::fs::create_dir(&path).unwrap();
-            Self(path)
+            // Missing children cannot canonicalize themselves. Use the same
+            // physical parent as the existing root, including aliased temp dirs.
+            Self(crate::engine::workspace::include_resolver::make_absolute(
+                &path,
+            ))
         }
         fn key(&self, name: &str) -> String {
             self.0.join(name).to_string_lossy().into_owned()
