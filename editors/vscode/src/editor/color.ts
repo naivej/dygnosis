@@ -74,6 +74,20 @@ export function tintRanges(info: ModelInfo, document: vscode.TextDocument, prefe
   return result;
 }
 
+/** Activity is proved by the selected execution, never inferred from block colors. */
+export function inactiveRanges(info: ModelInfo, document: vscode.TextDocument): vscode.Range[] {
+  const result: vscode.Range[] = [];
+  if (info.document_uri !== document.uri.toString()) return result;
+  for (const range of info.inactive_ranges ?? []) {
+    if (!location({ uri: info.document_uri, range })) continue;
+    const { start, end } = range;
+    if (start.line === end.line && start.character === end.character || end.line >= document.lineCount ||
+        start.character > document.lineAt(start.line).text.length || end.character > document.lineAt(end.line).text.length) continue;
+    result.push(new vscode.Range(start.line, start.character, end.line, end.character));
+  }
+  return result;
+}
+
 /** Shared model cache; this surface owns only visible-editor decorations. */
 export function registerColors(service: DygnosisClient): vscode.Disposable {
   const decorations = {
@@ -83,6 +97,8 @@ export function registerColors(service: DygnosisClient): vscode.Disposable {
     subtle: vscode.window.createTextEditorDecorationType({ isWholeLine: true,
       rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
       backgroundColor: new vscode.ThemeColor("dynare.blockTint.subtleBackground") }),
+    inactive: vscode.window.createTextEditorDecorationType({ opacity: "0.65",
+      rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed }),
   };
   interface EditorState {
     document: vscode.TextDocument;
@@ -97,7 +113,11 @@ export function registerColors(service: DygnosisClient): vscode.Disposable {
   const clear = (editor: vscode.TextEditor): void => {
     editor.setDecorations(decorations.model, []);
     editor.setDecorations(decorations.subtle, []);
+    editor.setDecorations(decorations.inactive, []);
   };
+  const enabled = (document: vscode.TextDocument): boolean =>
+    booleanSetting("blockTint.enabled", document.uri, true, service.log) ||
+    booleanSetting("inactiveCode.enabled", document.uri, true, service.log);
   const update = async (editor: vscode.TextEditor, state: EditorState, request: number): Promise<void> => {
     const { document, client, instance } = state;
     const version = document.version, uri = document.uri.toString();
@@ -105,7 +125,7 @@ export function registerColors(service: DygnosisClient): vscode.Disposable {
       vscode.window.visibleTextEditors.includes(editor) && editor.document === document &&
       !document.isClosed && document.version === version && document.uri.toString() === uri &&
       client === service.client && instance === service.currentInstance &&
-      isAnalysisDocument(document) && booleanSetting("blockTint.enabled", document.uri, true, service.log);
+      isAnalysisDocument(document) && enabled(document);
     try {
       if (!current()) return;
       const root = await service.rootForDocument(document);
@@ -125,6 +145,8 @@ export function registerColors(service: DygnosisClient): vscode.Disposable {
       // pending. Replace them only with current facts; do not repaint old offsets.
       editor.setDecorations(decorations.model, ranges.model);
       editor.setDecorations(decorations.subtle, ranges.subtle);
+      editor.setDecorations(decorations.inactive,
+        booleanSetting("inactiveCode.enabled", document.uri, true, service.log) ? inactiveRanges(info, document) : []);
     } catch (error: unknown) {
       if (current()) { clear(editor); service.log(String(error)); }
     }
@@ -147,7 +169,10 @@ export function registerColors(service: DygnosisClient): vscode.Disposable {
         tracked.set(editor, state);
       }
       if (document.isClosed || !isAnalysisDocument(document) ||
-          !booleanSetting("blockTint.enabled", document.uri, true, service.log)) { clear(editor); continue; }
+          !enabled(document)) { clear(editor); continue; }
+      // A changed input invalidates activity proof immediately. Block outlines
+      // can keep moving with edits while the selected execution is refreshed.
+      editor.setDecorations(decorations.inactive, []);
       pending.push([editor, state]);
     }
     const run = (): void => {
@@ -171,7 +196,8 @@ export function registerColors(service: DygnosisClient): vscode.Disposable {
     vscode.workspace.onDidChangeConfiguration(event => {
       let affected = false;
       for (const editor of tracked.keys()) {
-        if (event.affectsConfiguration("dynare.blockTint", editor.document.uri)) { clear(editor); affected = true; }
+        if (event.affectsConfiguration("dynare.blockTint", editor.document.uri) ||
+            event.affectsConfiguration("dynare.inactiveCode", editor.document.uri)) { clear(editor); affected = true; }
       }
       if (affected) refresh();
     }),
@@ -185,6 +211,6 @@ export function registerColors(service: DygnosisClient): vscode.Disposable {
     for (const listener of listeners) listener.dispose();
     for (const editor of tracked.keys()) clear(editor);
     tracked.clear();
-    decorations.model.dispose(); decorations.subtle.dispose();
+    decorations.model.dispose(); decorations.subtle.dispose(); decorations.inactive.dispose();
   });
 }

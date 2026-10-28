@@ -318,6 +318,13 @@ impl SourceDocument {
             ))
             .ok()
     }
+    pub(crate) fn cached_macro_source(&self) -> Option<Arc<MacroSource>> {
+        self.doc
+            .macro_source
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
     pub(crate) fn has_conditional_source(&self) -> bool {
         self.macro_source().is_none_or(|source| {
             source.tokens.iter().any(|token| {
@@ -334,6 +341,10 @@ impl SourceDocument {
     pub(crate) fn availability(&self, span: Span) -> SourceAvailability {
         self.availability_index
             .summary(&self.file, span, self.complete)
+    }
+    pub(crate) fn inactive_spans(&self) -> impl Iterator<Item = Span> + '_ {
+        self.availability_index
+            .inactive_spans(&self.file, self.complete)
     }
 }
 

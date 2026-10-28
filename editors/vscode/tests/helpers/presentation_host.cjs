@@ -206,6 +206,7 @@ async function checkPresentation(service, workspaceRoot, evidence, helpers) {
   evidence.checks.push("the native Jump to equation command lists both counted macro copies and keeps the written target");
   await checkPreviewOutline(service, workspaceRoot, evidence, helpers);
   await checkOwnerContexts(service, workspaceRoot, evidence, helpers);
+  await require("./inactive_source_host.cjs").checkInactiveSource(open, evidence, waitFor);
 
   // External examples are optional for the general harness; release evidence records their pin.
   if (process.env.DYGNOSIS_PINNED_DYNARE_ROOT) {

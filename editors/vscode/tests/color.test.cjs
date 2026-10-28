@@ -54,7 +54,7 @@ const vscode = {
     get visibleTextEditors() { return host.editors; },
     get activeTextEditor() { return host.editors[0]; },
     createTextEditorDecorationType: options => {
-      const type = { id: options.backgroundColor.id, options, disposed: false, dispose() { this.disposed = true; } };
+      const type = { id: options.backgroundColor?.id ?? "inactiveCode", options, disposed: false, dispose() { this.disposed = true; } };
       host.types.push(type); return type;
     },
     onDidChangeVisibleTextEditors: listener => host.visible.event(listener),
@@ -82,7 +82,7 @@ Module._load = function(id, ...args) {
   };
   return originalLoad.call(this, id, ...args);
 };
-const { dimensionOverrides, registerColors, tintPreferences, tintRanges } = require(compiledModule("color"));
+const { dimensionOverrides, inactiveRanges, registerColors, tintPreferences, tintRanges } = require(compiledModule("color"));
 Module._load = originalLoad;
 const manifest = require("../package.json").contributes;
 const colorContributions = { ...manifest, configuration: manifest.configuration.find(group => group.title === "Dygnosis: Appearance") };
@@ -189,8 +189,7 @@ test("four independently customizable roles use variable parent and explicit Dyn
 
 test("shared backgrounds use four theme defaults, transparent high contrast, and no token foreground styling", async () => {
   const env = setup(); await flush();
-  assert.equal(env.host.types.length, 2);
-  for (const type of env.host.types) {
+  for (const type of env.host.types.filter(type => type.options.backgroundColor)) {
     assert.equal(type.options.isWholeLine, true); assert.equal(type.options.rangeBehavior, 3);
     assert.deepEqual(Object.keys(type.options).sort(), ["backgroundColor", "isWholeLine", "rangeBehavior"]);
     assert.ok(type.options.backgroundColor instanceof ThemeColor);
@@ -313,13 +312,59 @@ test("removed and retyped blocks clear prior colors instead of accumulating deco
 
 test("global disabling clears immediately, supersedes pending work and performs no surface requests until reset", async () => {
   const env = setup(); await flush(); const late = deferred(); env.service.modelInfo = () => late.promise;
-  env.changed.fire(); await flush(); env.configure("blockTint.enabled", false);
+  env.changed.fire(); await flush(); env.configure("blockTint.enabled", false); env.configure("inactiveCode.enabled", false);
   const roots = env.service.roots.length; env.changed.fire(); env.host.active.fire(); await flush();
   assert.equal(env.service.roots.length, roots); assert.equal(env.ranges("model").length, 0);
   late.resolve(facts(env.doc)); await flush(); assert.equal(env.ranges("model").length, 0);
   env.service.modelInfo = async () => facts(env.doc); delete env.host.settings["blockTint.enabled"];
   env.host.configured.fire({ affectsConfiguration: () => true }); await flush(); assert.equal(env.ranges("model").length, 1);
   env.registration.dispose();
+});
+
+test("inactive dimming uses exact proved ranges independently of block backgrounds", async () => {
+  // Guards inactive text replacing syntax colors or depending on block-tint settings.
+  const env = setup(), range = location(undefined, 3, 6, 2, 0).range;
+  env.service.info = () => facts(env.doc, { inactive_ranges: [range] });
+  env.configure("blockTint.enabled", false); await flush();
+  const dimmed = env.host.editors[0].decorations.get("inactiveCode");
+  assert.deepEqual(dimmed, [new Range(3, 2, 6, 0)]);
+  const type = env.host.types.find(row => row.id === "inactiveCode");
+  assert.equal(type.options.opacity, "0.65");
+  assert.equal(type.options.color, undefined); assert.equal(type.options.backgroundColor, undefined);
+  assert.equal(env.ranges("model").length, 0);
+  env.configure("blockTint.enabled", true); await flush();
+  assert.equal(env.ranges("model").length, 1);
+  assert.deepEqual(env.host.editors[0].decorations.get("inactiveCode"), dimmed);
+  env.configure("inactiveCode.enabled", false); await flush();
+  assert.deepEqual(env.host.editors[0].decorations.get("inactiveCode"), []);
+  assert.equal(env.ranges("model").length, 1); env.registration.dispose();
+});
+
+test("inactive dimming rejects unproved coordinates and supports older engines without ranges", () => {
+  // Guards out-of-file and malformed ranges being applied to unrelated text.
+  const doc = document(), valid = location(undefined, 2, 5, 3, 0).range;
+  const malformed = [location(undefined, 1, 61).range, location(undefined, 1, 2, 41).range,
+    location(undefined, 4, 3).range, location(undefined, 3, 3, 0, 0).range];
+  assert.deepEqual(inactiveRanges(facts(doc), doc), []);
+  assert.deepEqual(inactiveRanges(facts(doc, { inactive_ranges: [valid, ...malformed] }), doc), [new Range(2, 3, 5, 0)]);
+});
+
+test("edits and configuration switches clear inactive proof before a delayed response", async () => {
+  // Guards a previously excluded branch remaining dim after its inputs change.
+  for (const change of ["edit", "configuration"]) {
+    const env = setup(), range = location(undefined, 3, 4).range;
+    env.service.info = () => facts(env.doc, { inactive_ranges: [range] }); env.changed.fire(); await flush();
+    assert.equal(env.host.editors[0].decorations.get("inactiveCode").length, 1);
+    const late = deferred(); env.service.modelInfo = () => late.promise;
+    if (change === "edit") {
+      ++env.doc.version; env.host.edited.fire({ document: env.doc, contentChanges: [{ text: "1" }] });
+    } else env.changed.fire();
+    assert.deepEqual(env.host.editors[0].decorations.get("inactiveCode"), [], change);
+    await flush(); env.configure("inactiveCode.enabled", false);
+    late.resolve(facts(env.doc, { inactive_ranges: [range] })); await flush();
+    assert.deepEqual(env.host.editors[0].decorations.get("inactiveCode"), []);
+    env.registration.dispose();
+  }
 });
 
 test("style and dimension reset restore declared defaults live without restarting the engine", async () => {
@@ -436,7 +481,8 @@ test("typing retains tint through the 200 ms pause and the pending model respons
   env.host.edited.fire({ document: env.doc, contentChanges: [{ text: "x" }] });
   env.changed.fire();
   assert.equal(env.ranges("model").length, 1);
-  assert.equal(painted.calls.length, calls, "an edit must not clear the editor's tracked ranges");
+  assert.ok(painted.calls.slice(calls).every(call => call.type.id === "inactiveCode" && call.ranges.length === 0),
+    "an edit clears activity proof while preserving block backgrounds");
   timers.tick(199); await drain();
   assert.equal(env.service.requests.length, requests);
   timers.tick(1); await drain();
@@ -458,7 +504,7 @@ test("successive edits coalesce and reject a response that arrives during the ne
   timers.tick(100);
   ++env.doc.version; env.host.edited.fire({ document: env.doc, contentChanges: [{ text: "y" }] }); env.changed.fire();
   old.resolve(facts(env.doc, { statements: [] })); await drain();
-  assert.equal(env.host.editors[0].calls.length, calls);
+  assert.ok(env.host.editors[0].calls.slice(calls).every(call => call.type.id === "inactiveCode" && call.ranges.length === 0));
   timers.tick(199); await drain(); assert.equal(env.service.requests.length, requests);
   timers.tick(1); await drain(); assert.equal(env.service.requests.length, requests + 1);
   assert.equal(env.ranges("model").length, 1);

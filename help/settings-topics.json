@@ -16,6 +16,7 @@
   "dynare.effectiveModel.macroTint": "effective-model",
   "dynare.codeLens.declarationReferences": "model-and-includes",
   "dynare.codeLens.effectiveModel": "model-and-includes",
+  "dynare.inactiveCode.enabled": "appearance",
   "dynare.blockTint.enabled": "appearance",
   "dynare.blockTint.model.aggregate": "appearance",
   "dynare.blockTint.model.heterogeneous": "appearance",

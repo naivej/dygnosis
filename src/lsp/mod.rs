@@ -16,6 +16,7 @@ mod analysis_configuration;
 mod comparison_inputs;
 mod document_analysis;
 mod document_context;
+mod source_activity;
 mod source_intelligence;
 mod source_projection;
 mod workspace_checks;
@@ -2208,30 +2209,30 @@ impl Backend {
 
     fn model_info_command(&self, arguments: &[Value]) -> Value {
         let Some(argument) = arguments.first().and_then(Value::as_object) else {
-            return json!({"error":"dynare/modelInfo requires a root_uri argument", "code":"INVALID_ARGUMENTS"});
+            return json!({"error":"dynare/modelInfo requires a root_uri argument", "code":"INVALID_ARGUMENTS", "inactive_ranges":[]});
         };
         let Some(root) = argument
             .get("root_uri")
             .and_then(Value::as_str)
             .and_then(|uri| Url::parse(uri).ok())
         else {
-            return json!({"error":"dynare/modelInfo requires a valid root_uri", "code":"INVALID_ARGUMENTS"});
+            return json!({"error":"dynare/modelInfo requires a valid root_uri", "code":"INVALID_ARGUMENTS", "inactive_ranges":[]});
         };
         let document = match argument.get("document_uri") {
             None => root.clone(),
             Some(value) => match value.as_str().and_then(|uri| Url::parse(uri).ok()) {
                 Some(uri) => uri,
                 None => {
-                    return json!({"error":"dynare/modelInfo requires a valid document_uri", "code":"INVALID_ARGUMENTS"});
+                    return json!({"error":"dynare/modelInfo requires a valid document_uri", "code":"INVALID_ARGUMENTS", "inactive_ranges":[]});
                 }
             },
         };
         let mut inner = self.lock_inner();
         if !is_model_root(&root) {
-            return json!({"error":"Choose a .mod or .dyn owner root for model information", "code":"ROOT_REQUIRED", "owner_roots":inner.known_owner_roots(&root)});
+            return json!({"error":"Choose a .mod or .dyn owner root for model information", "code":"ROOT_REQUIRED", "owner_roots":inner.known_owner_roots(&root), "inactive_ranges":[]});
         }
         if !["file", "untitled"].contains(&root.scheme()) {
-            return json!({"error":"Model information requires a file or untitled root URI", "code":"UNSUPPORTED_URI"});
+            return json!({"error":"Model information requires a file or untitled root URI", "code":"UNSUPPORTED_URI", "inactive_ranges":[]});
         }
         let revision = inner.root_revision(&root);
         let analysis = analysis_configuration::metadata(&mut inner, &root);
@@ -2241,27 +2242,28 @@ impl Backend {
             && inner.document_contexts.get(&document_key) != Some(&root)
             && !inner.source_browsing_relation(&root, &document)
         {
-            return json!({"error":"The displayed document does not belong to the chosen model root", "code":"DOCUMENT_NOT_OWNED"});
+            return json!({"error":"The displayed document does not belong to the chosen model root", "code":"DOCUMENT_NOT_OWNED", "inactive_ranges":[]});
         }
         if analysis["state"] == "stale" {
             let Some(revision) = analysis_configuration::context_revision(&mut inner, &root) else {
-                return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND"});
+                return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND", "inactive_ranges":[]});
             };
             let cause = &analysis["cause"];
             return json!({"schema_version":MODEL_INFO_SCHEMA_VERSION,"root_uri":root,"document_uri":document,
                 "document_version":inner.document(&document).map(|doc|doc.version),"revision":revision,"complete":false,
                 "analysis":analysis,"status":"stale","message":cause["message"],"incomplete_reasons":[cause],
                 "owner_roots":inner.known_owner_roots(&document),"browsing_documents":inner.browsing_documents(&root),
-                "statements":[],"declarations":[],"equations":[],"related_files":[],"block_categories":[],"first_model_anchor":null});
+                "statements":[],"declarations":[],"equations":[],"related_files":[],"block_categories":[],"first_model_anchor":null,
+                "inactive_ranges":[]});
         }
         let Some(revision) = revision else {
-            return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND"});
+            return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND", "inactive_ranges":[]});
         };
         let Some(model) = inner.workspace.effective_model_snapshot(root.as_str()) else {
-            return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND"});
+            return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND", "inactive_ranges":[]});
         };
         let Some(report) = inner.workspace.expand_report_snapshot(root.as_str()) else {
-            return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND"});
+            return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND", "inactive_ranges":[]});
         };
         let complete = report.complete
             && report.model_map.complete
@@ -2295,8 +2297,9 @@ impl Backend {
                 reasons.as_array().unwrap(),
             )
         };
+        let inactive_ranges = source_activity::requested_document_ranges(&inner, &root, &document);
         let Some(text) = inner.workspace.get_source(document.as_str()) else {
-            return json!({"error":"The displayed source is unavailable", "code":"DOCUMENT_NOT_FOUND"});
+            return json!({"error":"The displayed source is unavailable", "code":"DOCUMENT_NOT_FOUND", "inactive_ranges":[]});
         };
         let view = WrittenView::new(
             &document,
@@ -2318,6 +2321,7 @@ impl Backend {
         result["schema_version"] = json!(MODEL_INFO_SCHEMA_VERSION);
         result["root_uri"] = json!(root);
         result["document_uri"] = json!(document);
+        result["inactive_ranges"] = json!(inactive_ranges);
         result["document_version"] = json!(inner.document(&document).map(|doc| doc.version));
         result["revision"] = json!(revision);
         result["complete"] = json!(complete);

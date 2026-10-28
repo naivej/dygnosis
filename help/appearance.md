@@ -26,6 +26,12 @@ Settings. For [heterogeneous-agent models](https://www.dynare.org/manual/the-mod
 Models](settings:dynare.blockTint.heterogeneousModels) to set shading per
 `heterogeneity_dimension` (for example `{"households": "off"}`).
 
+## Inactive source
+
+Source excluded by the selected analysis configuration is dimmed, including
+source excluded by a branch preview. Toggle this with
+[Dynare › Inactive Code: Enabled](settings:dynare.inactiveCode.enabled).
+
 ## Expression value hints
 
 Top-level parameter expressions such as `beta = 1 / 1.04;` show an inline value

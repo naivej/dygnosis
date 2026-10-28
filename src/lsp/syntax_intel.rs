@@ -359,6 +359,101 @@ pub(crate) fn documentation(record: &SyntaxRecord) -> String {
     text
 }
 
+/// Catalog help only when retained written context proves the token's role.
+pub(crate) fn written_syntax_help(
+    inventory: &SourceInventory,
+    text: &str,
+    byte: u32,
+    word: &str,
+    span: Span,
+    context: &Context,
+) -> Option<String> {
+    use crate::engine::analysis::source_inventory::SourceItemKind;
+    if context.language == "top_level" {
+        return None;
+    }
+    let macro_expression = context.language == "macro_expression";
+    let (call, body_start, after_comma) = if macro_expression {
+        let item = inventory
+            .items
+            .iter()
+            .filter(|item| item.span.start <= byte && byte < item.span.end)
+            .min_by_key(|item| item.span.end - item.span.start)?;
+        if item.kind == SourceItemKind::MacroDefinition && item.selection == span {
+            return None;
+        }
+        // Directives are retained as whole tokens. Check only a bounded local
+        // prefix and track quoted strings and comments before this word.
+        let prefix = text.get(item.span.start as usize..span.start as usize)?;
+        if prefix.len() > 256 {
+            return None;
+        }
+        let mut quoted = false;
+        let mut previous = 0;
+        for byte in prefix.bytes() {
+            if !quoted && previous == b'/' && byte == b'/' {
+                return None;
+            }
+            if byte == b'"' {
+                quoted = !quoted;
+            }
+            previous = byte;
+        }
+        if quoted {
+            return None;
+        }
+        let call = text
+            .get(span.end as usize..item.span.end as usize)?
+            .bytes()
+            .take(256)
+            .find(|byte| !byte.is_ascii_whitespace())
+            == Some(b'(');
+        (call, false, false)
+    } else {
+        let tokens = &inventory.lexical_tokens;
+        let at = tokens.partition_point(|token| token.span.end <= byte);
+        if tokens
+            .get(at)
+            .is_none_or(|token| token.kind != TokenKind::Ident || token.span != span)
+        {
+            return None;
+        }
+        let previous = at
+            .checked_sub(1)
+            .and_then(|index| tokens.get(index))
+            .map(|token| token.kind);
+        if previous == Some(TokenKind::Dot) {
+            return None;
+        }
+        (
+            tokens
+                .get(at + 1)
+                .is_some_and(|token| token.kind == TokenKind::LParen),
+            previous == Some(TokenKind::Semi),
+            previous == Some(TokenKind::Comma),
+        )
+    };
+    let docs: Vec<_> = records(context)
+        .into_iter()
+        .filter(|record| {
+            (record.name.eq_ignore_ascii_case(word)
+                || record
+                    .aliases
+                    .iter()
+                    .any(|alias| alias.eq_ignore_ascii_case(word)))
+                && ((record.kind == "body_keyword"
+                    && (body_start
+                        || after_comma && context.parent.as_deref() == Some("estimated_params")))
+                    || matches!(
+                        record.kind.as_str(),
+                        "function" | "operator" | "macro_function"
+                    ) && call)
+        })
+        .map(documentation)
+        .collect();
+    (!docs.is_empty()).then(|| format!("**`{word}`**\n\n{}", docs.join("\n\n")))
+}
+
 pub(crate) fn options(command: &str) -> impl Iterator<Item = &'static SyntaxRecord> + '_ {
     syntax::records().iter().filter(move |record| {
         record.kind == "option"

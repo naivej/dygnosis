@@ -174,6 +174,30 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
     if state == SourceAvailability::Active && overridden.is_none() && !item.template && !control {
         return None;
     }
+    if !control
+        && overridden.is_none()
+        && let Some((word, span)) = syntax_intel::candidate_word_at(&file.text, byte)
+        && let Some(context) =
+            syntax_intel::source_context(&file.inventory, &file.text, byte, false)
+        && let Some(description) = syntax_intel::written_syntax_help(
+            &file.inventory,
+            &file.text,
+            byte,
+            word,
+            span,
+            &context,
+        )
+    {
+        let index = inner
+            .workspace
+            .source_document(root.as_str(), &normalize_uri(document.as_str()))
+            .map(|source| source.source_index())
+            .unwrap_or_else(|| Arc::new(LineIndex::new(&file.text)));
+        return Some(markdown_hover(
+            description,
+            Some(span_range(&index, &file.text, span)),
+        ));
+    }
     // A containing statement supplies availability, not the hovered name.
     // Reuse its retained lexical tokens for a precise inner token and range.
     let (name, selection, option) = if item.selection.start <= byte && byte < item.selection.end {
@@ -182,7 +206,7 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
             item.selection,
             None,
         )
-    } else if item.kind == SourceItemKind::MacroDefinition {
+    } else if item.kind == SourceItemKind::MacroDefinition && overridden.is_some() {
         // A preview receipt describes the whole written directive, including
         // its keyword and replacement expression outside the defined name.
         (
@@ -216,14 +240,62 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
         };
         (name, token.span, option)
     };
-    let mut message = format!(
-        "**{name}** · {}",
-        if state == SourceAvailability::Mixed {
-            "active in some expansions"
-        } else {
-            availability_label(state)
+    let mut message = if control || overridden.is_some() {
+        format!(
+            "**{name}** · {}",
+            if state == SourceAvailability::Mixed {
+                "active in some expansions"
+            } else {
+                availability_label(state)
+            }
+        )
+    } else if item.kind == SourceItemKind::Declaration && selection == item.selection {
+        let mut description = format!(
+            "**{name}**\n\nWritten declaration: `{}`.",
+            item.written_kind.as_deref().unwrap_or("declaration")
+        );
+        if let Some(metadata) = &item.declaration_metadata {
+            let settings = inner.presentation_for(document);
+            if settings.name_details.long_name
+                && let Some(long_name) = &metadata.long_name
+            {
+                description.push_str(&format!("\n\nLong name: {}", names::literal(long_name)));
+            }
+            if settings.name_details.tex
+                && let Some(tex_name) = &metadata.tex_name
+            {
+                description.push_str(&format!("\n\nTeX label: {}", names::code(tex_name)));
+            }
         }
-    );
+        description
+    } else if selection == item.selection
+        && let Some(rhs) = item.local_definition
+    {
+        let expression = file
+            .text
+            .get(rhs.start as usize..rhs.end as usize)
+            .unwrap_or_default();
+        format!(
+            "**{name}**\n\nWritten model-local expression: {}",
+            names::code(expression)
+        )
+    } else {
+        let reason = match state {
+            SourceAvailability::Inactive => {
+                "This source is inactive in the selected analysis, so model information is unavailable."
+            }
+            SourceAvailability::Mixed => {
+                "This source has different activity across expansions, so model information is unavailable."
+            }
+            SourceAvailability::Unknown => {
+                "Source activity is unknown, so model information is unavailable."
+            }
+            SourceAvailability::Active => {
+                "Model information is unavailable for this source template."
+            }
+        };
+        format!("**{name}**\n\n{reason}")
+    };
     if state == SourceAvailability::Unknown
         && let Some(cause) = availability.and_then(|row| {
             if control {
@@ -335,6 +407,139 @@ pub(super) fn candidates(inner: &mut Inner, arguments: &[Value]) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn inactive_hover_preserves_local_syntax_and_written_facts() {
+        // Guards catalog help, exact macro token selection, and the boundary
+        // between a written definition and an inactive use of the same name.
+        let root = Url::parse("file:///C:/dygnosis-inactive-hover/main.mod").unwrap();
+        let text = "@#if 0\nvar hidden $H$ (long_name='Hidden variable');\nvar_model(structural);\nmodel(linear);\n# temp = log(1);\nhidden = exp(temp);\nend;\n@#define n = length([1,2])\n@#endif\n";
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(root.clone(), text.into(), 1);
+        let hover = |line: u32, column: u32| {
+            server
+                .hover_at(&TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: root.clone() },
+                    position: Position::new(line, column),
+                })
+                .unwrap()
+        };
+        for (line, column, word, kind) in [
+            (2, 10, "structural", "option"),
+            (3, 6, "linear", "option"),
+            (4, 9, "log", "function"),
+            (5, 9, "exp", "function"),
+            (7, 13, "length", "macro_function"),
+        ] {
+            let result = hover(line, column);
+            let value = serde_json::to_string(&result).unwrap();
+            let record = crate::engine::catalog::syntax::records()
+                .iter()
+                .find(|record| {
+                    record.kind == kind
+                        && record.name.eq_ignore_ascii_case(word)
+                        && (kind != "option"
+                            || record.parent.as_deref()
+                                == Some(if word == "linear" {
+                                    "model"
+                                } else {
+                                    "var_model"
+                                }))
+                })
+                .unwrap();
+            assert!(value.contains(&record.summary), "{word}: {value}");
+            assert!(!value.contains("inactive"), "{word}: {value}");
+            if word == "length" {
+                assert_eq!(
+                    result.range.unwrap(),
+                    Range::new(Position::new(7, 13), Position::new(7, 19))
+                );
+            }
+        }
+        let declaration = serde_json::to_string(&hover(1, 5)).unwrap();
+        assert!(
+            declaration.contains("Written declaration")
+                && declaration.contains("Hidden variable")
+                && declaration.contains('H'),
+            "{declaration}"
+        );
+        let definition = serde_json::to_string(&hover(4, 3)).unwrap();
+        assert!(definition.contains("log(1)"), "{definition}");
+        let usage = serde_json::to_string(&hover(5, 13)).unwrap();
+        assert!(!usage.contains("log(1)"), "{usage}");
+    }
+
+    #[tokio::test]
+    async fn inactive_body_keyword_uses_its_containing_block() {
+        // Guards the body keyword being replaced by availability-only hover.
+        let root = Url::parse("file:///C:/dygnosis-inactive-body/main.mod").unwrap();
+        let text = "@#if 0\nshocks;\nvar e;\nstderr 1;\nend;\n@#endif\n";
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(root.clone(), text.into(), 1);
+        let hover = server
+            .hover_at(&TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: root },
+                position: Position::new(3, 1),
+            })
+            .unwrap();
+        let value = serde_json::to_string(&hover).unwrap();
+        let record = crate::engine::catalog::syntax::records()
+            .iter()
+            .find(|record| {
+                record.kind == "body_keyword"
+                    && record.name == "stderr"
+                    && record.parent.as_deref() == Some("shocks")
+            })
+            .unwrap();
+        assert!(value.contains(&record.summary), "{value}");
+        assert!(!value.contains("inactive"), "{value}");
+    }
+
+    #[tokio::test]
+    async fn written_macro_function_ignores_quoted_text() {
+        // A prior string must not hide a later call, and a call-shaped string
+        // must not receive function documentation.
+        let root = Url::parse("file:///C:/dygnosis-macro-hover/main.mod").unwrap();
+        let text = "@#define n = \"foo\" + length([1,2])\n@#define s = \"length([1,2])\"\n";
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(root.clone(), text.into(), 1);
+        let at = |line, character| TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: root.clone() },
+            position: Position::new(line, character),
+        };
+        let call = server.syntax_hover_at(&at(0, 22)).unwrap();
+        assert!(serde_json::to_string(&call).unwrap().contains("length"));
+        assert!(server.syntax_hover_at(&at(1, 16)).is_none());
+    }
+
+    #[tokio::test]
+    async fn written_catalog_help_does_not_claim_names_or_qualified_calls() {
+        // Guards catalog names in declarations, option values and qualified
+        // calls from being presented as built-in calls.
+        let root = Url::parse("file:///C:/dygnosis-catalog-collisions/main.mod").unwrap();
+        for (text, character) in [
+            ("external_function(name=f);\n", 23),
+            ("var log;\n", 4),
+            ("var_model(model_name=log);\n", 21),
+            ("model; y=pkg.log(1); end;\n", 14),
+            ("@#define length(x) = x\n", 10),
+        ] {
+            let (service, _socket) = new_service();
+            let server = service.inner();
+            server.upsert(root.clone(), text.into(), 1);
+            let position = TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: root.clone() },
+                position: Position::new(0, character),
+            };
+            assert!(
+                server.syntax_hover_at(&position).is_none(),
+                "{text}:{character}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn literal_browsing_batches_lookup_and_reuses_cached_macro_source() {
@@ -719,12 +924,28 @@ mod tests {
             let server = service.inner();
             server.upsert(root.clone(), text.clone(), 1);
             let mut inner = server.lock_inner();
+            let projected = file(&mut inner, &root).unwrap();
+            let source_id = &projected
+                .inventory
+                .items
+                .iter()
+                .find(|item| item.name.as_deref() == Some("hidden"))
+                .unwrap()
+                .source_id;
+            let cause = projected
+                .availability
+                .iter()
+                .find(|row| &row.source_id == source_id)
+                .and_then(|row| row.cause.as_ref())
+                .map(|cause| cause.message.clone());
             let hover = hover(&mut inner, &root, text.find("hidden").unwrap() as u32).unwrap();
             let HoverContents::Markup(markup) = hover.contents else {
                 panic!("markdown hover")
             };
             assert!(
-                markup.value.starts_with(&format!("**hidden** · {state}")),
+                markup
+                    .value
+                    .starts_with("**hidden**\n\nWritten declaration: `var`."),
                 "{}",
                 markup.value
             );
@@ -736,11 +957,14 @@ mod tests {
                     .contains("Model values, timing and equation numbers")
             );
             if state == "inactive" {
-                assert_eq!(markup.value, "**hidden** · inactive");
+                assert_eq!(markup.value, "**hidden**\n\nWritten declaration: `var`.");
             } else {
                 assert!(
-                    markup.value.contains("\n\n"),
-                    "unknown activity retains its cause"
+                    markup
+                        .value
+                        .contains(cause.as_deref().expect("unknown cause")),
+                    "unknown activity retains its cause: {}",
+                    markup.value
                 );
             }
         }

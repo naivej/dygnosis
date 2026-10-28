@@ -791,7 +791,7 @@ mod tests {
         assert!(
             serde_json::to_string(&inactive_hover)
                 .unwrap()
-                .contains("inactive")
+                .contains("Written declaration")
         );
     }
 

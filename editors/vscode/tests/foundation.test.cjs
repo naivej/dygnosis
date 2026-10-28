@@ -43,6 +43,16 @@ test("unknown schemas, wrong ownership and malformed nested locations are reject
   assert.equal(location({ uri: "file:///x", range: { start: { line: 1, character: 0 }, end: { line: 0, character: 5 } } }), false);
   assert.throws(() => parseModelInfo({ ...info(), complete: true, n_endogenous: -1 }, "file:///root.mod", "file:///root.mod"));
 });
+
+test("inactive source ranges accept old engines and reject malformed activity coordinates", () => {
+  // Guards invalid activity data dimming unrelated source; the field is additive.
+  const valid = { start: { line: 2, character: 1 }, end: { line: 4, character: 0 } };
+  const read = inactive_ranges => parseModelInfo({ ...info(), inactive_ranges }, "file:///root.mod", "file:///root.mod");
+  assert.equal(parseModelInfo(info(), "file:///root.mod", "file:///root.mod").inactive_ranges, undefined);
+  assert.deepEqual(read([valid]).inactive_ranges, [valid]);
+  for (const value of [null, {}, [null], [{ start: { line: -1, character: 0 }, end: valid.end }],
+    [{ start: valid.end, end: valid.start }]]) assert.throws(() => read(value));
+});
 test("analysis receipts accept old engines without names and reject malformed optional names", () => {
   const analysis = { state: "selected", selection: { configuration_id: "c", name: null, preview: false, invocation_scope: "source" },
     configuration: { overrides: [{ kind: "definition", target: { file: null, site_id: "s", source_revision: "r" }, expression: "1" }] },

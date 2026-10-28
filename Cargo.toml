@@ -2,7 +2,7 @@
 name = "dygnosis"
 description = "Dynare analysis core"
 # Product version source. After editing, run: node scripts/version.cjs --sync
-version = "0.11.37"
+version = "0.11.38"
 edition = "2024"
 default-run = "dygnosis"
 license = "GPL-3.0-or-later"

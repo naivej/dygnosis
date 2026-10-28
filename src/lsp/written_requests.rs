@@ -52,6 +52,11 @@ pub(super) fn hover(source: &SourceDocument, position: Position) -> Option<Optio
             .map(|record| Some(markdown_hover(syntax_intel::documentation(record), range)));
     }
     let context = syntax_intel::source_context(&inventory, text, byte, false)?;
+    if let Some(description) =
+        syntax_intel::written_syntax_help(&inventory, text, byte, word, span, &context)
+    {
+        return Some(Some(markdown_hover(description, range)));
+    }
     let item = inventory
         .items
         .iter()
@@ -73,17 +78,31 @@ pub(super) fn hover(source: &SourceDocument, position: Position) -> Option<Optio
             .lexical_tokens
             .partition_point(|token| token.span.end <= byte);
         let token = inventory.lexical_tokens.get(at)?;
-        if token.span != span
-            || !inventory
-                .lexical_tokens
-                .get(at + 1)
-                .is_some_and(|token| token.kind == TokenKind::Eq)
-        {
+        if token.span != span {
             return None;
         }
         let command = item.name.as_deref()?;
         let option =
             syntax_intel::options(command).find(|option| option.name.eq_ignore_ascii_case(word))?;
+        let assigned = inventory
+            .lexical_tokens
+            .get(at + 1)
+            .is_some_and(|next| next.kind == TokenKind::Eq);
+        let flag = option
+            .value_rules
+            .iter()
+            .any(|rule| rule.starts_with("Flag;"))
+            && at
+                .checked_sub(1)
+                .and_then(|i| inventory.lexical_tokens.get(i))
+                .is_some_and(|prev| matches!(prev.kind, TokenKind::LParen | TokenKind::Comma))
+            && inventory
+                .lexical_tokens
+                .get(at + 1)
+                .is_some_and(|next| matches!(next.kind, TokenKind::Comma | TokenKind::RParen));
+        if !assigned && !flag {
+            return None;
+        }
         let description = shocks_overwrite_doc(text, byte, command, &option.name, &option.summary);
         return Some(Some(markdown_hover(
             format!("**`{command}` option**: `{word}`\n\n{description}"),

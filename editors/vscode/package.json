@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.37",
+  "version": "0.11.38",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -753,6 +753,12 @@
       {
         "title": "Dygnosis: Appearance",
         "properties": {
+          "dynare.inactiveCode.enabled": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Dim source excluded by the selected analysis configuration, including branch previews."
+          },
           "dynare.blockTint.enabled": {
             "type": "boolean",
             "default": true,

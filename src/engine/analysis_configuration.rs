@@ -617,6 +617,25 @@ impl MacroAvailabilityIndex {
         }
     }
 
+    /// Exact disjoint intervals known to be inactive for a complete macro
+    /// execution. Unknown, mixed, and uncovered intervals are omitted.
+    pub(crate) fn inactive_spans(
+        &self,
+        file: &str,
+        complete: bool,
+    ) -> impl Iterator<Item = Span> + '_ {
+        let summary = if complete {
+            self.files
+                .get(file)
+                .map_or(&[][..], |file| file.summary.as_slice())
+        } else {
+            &[][..]
+        };
+        summary
+            .iter()
+            .filter_map(|(span, state)| (*state == SourceAvailability::Inactive).then_some(*span))
+    }
+
     pub(crate) fn matching<'a>(
         &'a self,
         file: &str,

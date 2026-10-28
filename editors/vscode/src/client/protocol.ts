@@ -73,6 +73,7 @@ export interface ModelInfo {
   document_version: number | null; revision: string; complete: boolean;
   owner_roots: string[]; statements: Statement[]; declarations: Declaration[];
   dependency_candidates?: string[];
+  inactive_ranges?: Range[];
   equations: Equation[]; related_files: RelatedFile[];
   block_categories: { category: string; default: string }[];
   first_model_anchor: Location | null;
@@ -94,8 +95,11 @@ function position(value: unknown): value is Position {
   return record(value) && natural(value.line) && natural(value.character);
 }
 export function location(value: unknown): value is Location {
-  if (!record(value) || typeof value.uri !== "string" || !record(value.range)) return false;
-  const { start, end } = value.range;
+  return record(value) && typeof value.uri === "string" && range(value.range);
+}
+function range(value: unknown): value is Range {
+  if (!record(value)) return false;
+  const { start, end } = value;
   return position(start) && position(end) &&
     (start.line < end.line || (start.line === end.line && start.character <= end.character));
 }
@@ -182,6 +186,7 @@ export function parseModelInfo(value: unknown, root: string, document: string): 
       !(value.browsing_documents === undefined || strings(value.browsing_documents)) ||
       !(value.source_browsing === undefined || typeof value.source_browsing === "boolean") ||
       !(value.dependency_candidates === undefined || strings(value.dependency_candidates)) ||
+      !(value.inactive_ranges === undefined || Array.isArray(value.inactive_ranges) && value.inactive_ranges.every(range)) ||
       !rows(value.statements, row => source(row) && typeof row.id === "string" &&
         typeof row.kind === "string" && typeof row.name === "string" &&
         typeof row.complete === "boolean" && typeof row.native === "boolean" &&

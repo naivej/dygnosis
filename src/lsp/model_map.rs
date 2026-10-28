@@ -164,7 +164,7 @@ pub(crate) fn preview_symbols(
             origin_frames: Vec::new(),
         };
     let mut display = map.clone();
-    (display.statement_objects, display.pac_children) =
+    (display.statement_objects, display.statement_children) =
         crate::engine::workspace::model_map::outline_occurrences(model, source);
     display.statements = model
         .statements
@@ -578,7 +578,7 @@ impl<'a> WrittenView<'a> {
             if enabled("blocks") {
                 for member in self
                     .map
-                    .pac_children
+                    .statement_children
                     .iter()
                     .filter(|member| ids.contains(&member.statement_id))
                 {
@@ -940,14 +940,18 @@ pub(crate) fn add_source_symbols(
         } else {
             None
         };
-        let name = item.name.clone().unwrap_or_else(|| {
-            text.get(item.span.start as usize..item.span.end as usize)
-                .unwrap_or("source template")
-                .trim()
-                .chars()
-                .take(80)
-                .collect()
-        });
+        let name = item
+            .outline_name
+            .clone()
+            .or_else(|| item.name.clone())
+            .unwrap_or_else(|| {
+                text.get(item.span.start as usize..item.span.end as usize)
+                    .unwrap_or("source template")
+                    .trim()
+                    .chars()
+                    .take(80)
+                    .collect()
+            });
         let name = if matches!(
             item.kind,
             SourceItemKind::Conditional | SourceItemKind::Branch | SourceItemKind::Loop
@@ -972,10 +976,29 @@ pub(crate) fn add_source_symbols(
             SourceItemKind::Command => SymbolKind::EVENT,
             _ => SymbolKind::MODULE,
         };
+        let children = item
+            .outline_children
+            .iter()
+            .filter_map(|child| {
+                let child_range = range(child.span);
+                let selection = range(child.selection);
+                (contains(span, child_range) && contains(child_range, selection)).then(|| {
+                    symbol(
+                        child.name.clone(),
+                        child.detail.clone(),
+                        SymbolKind::OBJECT,
+                        child_range,
+                        selection,
+                        Vec::new(),
+                    )
+                })
+            })
+            .collect();
+        let selection = item.outline_selection.map(range).unwrap_or(selection);
         selections.insert(range_key(selection), flat.len());
         spans.insert(range_key(span), flat.len());
         flat.push(OutlineRow {
-            symbol: symbol(name, detail, icon, span, selection, Vec::new()),
+            symbol: symbol(name, detail, icon, span, selection, children),
             availability: state,
         });
     }
@@ -1185,5 +1208,207 @@ mod source_index_tests {
         view.location(segment).unwrap();
         let sources = view.sources.borrow();
         assert!(Arc::ptr_eq(&sources[&key].index, &source.source_index()));
+    }
+}
+
+#[cfg(test)]
+mod named_outline_tests {
+    use super::*;
+    use crate::engine::analysis::source_inventory::SourceInventory;
+    use crate::engine::language::macro_expr::MacroBudget;
+    use crate::engine::language::macro_source::MacroSource;
+    use crate::engine::macro_work::MacroWorkLimit;
+
+    fn find<'a>(rows: &'a [DocumentSymbol], name: &str) -> Option<&'a DocumentSymbol> {
+        rows.iter().find_map(|row| {
+            (row.name == name)
+                .then_some(row)
+                .or_else(|| find(row.children.as_deref().unwrap_or_default(), name))
+        })
+    }
+
+    fn count(rows: &[DocumentSymbol], name: &str) -> usize {
+        rows.iter()
+            .map(|row| {
+                usize::from(row.name == name)
+                    + count(row.children.as_deref().unwrap_or_default(), name)
+            })
+            .sum()
+    }
+
+    fn source_symbols(text: &str) -> Vec<DocumentSymbol> {
+        let inventory = source_inventory(text);
+        let mut rows = Vec::new();
+        add_source_symbols(
+            &mut rows,
+            &inventory,
+            text,
+            &PresentationSettings::default(),
+            |_| SourceAvailability::Unknown,
+        );
+        rows
+    }
+
+    fn source_inventory(text: &str) -> SourceInventory {
+        let source = MacroSource::build(Arc::new(text.to_owned()), &mut MacroBudget::new())
+            .expect("macro source should build");
+        SourceInventory::build_from_macro_source(source, MacroWorkLimit::default(), None)
+            .expect("source inventory should build")
+    }
+
+    fn accepted_symbols(text: &str) -> Vec<DocumentSymbol> {
+        let uri = Url::parse("untitled:named-accepted-outline.mod").unwrap();
+        let mut workspace = Workspace::new();
+        workspace.update_document(uri.as_str(), text.to_owned());
+        let model = workspace
+            .effective_model_snapshot(uri.as_str())
+            .expect("model should parse");
+        let report = workspace
+            .expand_report_snapshot(uri.as_str())
+            .expect("expansion report should exist");
+        let source = workspace
+            .source_document(uri.as_str(), &normalize_uri(uri.as_str()))
+            .expect("source should exist");
+        WrittenView::new(
+            &uri,
+            source.source(),
+            &model,
+            &report.model_map,
+            Some(&workspace),
+            true,
+            true,
+        )
+        .symbols(&PresentationSettings::default())
+    }
+
+    const NAMED_BODY: &str = "database db;\nvar y; varexo e u; parameters beta; beta=.9;\nvar_model(model_name=vm);\ntrend_component_model(model_name=tm,targets=['law'],eqtags=['law']);\nvar_expectation_model(model_name=ve,expression=y);\npac_model(model_name=pm,discount=beta);\npac_target_info(pm); target y; component y; growth 1; end;\nshock_groups(name=business); supply=e; 'Demand shock'=u; end;\ninit2shocks(name=allocation); y,e; end;\noccbin_constraints; name 'floor'; bind y<0; relax y>0; end;\nstd(e).subsamples(early=2000Q1:2000Q2,late=2000Q3:2000Q4);\nmodel_local_variable temp; model; #temp=y; [name='law'] y=0; end;\n";
+
+    #[test]
+    fn accepted_named_blocks_project_names_and_named_children() {
+        // Guards dropping names retained by accepted parser records, or
+        // treating shock and initialization mapping operands as object names.
+        let rows = accepted_symbols(NAMED_BODY);
+        for label in [
+            "var_model(vm)",
+            "trend_component_model(tm)",
+            "var_expectation_model(ve)",
+            "pac_model(pm)",
+            "pac_target_info(pm)",
+            "shock_groups(business)",
+            "init2shocks(allocation)",
+        ] {
+            assert!(find(&rows, label).is_some(), "missing {label}");
+        }
+        for child in ["target y", "component y", "supply", "Demand shock", "floor"] {
+            assert!(find(&rows, child).is_some(), "missing {child}");
+        }
+        let groups = find(&rows, "shock_groups(business)").unwrap();
+        let group_names: Vec<_> = groups
+            .children
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect();
+        assert_eq!(group_names, ["supply", "Demand shock"]);
+        for operand in ["e", "u"] {
+            assert!(
+                !group_names.contains(&operand),
+                "unexpected named shock-group child {operand}"
+            );
+        }
+        assert!(
+            find(&rows, "init2shocks(allocation)")
+                .unwrap()
+                .children
+                .as_deref()
+                .is_none_or(|children| children.is_empty())
+        );
+    }
+
+    #[test]
+    fn source_outline_keeps_named_syntax_in_an_inactive_branch() {
+        // Guards source-only Outline losing literal names or child structure
+        // when execution excludes a complete macro branch.
+        let text = format!("@#if 0\n{NAMED_BODY}@#endif\n");
+        let rows = source_symbols(&text);
+        for label in [
+            "var_model(vm)",
+            "trend_component_model(tm)",
+            "var_expectation_model(ve)",
+            "pac_model(pm)",
+            "pac_target_info(pm)",
+            "shock_groups(business)",
+            "init2shocks(allocation)",
+        ] {
+            assert!(find(&rows, label).is_some(), "missing {label}");
+        }
+        for child in [
+            "target y",
+            "component y",
+            "supply",
+            "Demand shock",
+            "floor",
+            "early",
+            "late",
+            "db",
+            "temp",
+        ] {
+            assert!(find(&rows, child).is_some(), "missing {child}");
+        }
+        let group_names: Vec<_> = find(&rows, "shock_groups(business)")
+            .unwrap()
+            .children
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect();
+        assert_eq!(group_names, ["supply", "Demand shock"]);
+        for operand in ["e", "u"] {
+            assert!(!group_names.contains(&operand));
+        }
+        let inventory = source_inventory(&text);
+        let local = inventory
+            .items
+            .iter()
+            .find(|item| {
+                item.kind == SourceItemKind::Equation && item.name.as_deref() == Some("temp")
+            })
+            .expect("local definition source row");
+        let rhs = local.local_definition.expect("local RHS span");
+        assert_eq!(&text[rhs.start as usize..rhs.end as usize], "y");
+    }
+
+    #[test]
+    fn source_interpolation_does_not_invent_a_named_model_identity() {
+        // Guards inert placeholder text becoming a literal PAC model name
+        // before macro execution supplies the interpolated value.
+        let text = "@#define model_name = \"pm\"\n@#if 0\nparameters beta; beta=.9; pac_model(model_name=@{model_name},discount=beta);\n@#endif\n";
+        let rows = source_symbols(text);
+        assert!(find(&rows, "pac_model").is_some());
+        assert!(find(&rows, "pac_model(pm)").is_none());
+    }
+
+    #[test]
+    fn accepted_and_source_outline_do_not_duplicate_named_children() {
+        // Guards source projection adding a second child under an accepted
+        // statement when both views describe the same literal source bytes.
+        let mut rows = accepted_symbols(NAMED_BODY);
+        let inventory = source_inventory(NAMED_BODY);
+        add_source_symbols(
+            &mut rows,
+            &inventory,
+            NAMED_BODY,
+            &PresentationSettings::default(),
+            |_| SourceAvailability::Unknown,
+        );
+        assert_eq!(count(&rows, "supply"), 1);
+        assert_eq!(count(&rows, "Demand shock"), 1);
+        let demand = find(&rows, "Demand shock").unwrap();
+        let start = NAMED_BODY.find("'Demand shock'").unwrap();
+        let expected =
+            written_range(NAMED_BODY, Span::new(start, start + "'Demand shock'".len())).unwrap();
+        assert_eq!(demand.selection_range, expected);
     }
 }

@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.11.38
+
+- Outline shows more named blocks and their entries, including names in
+  inactive macro branches.
+- Inactive macro branches are dimmed for the selected analysis configuration,
+  including branch previews. Turn this off with **Dynare: Inactive Code:
+  Enabled**.
+- Hover describes recognized options, expressions and block keywords in
+  inactive macro branches. Written declarations and model-local definitions
+  show their own labels and expressions.
+
 ## v0.11.37
 
 - MCP equation queries and pages select matching rows before projecting their

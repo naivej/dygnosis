@@ -80,7 +80,7 @@ pub struct WrittenModelMap {
     pub type_events: Vec<(usize, SourceOccurrence)>,
     pub writes: Vec<SourceOccurrence>,
     pub statement_objects: Vec<OutlineOccurrence>,
-    pub pac_children: Vec<OutlineOccurrence>,
+    pub statement_children: Vec<OutlineOccurrence>,
 }
 
 /// A parsed object name, PAC target or component under its owning statement.
@@ -104,6 +104,28 @@ pub(crate) fn outline_occurrences(
         .collect();
     let mut objects = Vec::new();
     let mut children = Vec::new();
+    let statement_by_span_start = |start: u32| {
+        let index = model
+            .statements
+            .partition_point(|statement| statement.span.start < start);
+        model
+            .statements
+            .get(index)
+            .filter(|statement| statement.span.start == start)
+            .map(|statement| statement.id)
+    };
+    let token_at_span = |range: &std::ops::Range<usize>, span: Span| {
+        let tokens = &model.expanded_tokens[range.clone()];
+        let offset = tokens.partition_point(|token| token.span.start < span.start);
+        let index = range.start + offset;
+        (index < range.end && model.expanded_tokens[index].span == span).then_some(index)
+    };
+    let token_starting_at = |range: &std::ops::Range<usize>, start: u32| {
+        let tokens = &model.expanded_tokens[range.clone()];
+        let offset = tokens.partition_point(|token| token.span.start < start);
+        let index = range.start + offset;
+        (index < range.end && model.expanded_tokens[index].span.start == start).then_some(index)
+    };
     for slot in model.named_slots.iter().filter(|slot| slot.declaration) {
         let NamedSlotOwner::ModelCommand(index) = slot.owner else {
             continue;
@@ -162,6 +184,85 @@ pub(crate) fn outline_occurrences(
                     source: source(&component.active_tokens, &(index..index + 1)),
                 });
             }
+        }
+    }
+    for block in &model.shock_group_blocks {
+        let Some(statement_id) = statement_by_span_start(block.span.start) else {
+            continue;
+        };
+        if let Some(span) = block.group_span
+            && let Some(index) = token_at_span(&model.statements[statement_id].token_range, span)
+        {
+            let target = index..index + 1;
+            objects.push(OutlineOccurrence {
+                statement_id,
+                name: block.group.clone(),
+                source: source(&target, &target),
+            });
+        }
+        for group in &model.shock_groups[block.row_start..block.row_end] {
+            let token_range = &model.statements[statement_id].token_range;
+            let Some(selection) = token_at_span(token_range, group.label_span) else {
+                continue;
+            };
+            let Some(first) = token_starting_at(token_range, group.span.start) else {
+                continue;
+            };
+            let last_offset = model.expanded_tokens[token_range.clone()]
+                .partition_point(|token| token.span.end <= group.span.end);
+            let Some(last) = token_range
+                .start
+                .checked_add(last_offset)
+                .and_then(|exclusive| exclusive.checked_sub(1))
+            else {
+                continue;
+            };
+            if last >= token_range.end || model.expanded_tokens[last].span.end != group.span.end {
+                continue;
+            }
+            children.push(OutlineOccurrence {
+                statement_id,
+                name: group.label.clone(),
+                source: source(&(first..last + 1), &(selection..selection + 1)),
+            });
+        }
+    }
+    for block in &model.init2shocks_blocks {
+        let Some(statement_id) = statement_by_span_start(block.span.start) else {
+            continue;
+        };
+        if let Some(span) = block.group_span
+            && let Some(index) = token_at_span(&model.statements[statement_id].token_range, span)
+        {
+            let target = index..index + 1;
+            objects.push(OutlineOccurrence {
+                statement_id,
+                name: block.group.clone(),
+                source: source(&target, &target),
+            });
+        }
+    }
+    for statement in model
+        .statements
+        .iter()
+        .filter(|statement| statement.name == "occbin_constraints")
+    {
+        let from = model
+            .occbin_constraints
+            .partition_point(|constraint| constraint.parse_order < statement.token_range.start);
+        for constraint in model.occbin_constraints[from..]
+            .iter()
+            .take_while(|constraint| constraint.parse_order < statement.token_range.end)
+        {
+            let Some(selection) = token_at_span(&statement.token_range, constraint.name_span)
+            else {
+                continue;
+            };
+            children.push(OutlineOccurrence {
+                statement_id: statement.id,
+                name: constraint.name.clone(),
+                source: source(&constraint.name_tokens, &(selection..selection + 1)),
+            });
         }
     }
     (objects, children)

@@ -45,6 +45,14 @@ pub(crate) struct SourceItem {
     pub branch_end: Option<u32>,
     pub selection: Span,
     pub name: Option<String>,
+    /// Literal display label override for a named source construct.
+    pub outline_name: Option<String>,
+    /// Exact source token to select for `outline_name`.
+    pub outline_selection: Option<Span>,
+    /// Named child identities retained from the existing parser pass.
+    pub outline_children: Vec<SourceOutlineChild>,
+    /// RHS bytes for a model-local definition selected at its name token.
+    pub local_definition: Option<Span>,
     pub written_kind: Option<String>,
     pub declaration_metadata: Option<Box<SourceDeclarationMetadata>>,
     pub path: Vec<SourcePathStep>,
@@ -54,6 +62,14 @@ pub(crate) struct SourceItem {
     pub template: bool,
     pub header_end: u32,
     pub function: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SourceOutlineChild {
+    pub name: String,
+    pub span: Span,
+    pub selection: Span,
+    pub detail: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -326,6 +342,10 @@ impl SourceInventory {
             branch_end: None,
             selection,
             name,
+            outline_name: None,
+            outline_selection: None,
+            outline_children: Vec::new(),
+            local_definition: None,
             written_kind: None,
             declaration_metadata: None,
             path: self.path_at(selection.start).to_vec(),
@@ -337,6 +357,46 @@ impl SourceInventory {
         }
     }
 
+    fn outline_name(
+        &mut self,
+        item: usize,
+        name: String,
+        selection: Span,
+        budget: &mut MacroBudget,
+    ) -> bool {
+        if !self.reserve(budget, name.len() + std::mem::size_of::<Span>()) {
+            return false;
+        }
+        let row = &mut self.items[item];
+        row.outline_name = Some(name);
+        row.outline_selection = Some(selection);
+        true
+    }
+
+    fn outline_child(
+        &mut self,
+        item: usize,
+        name: String,
+        span: Span,
+        selection: Span,
+        detail: Option<String>,
+        budget: &mut MacroBudget,
+    ) -> bool {
+        let retained = std::mem::size_of::<SourceOutlineChild>()
+            + name.len()
+            + detail.as_ref().map_or(0, String::len);
+        if !self.reserve(budget, retained) {
+            return false;
+        }
+        self.items[item].outline_children.push(SourceOutlineChild {
+            name,
+            span,
+            selection,
+            detail,
+        });
+        true
+    }
+
     fn macro_structure(
         &mut self,
         text: &str,
@@ -346,7 +406,7 @@ impl SourceInventory {
         let mut stack: Vec<MacroFrame<'_>> = Vec::new();
         let mut path = Vec::new();
         for directive in directives {
-            if !self.reserve(budget, 1 + path.len()) {
+            if !self.reserve(budget, std::mem::size_of::<SourceItem>() + path.len()) {
                 return;
             }
             let kind = directive.kind.as_str();
@@ -467,6 +527,7 @@ impl SourceInventory {
 
     fn collect_model(&mut self, text: &str, model: &Model, budget: &mut MacroBudget) {
         let mut proven = HashSet::new();
+        let mut item_by_statement: Vec<Option<usize>> = vec![None; model.statements.len()];
         self.opaque
             .extend(model.execution_steps.iter().filter_map(|step| {
                 if let ExecutionStep::Opaque(span) = step {
@@ -476,7 +537,10 @@ impl SourceInventory {
                 }
             }));
         for statement in &model.statements {
-            if !self.reserve(budget, 1 + self.path_at(statement.span.start).len()) {
+            if !self.reserve(
+                budget,
+                std::mem::size_of::<SourceItem>() + self.path_at(statement.span.start).len(),
+            ) {
                 return;
             }
             let Some(span) = token_span(model, &statement.token_range) else {
@@ -525,12 +589,286 @@ impl SourceInventory {
                     self.native_proof.push(span);
                 }
             }
+            item_by_statement[statement.id] = Some(self.items.len());
             self.items.push(row);
+        }
+        let statement_for_token = |order: usize| {
+            let index = model
+                .statements
+                .partition_point(|statement| statement.token_range.start <= order);
+            let statement = model.statements.get(index.checked_sub(1)?)?;
+            statement
+                .token_range
+                .contains(&order)
+                .then_some(statement.id)
+        };
+        let statement_for_span_start = |start: u32| {
+            let index = model
+                .statements
+                .partition_point(|statement| statement.span.start < start);
+            model
+                .statements
+                .get(index)
+                .filter(|statement| statement.span.start == start)
+                .map(|statement| statement.id)
+        };
+        for slot in &model.named_slots {
+            let (statement_id, object_name) = match slot.owner {
+                crate::engine::language::model::NamedSlotOwner::ModelCommand(index)
+                    if slot.declaration =>
+                {
+                    let command = &model.semi_structural_commands[index];
+                    let Some(statement_id) = statement_for_token(command.parse_order) else {
+                        continue;
+                    };
+                    if !proven.contains(&statement_id) {
+                        continue;
+                    }
+                    (statement_id, true)
+                }
+                crate::engine::language::model::NamedSlotOwner::DatabaseDeclaration => {
+                    let Some(statement_id) = statement_for_token(slot.order) else {
+                        continue;
+                    };
+                    if !proven.contains(&statement_id) {
+                        continue;
+                    }
+                    (statement_id, false)
+                }
+                _ => continue,
+            };
+            let Some(item) = item_by_statement.get(statement_id).copied().flatten() else {
+                continue;
+            };
+            let name = model.name(slot.name);
+            if text.get(slot.span.start as usize..slot.span.end as usize) != Some(name)
+                || intersects(&self.interpolations, slot.span)
+            {
+                continue;
+            }
+            if object_name {
+                let label = format!("{}({name})", model.statements[statement_id].name);
+                if !self.outline_name(item, label, slot.span, budget) {
+                    return;
+                }
+            } else if !self.outline_child(
+                item,
+                name.to_owned(),
+                slot.span,
+                slot.span,
+                Some("database".to_owned()),
+                budget,
+            ) {
+                return;
+            }
+        }
+        for block in &model.pac_target_info {
+            let Some(statement_id) = statement_for_token(block.parse_order) else {
+                continue;
+            };
+            if !proven.contains(&statement_id) {
+                continue;
+            }
+            let Some(item) = item_by_statement.get(statement_id).copied().flatten() else {
+                continue;
+            };
+            let name = model.name(block.name);
+            if text.get(block.name_span.start as usize..block.name_span.end as usize) == Some(name)
+                && !intersects(&self.interpolations, block.name_span)
+            {
+                let label = format!("pac_target_info({name})");
+                if !self.outline_name(item, label, block.name_span, budget) {
+                    return;
+                }
+            }
+            for target in &block.target_tokens {
+                let expression_start = target.start + 1;
+                let expression = &model.expanded_tokens[expression_start..target.end];
+                let Some(span) = token_span(model, target) else {
+                    continue;
+                };
+                let expression_span = token_span(model, &(expression_start..target.end));
+                let Some(expression_span) = expression_span else {
+                    continue;
+                };
+                if intersects(&self.interpolations, expression_span) {
+                    continue;
+                }
+                let label = format!(
+                    "target {}",
+                    crate::engine::language::parser::join_lexemes(&model.source, expression)
+                );
+                let selection = model.expanded_tokens[expression_start].span;
+                if !self.outline_child(item, label, span, selection, None, budget) {
+                    return;
+                }
+            }
+            for row in &block.rows {
+                let crate::engine::language::model::PacTargetInfoRow::Component(component) = row
+                else {
+                    continue;
+                };
+                let expression_span = token_span(model, &component.expression_tokens);
+                let Some(expression_span) = expression_span else {
+                    continue;
+                };
+                if intersects(&self.interpolations, expression_span) {
+                    continue;
+                }
+                let expression = &model.expanded_tokens[component.expression_tokens.clone()];
+                let name = format!(
+                    "component {}",
+                    crate::engine::language::parser::join_lexemes(&model.source, expression)
+                );
+                let Some(span) = token_span(model, &component.active_tokens) else {
+                    continue;
+                };
+                let selection = model.expanded_tokens[component.expression_tokens.start].span;
+                if !self.outline_child(item, name, span, selection, None, budget) {
+                    return;
+                }
+            }
+        }
+        for block in &model.shock_group_blocks {
+            let Some(statement_id) = statement_for_span_start(block.span.start) else {
+                continue;
+            };
+            if !proven.contains(&statement_id) {
+                continue;
+            }
+            let Some(item) = item_by_statement.get(statement_id).copied().flatten() else {
+                continue;
+            };
+            if let Some(span) = block.group_span
+                && text.get(span.start as usize..span.end as usize) == Some(block.group.as_str())
+                && !intersects(&self.interpolations, span)
+            {
+                let label = format!("shock_groups({})", block.group);
+                if !self.outline_name(item, label, span, budget) {
+                    return;
+                }
+            }
+            for group in &model.shock_groups[block.row_start..block.row_end] {
+                if intersects(&self.interpolations, group.label_span) {
+                    continue;
+                }
+                if !self.outline_child(
+                    item,
+                    group.label.clone(),
+                    group.span,
+                    group.label_span,
+                    None,
+                    budget,
+                ) {
+                    return;
+                }
+            }
+        }
+        for block in &model.init2shocks_blocks {
+            let Some(statement_id) = statement_for_span_start(block.span.start) else {
+                continue;
+            };
+            if !proven.contains(&statement_id) {
+                continue;
+            }
+            let Some(item) = item_by_statement.get(statement_id).copied().flatten() else {
+                continue;
+            };
+            if let Some(span) = block.group_span
+                && text.get(span.start as usize..span.end as usize) == Some(block.group.as_str())
+                && !intersects(&self.interpolations, span)
+            {
+                let label = format!("init2shocks({})", block.group);
+                if !self.outline_name(item, label, span, budget) {
+                    return;
+                }
+            }
+        }
+        for statement in &model.statements {
+            if statement.name != "occbin_constraints" {
+                continue;
+            }
+            if !proven.contains(&statement.id) {
+                continue;
+            }
+            let Some(item) = item_by_statement.get(statement.id).copied().flatten() else {
+                continue;
+            };
+            let from = model
+                .occbin_constraints
+                .partition_point(|constraint| constraint.parse_order < statement.token_range.start);
+            for constraint in model.occbin_constraints[from..]
+                .iter()
+                .take_while(|constraint| constraint.parse_order < statement.token_range.end)
+            {
+                if intersects(&self.interpolations, constraint.name_span) {
+                    continue;
+                }
+                if !self.outline_child(
+                    item,
+                    constraint.name.clone(),
+                    constraint.span,
+                    constraint.name_span,
+                    None,
+                    budget,
+                ) {
+                    return;
+                }
+            }
+        }
+        for instruction in &model.subsamples {
+            let crate::engine::language::model::SubsampleInstruction::Declare {
+                head,
+                ranges,
+                span,
+                ..
+            } = instruction
+            else {
+                continue;
+            };
+            let Some(statement_id) = statement_for_span_start(span.start) else {
+                continue;
+            };
+            if !proven.contains(&statement_id) {
+                continue;
+            }
+            let Some(item) = item_by_statement.get(statement_id).copied().flatten() else {
+                continue;
+            };
+            let head = match head {
+                crate::engine::language::model::SubsampleHead::Symbol(name, _)
+                | crate::engine::language::model::SubsampleHead::Std(name, _) => {
+                    model.name(*name).to_owned()
+                }
+                crate::engine::language::model::SubsampleHead::Corr(first, _, second, _) => {
+                    format!("{},{}", model.name(*first), model.name(*second))
+                }
+            };
+            for range in ranges {
+                let name = model.name(range.name);
+                if text.get(range.name_span.start as usize..range.name_span.end as usize)
+                    != Some(name)
+                    || intersects(&self.interpolations, range.name_span)
+                {
+                    continue;
+                }
+                if !self.outline_child(
+                    item,
+                    name.to_owned(),
+                    range.span,
+                    range.name_span,
+                    Some(format!("named subsample · subsamples({head})")),
+                    budget,
+                ) {
+                    return;
+                }
+            }
         }
         for (declaration_index, declaration) in model.written_declarations.iter().enumerate() {
             if !self.reserve(
                 budget,
-                1 + self.path_at(declaration.declaration.span.start).len(),
+                std::mem::size_of::<SourceItem>()
+                    + self.path_at(declaration.declaration.span.start).len(),
             ) {
                 return;
             }
@@ -583,7 +921,11 @@ impl SourceInventory {
             self.items.push(row);
         }
         for equation in &model.written_equations {
-            if !self.reserve(budget, 1 + self.path_at(equation.equation.span.start).len()) {
+            if !self.reserve(
+                budget,
+                std::mem::size_of::<SourceItem>()
+                    + self.path_at(equation.equation.span.start).len(),
+            ) {
                 return;
             }
             let Some(span) = token_span(model, &equation.token_range) else {
@@ -627,6 +969,30 @@ impl SourceInventory {
                 row.tags.clone_from(&equation.equation.tag_map);
             }
             row.name = row.tags.get("name").cloned();
+            if equation.equation.is_local {
+                let tokens = &model.expanded_tokens[equation.token_range.clone()];
+                let identifier = tokens.get(1).filter(|token| token.kind == TokenKind::Ident);
+                let equals = tokens.iter().position(|token| token.kind == TokenKind::Eq);
+                if let (Some(identifier), Some(equals)) = (identifier, equals) {
+                    let identifier_name = identifier.text(&model.source);
+                    if text.get(identifier.span.start as usize..identifier.span.end as usize)
+                        == Some(identifier_name)
+                        && !intersects(&self.interpolations, identifier.span)
+                    {
+                        row.name = Some(identifier_name.to_owned());
+                        row.selection = identifier.span;
+                        if let (Some(first), Some(last)) = (
+                            tokens.get(equals + 1),
+                            tokens.last().filter(|_| equals + 1 < tokens.len()),
+                        ) {
+                            row.local_definition = Some(Span {
+                                start: first.span.start,
+                                end: last.span.end,
+                            });
+                        }
+                    }
+                }
+            }
             self.items.push(row);
         }
     }
