@@ -95,7 +95,11 @@ pub(crate) fn installed() -> bool {
     INSTALLED.load(Ordering::Relaxed) && !ACCOUNTING_FAILED.load(Ordering::Relaxed)
 }
 
+// Darwin's x86_64 unwinder requires 16-byte exception alignment even when
+// Rust requests an 8-byte layout. Keep the native malloc alignment after the
+// header so a caught panic does not fault in libunwind's aligned stores.
 #[repr(C)]
+#[cfg_attr(all(target_vendor = "apple", target_arch = "x86_64"), repr(align(16)))]
 struct Header {
     owner: *const Owner,
 }
@@ -107,7 +111,7 @@ fn tracked_layout(layout: Layout) -> Option<(Layout, usize)> {
         .map(|(layout, offset)| (layout.pad_to_align(), offset))
 }
 
-/// Installed by the experimental binary, never by ordinary library consumers.
+/// Installed by the MCP executable and its library tests.
 pub struct TrackingAllocator;
 
 // SAFETY: each returned allocation carries one fixed header at its System base.
@@ -235,6 +239,31 @@ unsafe fn allocate(layout: Layout, zeroed: bool) -> *mut u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(target_vendor = "apple", target_arch = "x86_64"))]
+    #[test]
+    fn native_unwind_alignment_survives_low_alignment_realloc() {
+        // Guards the native unwind ABI for ordinary Rust exception layouts,
+        // including the payload offset after zeroed allocation and realloc.
+        let layout = Layout::from_size_align(56, 8).unwrap();
+        let pointer = unsafe { std::alloc::alloc_zeroed(layout) };
+        assert!(!pointer.is_null());
+        assert_eq!(pointer as usize % 16, 0);
+        assert!(
+            unsafe { std::slice::from_raw_parts(pointer, layout.size()) }
+                .iter()
+                .all(|byte| *byte == 0)
+        );
+        let pointer = unsafe { std::alloc::realloc(pointer, layout, 120) };
+        assert!(!pointer.is_null());
+        assert_eq!(pointer as usize % 16, 0);
+        assert!(
+            unsafe { std::slice::from_raw_parts(pointer, layout.size()) }
+                .iter()
+                .all(|byte| *byte == 0)
+        );
+        unsafe { std::alloc::dealloc(pointer, Layout::from_size_align(120, 8).unwrap()) };
+    }
 
     #[test]
     fn capacity_realloc_and_cross_thread_free_keep_the_original_owner() {

@@ -8,6 +8,8 @@
 - Launch MCP with the `dygnosis-mcp` companion. Completed source analysis is
   reused by default for each connection. Set `DYGNOSIS_MCP_REUSE=0` in the MCP
   server environment to disable reuse.
+- Fix MCP memory alignment on Intel macOS, which could crash the server during
+  panic recovery.
 
 ## v0.11.36
 
