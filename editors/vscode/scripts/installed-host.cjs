@@ -112,7 +112,7 @@ exports.run = async function run() {
     assert.ok(overrideSymbols.length > 0, "Override must provide actual language results after restart");
     evidence.overrideMcp = await probeMcp(overrideMcp, source.version);
     evidence.override_native_vscode_mcp = await probeNativeMcp(vscode, extension.id);
-    assert.ok(launchLogs.some(message => message.startsWith("MCP executable: ") && message.endsWith(` (dygnosis ${source.version})`) && samePath(message.slice(16, -` (dygnosis ${source.version})`.length), override)), "The global override must route native MCP through the selected main executable");
+    assert.ok(launchLogs.some(message => message.startsWith("MCP executable: ") && message.endsWith(` (dygnosis-mcp ${source.version})`) && samePath(message.slice(16, -` (dygnosis-mcp ${source.version})`.length), overrideMcp)), "The global override must select its MCP companion directly");
     evidence.selected_lsp_paths = launchLogs.filter(message => message.startsWith("LSP executable:"));
     evidence.checks.push("explicit user override with spaces launches LSP and MCP");
     await service.shutdown();
