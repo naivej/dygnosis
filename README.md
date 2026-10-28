@@ -2,7 +2,7 @@
 
 Dygnosis adds Dynare language support to VS Code with zero dependency. 
 
-Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis) or download packages and standalone binaries from [GitHub Releases](https://github.com/naivej/dygnosis/releases), then run **Dygnosis: Open Help** in VS Code to explore.
+Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis) or download packages and standalone bundles from [GitHub Releases](https://github.com/naivej/dygnosis/releases), then run **Dygnosis: Open Help** in VS Code to explore.
 
 ## Highlights
 

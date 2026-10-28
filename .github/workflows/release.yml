@@ -1,5 +1,5 @@
 # Cross-platform compatibility for a version tag, then a GitHub Release of the
-# tested engine binaries and VSIX files. Marketplace publication is marketplace.yml.
+# tested standalone bundles and VSIX files. Marketplace publication is marketplace.yml.
 #
 # Usage:
 #   git tag v0.12.0
@@ -75,32 +75,17 @@ jobs:
           name: verified-packages
           path: artifacts
 
-      - name: Stage tested engine binaries and VSIX files
-        shell: bash
-        run: |
-          mkdir -p release
-          for dir in artifacts/*/; do
-            target="$(basename "$dir")"
-            archive="$(find "$dir" -name '*.tar.gz' -print -quit)"
-            test -n "$archive"
-            member="$(tar -tzf "$archive" | grep -E '/dygnosis(\.exe)?$')"
-            case "$target" in
-              win32-*) name="dygnosis-${target}.exe" ;;
-              *) name="dygnosis-${target}" ;;
-            esac
-            tar -xOf "$archive" "$member" > "release/$name"
-            case "$target" in
-              win32-*) ;;
-              *) chmod 755 "release/$name" ;;
-            esac
-            vsix="$(find "$dir" -maxdepth 1 -type f -name 'dygnosis-*.vsix')"
-            test "$(printf '%s\n' "$vsix" | grep -c .)" -eq 1
-            cp "$vsix" "release/$(basename "$vsix")"
-          done
-          test "$(find release -type f -name '*.vsix' | wc -l)" -eq 6
-          test "$(find release -type f ! -name '*.vsix' ! -name SHA256SUMS | wc -l)" -eq 6
-          (cd release && sha256sum dygnosis-* > SHA256SUMS)
-          ls -l release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Test release asset staging
+        run: node --test editors/vscode/tests/release_staging.test.cjs
+
+      - name: Stage verified standalone bundles and VSIX files
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/stage-release.cjs --directory artifacts --output release --tag "$RELEASE_TAG" --commit "$(git rev-parse HEAD)"
 
       - uses: softprops/action-gh-release@v2
         with:
