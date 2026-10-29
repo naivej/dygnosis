@@ -388,27 +388,27 @@
         },
         {
           "command": "dygnosis.diffWith",
-          "when": "false"
+          "when": "dygnosis.changesContext"
         },
         {
           "command": "dygnosis.resetAnalysisConfiguration",
-          "when": "false"
+          "when": "dygnosis.analysisDocument || dygnosis.effectivePreview"
         },
         {
           "command": "dygnosis.saveAnalysisConfiguration",
-          "when": "false"
+          "when": "(dygnosis.analysisDocument || dygnosis.effectivePreview) && workspaceFolderCount > 0"
         },
         {
           "command": "dygnosis.filterOutline",
-          "when": "false"
+          "when": "dygnosis.analysisDocument"
         },
         {
           "command": "dygnosis.showNotFullyCheckedModels",
-          "when": "false"
+          "when": "workspaceFolderCount > 0"
         },
         {
           "command": "dygnosis.showAllWorkspaceFiles",
-          "when": "false"
+          "when": "workspaceFolderCount > 0"
         },
         {
           "command": "dygnosis.ignoreWorkspaceFolder",
@@ -416,7 +416,7 @@
         },
         {
           "command": "dygnosis.renameSymbol",
-          "when": "dygnosis.analysisDocument"
+          "when": "dygnosis.analysisDocument && !editorReadonly"
         },
         {
           "command": "dygnosis.showEffectiveModel",
@@ -436,7 +436,7 @@
         },
         {
           "command": "dygnosis.goToWrittenSource",
-          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview"
+          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewWrittenSource"
         },
         {
           "command": "dygnosis.refreshEffectiveModel",
@@ -445,6 +445,42 @@
         {
           "command": "dygnosis.openChanges",
           "when": "dygnosis.changesContext"
+        },
+        {
+          "command": "dygnosis.selectAnalysisConfiguration",
+          "when": "dygnosis.analysisDocument || dygnosis.effectivePreview"
+        },
+        {
+          "command": "dygnosis.overrideMacroDefinition",
+          "when": "dygnosis.analysisDocument"
+        },
+        {
+          "command": "dygnosis.skipMacroDefinition",
+          "when": "dygnosis.analysisDocument"
+        },
+        {
+          "command": "dygnosis.previewMacroBranch",
+          "when": "dygnosis.analysisDocument"
+        },
+        {
+          "command": "dygnosis.goToSourceCandidate",
+          "when": "dygnosis.analysisDocument"
+        },
+        {
+          "command": "dygnosis.setupWorkspaceMcp",
+          "when": "workspaceFolderCount > 0 && isWorkspaceTrusted"
+        },
+        {
+          "command": "dygnosis.recheckWorkspace",
+          "when": "workspaceFolderCount > 0"
+        },
+        {
+          "command": "dygnosis.cancelWorkspace",
+          "when": "workspaceFolderCount > 0"
+        },
+        {
+          "command": "dygnosis.configureWorkspaceExclusions",
+          "when": "workspaceFolderCount > 0"
         }
       ],
       "view/title": [

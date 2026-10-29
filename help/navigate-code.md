@@ -32,7 +32,8 @@ Sections](settings:dynare.outline.sections) and toggle equation numbers in
 
 Macro branches (`@#if`) and `@#for` loops follow the [selected analysis
 configuration](effective-model.md#choose-the-analysis-configuration); filter
-**Active**, **Inactive** or **Both** from the Outline toolbar or [Dynare ›
+**Active**, **Inactive** or **Both** from the Outline toolbar, **Dygnosis:
+Filter Outline by macro activity...** in the Command Palette, or [Dynare ›
 Outline: Activity](settings:dynare.outline.activity).
 
 ## Inactive source

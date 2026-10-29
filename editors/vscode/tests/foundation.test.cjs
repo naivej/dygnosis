@@ -111,10 +111,37 @@ test("equation navigation manifest replaces old commands and removes the model p
   assert.equal(Object.values(contributes.menus).flat().some(row => /dygnosis\.(model|equationNavigation|includeOwners)\b/.test(row.when ?? "")), false);
   assert.equal(contributes.configuration.some(group => Object.hasOwn(group.properties, "dynare.modelView.sections")), false);
   assert.equal(contributes.configuration.some(group => Object.hasOwn(group.properties, "dynare.diagnosticActions.explain")), false);
-  for (const command of ["dygnosis.jumpToEquation", "dygnosis.chooseModelOwner"]) {
-    assert.equal(contributes.menus.commandPalette.some(row => row.command === command && row.when === "dygnosis.analysisDocument"), true, command);
-  }
 });
+
+test("the palette exposes user actions in their context and hides aliases and target-only callbacks", () => {
+  // Guards actions disappearing behind local controls or appearing without their editor/workspace context.
+  const { contributes } = require("../package.json");
+  const groups = [
+    [undefined, ["openHelp", "restartServer", "showOutput", "openSettings", "workspaceStatus", "showDiagnostic", "showAllDiagnostics"]],
+    ["false", ["editSettingsJson", "ignoreWorkspaceFolder"]],
+    ["dygnosis.analysisDocument", ["jumpToEquation", "chooseModelOwner", "filterOutline", "overrideMacroDefinition", "skipMacroDefinition", "previewMacroBranch", "goToSourceCandidate"]],
+    ["dygnosis.analysisDocument && !editorReadonly", ["renameSymbol"]],
+    ["dygnosis.modelContext", ["showEffectiveModel"]],
+    ["dygnosis.analysisDocument && resourceExtname =~ /\\.(mod|dyn)$/", ["treatAsRoot"]],
+    ["resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewWrittenSource", ["goToWrittenSource"]],
+    ["resourceScheme == dygnosis-effective && dygnosis.effectivePreview", ["refreshEffectiveModel"]],
+    ["dygnosis.changesContext", ["openChanges", "diffWith"]],
+    ["dygnosis.analysisDocument || dygnosis.effectivePreview", ["selectAnalysisConfiguration", "resetAnalysisConfiguration"]],
+    ["(dygnosis.analysisDocument || dygnosis.effectivePreview) && workspaceFolderCount > 0", ["saveAnalysisConfiguration"]],
+    ["workspaceFolderCount > 0", ["showNotFullyCheckedModels", "showAllWorkspaceFiles", "recheckWorkspace", "cancelWorkspace", "configureWorkspaceExclusions"]],
+    ["workspaceFolderCount > 0 && isWorkspaceTrusted", ["setupWorkspaceMcp"]],
+  ];
+  const expected = new Map(groups.flatMap(([when, commands]) => commands.map(command => [`dygnosis.${command}`, when])));
+  const palette = new Map(contributes.menus.commandPalette.map(row => [row.command, row.when]));
+  assert.equal(palette.size, contributes.menus.commandPalette.length, "each command has one palette visibility rule");
+  assert.deepEqual(new Set(contributes.commands.map(row => row.command)), new Set(expected.keys()), "each public action has a deliberate palette classification");
+  for (const command of contributes.commands) {
+    assert.equal(command.category, "Dygnosis", command.command);
+    assert.equal(palette.get(command.command), expected.get(command.command), command.command);
+  }
+  for (const command of palette.keys()) assert.ok(expected.has(command), command);
+});
+
 test("editor context commands share one ordered Dygnosis block and retain their contexts", () => {
   // Guards split menu groups, lost context clauses/shortcuts, missing Skip, or restored Compare command.
   const { contributes } = require("../package.json");
@@ -140,11 +167,6 @@ test("editor context commands share one ordered Dygnosis block and retain their 
   assert.deepEqual({ title: skip?.title, category: skip?.category, enablement: skip?.enablement }, {
     title: "Skip macro definition for analysis", category: "Dygnosis", enablement: "dygnosis.analysisDocument",
   });
-  // Guards duplicate shortcuts returning to the palette while their contextual commands remain available.
-  for (const command of ["dygnosis.resetAnalysisConfiguration", "dygnosis.saveAnalysisConfiguration", "dygnosis.diffWith", "dygnosis.editSettingsJson", "dygnosis.filterOutline", "dygnosis.showNotFullyCheckedModels", "dygnosis.showAllWorkspaceFiles"]) {
-    assert.ok(commands.some(row => row.command === command), command);
-    assert.deepEqual(contributes.menus.commandPalette.filter(row => row.command === command), [{ command, when: "false" }]);
-  }
   for (const command of ["dygnosis.filterOutline", "dygnosis.showNotFullyCheckedModels", "dygnosis.showAllWorkspaceFiles"]) {
     assert.ok(contributes.menus["view/title"].some(row => row.command === command), command);
   }
@@ -161,7 +183,6 @@ test("editor context commands share one ordered Dygnosis block and retain their 
   assert.equal(contributes.menus["scm/resourceState/context"].some(row => row.command === "dygnosis.openChanges"), true);
   // Guards Help disappearing from the palette/extension menu or returning as a generic view button.
   assert.ok(commands.some(row => row.command === "dygnosis.openHelp" && row.enablement === undefined));
-  assert.ok(!contributes.menus.commandPalette.some(row => row.command === "dygnosis.openHelp" && row.when !== "true"));
   assert.deepEqual(contributes.menus["extension/context"], [{ command: "dygnosis.openHelp", when: "extension == coconutwater.dygnosis" }]);
   for (const menu of ["editor/title", "editor/context", "view/title"]) {
     assert.ok(!contributes.menus[menu].some(row => row.command === "dygnosis.openHelp"), menu);

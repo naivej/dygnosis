@@ -8,6 +8,8 @@ Diagnostics](settings:dynare.workspaceDiagnostics).
 Open **Dynare workspace checks** in Explorer, or run **Dygnosis: Show workspace
 checks** from the Command Palette. Click **Show not fully checked models**
 (`$(filter)`) in the view title bar to filter for incomplete or failed checks.
+You can also switch this filter from the Command Palette with **Dygnosis: Show
+not fully checked models** and **Dygnosis: Show all workspace files**.
 
 ## Scope and exclusions
 

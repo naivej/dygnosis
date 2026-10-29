@@ -10,7 +10,9 @@ Control**.
 In **Dygnosis Changes**, your active model appears under **After** and the
 selected baseline under **Before**. Browse structural categories such as
 **Equations** and **Parameters**, follow source links, or click **Text diff**
-for VS Code's side-by-side file comparison. Configure default filters in
+for VS Code's side-by-side file comparison. To select another file, run
+**Dygnosis: Show model changes with model file…** from the Command Palette
+while the changes view is active. Configure default filters in
 [Dynare › Diff: Default Change Kinds](settings:dynare.diff.defaultChangeKinds).
 
 ## Comparison scope

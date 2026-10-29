@@ -839,5 +839,4 @@ test("SCM contribution enables explicit resource selection independently of the 
   assert.equal(command.enablement, undefined, "global command enablement cannot use the unrelated active editor context");
   assert.match(scm.when, /scmProvider == git/); assert.match(scm.when, /resourceExtname/); assert.match(scm.when, /resourcePath in dygnosis\.knownIncludedPaths/);
   assert.equal(scm.when.includes("dygnosis.changesContext"), false); assert.equal(scm.when.includes("inc"), false, "include eligibility comes from proven paths rather than an extension list");
-  assert.ok(contributes.menus.commandPalette.some(item => item.command === command.command && item.when.includes("dygnosis.changesContext")));
 });

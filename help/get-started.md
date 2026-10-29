@@ -11,8 +11,8 @@ bar is **Dynare**. If it shows another language, click it and select
 Press `F1` and run **Dygnosis: Open Help**. You can also open **Extensions**,
 find **Dygnosis**, and choose **Open Help** from its gear or context menu.
 
-The **Command Palette** also offers commands such as **Dygnosis: Expand
-macros** and **Dygnosis: Select analysis configuration**. Common actions
+Press `F1` and search for **Dygnosis** to find actions in the **Command
+Palette**. Editor commands depend on the active file. Common actions also
 appear in the editor title bar, the editor context menu, **Outline**,
 **Problems**, and **Dynare workspace checks** in Explorer.
 

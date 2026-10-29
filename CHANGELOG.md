@@ -4,9 +4,10 @@
 
 - Open Help from the Command Palette or the Dygnosis extension's gear or context
   menu in **Extensions**.
-- Find analysis configuration commands under **Dygnosis**. Save or reset a
-  configuration from the selector. **Show model changes** compares model files
-  and configurations.
+- Find more actions in the Command Palette, including saving or resetting an
+  analysis configuration, filtering Outline and workspace checks, and selecting
+  another model file in **Dygnosis Changes**. These actions also remain available
+  from their local controls.
 - Simple hand-written configurations work without extra source information.
   Unavailable configurations explain why, and saving keeps other entries.
 

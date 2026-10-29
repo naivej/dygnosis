@@ -83,7 +83,9 @@ filtering.
 
 - In **Select analysis configuration**, choose **Save current configuration**
   to save your choices in [Dynare: Analysis Configurations](settings:dynare.analysisConfigurations),
-  or **Source** to reset them.
+  or **Source** to reset them. You can also run **Dygnosis: Save analysis
+  configuration** or **Dygnosis: Reset analysis configuration** from the
+  Command Palette.
 - **Compare configurations**: Run **Dygnosis: Show model changes** and choose
   **config…** to diff two configurations ([Review model
   changes](structural-diff.md)). For navigating inactive macro branches, see
