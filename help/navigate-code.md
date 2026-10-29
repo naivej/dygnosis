@@ -42,7 +42,7 @@ configuration, **Outline** can still list its declarations and equations
 without active equation numbers.
 
 To jump to a symbol declared only inside an inactive macro branch, place the
-cursor on the name and run **Dynare: Go to Source Candidate**. To analyze a
+cursor on the name and run **Dygnosis: Go to source candidate**. To analyze a
 different branch, see [Choose the analysis
 configuration](effective-model.md#choose-the-analysis-configuration).
 

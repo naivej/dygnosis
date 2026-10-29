@@ -51,7 +51,7 @@ impl Owner {
     fn add(&self, bytes: usize) {
         let before = self
             .live
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |live| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |live| {
                 Some(live.saturating_add(bytes))
             })
             .unwrap_or(usize::MAX);

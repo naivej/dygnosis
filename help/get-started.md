@@ -8,9 +8,11 @@ Open a model file and check that the language mode in the bottom-right status
 bar is **Dynare**. If it shows another language, click it and select
 **Dynare**.
 
-Press `F1` to open the **Command Palette** and type `Dygnosis` or `Dynare` to
-run extension commands such as **Dygnosis: Open Help**, **Dygnosis: Expand
-macros** or **Dynare: Select Analysis Configuration**. Common actions also
+Press `F1` and run **Dygnosis: Open Help**. You can also open **Extensions**,
+find **Dygnosis**, and choose **Open Help** from its gear or context menu.
+
+The **Command Palette** also offers commands such as **Dygnosis: Expand
+macros** and **Dygnosis: Select analysis configuration**. Common actions
 appear in the editor title bar, the editor context menu, **Outline**,
 **Problems**, and **Dynare workspace checks** in Explorer.
 
@@ -25,9 +27,9 @@ codes; setting links open the matching VS Code Settings entry.
 | Trace declarations, parameters and equations across files | **Go to Definition**, **Find All References**, **Rename symbol**, **Outline**, **Show Call Hierarchy** | [Follow equations and names](navigate-code.md) |
 | Write declarations, equations, steady states and shocks | Completion, hover, option hints, `shocks` templates, bulk `long_name` and equation tagging | [Write equations and commands](edit-models.md) |
 | Read `long_name` and TeX labels, parameter values and block roles | Inlay hints, block shading, semantic token colors | [Read labels, hints and colors](appearance.md) |
-| Preview `@#for`, `@#if` and `@#include`, or test `-D` and `exclude_eqs` | **Expand macros**, **Select Analysis Configuration** | [Inspect macro expansion](effective-model.md) |
+| Preview `@#for`, `@#if` and `@#include`, or test `-D` and `exclude_eqs` | **Expand macros**, **Select analysis configuration** | [Inspect macro expansion](effective-model.md) |
 | Catch preprocessor errors and modeling mistakes before MATLAB | **Problems** panel, related locations, **Quick Fix** | [Check the model](diagnostics.md) |
-| Compare model revisions, variants or analysis configurations | **Dygnosis Changes** (**Show mod changes**) | [Review model changes](structural-diff.md) |
+| Compare model revisions, variants or analysis configurations | **Dygnosis Changes** (**Show model changes**) | [Review model changes](structural-diff.md) |
 | Check all saved `.mod` and `.dyn` models in a project | **Dynare workspace checks** in Explorer | [Check workspace models](workspace-checks.md) |
 
 ## Numerical work and agents

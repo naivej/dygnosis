@@ -133,6 +133,12 @@ export function analysisConfiguration(value: unknown): value is AnalysisConfigur
       Array.isArray(value.equation_selection.values) && value.equation_selection.values.length > 0 &&
       value.equation_selection.values.every(item => typeof item === "string" && item.trim().length > 0));
 }
+export function presetBinding(value: unknown): value is PresetBinding {
+  return record(value) && natural(value.operation_index) && nullableString(value.file) &&
+    ["definition", "function_definition", "conditional"].includes(String(value.kind)) && nullableString(value.name) &&
+    typeof value.expected_text === "string" && typeof value.target_text === "string" &&
+    (value.branch_index === null || natural(value.branch_index)) && nullableString(value.branch_text);
+}
 export function parseAnalysisMetadata(value: unknown): AnalysisMetadata {
   if (!record(value) || !["selected", "stale"].includes(String(value.state)) || !record(value.selection) ||
       typeof value.selection.configuration_id !== "string" || !nullableString(value.selection.name) || typeof value.selection.preview !== "boolean" ||
@@ -166,10 +172,7 @@ export function parseAnalysisContext(value: unknown, root: string): AnalysisCont
       (value.partial !== undefined && typeof value.partial !== "boolean") || (value.message !== undefined && typeof value.message !== "string") ||
       (value.prepared_analysis !== undefined && !analysisConfiguration(value.prepared_analysis)) ||
       (value.prepared_include_paths !== undefined && !strings(value.prepared_include_paths)) ||
-      !(value.preset_bindings === undefined || rows(value.preset_bindings, binding => natural(binding.operation_index) && nullableString(binding.file) &&
-        ["definition", "function_definition", "conditional"].includes(String(binding.kind)) && nullableString(binding.name) &&
-        typeof binding.expected_text === "string" && typeof binding.target_text === "string" &&
-        (binding.branch_index === null || natural(binding.branch_index)) && nullableString(binding.branch_text)))) {
+      !(value.preset_bindings === undefined || Array.isArray(value.preset_bindings) && value.preset_bindings.every(presetBinding))) {
     throw new Error("Unsupported or invalid analysis context. Use the bundled engine or update dynare.serverPath.");
   }
   parseAnalysisMetadata(value.analysis);

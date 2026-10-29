@@ -24,8 +24,9 @@ const vscode = {
     showWarningMessage: async (...args) => { host.warnings.push(args); return host.warningAnswer; },
   },
   workspace: {
+    get workspaceFile() { return host.workspaceFile; },
     getWorkspaceFolder: value => value.scheme === "file" ? host.folder : undefined,
-    getConfiguration: () => ({ inspect: () => ({ workspaceFolderValue: host.saved }), update: async (key, value, target) => { host.updates.push({ key, value, target }); host.saved = value; } }),
+    getConfiguration: () => ({ inspect: () => ({ workspaceFolderValue: host.saved, workspaceValue: host.workspaceSaved, globalValue: host.globalSaved }), update: async (key, value, target) => { host.updates.push({ key, value, target }); host.saved = value; } }),
   },
 };
 const originalLoad = Module._load;
@@ -76,6 +77,109 @@ test("source and expanded selectors use one root and never apply saved startup c
   await env.run("selectAnalysisConfiguration");
   assert.equal(env.service.calls[1][0].toString(), env.document.uri.toString());
   assert.deepEqual(env.service.calls[1][1], {});
+  env.registration.dispose();
+});
+
+test("simple saved presets need no source bindings in selection or comparison", async () => {
+  // Guards a schema-valid hand-written preset disappearing unless internal binding data is added.
+  const env = setup();
+  host.saved = [{ name: "Simple", root: "main.mod", analysis: { defines: [{ name: "FLAG", expression: "1" }] } }];
+  host.answers.push(items => items.find(item => item.label === "Simple"));
+  await env.run("selectAnalysisConfiguration");
+  assert.equal(env.service.calls.length, 1);
+  assert.deepEqual(env.service.calls[0][1].defines, [{ name: "FLAG", expression: "1" }]);
+  assert.deepEqual(env.service.calls[0][4], []);
+  host.answers.push(items => items.find(item => item.label === "Simple"));
+  const baseline = await chooseAnalysisBaseline(env.document.uri, { isCancellationRequested: false });
+  assert.equal(baseline.analysis.name, "Simple");
+  assert.deepEqual(baseline.preset_bindings, []);
+  assert.equal(env.service.calls.length, 1, "comparison selection does not change the live configuration");
+  env.registration.dispose();
+});
+
+test("folder presets support single-folder Workspace storage without importing multi-root or User settings", async () => {
+  // Guards losing presets when a folder is opened alone, or applying shared presets to another folder.
+  const env = setup();
+  const single = { name: "Single folder", root: "main.mod", analysis: {} };
+  host.saved = undefined; host.workspaceSaved = [single];
+  host.globalSaved = [{ ...single, name: "Global" }];
+  host.answers.push(items => items.find(item => item.label === "Single folder"));
+  await env.run("selectAnalysisConfiguration");
+  assert.equal(env.service.calls.at(-1)[1].name, "Single folder");
+  assert.ok(host.picks.at(-1).items.some(item => item.label === "User settings" && item.description.includes("Unavailable:")));
+  host.inputAnswers.push("Saved locally");
+  await env.run("saveAnalysisConfiguration");
+  assert.deepEqual(host.saved.map(value => value.name), ["Single folder", "Saved locally"]);
+  assert.equal(host.updates[0].target, vscode.ConfigurationTarget.WorkspaceFolder);
+  host.workspaceFile = uri("file:///workspace/models.code-workspace");
+  host.saved = [{ ...single, name: "Folder" }];
+  host.answers.push(items => {
+    assert.ok(!items.some(item => ["Global", "Single folder"].includes(item.label)));
+    assert.ok(items.some(item => item.label === "Workspace settings" && item.description.includes("multi-root")));
+    return items.find(item => item.label === "Folder");
+  });
+  await env.run("selectAnalysisConfiguration");
+  assert.equal(env.service.calls.at(-1)[1].name, "Folder");
+  const applied = env.service.calls.length;
+  for (const scope of ["User settings", "Workspace settings"]) {
+    host.answers.push(items => items.find(item => item.label === scope));
+    await env.run("selectAnalysisConfiguration");
+    assert.match(host.messages.at(-1), /\.vscode\/settings\.json.*current analysis configuration remains active/);
+    assert.equal(env.service.calls.length, applied);
+  }
+  env.registration.dispose();
+});
+
+test("invalid saved presets retain a visible cause and cannot change analysis", async () => {
+  // Guards silently hiding invalid configurations or applying guarded overrides without their evidence.
+  const override = { kind: "skip_definition", target: { file: "main.mod", site_id: "site", source_revision: "source" } };
+  const binding = { operation_index: 0, file: "main.mod", kind: "definition", name: "FLAG", expected_text: "@#define FLAG=0", target_text: "@#define FLAG=0", branch_index: null, branch_text: null };
+  for (const [fields, cause] of [
+    [{ analysis: { overrides: [override] } }, /source information/],
+    [{ analysis: { overrides: [override] }, bindings: [] }, /source information/],
+    [{ analysis: { overrides: [override] }, bindings: [{ ...binding, operation_index: 1 }] }, /source information/],
+    [{ analysis: { overrides: [override, override] }, bindings: [binding, binding] }, /source information/],
+    [{ bindings: [{}] }, /source information is invalid/],
+    [{ analysis: null }, /Analysis choices/],
+    [{ includePaths: [2] }, /Include paths/],
+    [{ name: " " }, /Configuration name/],
+    [{ root: null }, /Model root/],
+  ]) {
+    const env = setup();
+    host.saved = [{ name: "Broken", root: "main.mod", analysis: {}, ...fields }];
+    host.answers.push(items => {
+      const row = items.find(item => item.cause);
+      assert.ok(row); assert.match(row.description, cause);
+      return row;
+    });
+    await env.run("selectAnalysisConfiguration");
+    assert.equal(env.service.calls.length, 0);
+    assert.match(host.messages.at(-1), cause);
+    assert.match(host.messages.at(-1), /current analysis configuration remains active/);
+    host.answers.push(items => items.find(item => item.cause));
+    await assert.rejects(chooseAnalysisBaseline(env.document.uri, { isCancellationRequested: false }), cause);
+    env.registration.dispose();
+  }
+});
+
+test("saving preserves invalid and other-model entries and refuses a non-array setting", async () => {
+  // Guards Save discarding entries that need repair or replacing a malformed setting without notice.
+  const env = setup();
+  const invalid = { name: "Broken", root: "main.mod", analysis: null }, other = { name: "Other", root: "other.mod", analysis: {} };
+  host.saved = [invalid, other];
+  host.inputAnswers.push("Current"); await env.run("saveAnalysisConfiguration");
+  assert.deepEqual(host.saved.slice(0, 2), [invalid, other]);
+  host.workspaceFile = uri("file:///workspace/models.code-workspace");
+  for (const malformed of [{ malformed: true }, null]) {
+    host.saved = malformed; host.messages = [];
+    host.answers.push(items => items.find(item => item.cause));
+    await env.run("selectAnalysisConfiguration");
+    assert.match(host.messages.at(-1), /must be an array/);
+    host.inputAnswers.push("Another"); await env.run("saveAnalysisConfiguration");
+    assert.equal(host.updates.length, 1);
+    assert.match(host.messages.at(-1), /No saved configurations were changed/);
+    assert.deepEqual(host.saved, malformed);
+  }
   env.registration.dispose();
 });
 
@@ -217,7 +321,7 @@ test("definition commands on a conditional explain the required directive withou
     assert.equal(host.inputs.length, 0);
     assert.equal(env.service.calls.length, 0, "a rejected action keeps the analysis configuration");
     assert.match(host.messages.at(-1), /@#define/);
-    assert.match(host.messages.at(-1), /Dynare: Preview Macro Branch\./);
+    assert.match(host.messages.at(-1), /Dygnosis: Preview macro branch\./);
     env.registration.dispose();
   }
 });
@@ -333,7 +437,7 @@ test("definition override opens one guarded expression input; skip remains a sep
   assert.deepEqual(env.service.calls[0][1].overrides, [{ kind: "definition", target, expression: "8" }]);
   host.inputAnswers.push("");
   await env.run("overrideMacroDefinition");
-  assert.match(host.messages.at(-1), /Use Skip Macro Definition/);
+  assert.match(host.messages.at(-1), /Use Skip macro definition/);
   assert.deepEqual(env.service.calls[0][1].overrides, [{ kind: "definition", target, expression: "8" }], "blank input cannot become a skip operation");
   await env.run("skipMacroDefinition");
   assert.deepEqual(env.service.calls[1][1].overrides, [{ kind: "skip_definition", target }]);
@@ -370,7 +474,7 @@ test("late picker stops after a document change and untitled Save has an explain
 test("baseline picker always offers written source and saved choices without changing live selection", async () => {
   const env = setup();
   const binding = { operation_index: 0, file: "main.mod", kind: "definition", name: "FLAG", expected_text: "@#define FLAG=0", target_text: "@#define FLAG=0", branch_index: null, branch_text: null };
-  host.saved = [{ name: "Alternative", root: "main.mod", analysis: { defines: [{ name: "FLAG", expression: "1" }] }, includePaths: ["models"], bindings: [binding] }];
+  host.saved = [{ name: "Alternative", root: "main.mod", analysis: { defines: [{ name: "FLAG", expression: "1" }], overrides: [{ kind: "definition", target: { file: "main.mod", site_id: "definition", source_revision: "source" }, expression: "1" }] }, includePaths: ["models"], bindings: [binding] }];
   host.answers.push(items => { assert.equal(items[0].label, "Written source"); assert.equal(items[0].description, undefined); return items.find(item => item.label === "Alternative"); });
   const token = { isCancellationRequested: false };
   const baseline = await chooseAnalysisBaseline(env.document.uri, token);

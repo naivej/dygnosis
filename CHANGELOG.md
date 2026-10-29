@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.11.39
+
+- Open Help from the Command Palette or the Dygnosis extension's gear or context
+  menu in **Extensions**.
+- Find analysis configuration commands under **Dygnosis**. Save or reset a
+  configuration from the selector. **Show model changes** compares model files
+  and configurations.
+- Simple hand-written configurations work without extra source information.
+  Unavailable configurations explain why, and saving keeps other entries.
+
 ## v0.11.38
 
 - Outline shows more named blocks and their entries, including names in

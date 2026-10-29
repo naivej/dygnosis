@@ -523,7 +523,7 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
       const response = await send("Runtime.evaluate", { expression: 'JSON.stringify({labels:Array.from(document.querySelectorAll(".quick-input-list .label-name")).filter(row => row.getClientRects().length > 0).map(row => row.textContent),placeholder:document.querySelector(".quick-input-widget input")?.placeholder})', returnByValue: true });
       const picker = JSON.parse(response.result.value);
       assert.equal(picker.placeholder, "Choose a file, config, or Git revision");
-      assert.ok(picker.labels.includes(".mod file…"));
+      assert.ok(picker.labels.includes("model file…"));
       assert.ok(picker.labels.includes("config…"));
       assert.equal(picker.labels.includes("With previous revision"), false);
       assert.ok(picker.labels.some(label => /^[0-9a-f]{7}$/.test(label)), "the picker shows local commit rows");
@@ -560,7 +560,15 @@ exports.run = async function run() {
     const extension = vscode.extensions.getExtension("CoconutWater.dygnosis");
     assert.ok(extension);
     const service = await extension.activate();
-    assert.ok(["all", "mcp", "semantic", "folding", "presentation", "rename", "workspace", "syntax", "lifecycle", "analysis"].includes(scope), "Unknown native host scope");
+    assert.ok(["all", "mcp", "semantic", "folding", "presentation", "rename", "workspace", "syntax", "lifecycle", "analysis", "help"].includes(scope), "Unknown native host scope");
+    if (scope === "help") {
+      await require("./helpers/help_host.cjs").checkHelpAccess(evidence, waitFor);
+      await service.shutdown();
+      evidence.artifacts_after = await historyArtifacts();
+      assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "native Help acceptance uses one matching candidate");
+      evidence.passed = true;
+      return;
+    }
     if (scope === "analysis") {
       await require("./helpers/analysis_configuration_host.cjs").checkAnalysisConfigurations(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, writeObservedInput });
       await service.shutdown();

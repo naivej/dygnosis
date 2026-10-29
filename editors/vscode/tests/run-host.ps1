@@ -4,19 +4,26 @@ $electronRunAsNode = $env:ELECTRON_RUN_AS_NODE
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 $extensionRoot = Split-Path -Parent $PSScriptRoot
 $scope = $env:DYGNOSIS_HOST_SCOPE
-if ($scope -and $scope -notin @('all', 'mcp', 'semantic', 'folding', 'presentation', 'rename', 'workspace', 'syntax', 'lifecycle', 'analysis')) { throw 'Unknown DYGNOSIS_HOST_SCOPE.' }
+if ($scope -and $scope -notin @('all', 'mcp', 'semantic', 'folding', 'presentation', 'rename', 'workspace', 'syntax', 'lifecycle', 'analysis', 'help')) { throw 'Unknown DYGNOSIS_HOST_SCOPE.' }
 $testRoot = Join-Path $extensionRoot '.test-data'
 $runId = [Guid]::NewGuid().ToString()
 $hostRoot = Join-Path $testRoot $runId
 $workspaceRoot = Join-Path $hostRoot 'workspace'
 New-Item -ItemType Directory -Force -Path $workspaceRoot | Out-Null
+$workspaceTarget = $workspaceRoot
+if ($env:DYGNOSIS_HOST_MULTI_ROOT -eq '1') {
+    if ($scope -ne 'analysis') { throw 'Multi-root native acceptance currently supports only the analysis scope.' }
+    New-Item -ItemType Directory -Force -Path (Join-Path $hostRoot 'other') | Out-Null
+    $workspaceTarget = Join-Path $hostRoot 'models.code-workspace'
+    @{ folders = @(@{ path = 'workspace' }, @{ path = 'other' }) } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $workspaceTarget -Encoding utf8
+}
 $vscodeExecutable = $env:DYGNOSIS_VSCODE_EXECUTABLE
 if (-not $vscodeExecutable) {
     $vscodeExecutable = Join-Path $env:LOCALAPPDATA 'Programs/Microsoft VS Code/Code.exe'
 }
 if (-not (Test-Path -LiteralPath $vscodeExecutable)) { throw 'Set DYGNOSIS_VSCODE_EXECUTABLE to the minimum/current VS Code executable.' }
 if (-not $env:DYGNOSIS_TEST_BINARY) { throw 'Set DYGNOSIS_TEST_BINARY to the matching built engine.' }
-$visualEnabled = $env:DYGNOSIS_HOST_VISUAL -eq '1' -or $scope -in @('folding', 'presentation', 'rename', 'workspace', 'syntax', 'analysis')
+$visualEnabled = $env:DYGNOSIS_HOST_VISUAL -eq '1' -or $scope -in @('folding', 'presentation', 'rename', 'workspace', 'syntax', 'analysis', 'help')
 if ($visualEnabled) {
     $cdpPort = 0
     if ($env:DYGNOSIS_HOST_CDP_PORT) {
@@ -45,7 +52,7 @@ New-Item -ItemType Directory -Force -Path $hostUser | Out-Null
 $env:DYGNOSIS_HOST_RESULT = Join-Path $hostRoot 'result.json'
 $env:DYGNOSIS_HOST_RUN_ID = $runId
 $arguments = @(
-    ('"' + $workspaceRoot + '"'),
+    ('"' + $workspaceTarget + '"'),
     ('--extensionDevelopmentPath="' + $extensionRoot + '"'),
     ('--extensionTestsPath="' + (Join-Path $PSScriptRoot 'host.cjs') + '"'),
     ('--user-data-dir="' + (Join-Path $hostRoot 'profile') + '"'),

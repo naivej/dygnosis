@@ -7,7 +7,7 @@ const { createHost, load, captured, snapshotResponse, deferred, flush, working, 
 const { resourceData, resourceQuery, resourceName, selector } = require(compiledModule("changes_resource"));
 
 function setup(t) { const env = createHost(); env.host.install(); t.after(() => env.host.registration.dispose()); return env; }
-const baselineActions = [".mod file…", "config…"];
+const baselineActions = ["model file…", "config…"];
 function activateHost(env) {
   const { host, service, vscode } = env; host.registeredChanges = 0;
   const registrations = { "changes_editor": { registerChanges: value => { assert.equal(value, service); host.registeredChanges++; return new Disposable(); } },
@@ -52,7 +52,7 @@ test("unavailable Git keeps all choices visible and file comparison uses selecte
   const { host } = setup(t); host.gitUnavailable = true; host.pick = items => items.find(item => item.mode === "file");
   await host.open(); const choices = host.picks[0]?.items;
   assert.ok(choices, JSON.stringify({ picks: host.picks.length, failures: host.failures, notifications: host.notifications }));
-  assert.ok(choices.some(item => item.label === ".mod file…")); assert.ok(choices.some(item => item.label === "config…"));
+  assert.ok(choices.some(item => item.label === "model file…")); assert.ok(choices.some(item => item.label === "config…"));
   assert.ok(choices.some(item => /Git revisions unavailable/.test(item.label)), "unavailable Git is explained without hiding file/config options");
   assert.deepEqual(host.captures[0].resource.before, working(baselineUri));
   assert.deepEqual(host.captures[0].resource.after, working()); assert.match(host.dialogs[0].title, /Before.*After/);
@@ -619,7 +619,7 @@ test("config comparison fixes the current unsaved configuration as After and cho
   const saved = resourceData(JSON.parse(host.panels[0].document.uri.query));
   assert.deepEqual(saved.before.analysis.defines, [{ name: "N", expression: "1" }]);
   assert.deepEqual(saved.after.analysis.defines, [{ name: "N", expression: "2" }]);
-  assert.deepEqual(host.picks[0].items.filter(item => item.mode === "file" || item.mode === "config").map(item => item.label), [".mod file…", "config…"]);
+  assert.deepEqual(host.picks[0].items.filter(item => item.mode === "file" || item.mode === "config").map(item => item.label), ["model file…", "config…"]);
 });
 
 test("explicit comparison choices can complete while the live root is incomplete", async t => {

@@ -63,6 +63,20 @@ test('Help starts with no engine, persists invitation dismissal and restores a p
   const again = setup(true); await new Promise(resolve => setImmediate(resolve)); assert.equal(again.host.invitations, 0); again.registration.dispose();
 });
 
+test('the Extensions menu opens general Help without losing explicit topic destinations', async () => {
+  // Guards the extension ID supplied by its menu being mistaken for a Help topic.
+  const env = setup(true);
+  env.open('CoconutWater.dygnosis'); const panel = env.host.panels[0];
+  await panel.receive({ type: 'ready' });
+  assert.equal(panel.messages.at(-1).destination, 'get-started');
+  env.open('coconutwater.dygnosis');
+  assert.equal(panel.messages.at(-1).destination, 'get-started');
+  env.open('effective-model');
+  assert.equal(panel.messages.at(-1).destination, 'effective-model');
+  assert.equal(env.host.panels.length, 1);
+  env.registration.dispose();
+});
+
 test('messages dispatch only known native actions and topic permalinks', async () => {
   const env = setup(true); env.open(); const panel = env.host.panels[0]; await panel.receive({ type: 'ready' });
   for (const target of ['command:workbench.action.quit', 'settings:unknown.key', 'javascript:evil', 'action:delete']) await panel.receive({ type: 'link', target });

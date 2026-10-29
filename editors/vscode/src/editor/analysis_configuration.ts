@@ -1,13 +1,14 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
 import { DygnosisClient } from "../client/client";
-import { AnalysisConfiguration, AnalysisContext, AnalysisMetadata, AnalysisOverride, EquationSelection, PresetBinding, analysisConfiguration, parseAnalysisMetadata, record } from "../client/protocol";
+import { AnalysisConfiguration, AnalysisContext, AnalysisMetadata, AnalysisOverride, EquationSelection, PresetBinding, analysisConfiguration, parseAnalysisMetadata, presetBinding, record } from "../client/protocol";
 import { CommandCancelled, refuse, runCommand } from "../client/refusal";
 import type { EffectivePreviewRegistry } from "./preview";
 import { automaticConfigurationName, configurationSummary } from "../client/analysis_presentation";
 
 export interface AnalysisSide { analysis: AnalysisConfiguration; include_paths: string[] | null; preset_bindings?: PresetBinding[] }
 interface Preset { name: string; root: string; analysis: AnalysisConfiguration; includePaths?: string[]; bindings: PresetBinding[] }
+interface SavedChoice { label: string; preset?: Preset; cause?: string }
 interface Target { root: vscode.Uri; document: vscode.Uri; current(): boolean }
 
 export function analysisLabel(analysis: AnalysisMetadata): string {
@@ -58,17 +59,45 @@ function relative(folder: vscode.WorkspaceFolder, uri: vscode.Uri): string {
 function resolved(folder: vscode.WorkspaceFolder, file: string): string {
   return path.isAbsolute(file) ? file : path.resolve(folder.uri.fsPath, file);
 }
-function preset(value: unknown): value is Preset {
-  return record(value) && typeof value.name === "string" && value.name.length > 0 && typeof value.root === "string" &&
-    analysisConfiguration(value.analysis) && Array.isArray(value.bindings) &&
-    (value.includePaths === undefined || Array.isArray(value.includePaths) && value.includePaths.every(path => typeof path === "string"));
+function presetCause(value: unknown): string | undefined {
+  if (!record(value) || typeof value.name !== "string" || !value.name.trim()) return "Configuration name is missing or empty.";
+  if (typeof value.root !== "string" || !value.root.trim()) return "Model root is missing or invalid.";
+  if (!analysisConfiguration(value.analysis)) return "Analysis choices are missing or invalid.";
+  if (value.includePaths !== undefined && !(Array.isArray(value.includePaths) && value.includePaths.every(path => typeof path === "string"))) return "Include paths are invalid.";
+  if (value.bindings !== undefined && !Array.isArray(value.bindings)) return "Saved source information is invalid. Recreate the configuration through Save current configuration.";
+  const overrides = value.analysis.overrides ?? [], indices = new Set<number>();
+  for (const binding of value.bindings ?? []) {
+    if (!presetBinding(binding)) return "Saved source information is invalid. Recreate the configuration through Save current configuration.";
+    if (indices.has(binding.operation_index) || binding.operation_index >= overrides.length) return "Saved overrides lack source information. Recreate the configuration through Save current configuration.";
+    indices.add(binding.operation_index);
+  }
+  if (indices.size !== overrides.length) return "Saved overrides lack source information. Recreate the configuration through Save current configuration.";
+  return undefined;
 }
-function presets(root: vscode.Uri): { folder?: vscode.WorkspaceFolder; values: Preset[] } {
+function folderPresets(folder: vscode.WorkspaceFolder): { raw: unknown; ignored: SavedChoice[] } {
+  const settings = vscode.workspace.getConfiguration("dynare", folder.uri).inspect<unknown>("analysisConfigurations");
+  const multiRoot = vscode.workspace.workspaceFile !== undefined;
+  const ignored: SavedChoice[] = [];
+  const present = (value: unknown): boolean => value !== undefined && (!Array.isArray(value) || value.length > 0);
+  if (present(settings?.globalValue)) ignored.push({ label: "User settings", cause: "User settings are not used for saved analysis configurations. Store them in the owning folder's .vscode/settings.json." });
+  if (multiRoot && present(settings?.workspaceValue)) ignored.push({ label: "Workspace settings", cause: "Workspace settings are not used for saved analysis configurations in a multi-root workspace. Store them in the owning folder's .vscode/settings.json." });
+  return { raw: settings?.workspaceFolderValue !== undefined ? settings.workspaceFolderValue : multiRoot ? undefined : settings?.workspaceValue, ignored };
+}
+function presets(root: vscode.Uri): { folder?: vscode.WorkspaceFolder; values: SavedChoice[] } {
   const folder = root.scheme === "file" ? vscode.workspace.getWorkspaceFolder(root) : undefined;
   if (!folder) return { values: [] };
-  const raw = vscode.workspace.getConfiguration("dynare", folder.uri).inspect<unknown>("analysisConfigurations")?.workspaceFolderValue;
+  const { raw, ignored } = folderPresets(folder);
   const rootPath = relative(folder, root);
-  return { folder, values: Array.isArray(raw) ? raw.filter(preset).filter(value => value.root === rootPath) : [] };
+  const values = raw === undefined ? [] : Array.isArray(raw) ? raw.flatMap((value: unknown, index): SavedChoice[] => {
+    if (record(value) && typeof value.root === "string" && value.root.trim() && value.root !== rootPath) return [];
+    const label = record(value) && typeof value.name === "string" && value.name.trim() ? value.name : `Configuration ${index + 1}`;
+    const cause = presetCause(value);
+    return [{ label, ...(cause ? { cause } : { preset: { ...(value as Preset), bindings: (value as Preset).bindings ?? [] } }) }];
+  }) : [{ label: "Analysis configurations", cause: "Analysis configurations must be an array." }];
+  return { folder, values: [...values, ...ignored] };
+}
+function unavailable(choice: { label: string; cause?: string }): void {
+  if (choice.cause) refuse(`Cannot select “${choice.label}”: ${choice.cause} The current analysis configuration remains active.`);
 }
 function presetSide(value: Preset, folder: vscode.WorkspaceFolder): AnalysisSide {
   const analysis = structuredClone(value.analysis);
@@ -83,9 +112,12 @@ export async function chooseAnalysisBaseline(root: vscode.Uri, token: vscode.Can
   const saved = presets(root);
   const pick = await vscode.window.showQuickPick([
     { label: "Written source", side: { analysis: {}, include_paths: null } },
-    ...saved.values.map(value => ({ label: value.name, description: "Saved configuration", side: presetSide(value, saved.folder!) })),
+    ...saved.values.map(value => ({ label: value.label, description: value.cause ? `Unavailable: ${value.cause}` : "Saved configuration",
+      side: value.preset ? presetSide(value.preset, saved.folder!) : undefined, cause: value.cause })),
   ], { title: `Compare ${path.posix.basename(root.path)} with`, placeHolder: "Choose written source or a saved configuration" }, token);
-  return token.isCancellationRequested ? undefined : pick?.side;
+  if (token.isCancellationRequested || !pick) return undefined;
+  unavailable(pick);
+  return pick.side;
 }
 function modified(context: AnalysisContext): AnalysisConfiguration {
   const choices = structuredClone(context.analysis.configuration);
@@ -123,12 +155,13 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     if (!invocation.current()) refuse("The source or chosen root changed. Request the analysis action again.");
     await service.setAnalysisConfiguration(invocation.root, side.analysis, proof, side.include_paths, side.preset_bindings, () => invocation.current());
   };
-  type Choice = vscode.QuickPickItem & { side?: AnalysisSide; action?: "save" | "input" | "include" | "exclude" | "clearEquations" | "clearBranches"; index?: number };
+  type Choice = vscode.QuickPickItem & { side?: AnalysisSide; cause?: string; action?: "save" | "input" | "include" | "exclude" | "clearEquations" | "clearBranches"; index?: number };
   const choose = async (invocation: Target, proof: AnalysisContext): Promise<Choice> => {
     const saved = presets(invocation.root);
     const entries: Choice[] = [
       { label: "Source", description: "Reset analysis configuration", side: { analysis: {}, include_paths: null } },
-      ...saved.values.map(value => ({ label: value.name, description: "Saved configuration", side: presetSide(value, saved.folder!) })),
+      ...saved.values.map(value => ({ label: value.label, description: value.cause ? `Unavailable: ${value.cause}` : "Saved configuration",
+        side: value.preset ? presetSide(value.preset, saved.folder!) : undefined, cause: value.cause })),
       ...(proof.analysis.configuration.defines ?? []).map((input, index) => ({ label: `${input.name}=${input.expression}`, description: "Edit macro input", action: "input" as const, index })),
       { label: "Add macro input…", action: "input", index: -1 },
       { label: "Include equations…", action: "include" }, { label: "Exclude equations…", action: "exclude" },
@@ -140,6 +173,7 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     const pick = await vscode.window.showQuickPick(entries, { placeHolder: "Choose an analysis configuration or edit its inputs", title: `Dynare: ${analysisLabel(proof.analysis)}` });
     if (!pick) throw new CommandCancelled();
     if (!invocation.current()) refuse("The source or chosen root changed. Open the selector again.");
+    unavailable(pick);
     return pick;
   };
   const save = async (invocation?: Target): Promise<void> => {
@@ -148,7 +182,7 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     if (!folder) refuse("Save this model in a workspace folder before saving a path-based analysis configuration. Untitled models can keep transient choices.");
     const proof = await context(invocation, true);
     if (proof.analysis.state === "stale") refuse(proof.analysis.cause?.message ?? "Repair or reset the stale analysis configuration before saving it.");
-    const name = await vscode.window.showInputBox({ title: "Save Analysis Configuration", prompt: "Configuration name", value: proof.analysis.selection.name ?? "", validateInput: value => value.trim() ? undefined : "Enter a configuration name." });
+    const name = await vscode.window.showInputBox({ title: "Save analysis configuration", prompt: "Configuration name", value: proof.analysis.selection.name ?? "", validateInput: value => value.trim() ? undefined : "Enter a configuration name." });
     if (name === undefined) throw new CommandCancelled();
     if (!invocation.current()) refuse("The source or server changed. Save the configuration again.");
     const current = await context(invocation, true);
@@ -160,12 +194,14 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
       bindings: (current.preset_bindings ?? []).map(binding => ({ ...binding, file: binding.file === null ? null : relative(folder, fileUri(binding.file)) })) };
     if (current.analysis.include_paths !== null) value.includePaths = current.analysis.include_paths.map(file => relative(folder, fileUri(file)));
     const configuration = vscode.workspace.getConfiguration("dynare", folder.uri);
-    const raw = configuration.inspect<unknown>("analysisConfigurations")?.workspaceFolderValue;
-    const existing = Array.isArray(raw) ? raw.filter(preset) : [];
-    const duplicate = existing.some(saved => saved.root === value.root && saved.name === value.name);
+    const { raw } = folderPresets(folder);
+    if (raw !== undefined && !Array.isArray(raw)) refuse("Analysis configurations must be an array. Repair this folder's .vscode/settings.json before saving a configuration. No saved configurations were changed.");
+    const existing: unknown[] = Array.isArray(raw) ? raw : [];
+    const replaces = (saved: unknown): boolean => record(saved) && saved.root === value.root && saved.name === value.name;
+    const duplicate = existing.some(replaces);
     if (duplicate && await vscode.window.showWarningMessage(`Replace saved analysis configuration '${value.name}'?`, { modal: true }, "Replace") !== "Replace") throw new CommandCancelled();
     if (!invocation.current()) refuse("The source or server changed. Save the configuration again.");
-    await configuration.update("analysisConfigurations", [...existing.filter(saved => saved.root !== value.root || saved.name !== value.name), value], vscode.ConfigurationTarget.WorkspaceFolder);
+    await configuration.update("analysisConfigurations", [...existing.filter(saved => !replaces(saved)), value], vscode.ConfigurationTarget.WorkspaceFolder);
   };
   const inputs = async (invocation: Target, proof: AnalysisContext, index: number): Promise<void> => {
     const choices = modified(proof), current = choices.defines ?? [];
@@ -223,7 +259,7 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     const position = vscode.window.activeTextEditor!.selection.active;
     const sites = proof.sites.filter(site => site.kind !== "conditional" && site.location.uri === invocation.document.toString() &&
       site.location.range.start.line <= position.line && position.line <= site.location.range.end.line);
-    if (!sites.length) refuse(`Place the cursor on an @#define directive before ${skip ? "skipping" : "overriding"} it for analysis. To select a conditional branch, use Dynare: Preview Macro Branch.`);
+    if (!sites.length) refuse(`Place the cursor on an @#define directive before ${skip ? "skipping" : "overriding"} it for analysis. To select a conditional branch, use Dygnosis: Preview macro branch.`);
     const site = sites.length === 1 ? sites[0] : (await vscode.window.showQuickPick(sites.map(site => ({ label: site.expected_text, site })), { placeHolder: "Select the written macro definition" }))?.site;
     if (!site) throw new CommandCancelled();
     const choices = modified(proof);
@@ -233,7 +269,7 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
       const previous = choices.overrides?.find(operation => operation.target.file === site.target.file && operation.target.site_id === site.target.site_id);
       const expression = await vscode.window.showInputBox({ title: `Override ${site.name ?? "macro"} · ${path.posix.basename(invocation.document.path)}:${site.location.range.start.line + 1}`, prompt: `Source: ${site.expected_text.replace(/\s+/g, " ").slice(0, 100)}. Enter a replacement expression.`, value: previous?.kind === "definition" ? previous.expression : "", validateInput: value => value.trim() ? undefined : "Enter a macro expression." });
       if (expression === undefined) throw new CommandCancelled();
-      if (!expression.trim()) refuse("Enter a Dynare macro expression. Use Skip Macro Definition for Analysis to skip this definition.");
+      if (!expression.trim()) refuse("Enter a Dynare macro expression. Use Skip macro definition for analysis to skip this definition.");
       replaceOverride(choices, { kind: "definition", target: site.target, expression });
     }
     await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });

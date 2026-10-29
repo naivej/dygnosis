@@ -56,7 +56,7 @@ async function chooseAnyPicker(label, waitFor) {
 }
 async function input(text, waitFor) {
   await waitFor(async () => nativeWorkbench(async send => {
-    const result = await send("Runtime.evaluate", { expression: "(() => { const widget=document.querySelector('.quick-input-widget'), input=widget?.querySelector('input'), box=input?.getBoundingClientRect(); return Boolean(box?.width && box.height && input===document.activeElement && widget.textContent.includes('Save Analysis Configuration')); })()", returnByValue: true });
+    const result = await send("Runtime.evaluate", { expression: "(() => { const widget=document.querySelector('.quick-input-widget'), input=widget?.querySelector('input'), box=input?.getBoundingClientRect(); return Boolean(box?.width && box.height && input===document.activeElement && widget.textContent.includes('Save analysis configuration')); })()", returnByValue: true });
     return result.result.value;
   }), "native analysis input is visible");
   await press("a", "KeyA", 65, 2);
@@ -161,15 +161,15 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   await waitFor(async () => {
     const hovers = await vscode.commands.executeCommand("vscode.executeHoverProvider", document.uri, dormantPosition);
     dormantHover = (hovers ?? []).flatMap(hover => hover.contents.map(content => typeof content === "string" ? content : content.value)).join("\n");
-    return dormantHover.includes("inactive");
-  }, "native written hover reports the dormant declaration as inactive");
-  assert.doesNotMatch(dormantHover, /Written:|Model values, timing and equation numbers/);
+    return dormantHover.includes("dormant_p") && dormantHover.includes("parameter") && dormantHover.includes("Dormant");
+  }, "native written hover describes the dormant declaration's written type and metadata");
+  assert.doesNotMatch(dormantHover, /\binactive\b|Written:|Model values, timing and equation numbers/);
   assert.doesNotMatch(dormantHover, /(?:Equation number|Effective equation|Binding|Timing)\s*[:#]\s*\S/i);
   const dormantDefinitions = await vscode.commands.executeCommand("vscode.executeDefinitionProvider", document.uri, dormantPosition);
   assert.deepEqual(dormantDefinitions ?? [], [], "an inactive written declaration does not invent a semantic binding");
   assert.equal(hasExpansion(), false, "source-only provider requests do not open an expanded view");
   evidence.analysis_source_only = { outline: dormant.detail, hover: dormantHover, definitions: 0 };
-  evidence.checks.push("native source-only Outline labels controlling macro arms; dormant declaration hover keeps its inactive state without inventing a binding or equation number");
+  evidence.checks.push("native source-only Outline labels controlling macro arms; dormant declaration hover keeps written type and metadata without repeating activity or inventing a binding or equation number");
   await vscode.commands.executeCommand("outline.focus");
   const outlineHeader = await nativeWorkbench(async send => {
     const result = await send("Runtime.evaluate", { returnByValue: true, expression:
@@ -255,10 +255,55 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   const saving = vscode.commands.executeCommand("dygnosis.saveAnalysisConfiguration");
   await input("Else preview", waitFor); await saving;
   const folder = vscode.workspace.getWorkspaceFolder(document.uri);
-  const saved = vscode.workspace.getConfiguration("dynare", folder.uri).inspect("analysisConfigurations").workspaceFolderValue;
+  const configuration = vscode.workspace.getConfiguration("dynare", folder.uri);
+  const inspected = configuration.inspect("analysisConfigurations");
+  const saved = inspected.workspaceFolderValue ?? (!vscode.workspace.workspaceFile ? inspected.workspaceValue : undefined);
   assert.equal(saved.length, 1); assert.equal(saved[0].bindings.length, 1);
   assert.equal(saved[0].bindings[0].target_text.includes("@#endif"), true);
   evidence.checks.push("native branch preview and explicit folder Save preserve exact guards, written source, and dormant helper root");
+
+  // Guards actual Settings storage, schema-valid hand-written presets and invalid choices through the native selector.
+  const simple = { name: "Simple preset", root: path.basename(rootPath), analysis: { defines: [{ name: "UNUSED_INPUT", expression: "1" }] } };
+  const invalid = { name: "Invalid preset", root: path.basename(rootPath), analysis: saved[0].analysis };
+  await configuration.update("analysisConfigurations", [...saved, simple, invalid], vscode.ConfigurationTarget.WorkspaceFolder);
+  const simpleSelection = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
+  await choose("Simple preset", waitFor); await simpleSelection;
+  assert.equal((await context()).analysis.selection.name, "Simple preset");
+  const generation = (await context()).analysis.selection_generation;
+  const invalidSelection = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
+  await choose("Invalid preset", waitFor);
+  await dismissOutcome("Saved overrides lack source information", waitFor); await invalidSelection;
+  assert.equal((await context()).analysis.selection_generation, generation);
+  await configuration.update("analysisConfigurations", [simple], vscode.ConfigurationTarget.Global);
+  if (vscode.workspace.workspaceFile) await configuration.update("analysisConfigurations", [simple], vscode.ConfigurationTarget.Workspace);
+  for (const label of ["User settings", ...(vscode.workspace.workspaceFile ? ["Workspace settings"] : [])]) {
+    const unsupported = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
+    await choose(label, waitFor);
+    await dismissOutcome("Store them in the owning folder's .vscode/settings.json", waitFor); await unsupported;
+    assert.equal((await context()).analysis.selection_generation, generation);
+  }
+  const otherFolder = vscode.workspace.workspaceFolders.find(candidate => candidate.uri.toString() !== folder.uri.toString());
+  if (otherFolder) {
+    const otherPath = path.join(otherFolder.uri.fsPath, path.basename(rootPath));
+    await writeObservedInput(service, otherPath, "var z; model; z=0; end;\n");
+    const otherDocument = await vscode.workspace.openTextDocument(otherPath);
+    await vscode.window.showTextDocument(otherDocument);
+    await waitFor(() => vscode.window.activeTextEditor?.document === otherDocument, "second folder's model is active");
+    await waitFor(async () => (await service.modelInfo(otherDocument.uri))?.complete === true, "second folder's model is ready");
+    assert.equal((await service.rootForDocument(otherDocument)).toString(), otherDocument.uri.toString());
+    const otherSelection = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
+    await choose("Workspace settings", waitFor);
+    await dismissOutcome("Store them in the owning folder's .vscode/settings.json", waitFor); await otherSelection;
+    assert.equal((await service.analysisContext(otherDocument.uri)).analysis.selection.name, null, "workspace-wide presets cannot leak to another model folder");
+    await vscode.window.showTextDocument(document);
+    await configuration.update("analysisConfigurations", undefined, vscode.ConfigurationTarget.Workspace);
+  }
+  await configuration.update("analysisConfigurations", undefined, vscode.ConfigurationTarget.Global);
+  await configuration.update("analysisConfigurations", saved, vscode.ConfigurationTarget.WorkspaceFolder);
+  const restored = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
+  await choose("Else preview", waitFor); await restored;
+  evidence.preset_storage = { multi_root: !!vscode.workspace.workspaceFile, workspace_value: inspected.workspaceValue !== undefined, folder_value: inspected.workspaceFolderValue !== undefined };
+  evidence.checks.push("native folder settings accept simple presets, explain invalid evidence and ignored scopes, and keep model-folder selections separate");
 
   await vscode.commands.executeCommand("dygnosis.showEffectiveModel");
   let preview = vscode.window.activeTextEditor.document;
@@ -278,7 +323,7 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   inputEvents.dispose(); analysisEvents.dispose();
   preview = vscode.window.activeTextEditor.document;
   assert.match(preview.uri.path, /Source/); assert.match(preview.getText(), /y=1/);
-  assert.match(originalPreview.uri.path, /1 branch preview/);
+  assert.match(originalPreview.uri.path, /Else preview/);
   assert.equal((await context()).analysis.selection.preview, false);
   await assertBranchActivity(true);
   const loading = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");

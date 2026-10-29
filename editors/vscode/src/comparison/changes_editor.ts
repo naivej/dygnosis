@@ -336,8 +336,8 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     try {
       const modelName = sourceName(modelUri(anchor).path);
       const title = `Compare ${modelName}${anchor.kind === "git" ? ` (${anchor.commit.slice(0, 7)})` : ""} with`;
-      choice = fileOnly ? { mode: "file", label: ".mod file…" } : await pickBaseline(title, [
-        { label: ".mod file…", mode: "file" },
+      choice = fileOnly ? { mode: "file", label: "model file…" } : await pickBaseline(title, [
+        { label: "model file…", mode: "file" },
         { label: "config…", mode: "config", description: anchor.kind === "working" ? "Same model · current configuration is After" : "Open the written model to compare configurations" },
       ], load, token);
     } finally {

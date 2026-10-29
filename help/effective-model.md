@@ -24,13 +24,13 @@ Limit](settings:dynare.macroWorkLimit).
 
 ## Choose the analysis configuration
 
-Run **Dynare: Select Analysis Configuration** from the editor title gear,
+Run **Dygnosis: Select analysis configuration** from the editor title gear,
 Command Palette or editor context menu to test different macro values or
 equation selections without modifying your `.mod` file.
 
 ### Macro inputs and previews
 
-In **Select Analysis Configuration**, choose **Add macro input…** to supply a
+In **Select analysis configuration**, choose **Add macro input…** to supply a
 top-level macro value such as `FLAG=true`, matching Dynare's [`-D` command-line
 option](https://www.dynare.org/manual/running-dynare.html#-DMACRO_VARIABLE%5B=MACRO_EXPRESSION%5D).
 
@@ -43,10 +43,10 @@ Because an in-file `@#define` replaces a `-D` input when reached:
 you can also place the cursor directly on a macro directive in the editor and
 run:
 
-- **Dynare: Override Macro Definition for Analysis** to substitute a different
+- **Dygnosis: Override macro definition for analysis** to substitute a different
   value (such as `true`) at that definition.
-- **Dynare: Skip Macro Definition for Analysis** to ignore that `@#define`.
-- **Dynare: Preview Macro Branch** on an `@#if`, `@#elseif` or `@#else` arm to
+- **Dygnosis: Skip macro definition for analysis** to ignore that `@#define`.
+- **Dygnosis: Preview macro branch** on an `@#if`, `@#elseif` or `@#else` arm to
   preview that branch.
 
 See the [Dynare manual on macro
@@ -81,12 +81,10 @@ filtering.
 
 ### Save, reset and compare
 
-- **Dynare: Save Analysis Configuration**: Saves the current choices in
-  [Dynare: Analysis Configurations](settings:dynare.analysisConfigurations) so
-  you can switch back to them later.
-- **Dynare: Reset Analysis Configuration**: Returns to the default written
-  **Source** configuration.
-- **Compare configurations**: Run **Dygnosis: Show mod changes** and choose
+- In **Select analysis configuration**, choose **Save current configuration**
+  to save your choices in [Dynare: Analysis Configurations](settings:dynare.analysisConfigurations),
+  or **Source** to reset them.
+- **Compare configurations**: Run **Dygnosis: Show model changes** and choose
   **config…** to diff two configurations ([Review model
   changes](structural-diff.md)). For navigating inactive macro branches, see
   [Inactive source](navigate-code.md#inactive-source).

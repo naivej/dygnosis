@@ -83,6 +83,18 @@ test("preview schemes and user-only executable scope are manifest constraints", 
   assert.equal(manifest.contributes.configuration[0].properties["dynare.serverPath"].scope, "machine");
   assert.equal(manifest.contributes.mcpServerDefinitionProviders[0].id, "dygnosis");
   assert.equal(manifest.activationEvents.includes("onStartupFinished"), true);
+  // Guards Settings accepting simple presets without bindings and rejecting overrides without evidence.
+  const schema = manifest.contributes.configuration.flatMap(group => Object.entries(group.properties)).find(([key]) => key === "dynare.analysisConfigurations")[1];
+  const validate = new (require("ajv"))({ logger: false }).compile(schema);
+  const simple = { name: "Alternative", root: "main.mod", analysis: { defines: [{ name: "FLAG", expression: "1" }] } };
+  assert.equal(validate([simple]), true);
+  assert.equal(validate([{ ...simple, analysis: { defines: [{ name: "FLAG", expression: 1 }] } }]), false);
+  assert.equal(validate([{ ...simple, analysis: { overrides: [{ kind: "skip_definition" }] }, bindings: [] }]), false);
+  const guarded = { ...simple, analysis: { overrides: [{ kind: "skip_definition", target: { file: "main.mod", site_id: "site", source_revision: "source" } }] } };
+  assert.equal(validate([guarded]), false);
+  assert.equal(validate([{ ...guarded, bindings: [] }]), false);
+  assert.equal(validate([{ ...guarded, bindings: [{}] }]), false);
+  assert.equal(validate([{ ...guarded, bindings: [{ operation_index: 0, file: "main.mod", kind: "definition", name: "FLAG", expected_text: "@#define FLAG=0", target_text: "@#define FLAG=0", branch_index: null, branch_text: null }] }]), true);
 });
 test("equation navigation manifest replaces old commands and removes the model panel", () => {
   const { contributes } = require("../package.json");
@@ -119,7 +131,6 @@ test("editor context commands share one ordered Dygnosis block and retain their 
     ["dygnosis.goToSourceCandidate", "dygnosis.analysisDocument && dygnosis.contextActions"],
     ["dygnosis.goToWrittenSource", "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions"],
     ["dygnosis.refreshEffectiveModel", "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions"],
-    ["dygnosis.openHelp", "resourceScheme == dygnosis-effective"],
   ];
   assert.deepEqual(context.map(row => row.command), expected.map(([command]) => command));
   assert.deepEqual(context.map(row => row.group), expected.map((_, index) => `dygnosis@${index + 1}`));
@@ -127,8 +138,16 @@ test("editor context commands share one ordered Dygnosis block and retain their 
 
   const skip = commands.find(row => row.command === "dygnosis.skipMacroDefinition");
   assert.deepEqual({ title: skip?.title, category: skip?.category, enablement: skip?.enablement }, {
-    title: "Skip Macro Definition for Analysis", category: "Dynare", enablement: "dygnosis.analysisDocument",
+    title: "Skip macro definition for analysis", category: "Dygnosis", enablement: "dygnosis.analysisDocument",
   });
+  // Guards duplicate shortcuts returning to the palette while their contextual commands remain available.
+  for (const command of ["dygnosis.resetAnalysisConfiguration", "dygnosis.saveAnalysisConfiguration", "dygnosis.diffWith", "dygnosis.editSettingsJson", "dygnosis.filterOutline", "dygnosis.showNotFullyCheckedModels", "dygnosis.showAllWorkspaceFiles"]) {
+    assert.ok(commands.some(row => row.command === command), command);
+    assert.deepEqual(contributes.menus.commandPalette.filter(row => row.command === command), [{ command, when: "false" }]);
+  }
+  for (const command of ["dygnosis.filterOutline", "dygnosis.showNotFullyCheckedModels", "dygnosis.showAllWorkspaceFiles"]) {
+    assert.ok(contributes.menus["view/title"].some(row => row.command === command), command);
+  }
   assert.equal(commands.some(row => row.command === "dygnosis.compareAnalysisConfigurations"), false);
   assert.equal(Object.values(contributes.menus).flat().some(row => row.command === "dygnosis.compareAnalysisConfigurations"), false);
 
@@ -140,4 +159,11 @@ test("editor context commands share one ordered Dygnosis block and retain their 
   ]);
   assert.equal(contributes.menus["view/item/context"].some(row => row.command === "dygnosis.ignoreWorkspaceFolder"), true);
   assert.equal(contributes.menus["scm/resourceState/context"].some(row => row.command === "dygnosis.openChanges"), true);
+  // Guards Help disappearing from the palette/extension menu or returning as a generic view button.
+  assert.ok(commands.some(row => row.command === "dygnosis.openHelp" && row.enablement === undefined));
+  assert.ok(!contributes.menus.commandPalette.some(row => row.command === "dygnosis.openHelp" && row.when !== "true"));
+  assert.deepEqual(contributes.menus["extension/context"], [{ command: "dygnosis.openHelp", when: "extension == coconutwater.dygnosis" }]);
+  for (const menu of ["editor/title", "editor/context", "view/title"]) {
+    assert.ok(!contributes.menus[menu].some(row => row.command === "dygnosis.openHelp"), menu);
+  }
 });

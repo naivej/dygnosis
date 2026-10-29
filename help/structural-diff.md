@@ -3,7 +3,7 @@
 Compare your active model against a local Git revision (commit, branch or tag),
 another `.mod`/`.dyn` file, or another [analysis
 configuration](effective-model.md#choose-the-analysis-configuration)
-(`config…`). Run **Dygnosis: Show mod changes** from the Command Palette, the
+(`config…`). Run **Dygnosis: Show model changes** from the Command Palette, the
 editor title bar (`$(diff)`), or a model file's context menu in **Source
 Control**.
 

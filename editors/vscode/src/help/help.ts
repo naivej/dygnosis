@@ -76,7 +76,7 @@ export function registerHelp(context: vscode.ExtensionContext): vscode.Disposabl
     }));
   };
   const command = vscode.commands.registerCommand("dygnosis.openHelp", (argument?: unknown) => {
-    const request: HelpRequest = typeof argument === "string" ? { topic: argument } : record(argument) ? {
+    const request: HelpRequest = typeof argument === "string" ? { topic: argument.toLowerCase() === context.extension.id.toLowerCase() ? "get-started" : argument } : record(argument) ? {
       topic: typeof argument.topic === "string" ? argument.topic : undefined,
       code: typeof argument.code === "string" && /^[A-Z]\d{3}$/.test(argument.code) ? argument.code : undefined,
       markdown: typeof argument.markdown === "string" ? argument.markdown : undefined,

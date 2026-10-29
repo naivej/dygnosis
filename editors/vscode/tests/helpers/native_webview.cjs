@@ -72,7 +72,7 @@ async function nativeWorkbench(callback) {
   }
 }
 
-async function nativeChanges(callback) {
+async function nativeChanges(callback, marker = "changeComparison") {
   return nativeWorkbench(async send => {
     const contexts = new Map(), sessions = new Map();
     send.onEvent(event => {
@@ -117,7 +117,7 @@ async function nativeChanges(callback) {
         try {
           result = await send("Runtime.evaluate", {
             contextId: context.contextId,
-            expression: 'Boolean(document.getElementById("changeComparison"))', returnByValue: true,
+            expression: `Boolean(document.getElementById(${JSON.stringify(marker)}))`, returnByValue: true,
           }, context.sessionId);
         } catch { continue; } // A hidden/reloaded webview can destroy a world.
         if (result.result?.value) return context;
@@ -149,4 +149,4 @@ async function nativeChanges(callback) {
   });
 }
 
-module.exports = { nativeWorkbench, nativeChanges };
+module.exports = { nativeWorkbench, nativeChanges, nativeHelp: callback => nativeChanges(callback, "permalink") };
