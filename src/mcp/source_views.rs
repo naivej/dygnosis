@@ -2,6 +2,7 @@
 
 use rmcp::ErrorData;
 use serde_json::{Value, json};
+use std::collections::HashSet;
 
 use crate::engine::analysis::source_inventory::{SourceItem, SourceItemKind};
 use crate::engine::analysis_configuration::{
@@ -14,14 +15,16 @@ use super::request::{Params, byte_position};
 use super::result::ToolResult;
 use super::source::SourceSnapshot;
 
+pub(super) struct Inspection {
+    pub structure: SourceStructureQuery,
+    pub declaration_target: Option<super::request::Target>,
+}
+
 fn invalid(message: &str) -> ErrorData {
     ErrorData::invalid_params(message.to_owned(), None)
 }
 
-pub(super) fn inspection(
-    tool: &str,
-    params: &Params,
-) -> Result<Option<SourceStructureQuery>, ErrorData> {
+pub(super) fn inspection(tool: &str, params: &Params) -> Result<Option<Inspection>, ErrorData> {
     let source_view = params.view == Some(View::Source);
     if params.file.is_some()
         && (tool == "dynare_equations" && !source_view
@@ -72,10 +75,21 @@ pub(super) fn inspection(
             .as_ref()
             .and_then(|target| target.file.as_ref())
     });
-    Ok(Some(SourceStructureQuery {
-        files: file
-            .map(|file| vec![SourceFileSelection::File(file.clone())])
-            .unwrap_or_default(),
+    Ok(Some(Inspection {
+        structure: SourceStructureQuery {
+            files: file
+                .map(|file| vec![SourceFileSelection::File(file.clone())])
+                .unwrap_or_else(|| {
+                    if source_view && tool == "dynare_symbol_info" && params.target.is_some() {
+                        vec![SourceFileSelection::Root]
+                    } else {
+                        Vec::new()
+                    }
+                }),
+        },
+        declaration_target: (source_view && tool == "dynare_symbol_info")
+            .then(|| params.target.clone())
+            .flatten(),
     }))
 }
 
@@ -113,13 +127,18 @@ fn item_json(
     let availability = file
         .availability
         .get(index)
-        .filter(|row| row.source_id == item.source_id);
+        .filter(|row| row.source_id == item.source_id)
+        .or_else(|| item.parent.and_then(|index| file.availability.get(index)));
     let occurrences: Vec<_> = availability.into_iter().flat_map(|row| &row.occurrences).map(|row|json!({
         "occurrence_id":row.occurrence_id,"include_call":row.include_call,"parent_include_call":row.parent_include_call,
         "loops":row.loops.iter().map(|step|json!({"frame_id":step.frame_id,"variable":step.variable,"value":step.value})).collect::<Vec<_>>(),
         "availability":row.availability,"cause":row.cause.as_deref().map(|value|cause(snapshot,value))})).collect();
     json!({"source_id":item.source_id,"file":file.file,"source_revision":file.source_revision,
         "kind":kind,"name":item.name,"written_kind":item.written_kind,"template":item.template,
+        "long_name":item.declaration_metadata.as_ref().and_then(|metadata|metadata.long_name.as_ref()),
+        "tex_name":item.declaration_metadata.as_ref().and_then(|metadata|metadata.tex_name.as_ref()),
+        "namespace":item.source_namespace,
+        "expression":item.local_definition.and_then(|span|file.text.get(span.start as usize..span.end as usize)),
         "range":range(snapshot,file,item.span),"selection_range":range(snapshot,file,item.selection),
         "text":matches!(item.kind,SourceItemKind::Equation|SourceItemKind::Fragment).then(||file.text.get(item.span.start as usize..item.span.end as usize)).flatten(),"tags":item.tags,
         "parent_source_id":item.parent.and_then(|index|file.inventory.items.get(index)).map(|parent|&parent.source_id),
@@ -220,7 +239,7 @@ pub(super) fn symbols(snapshot: &SourceSnapshot, params: &Params) -> Result<Tool
             ))
         })
         .transpose()?;
-    let rows: Vec<_> = structure
+    let mut rows: Vec<_> = structure
         .files
         .iter()
         .flat_map(|file| {
@@ -255,11 +274,107 @@ pub(super) fn symbols(snapshot: &SourceSnapshot, params: &Params) -> Result<Tool
                 })
         })
         .collect();
+    let mut row_ids: HashSet<_> = rows
+        .iter()
+        .map(|row| {
+            (
+                row["file"].as_str().map(str::to_owned),
+                row["source_id"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    for file in &structure.files {
+        for site in file
+            .inventory
+            .named_sites
+            .iter()
+            .filter(|site| site.declaration)
+        {
+            if params.symbol.as_ref().is_some_and(|name| {
+                file.text
+                    .get(site.span.start as usize..site.span.end as usize)
+                    .map(|value| value.trim_matches(['\'', '"']))
+                    != Some(name.as_str())
+            }) {
+                continue;
+            }
+            let Some(item) = file.inventory.named_declaration(&file.text, site) else {
+                continue;
+            };
+            if params
+                .symbol
+                .as_ref()
+                .is_some_and(|name| item.name.as_ref() != Some(name))
+                || target.as_ref().is_some_and(|(selected, byte)| {
+                    selected != &file.file || *byte < site.span.start || *byte >= site.span.end
+                })
+            {
+                continue;
+            }
+            if !row_ids.insert((file.file.clone(), item.source_id.clone())) {
+                continue;
+            }
+            let mut row = item_json(snapshot, file, usize::MAX, &item);
+            row["label"] = json!("source candidate");
+            row["verified_binding"] = json!(false);
+            rows.push(row);
+        }
+    }
+    if let Some(declaration) = snapshot
+        .source_declaration
+        .as_ref()
+        .and_then(|lookup| lookup.declaration.as_ref())
+    {
+        let existing = structure
+            .files
+            .iter()
+            .find(|file| file.file.as_deref().unwrap_or(&snapshot.root) == declaration.file);
+        let acquired = snapshot.source_declaration.as_ref().and_then(|lookup| {
+            lookup
+                .sources
+                .iter()
+                .find(|file| file.file == declaration.file)
+        });
+        let owned = acquired.and_then(|source| {
+            source
+                .inventory
+                .as_ref()
+                .map(|inventory| SourceFileStructure {
+                    file: Some(source.file.clone()),
+                    source_revision: source.revision.clone(),
+                    text: std::sync::Arc::clone(&source.text),
+                    inventory: std::sync::Arc::clone(inventory),
+                    sites: std::sync::Arc::from([]),
+                    availability: std::sync::Arc::from([]),
+                    lookup: None,
+                })
+        });
+        if let Some(file) = existing.or(owned.as_ref()) {
+            let index = file
+                .inventory
+                .items
+                .iter()
+                .position(|item| item.source_id == declaration.item.source_id)
+                .unwrap_or(usize::MAX);
+            let mut row = item_json(snapshot, file, index, &declaration.item);
+            row["label"] = json!("source candidate");
+            row["verified_binding"] = json!(false);
+            if row_ids.insert((file.file.clone(), declaration.item.source_id.clone())) {
+                rows.push(row);
+            }
+        }
+    }
     let empty = rows.is_empty();
     let mut result = ToolResult::new(
         json!({"view":"source","label":"source candidates","source_item_count":structure.coverage.complete.then_some(rows.len()),"available_source_item_count":rows.len(),"candidates":rows,"source_coverage":coverage(snapshot)}),
     );
-    if empty {
+    if let Some(cause) = snapshot
+        .source_declaration
+        .as_ref()
+        .and_then(|lookup| lookup.cause.as_ref())
+    {
+        result.cause("partial", "SOURCE_DECLARATION_UNAVAILABLE", cause.clone());
+    } else if empty {
         let label = params
             .symbol
             .as_deref()

@@ -85,7 +85,8 @@ Use this path for inactive code, macro inputs or alternative branches.
 2. Find written equations with Equations `view: "source"` or names with Symbol
    Info `view: "source"`. These are templates and source candidates. Their
    availability can be active, inactive, mixed or unknown; their source IDs
-   cannot select effective expansion, extraction or Rename.
+   cannot select effective expansion, extraction or Rename. A target on an
+   inactive name use can find its written declaration through literal includes.
 3. For explicit macro inputs, pass `analysis` on each model request, for example
    `{"defines":[{"name":"POLICY","expression":"1"}]}`. Inputs are ordered;
    later source definitions can replace them. Omit an absent input: false and
@@ -125,8 +126,8 @@ Symbol Info, Equations and Rename share one typed `symbol` selector:
 Default Symbol Info includes `data.binding` and bounded `data.references`.
 Select `definition`, `metadata`, `assignments` or `references`; references-only
 works directly. `include_declaration` defaults to true; `occurrences` adds
-expanded uses. Comments, unrelated strings, native MATLAB and inactive source
-are excluded.
+expanded uses. Effective references exclude comments, unrelated strings,
+native MATLAB and inactive source.
 
 Equation name, tags, scope/dimension and symbol filters combine with AND.
 Extraction combines names with OR and tags with AND. A typed `equation`

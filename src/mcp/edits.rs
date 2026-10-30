@@ -663,6 +663,7 @@ fn proposed_capture(
         })
         .collect();
     Ok(SourceSnapshot {
+        source_declaration: None,
         source_structure: None,
         workspace,
         root: snapshot.root.clone(),

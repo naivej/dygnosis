@@ -18,19 +18,7 @@ fn role(kind: &str) -> Option<NameRole> {
 }
 
 fn label(kind: &str) -> &'static str {
-    match kind {
-        "heterogeneity_dimension" => "Heterogeneity dimension",
-        "database" => "Database",
-        "var_model" => "VAR auxiliary model",
-        "trend_component_model" => "Trend component auxiliary model",
-        "var_expectation_model" => "VAR expectation model",
-        "pac_model" => "PAC model",
-        "named_subsample" => "Named subsample",
-        "trend_var" => "Trend variable",
-        "log_trend_var" => "Log trend variable",
-        "external_function" => "External function",
-        _ => "Name",
-    }
+    names::typed_label(kind).unwrap_or("Name")
 }
 
 pub(super) fn root_view(inner: &mut Inner, root: &Url) -> Option<Arc<SemanticModel>> {

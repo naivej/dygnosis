@@ -1,6 +1,6 @@
 //! Source-context projections of the shared pinned syntax reference.
 
-use crate::engine::analysis::source_inventory::SourceInventory;
+use crate::engine::analysis::source_inventory::{SourceInventory, SourceItem, SourceItemKind};
 use crate::engine::catalog::syntax::{self, SyntaxRecord};
 use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::model::{ExecutionStep, Model, StatementKind};
@@ -140,8 +140,13 @@ pub(crate) fn hover_may_need_model(inventory: &SourceInventory, text: &str, byte
     if inventory.is_proven_native(token.span) {
         return false;
     }
-    if token.kind == TokenKind::Ident {
-        return true;
+    let named_at = inventory
+        .named_sites
+        .partition_point(|site| site.span.end <= byte);
+    if inventory.named_sites.get(named_at).is_some_and(|site| {
+        site.kind == "database_field" && site.span.start <= byte && byte < site.span.end
+    }) {
+        return false;
     }
     // Source items are ordered by start, with outer items first at equal
     // starts. A local point lookup is sufficient for the exclusions below;
@@ -151,6 +156,12 @@ pub(crate) fn hover_may_need_model(inventory: &SourceInventory, text: &str, byte
         .partition_point(|item| item.span.start <= byte)
         .checked_sub(1)
         .map(|at| &inventory.items[at]);
+    if item.is_some_and(|item| display_equation_tag_at(inventory, text, item, byte)) {
+        return false;
+    }
+    if token.kind == TokenKind::Ident {
+        return true;
+    }
     if token.kind == TokenKind::String {
         let macro_at = inventory
             .macro_tokens
@@ -192,9 +203,49 @@ pub(crate) fn hover_may_need_model(inventory: &SourceInventory, text: &str, byte
         }
         return true;
     }
-    // Source inspection can describe the selection of a dormant item even
-    // when its selection is punctuation (for example an equation's opening [).
+    // Other written item selections can retain source-only presentation.
     item.is_some_and(|item| item.selection.start <= byte && byte < item.selection.end)
+}
+
+/// Literal display tags have no hover. Semantic tag operands retain their
+/// existing name providers; generated or incomplete prefixes stay uncertain.
+pub(crate) fn display_equation_tag_at(
+    inventory: &SourceInventory,
+    text: &str,
+    item: &SourceItem,
+    byte: u32,
+) -> bool {
+    if !inventory.structure_complete()
+        || item.kind != SourceItemKind::Equation
+        || byte < item.span.start
+        || byte >= item.header_end
+        || !inventory.literal_anchor_on_path(
+            Span {
+                start: item.span.start,
+                end: item.header_end,
+            },
+            byte,
+        )
+    {
+        return false;
+    }
+    let at = inventory
+        .lexical_tokens
+        .partition_point(|token| token.span.end <= byte);
+    let semantic_value = inventory.lexical_tokens.get(at).is_some_and(|token| {
+        matches!(token.kind, TokenKind::String | TokenKind::Ident)
+            && token.span.start <= byte
+            && byte < token.span.end
+    }) && at.checked_sub(2).is_some_and(|key| {
+        let tokens = &inventory.lexical_tokens;
+        tokens[key].kind == TokenKind::Ident
+            && tokens[key + 1].kind == TokenKind::Eq
+            && matches!(
+                tokens[key].text(text).to_ascii_lowercase().as_str(),
+                "endogenous" | "mcp"
+            )
+    });
+    !semantic_value
 }
 
 fn macro_at(tokens: &[Token], byte: u32) -> bool {

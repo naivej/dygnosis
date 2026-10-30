@@ -4,6 +4,39 @@ use super::*;
 use crate::engine::language::parser::PARSE_EXPANDED_BUILDS;
 
 #[tokio::test]
+async fn inactive_named_command_keyword_keeps_catalog_help() {
+    // Guards an inactive PAC name losing written declaration help while its keyword keeps the same catalog help.
+    let uri = Url::parse("untitled:inactive-pac-syntax.mod").unwrap();
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    let source = "parameters beta; beta=.9;\n@#if 1\npac_model(model_name=active,discount=beta);\n@#else\npac_model(model_name=dormant,discount=beta);\n@#endif\n";
+    open_source(server, &uri, source.into(), 1).await;
+    let mut descriptions = Vec::new();
+    for line in [2, 4] {
+        let hover = server
+            .hover_at(&TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(line, 2),
+            })
+            .expect("PAC command help");
+        let text = serde_json::to_string(&hover.contents).unwrap();
+        assert!(!text.contains("model information is unavailable"), "{text}");
+        descriptions.push(text);
+    }
+    assert_eq!(descriptions[0], descriptions[1]);
+    for (line, expected) in [(2, "**PAC model**"), (4, "**Written PAC model**")] {
+        let hover = server
+            .hover_at(&TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(line, 22),
+            })
+            .expect("named model help");
+        let text = serde_json::to_string(&hover).unwrap();
+        assert!(text.contains(expected), "{text}");
+    }
+}
+
+#[tokio::test]
 async fn trivia_color_range_does_not_wait_for_pending_model_work() {
     // Guards a comment-range color request waiting for model work that cannot
     // contribute a token inside the requested trivia.
@@ -322,20 +355,45 @@ async fn change_source(server: &Backend, uri: &Url, text: String, version: i32) 
 
 #[tokio::test]
 async fn equation_label_collision_has_no_variable_hover() {
-    // Guards a quoted equation label borrowing a declaration with equal text.
+    // Guards display tag punctuation/keys/labels borrowing source receipts or
+    // equal-name declarations, while body identifiers remain useful.
     let uri = Url::parse("untitled:label-collision.mod").unwrap();
-    let source = "var y; model; [name='y'] y=0; end;";
-    let (service, _socket) = new_service();
-    let server = service.inner();
-    server.upsert(uri.clone(), source.into(), 1);
-    let hover = server.hover_at(&TextDocumentPositionParams {
-        text_document: TextDocumentIdentifier { uri },
-        position: Position::new(0, source.find("'y'").unwrap() as u32 + 1),
-    });
-    assert!(
-        hover.is_none(),
-        "equation label acquired variable hover: {hover:?}"
-    );
+    for condition in [0, 1] {
+        let source = format!(
+            "var y name;\n@#if {condition}\nmodel; [name='y',other='name'] y=name+log(1); end;\n@#endif\n"
+        );
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(uri.clone(), source.clone(), 1);
+        let at = |byte| TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: span_range(&LineIndex::new(&source), &source, Span::new(byte, byte)).start,
+        };
+        for (needle, offset) in [
+            ("[name", 0),
+            ("[name", 1),
+            ("'y'", 1),
+            ("other=", 0),
+            ("'name'", 1),
+            ("] y=", 0),
+        ] {
+            let pos = at(source.find(needle).unwrap() + offset);
+            assert!(
+                !server.hover_may_need_model(&pos),
+                "display tag stayed eligible: {condition}/{needle}"
+            );
+            assert!(
+                server.hover_at(&pos).is_none(),
+                "display tag acquired hover: {condition}/{needle}"
+            );
+        }
+        for needle in ["y=name", "name+log", "log(1)"] {
+            assert!(
+                server.hover_at(&at(source.find(needle).unwrap())).is_some(),
+                "lost body hover: {condition}/{needle}"
+            );
+        }
+    }
 }
 
 #[tokio::test]
@@ -496,21 +554,15 @@ async fn hover_eligibility_keeps_quoted_names_semantic_tags_and_macros() {
 
 #[tokio::test]
 async fn hover_eligibility_preserves_dormant_source_and_uncertain_strings() {
-    // Guards dropping source receipts or guessing a literal role in recovery
+    // Guards dropping source receipts/declarations or guessing a literal role in recovery
     // and interpolated strings. These positions keep their existing provider.
     let uri = Url::parse("untitled:uncertain-hover.mod").unwrap();
     for (source, needle, offset, expected) in [
         (
             "var y;\n@#if 0\nmodel; [name='y'] y=0; end;\n@#endif\nmodel; y=1; end;",
-            "[name",
-            0,
-            Some("inactive"),
-        ),
-        (
-            "var y;\n@#if 0\nmodel; [name='y'] y=0; end;\n@#endif\nmodel; y=1; end;",
             "y=0",
             0,
-            Some("inactive"),
+            Some("**Written endogenous variable**: `y`"),
         ),
         (
             "@#define K=1\nvar y; model; [name='y_@{K}'] y=0; end;",

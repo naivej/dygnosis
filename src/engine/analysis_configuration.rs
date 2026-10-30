@@ -425,6 +425,7 @@ pub struct SourceFileStructure {
     pub(crate) inventory: Arc<crate::engine::analysis::source_inventory::SourceInventory>,
     pub sites: Arc<[DirectiveSite]>,
     pub availability: Arc<[SourceItemAvailability]>,
+    pub(crate) lookup: Option<Arc<crate::engine::workspace::SourceLookup>>,
 }
 
 impl SourceFileStructure {

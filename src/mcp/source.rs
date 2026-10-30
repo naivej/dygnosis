@@ -301,6 +301,7 @@ pub struct SourceAnalysis {
 
 pub struct SourceSnapshot {
     pub source_structure: Option<SourceStructure>,
+    pub(crate) source_declaration: Option<crate::engine::workspace::DeclarationLookup>,
     pub workspace: Workspace,
     /// Internal selected root. Text mode uses an explicitly synthetic root.
     pub root: String,
@@ -450,6 +451,44 @@ pub(super) fn resolve_source_configured_reusing(
     inspection: Option<&SourceStructureQuery>,
     previous: Option<(&SourceSnapshot, bool)>,
 ) -> Result<SourceSnapshot, SourceError> {
+    resolve_source_inspection_reusing(
+        input,
+        expected_revision,
+        control,
+        analysis,
+        inspection,
+        None,
+        previous,
+    )
+}
+
+pub(super) fn resolve_source_inspecting(
+    input: SourceInput,
+    expected_revision: Option<&str>,
+    control: &RequestControl,
+    analysis: Option<&AnalysisConfiguration>,
+    inspection: Option<&super::source_views::Inspection>,
+) -> Result<SourceSnapshot, SourceError> {
+    resolve_source_inspection_reusing(
+        input,
+        expected_revision,
+        control,
+        analysis,
+        inspection.map(|value| &value.structure),
+        inspection.and_then(|value| value.declaration_target.as_ref()),
+        None,
+    )
+}
+
+fn resolve_source_inspection_reusing(
+    input: SourceInput,
+    expected_revision: Option<&str>,
+    control: &RequestControl,
+    analysis: Option<&AnalysisConfiguration>,
+    inspection: Option<&SourceStructureQuery>,
+    declaration_target: Option<&super::request::Target>,
+    previous: Option<(&SourceSnapshot, bool)>,
+) -> Result<SourceSnapshot, SourceError> {
     #[cfg(test)]
     let probe = super::reuse_probe::Checkout::new(
         &input,
@@ -478,6 +517,7 @@ pub(super) fn resolve_source_configured_reusing(
         control,
         analysis,
         inspection,
+        declaration_target,
         previous,
     );
     #[cfg(test)]
@@ -497,6 +537,7 @@ fn resolve_source_configured_inner(
     control: &RequestControl,
     analysis: Option<&AnalysisConfiguration>,
     inspection: Option<&SourceStructureQuery>,
+    declaration_target: Option<&super::request::Target>,
     previous: Option<ReuseView<'_>>,
 ) -> Result<SourceSnapshot, SourceError> {
     #[cfg(feature = "mcp-reuse")]
@@ -781,7 +822,7 @@ fn resolve_source_configured_inner(
         capture_boundary(CaptureBoundary::SourceStructure);
     }
     captured_owners_current(&workspace, &owner_proofs)?;
-    let source_structure = inspection
+    let mut source_structure = inspection
         .map(|query| workspace.source_structure(&root, query))
         .transpose()
         .map_err(|error| SourceError::failure(error.code, error.message))?;
@@ -795,6 +836,97 @@ fn resolve_source_configured_inner(
             "INPUT_CHANGED",
             "Source inspection refreshed the analyzed input identity. No earlier model facts were returned. Repeat the request.",
         ));
+    }
+    let source_declaration =
+        if let (Some(target), Some(structure)) = (declaration_target, source_structure.as_ref()) {
+            let file = structure
+                .files
+                .iter()
+                .find(|file| {
+                    target.file.as_ref().map_or(file.file == root_file, |key| {
+                        file.file.as_ref() == Some(key)
+                    })
+                })
+                .ok_or_else(|| {
+                    SourceError::invalid(
+                        "The written target file is unavailable under this source policy.",
+                    )
+                })?;
+            let byte = super::request::byte_position(&file.text, target.line, target.column)
+                .map_err(|error| SourceError::invalid(error.message.to_string()))?;
+            file.inventory
+                .items
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| item.span.start <= byte && byte < item.span.end)
+                .min_by_key(|(_, item)| item.span.end - item.span.start)
+                .filter(|(index, item)| {
+                    use crate::engine::analysis_configuration::SourceAvailability;
+                    file.inventory
+                        .name_use(item, byte)
+                        .is_some_and(|(_, site)| site.is_some_and(|site| site.declaration))
+                        || file.availability.get(*index).is_none_or(|row| {
+                            matches!(
+                                row.availability,
+                                SourceAvailability::Inactive | SourceAvailability::Unknown
+                            )
+                        })
+                })
+                .filter(|(_, item)| file.inventory.name_use(item, byte).is_some())
+                .map(|(_, item)| {
+                    workspace.written_declaration_at_use(
+                        &root,
+                        file.file.as_deref().unwrap_or(&root),
+                        file,
+                        item,
+                        byte,
+                    )
+                })
+        } else {
+            None
+        };
+    if let Some(lookup) = &source_declaration {
+        for guard in &lookup.guards {
+            guards.insert(guard.file.clone(), guard.clone());
+        }
+        if let Some(structure) = &mut source_structure {
+            for source in &lookup.sources {
+                if !structure
+                    .coverage
+                    .indexed_files
+                    .iter()
+                    .any(|file| file.file.as_deref() == Some(&source.file))
+                {
+                    structure.coverage.indexed_files.push(
+                        crate::engine::analysis_configuration::IndexedSourceCoverage {
+                            file: Some(source.file.clone()),
+                            source_revision: Some(source.revision.clone()),
+                            acquired: true,
+                            executed: sources.contains_key(&source.file),
+                            explicitly_selected: false,
+                            complete: source.complete,
+                            cause: source.cause.clone(),
+                        },
+                    );
+                }
+            }
+            structure.coverage.unresolved_targets.retain(|target| {
+                !lookup.checked_includes.iter().any(|(file, span)| {
+                    target.file.as_deref() == Some(file) && target.span == *span
+                })
+            });
+            structure.coverage.complete = structure.coverage.unresolved_targets.is_empty()
+                && structure
+                    .coverage
+                    .indexed_files
+                    .iter()
+                    .all(|file| file.complete);
+        }
+        for source in &lookup.sources {
+            sources
+                .entry(source.file.clone())
+                .or_insert_with(|| source.text.as_str().to_owned());
+        }
     }
     if let Some(structure) = &source_structure {
         for guard in &structure.input_guards {
@@ -839,6 +971,8 @@ fn resolve_source_configured_inner(
         }
     }
     let guards: Vec<_> = guards.into_values().collect();
+    #[cfg(test)]
+    capture_boundary(CaptureBoundary::AnalysisMetadata);
     let structure_current = source_structure.is_none() || {
         #[cfg(feature = "mcp-reuse")]
         let _measurement = super::retention::measure(super::retention::Phase::Proof);
@@ -850,8 +984,6 @@ fn resolve_source_configured_inner(
             "Source or lookup facts changed while capturing this request; repeat the request.",
         ));
     }
-    #[cfg(test)]
-    capture_boundary(CaptureBoundary::AnalysisMetadata);
     captured_owners_current(&workspace, &owner_proofs)?;
     let metadata = workspace
         .analysis_metadata(&root)
@@ -863,7 +995,10 @@ fn resolve_source_configured_inner(
             "Analysis metadata refreshed the analyzed input identity. No earlier model facts were returned. Repeat the request.",
         ));
     }
-    let identity = json!({"source_policy":kind,"root":root_file,"owner_roots":owner_roots,"include_dirs":include_dirs,"macro_work_limit":control.macro_work_limit,"guards":guards,"configuration_id":metadata.selection.configuration_id,"source_structure_revision":source_structure.as_ref().map(|source| &source.revision)});
+    let mut identity = json!({"source_policy":kind,"root":root_file,"owner_roots":owner_roots,"include_dirs":include_dirs,"macro_work_limit":control.macro_work_limit,"guards":guards,"configuration_id":metadata.selection.configuration_id,"source_structure_revision":source_structure.as_ref().map(|source| &source.revision)});
+    if let Some(lookup) = &source_declaration {
+        identity["source_declaration_resolutions"] = json!(lookup.resolutions);
+    }
     let revision = sha256(serde_json::to_vec(&identity).expect("source identity is serializable"));
     if expected_revision.is_some_and(|expected| expected != revision) {
         return Err(SourceError::failure(
@@ -896,6 +1031,7 @@ fn resolve_source_configured_inner(
     control.check()?;
     Ok(SourceSnapshot {
         source_structure,
+        source_declaration,
         workspace,
         root,
         root_file,

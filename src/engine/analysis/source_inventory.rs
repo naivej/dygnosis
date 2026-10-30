@@ -55,11 +55,13 @@ pub(crate) struct SourceItem {
     pub local_definition: Option<Span>,
     pub written_kind: Option<String>,
     pub declaration_metadata: Option<Box<SourceDeclarationMetadata>>,
+    pub source_namespace: Option<String>,
     pub path: Vec<SourcePathStep>,
     /// A proven containing written item, never an inferred semantic owner.
     pub parent: Option<usize>,
     pub tags: BTreeMap<String, String>,
     pub template: bool,
+    /// End of the block opener or equation-tag prefix (empty when no tags).
     pub header_end: u32,
     pub function: bool,
 }
@@ -90,6 +92,36 @@ pub(crate) struct SourceContext {
     pub parent: Option<String>,
 }
 
+/// Parser-completed literal name role; it is not an accepted binding.
+#[derive(Clone, Debug)]
+pub(crate) struct SourceNameSite {
+    pub span: Span,
+    pub kind: &'static str,
+    pub declaration: bool,
+    pub namespace: Option<String>,
+    pub owner: Option<usize>,
+}
+
+impl SourceNameSite {
+    pub(crate) fn final_table(&self) -> bool {
+        matches!(
+            self.kind,
+            "var_model"
+                | "trend_component_model"
+                | "var_expectation_model"
+                | "pac_model"
+                | "auxiliary_model"
+        )
+    }
+    pub(crate) fn matches(&self, declaration: &Self) -> bool {
+        self.namespace == declaration.namespace
+            && (self.kind == declaration.kind
+                || self.kind == "auxiliary_model"
+                    && matches!(declaration.kind, "var_model" | "trend_component_model")
+                || self.kind == "callable" && declaration.kind == "external_function")
+    }
+}
+
 /// A retained projection of the existing written-folding parse. It stores no
 /// temporary Model, expressions, bindings, or effective equation numbers.
 pub(crate) struct SourceInventory {
@@ -115,6 +147,11 @@ pub(crate) struct SourceInventory {
     contexts: Vec<(u32, Vec<SourcePathStep>)>,
     interpolations: Vec<Span>,
     directive_spans: Vec<Span>,
+    /// Grammar-completed names in other namespaces, retained from the same parse.
+    nonordinary_names: Vec<Span>,
+    /// Literal ordinary-name slots read by the existing command-list parser.
+    command_uses: Vec<Span>,
+    pub named_sites: Vec<SourceNameSite>,
 }
 
 struct MacroFrame<'a> {
@@ -125,6 +162,77 @@ struct MacroFrame<'a> {
 }
 
 impl SourceInventory {
+    /// Conservative retained payload for the bounded source-only hover cache.
+    pub(crate) fn retained_bytes(&self) -> usize {
+        use std::mem::size_of;
+        let strings = |value: &Option<String>| value.as_ref().map_or(0, String::capacity);
+        size_of::<Self>()
+            + self.source_revision.capacity()
+            + self.items.capacity() * size_of::<SourceItem>()
+            + self
+                .items
+                .iter()
+                .map(|row| {
+                    row.source_id.capacity()
+                        + strings(&row.name)
+                        + strings(&row.outline_name)
+                        + strings(&row.written_kind)
+                        + strings(&row.source_namespace)
+                        + row.path.capacity() * size_of::<SourcePathStep>()
+                        + row.outline_children.capacity() * size_of::<SourceOutlineChild>()
+                        + row
+                            .outline_children
+                            .iter()
+                            .map(|child| child.name.capacity() + strings(&child.detail))
+                            .sum::<usize>()
+                        + row
+                            .tags
+                            .iter()
+                            // Charge a full sparsely occupied B-tree node per entry.
+                            .map(|(key, value)| {
+                                key.capacity()
+                                    + value.capacity()
+                                    + 11 * size_of::<(String, String)>()
+                                    + 128
+                            })
+                            .sum::<usize>()
+                        + row.declaration_metadata.as_ref().map_or(0, |metadata| {
+                            size_of::<SourceDeclarationMetadata>()
+                                + strings(&metadata.long_name)
+                                + strings(&metadata.tex_name)
+                        })
+                })
+                .sum::<usize>()
+            + self.lexical_tokens.capacity() * size_of::<Token>()
+            + self
+                .lexical_tokens
+                .iter()
+                .map(|token| strings(&token.lexeme))
+                .sum::<usize>()
+            + self.folds.capacity() * size_of::<SourceFold>()
+            + strings(&self.coverage_cause)
+            + strings(&self.target_coverage_cause)
+            + (self.opaque.capacity()
+                + self.native_proof.capacity()
+                + self.interpolations.capacity()
+                + self.directive_spans.capacity()
+                + self.nonordinary_names.capacity()
+                + self.command_uses.capacity())
+                * size_of::<Span>()
+            + self.contexts.capacity() * size_of::<(u32, Vec<SourcePathStep>)>()
+            + self.named_sites.capacity() * size_of::<SourceNameSite>()
+            + self
+                .named_sites
+                .iter()
+                .map(|site| strings(&site.namespace))
+                .sum::<usize>()
+            + self
+                .contexts
+                .iter()
+                .map(|(_, path)| path.capacity() * size_of::<SourcePathStep>())
+                .sum::<usize>()
+    }
+
     fn empty() -> Self {
         Self {
             source_revision: String::new(),
@@ -144,6 +252,9 @@ impl SourceInventory {
             contexts: vec![(0, Vec::new())],
             interpolations: Vec::new(),
             directive_spans: Vec::new(),
+            nonordinary_names: Vec::new(),
+            command_uses: Vec::new(),
+            named_sites: Vec::new(),
         }
     }
 
@@ -348,6 +459,7 @@ impl SourceInventory {
             local_definition: None,
             written_kind: None,
             declaration_metadata: None,
+            source_namespace: None,
             path: self.path_at(selection.start).to_vec(),
             parent: None,
             tags: BTreeMap::new(),
@@ -527,6 +639,7 @@ impl SourceInventory {
 
     fn collect_model(&mut self, text: &str, model: &Model, budget: &mut MacroBudget) {
         let mut proven = HashSet::new();
+        let mut literal_dimensions = HashSet::new();
         let mut item_by_statement: Vec<Option<usize>> = vec![None; model.statements.len()];
         self.opaque
             .extend(model.execution_steps.iter().filter_map(|step| {
@@ -613,6 +726,67 @@ impl SourceInventory {
                 .map(|statement| statement.id)
         };
         for slot in &model.named_slots {
+            if !self.reserve(budget, std::mem::size_of::<Span>()) {
+                return;
+            }
+            self.nonordinary_names.push(slot.span);
+            if statement_for_token(slot.order).is_some_and(|statement| proven.contains(&statement))
+                && text.get(slot.span.start as usize..slot.span.end as usize)
+                    == Some(model.name(slot.name))
+                && self.literal_anchor_on_path(slot.span, slot.span.start)
+            {
+                use crate::engine::language::model::NamedSlotKind;
+                let kind = match slot.kind {
+                    NamedSlotKind::Dimension => "heterogeneity_dimension",
+                    NamedSlotKind::Database => "database",
+                    NamedSlotKind::Model(kind) => kind.source_kind(),
+                    NamedSlotKind::AuxiliaryModel(_) => "auxiliary_model",
+                };
+                if !self.reserve(budget, std::mem::size_of::<SourceNameSite>()) {
+                    return;
+                }
+                self.named_sites.push(SourceNameSite {
+                    span: slot.span,
+                    kind,
+                    declaration: slot.declaration,
+                    namespace: None,
+                    owner: None,
+                });
+                if kind == "heterogeneity_dimension"
+                    && !slot.declaration
+                    && let Some(statement) = statement_for_token(slot.order)
+                {
+                    if !self.reserve(budget, 32) {
+                        return;
+                    }
+                    literal_dimensions.insert(statement);
+                }
+                if kind == "database" && !slot.declaration {
+                    let at = model
+                        .expanded_tokens
+                        .partition_point(|token| token.span.end <= slot.span.end);
+                    if model
+                        .expanded_tokens
+                        .get(at)
+                        .is_some_and(|token| token.kind == TokenKind::Dot)
+                        && let Some(field) = model.expanded_tokens.get(at + 1).filter(|token| {
+                            token.kind == TokenKind::Ident
+                                && self.literal_anchor_on_path(token.span, token.span.start)
+                        })
+                    {
+                        if !self.reserve(budget, std::mem::size_of::<SourceNameSite>()) {
+                            return;
+                        }
+                        self.named_sites.push(SourceNameSite {
+                            span: field.span,
+                            kind: "database_field",
+                            declaration: false,
+                            namespace: None,
+                            owner: None,
+                        });
+                    }
+                }
+            }
             let (statement_id, object_name) = match slot.owner {
                 crate::engine::language::model::NamedSlotOwner::ModelCommand(index)
                     if slot.declaration =>
@@ -660,6 +834,149 @@ impl SourceInventory {
                 budget,
             ) {
                 return;
+            }
+        }
+        for call in &model.function_calls {
+            use crate::engine::language::expr::ExprKind;
+            if let ExprKind::Call { callee, .. } = &model.exprs.get(call.expr).kind
+                && statement_for_token(call.order)
+                    .is_some_and(|statement| proven.contains(&statement))
+                && !crate::engine::language::parser::is_dynare_expression_builtin(
+                    model.name(*callee),
+                )
+                && text.get(call.span.start as usize..call.span.end as usize)
+                    == Some(model.name(*callee))
+                && self.literal_anchor_on_path(call.span, call.span.start)
+            {
+                if !self.reserve(budget, std::mem::size_of::<SourceNameSite>()) {
+                    return;
+                }
+                self.named_sites.push(SourceNameSite {
+                    span: call.span,
+                    kind: "external_function",
+                    declaration: false,
+                    namespace: None,
+                    owner: None,
+                });
+            }
+            // The inert parser has no declarations from an unexpanded include.
+            // Its generic one-integer call can be a variable lead/lag. A later
+            // written declaration must establish that role before presentation.
+            if let ExprKind::Call { callee, args } = &model.exprs.get(call.expr).kind
+                && !crate::engine::language::parser::is_dynare_expression_builtin(
+                    model.name(*callee),
+                )
+                && let [argument] = args.as_slice()
+            {
+                let argument = match model.exprs.get(*argument).kind {
+                    ExprKind::Unary { arg, .. } => arg,
+                    _ => *argument,
+                };
+                if matches!(model.exprs.get(argument).kind, ExprKind::Number)
+                    && model
+                        .numeric_literals
+                        .get(&argument)
+                        .is_some_and(|value| value.is_finite() && value.fract() == 0.0)
+                {
+                    continue;
+                }
+            }
+            if !self.reserve(budget, std::mem::size_of::<Span>()) {
+                return;
+            }
+            self.nonordinary_names.push(call.span);
+        }
+        for usage in &model.command_symbols {
+            if !self.reserve(budget, std::mem::size_of::<Span>()) {
+                return;
+            }
+            self.command_uses.push(usage.span);
+        }
+        for command in &model.semi_structural_commands {
+            if !statement_for_token(command.parse_order)
+                .is_some_and(|statement| proven.contains(&statement))
+            {
+                continue;
+            }
+            for option in &command.options {
+                use crate::engine::language::model::SemiStructuralValue;
+                if let SemiStructuralValue::Expression(expression) = &option.value
+                    && let Some(expr) = expression.expr
+                {
+                    for name in model.exprs.walk_idents(expr) {
+                        if !self.reserve(budget, std::mem::size_of::<Span>()) {
+                            return;
+                        }
+                        self.command_uses.push(name.span);
+                    }
+                } else if let SemiStructuralValue::Symbol { span, .. } = option.value {
+                    // Typed named slots are excluded by nonordinary_names above.
+                    if !self.reserve(budget, std::mem::size_of::<Span>()) {
+                        return;
+                    }
+                    self.command_uses.push(span);
+                }
+            }
+        }
+        for external in &model.external_functions {
+            if !statement_for_token(external.parse_order)
+                .is_some_and(|statement| proven.contains(&statement))
+            {
+                continue;
+            }
+            if let Some((name, span)) = external.name
+                && text
+                    .get(span.start as usize..span.end as usize)
+                    .map(|name| name.trim_matches(['\'', '"']))
+                    == Some(model.name(name))
+                && self.literal_anchor_on_path(span, span.start)
+            {
+                if !self.reserve(budget, std::mem::size_of::<SourceNameSite>()) {
+                    return;
+                }
+                self.named_sites.push(SourceNameSite {
+                    span,
+                    kind: "external_function",
+                    declaration: true,
+                    namespace: None,
+                    owner: None,
+                });
+            }
+            for derivative in [external.first_deriv, external.second_deriv]
+                .into_iter()
+                .flatten()
+            {
+                if let crate::engine::language::model::DerivSpec::Named(name, span) = derivative
+                    && text
+                        .get(span.start as usize..span.end as usize)
+                        .map(|name| name.trim_matches(['\'', '"']))
+                        == Some(model.name(name))
+                    && self.literal_anchor_on_path(span, span.start)
+                {
+                    if !self.reserve(budget, std::mem::size_of::<SourceNameSite>()) {
+                        return;
+                    }
+                    self.named_sites.push(SourceNameSite {
+                        span,
+                        kind: "external_function",
+                        declaration: true,
+                        namespace: None,
+                        owner: None,
+                    });
+                }
+            }
+        }
+        for expr in model.trend_vars.iter().filter_map(|row| row.growth).chain(
+            model
+                .nonstationary_vars
+                .iter()
+                .filter_map(|row| row.deflator),
+        ) {
+            for name in model.exprs.walk_idents(expr) {
+                if !self.reserve(budget, std::mem::size_of::<Span>()) {
+                    return;
+                }
+                self.command_uses.push(name.span);
             }
         }
         for block in &model.pac_target_info {
@@ -817,6 +1134,35 @@ impl SourceInventory {
             }
         }
         for instruction in &model.subsamples {
+            if let crate::engine::language::model::SubsampleInstruction::Copy { target, .. } =
+                instruction
+            {
+                use crate::engine::language::model::SubsampleHead;
+                let (names, span) = match target {
+                    SubsampleHead::Symbol(name, span) | SubsampleHead::Std(name, span) => {
+                        (vec![model.name(*name)], *span)
+                    }
+                    SubsampleHead::Corr(first, span, second, _) => {
+                        let mut names = vec![model.name(*first), model.name(*second)];
+                        names.sort_unstable();
+                        (names, *span)
+                    }
+                };
+                let namespace = format!("subsamples({})", names.join(","));
+                if !self.reserve(
+                    budget,
+                    std::mem::size_of::<SourceNameSite>() + namespace.len(),
+                ) {
+                    return;
+                }
+                self.named_sites.push(SourceNameSite {
+                    span,
+                    kind: "subsample_copy",
+                    declaration: false,
+                    namespace: Some(namespace),
+                    owner: None,
+                });
+            }
             let crate::engine::language::model::SubsampleInstruction::Declare {
                 head,
                 ranges,
@@ -844,6 +1190,34 @@ impl SourceInventory {
                     format!("{},{}", model.name(*first), model.name(*second))
                 }
             };
+            let reset_span = match instruction {
+                crate::engine::language::model::SubsampleInstruction::Declare { head, .. } => {
+                    match head {
+                        crate::engine::language::model::SubsampleHead::Symbol(_, span)
+                        | crate::engine::language::model::SubsampleHead::Std(_, span)
+                        | crate::engine::language::model::SubsampleHead::Corr(_, span, _, _) => {
+                            *span
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            };
+            let mut reset_key: Vec<_> = head.split(',').collect();
+            reset_key.sort_unstable();
+            let reset_namespace = format!("subsamples({})", reset_key.join(","));
+            if !self.reserve(
+                budget,
+                std::mem::size_of::<SourceNameSite>() + reset_namespace.len(),
+            ) {
+                return;
+            }
+            self.named_sites.push(SourceNameSite {
+                span: reset_span,
+                kind: "subsample_reset",
+                declaration: false,
+                namespace: Some(reset_namespace),
+                owner: None,
+            });
             for range in ranges {
                 let name = model.name(range.name);
                 if text.get(range.name_span.start as usize..range.name_span.end as usize)
@@ -852,6 +1226,22 @@ impl SourceInventory {
                 {
                     continue;
                 }
+                let mut key: Vec<_> = head.split(',').collect();
+                key.sort_unstable();
+                let namespace = format!("subsamples({})", key.join(","));
+                if !self.reserve(
+                    budget,
+                    std::mem::size_of::<SourceNameSite>() + namespace.len(),
+                ) {
+                    return;
+                }
+                self.named_sites.push(SourceNameSite {
+                    span: range.name_span,
+                    kind: "named_subsample",
+                    declaration: true,
+                    namespace: Some(namespace),
+                    owner: None,
+                });
                 if !self.outline_child(
                     item,
                     name.to_owned(),
@@ -863,6 +1253,66 @@ impl SourceInventory {
                     return;
                 }
             }
+        }
+        for usage in &model.subsample_uses {
+            use crate::engine::language::model::DottedHead;
+            if usage.checked {
+                let spans: Vec<_> = match &usage.head {
+                    DottedHead::Param { first, .. } => model
+                        .dotted_statements
+                        .get(usage.statement)
+                        .and_then(|statement| {
+                            model.expanded_tokens.get(statement.active_tokens.start)
+                        })
+                        .filter(|token| token.text(&model.source) == model.name(*first))
+                        .map(|token| vec![token.span])
+                        .unwrap_or_default(),
+                    DottedHead::Std { first_span, .. } => vec![*first_span],
+                    DottedHead::Corr {
+                        first_span,
+                        second_span,
+                        ..
+                    } => vec![*first_span, *second_span],
+                    DottedHead::Vec { .. } => Vec::new(),
+                };
+                for span in spans {
+                    if !self.reserve(budget, std::mem::size_of::<Span>()) {
+                        return;
+                    }
+                    self.command_uses.push(span);
+                }
+            }
+            let names = match &usage.head {
+                DottedHead::Param { first, .. } | DottedHead::Std { first, .. } => {
+                    vec![model.name(*first)]
+                }
+                DottedHead::Corr { first, second, .. } => {
+                    let mut names = vec![model.name(*first), model.name(*second)];
+                    names.sort_unstable();
+                    names
+                }
+                DottedHead::Vec { .. } => continue,
+            };
+            let namespace = format!("subsamples({})", names.join(","));
+            if !self.literal_anchor_on_path(usage.span, usage.span.start)
+                || text.get(usage.span.start as usize..usage.span.end as usize)
+                    != Some(model.name(usage.name))
+            {
+                continue;
+            }
+            if !self.reserve(
+                budget,
+                std::mem::size_of::<SourceNameSite>() + namespace.len(),
+            ) {
+                return;
+            }
+            self.named_sites.push(SourceNameSite {
+                span: usage.span,
+                kind: "named_subsample",
+                declaration: false,
+                namespace: Some(namespace),
+                owner: None,
+            });
         }
         for (declaration_index, declaration) in model.written_declarations.iter().enumerate() {
             if !self.reserve(
@@ -959,6 +1409,18 @@ impl SourceInventory {
                 at += close + 1;
                 tag_end = tokens[at - 1].span.end;
             }
+            row.header_end = tag_end;
+            let scope = match equation.dimension {
+                None => Some("model".to_owned()),
+                Some(dimension) if literal_dimensions.contains(&equation.statement_id) => {
+                    Some(format!("model(heterogeneity={})", model.name(dimension)))
+                }
+                Some(_) => None,
+            };
+            if !self.reserve(budget, scope.as_ref().map_or(0, String::len)) {
+                return;
+            }
+            row.source_namespace = scope;
             if !intersects(
                 &self.interpolations,
                 Span {
@@ -992,6 +1454,23 @@ impl SourceInventory {
                         }
                     }
                 }
+            }
+            if row.local_definition.is_some() && complete {
+                let namespace = row.source_namespace.clone();
+                if !self.reserve(
+                    budget,
+                    std::mem::size_of::<SourceNameSite>()
+                        + namespace.as_ref().map_or(0, String::len),
+                ) {
+                    return;
+                }
+                self.named_sites.push(SourceNameSite {
+                    span: row.selection,
+                    kind: "model_local_variable",
+                    declaration: true,
+                    namespace,
+                    owner: None,
+                });
             }
             self.items.push(row);
         }
@@ -1030,6 +1509,24 @@ impl SourceInventory {
         self.folds.dedup();
         self.native_proof.sort_by_key(|span| (span.start, span.end));
         self.native_proof.dedup();
+        self.nonordinary_names
+            .sort_by_key(|span| (span.start, span.end));
+        self.nonordinary_names.dedup();
+        self.command_uses.sort_by_key(|span| (span.start, span.end));
+        self.command_uses.dedup();
+        self.named_sites
+            .sort_by_key(|site| (site.span.start, site.span.end));
+        for site in &mut self.named_sites {
+            if crate::engine::control::cancelled() {
+                return;
+            }
+            let at = self
+                .items
+                .partition_point(|item| item.span.start <= site.span.start);
+            site.owner = self.items[..at].iter().rposition(|item| {
+                item.kind != SourceItemKind::Fragment && site.span.end <= item.span.end
+            });
+        }
     }
 
     /// Context uses literal, complete source boundaries. Fragments withhold a
@@ -1095,6 +1592,170 @@ impl SourceInventory {
                     })
                 })
         })
+    }
+
+    pub(crate) fn name_use(
+        &self,
+        item: &SourceItem,
+        byte: u32,
+    ) -> Option<(Span, Option<SourceNameSite>)> {
+        let at = self
+            .named_sites
+            .partition_point(|site| site.span.end <= byte);
+        let named = self.named_sites.get(at).filter(|site| {
+            !matches!(
+                site.kind,
+                "database_field" | "subsample_copy" | "subsample_reset"
+            ) && site.owner.is_some()
+                && site.span.start <= byte
+                && byte < site.span.end
+                && self.literal_anchor_on_path(site.span, byte)
+        });
+        if let Some(span) = self.ordinary_name_use(item, byte) {
+            let role = named
+                .filter(|site| !site.declaration && site.kind == "external_function")
+                .map(|site| {
+                    let mut site = site.clone();
+                    site.kind = "callable";
+                    site
+                });
+            return Some((span, role));
+        }
+        self.structure_complete
+            .then_some(named)
+            .flatten()
+            .map(|site| (site.span, Some(site.clone())))
+    }
+
+    pub(crate) fn named_declaration(
+        &self,
+        text: &str,
+        site: &SourceNameSite,
+    ) -> Option<SourceItem> {
+        if !site.declaration {
+            return None;
+        }
+        if site.kind == "model_local_variable" {
+            let mut item = self.items.get(site.owner?)?.clone();
+            item.kind = SourceItemKind::Declaration;
+            item.written_kind = Some(site.kind.into());
+            return Some(item);
+        }
+        let index = site.owner?;
+        let owner = self.items.get(index)?;
+        if owner.kind == SourceItemKind::Declaration
+            && owner.span == site.span
+            && owner.selection == site.span
+            && owner.written_kind.as_deref() == Some(site.kind)
+        {
+            return Some(owner.clone());
+        }
+        Some(SourceItem {
+            source_id: format!("{}:name:{}", owner.source_id, site.span.start),
+            kind: SourceItemKind::Declaration,
+            span: site.span,
+            selection: site.span,
+            header_end: site.span.end,
+            branch_end: None,
+            name: Some(
+                text.get(site.span.start as usize..site.span.end as usize)?
+                    .trim_matches(['\'', '"'])
+                    .to_owned(),
+            ),
+            written_kind: Some(site.kind.to_owned()),
+            parent: Some(index),
+            source_namespace: site.namespace.clone(),
+            outline_name: None,
+            outline_selection: None,
+            outline_children: Vec::new(),
+            local_definition: None,
+            declaration_metadata: None,
+            tags: BTreeMap::new(),
+            template: false,
+            path: self.path_at(site.span.start).to_vec(),
+            function: site.kind == "external_function",
+        })
+    }
+
+    /// A literal ordinary-name use in an equation or parser-proven command-list
+    /// token. This establishes no accepted binding, model value or timing.
+    pub(crate) fn ordinary_name_use(&self, item: &SourceItem, byte: u32) -> Option<Span> {
+        if !self.structure_complete || item.template {
+            return None;
+        }
+        let tokens = &self.lexical_tokens;
+        let at = tokens.partition_point(|token| token.span.end <= byte);
+        let token = tokens.get(at).filter(|token| {
+            token.kind == TokenKind::Ident
+                && token.span.start <= byte
+                && byte < token.span.end
+                && self.literal_anchor_on_path(token.span, byte)
+        })?;
+        let equation = item.kind == SourceItemKind::Equation;
+        let command_use = self
+            .command_uses
+            .binary_search_by_key(&token.span.start, |span| span.start)
+            .is_ok();
+        if equation && item.source_namespace.is_none() {
+            return None;
+        }
+        if !equation
+            && !(matches!(
+                item.kind,
+                SourceItemKind::Command | SourceItemKind::Declaration | SourceItemKind::Block
+            ) && command_use)
+        {
+            return None;
+        }
+        if self
+            .nonordinary_names
+            .binary_search_by_key(&token.span.start, |span| span.start)
+            .is_ok()
+        {
+            return None;
+        }
+        if !command_use
+            && (at
+                .checked_sub(1)
+                .and_then(|at| tokens.get(at))
+                .is_some_and(|token| token.kind == TokenKind::Dot)
+                || tokens
+                    .get(at + 1)
+                    .is_some_and(|token| token.kind == TokenKind::Dot))
+        {
+            return None;
+        }
+        // The existing tag walk retains the prefix bound; tags are not
+        // ordinary-name uses and need no second prefix-token walk here.
+        if equation && token.span.start < item.header_end
+            || item
+                .local_definition
+                .is_some_and(|rhs| token.span.start < rhs.start)
+        {
+            return None;
+        }
+        let block = |row: &SourceItem| {
+            let mut parent = row.parent;
+            while let Some(index) = parent {
+                let row = &self.items[index];
+                if row.kind == SourceItemKind::Block {
+                    return Some(index);
+                }
+                parent = row.parent;
+            }
+            None
+        };
+        if equation
+            && !block(item).is_some_and(|owner| {
+                matches!(
+                    self.items[owner].name.as_deref(),
+                    Some("model" | "model_replace")
+                )
+            })
+        {
+            return None;
+        }
+        Some(token.span)
     }
 
     /// Only literal, locally paired verbatim text is certified here. The pin's

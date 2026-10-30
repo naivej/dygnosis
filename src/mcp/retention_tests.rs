@@ -589,6 +589,81 @@ fn source_structure_inspection_matches_uncached_result_and_rejects_a_racing_edit
 }
 
 #[test]
+fn inactive_include_declaration_hover_reuses_its_source_only_cache() {
+    // Guards a warm include declaration hover avoiding another parser build while preserving effective output.
+    let input = SourceInput::Map {
+        root: "root.mod".into(),
+        files: std::collections::BTreeMap::from([
+            (
+                "root.mod".into(),
+                "@#if 1\nvar mu_cngdp (long_name='Active consumption');\nmodel;\nmu_cngdp=0;\nend;\n@#else\n@#include \"nested/parameters_initial.inc\"\nmodel;\ny=mu_cngdp(1);\ny=pac_expectation(pm)+temp;\nend;\n@#endif\n".into(),
+            ),
+            (
+                "nested/parameters_initial.inc".into(),
+                "var mu_cngdp $C$ (long_name='Dormant consumption'); parameters beta; pac_model(model_name=pm,discount=beta); model; #temp=mu_cngdp; end;\n".into(),
+            ),
+        ]),
+        root_text: None,
+        include_dirs: Vec::new(),
+        owner_roots: Vec::new(),
+    };
+    let source = serde_json::to_value(&input).unwrap();
+    let query = json!({"source":source,"view":"source","symbol":{"kind":"target","file":"root.mod","line":9,"column":5}});
+    let effective_query = json!({"source":source});
+    let cache = store(limits(64 * 1024 * 1024, 1));
+    let expected_effective = run_call(None, "dynare_model_info", effective_query.clone()).0;
+
+    let (cold, cold_hit, cold_builds) = run_call(Some(&cache), "dynare_symbol_info", query.clone());
+    assert!(!cold_hit);
+    assert_eq!(
+        cold["data"]["candidates"].as_array().unwrap().len(),
+        1,
+        "{cold}"
+    );
+    assert_eq!(
+        cold["data"]["candidates"][0]["long_name"], "Dormant consumption",
+        "{cold}"
+    );
+    assert_eq!(cold["data"]["candidates"][0]["tex_name"], "C", "{cold}");
+
+    let (warm, warm_hit, warm_builds) = run_call(Some(&cache), "dynare_symbol_info", query);
+    assert!(warm_hit, "warm include declaration query missed retention");
+    assert_eq!(warm, cold);
+    assert_eq!(warm_builds, 0, "warm declaration hover rebuilt a parser");
+    assert!(cold_builds > 0, "cold request did not exercise parser work");
+
+    let use_line = "y=pac_expectation(pm)+temp;";
+    for (name, kind, expression) in [
+        ("pm", "pac_model", None),
+        ("temp", "model_local_variable", Some("mu_cngdp")),
+    ] {
+        let args = json!({"source":source,"view":"source","symbol":{"kind":"target","line":10,"column":use_line.find(name).unwrap()+1}});
+        let (result, hit, builds) = run_call(Some(&cache), "dynare_symbol_info", args.clone());
+        assert!(hit);
+        assert_eq!(builds, 0, "typed/local lookup rebuilt written facts");
+        assert_eq!(
+            result["data"]["candidates"][0]["written_kind"], kind,
+            "{result}"
+        );
+        if let Some(expression) = expression {
+            assert_eq!(
+                result["data"]["candidates"][0]["expression"], expression,
+                "{result}"
+            );
+        }
+        let (again, hit, builds) = run_call(Some(&cache), "dynare_symbol_info", args);
+        assert!(hit);
+        assert_eq!(builds, 0);
+        assert_eq!(again, result);
+    }
+
+    let (actual_effective, effective_hit, _) =
+        run_call(Some(&cache), "dynare_model_info", effective_query);
+    assert!(effective_hit);
+    assert_eq!(actual_effective, expected_effective);
+}
+
+#[test]
 fn cancelled_checkout_does_not_block_a_sibling_or_replace_its_entry() {
     // Guards that a checked-out entry holds no store lock during analysis and cannot erase a sibling publish on cancellation.
     let cache = store(limits(16 * 1024 * 1024, 2));

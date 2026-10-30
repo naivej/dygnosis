@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.11.40
+
+- Hover on a name in an inactive macro branch can show a matching written
+  declaration and its labels, including from a file named by a literal
+  `@#include` path. Included-file lookup follows the configured macro work
+  limit. PAC and auxiliary model names, command expressions and model-local
+  uses can also show their written declarations or definitions.
+- MCP `dynare_symbol_info` can inspect the written declaration and labels at
+  an inactive name use, including through literal includes. It also returns
+  written model-local expressions and supported named-model declarations.
+- Written declaration and model-local hovers use the same label layout as
+  active names. Equation-name tags stay silent in inactive branches.
+
 ## v0.11.39
 
 - Clarify model owner selection, workspace coverage and diagnostic guidance in

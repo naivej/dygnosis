@@ -14,6 +14,8 @@ mod configuration_tests;
 pub mod include_resolver;
 mod input_read;
 pub mod model_map;
+mod source_declarations;
+pub(crate) use source_declarations::DeclarationLookup;
 mod source_structure;
 
 use std::cell::RefCell;
@@ -525,7 +527,7 @@ impl InputFile {
     }
 }
 
-struct SourceLookup {
+pub(crate) struct SourceLookup {
     known: HashSet<String>,
     aliases: HashMap<String, Option<String>>,
 }
@@ -590,6 +592,7 @@ pub struct Workspace {
     // until that side independently selects them under its own source policy.
     comparison_reuse: HashMap<String, Arc<Doc>>,
     source_projections: Vec<source_structure::SourceProjection>,
+    source_declarations: Vec<source_declarations::CachedSource>,
     retained_roots: Vec<RetainedRoot>,
     docs: HashMap<String, Arc<Doc>>,
     search_paths: Vec<PathBuf>,
@@ -1339,6 +1342,7 @@ impl Workspace {
         snapshot.cancellation = self.cancellation.clone();
         snapshot.source_limits = self.source_limits;
         snapshot.comparison_reuse = self.comparison_reuse.clone();
+        snapshot.source_declarations = self.source_declarations.clone();
         snapshot.docs = self
             .docs
             .iter()
@@ -2350,8 +2354,22 @@ impl Workspace {
         filename: &str,
         paths: &[PathBuf],
     ) {
+        let candidates = self.source_candidate_keys(root, including_key, filename, paths);
+        self.dependency_candidates
+            .entry(root.to_owned())
+            .or_default()
+            .extend(candidates);
+    }
+
+    fn source_candidate_keys(
+        &self,
+        root: &str,
+        including_key: &str,
+        filename: &str,
+        paths: &[PathBuf],
+    ) -> Vec<String> {
         if self.virtual_roots.contains(root) {
-            return;
+            return Vec::new();
         }
         if self.overlay_only {
             let candidates = self.overlay_candidates(including_key, filename, paths);
@@ -2359,11 +2377,7 @@ impl Workspace {
                 .into_iter()
                 .map(|candidate| self.overlay_match_key(&candidate).unwrap_or(candidate))
                 .collect();
-            self.dependency_candidates
-                .entry(root.to_owned())
-                .or_default()
-                .extend(candidates);
-            return;
+            return candidates;
         }
         let name = PathBuf::from(normalize_separators(filename));
         let mut candidates = Vec::new();
@@ -2375,10 +2389,7 @@ impl Workspace {
             }
             candidates.extend(paths.iter().map(|path| path.join(&name)));
         }
-        self.dependency_candidates
-            .entry(root.to_owned())
-            .or_default()
-            .extend(candidates.iter().map(|path| path_key(path)));
+        candidates.iter().map(|path| path_key(path)).collect()
     }
 
     pub fn get_model(&self, uri: &str) -> Option<&Model> {

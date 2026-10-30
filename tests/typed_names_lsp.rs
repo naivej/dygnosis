@@ -69,8 +69,8 @@ async fn inactive_command_hover_uses_the_requested_option_or_name() {
             let hover = help(server, query).await.expect("written token hover");
             let message = markdown(&hover);
             if name == "pac_rent" {
-                assert!(message.starts_with("**pac_rent**"), "{message}");
-                assert!(message.contains("inactive"), "{message}");
+                assert!(message.contains("`pac_rent`"), "{message}");
+                assert!(message.contains("Written PAC model"), "{message}");
             } else {
                 assert!(message.contains(&format!("`{name}`")), "{message}");
                 assert!(
@@ -92,6 +92,38 @@ async fn inactive_command_hover_uses_the_requested_option_or_name() {
                 "{name}: hover must select the requested written token"
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn inactive_typed_uses_follow_written_model_and_external_function_declarations() {
+    // Guards forward typed-name lookup in a dormant branch without borrowing active values or timing.
+    let source = "var y; parameters beta; beta=.9;\n@#if 0\npac_model(model_name=pm,discount=beta,auxiliary_model_name=vm);\ntrend_component_model(model_name=vm,eqtags=['Y'],targets=['Y']);\nexternal_function(name='ext',nargs=1,first_deriv_provided='deriv');\nmodel; y=ext(y(-1)); end;\n@#endif\n";
+    let document = uri("inactive-typed-uses.mod");
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open(server, &document, source).await;
+
+    for (needle, offset, expected) in [
+        (
+            "auxiliary_model_name=vm",
+            21,
+            "trend component auxiliary model",
+        ),
+        ("model_name=pm", 11, "PAC model"),
+        ("name='ext'", 5, "external function"),
+        ("first_deriv_provided='deriv'", 21, "external function"),
+        ("y=ext(y(-1))", 2, "external function"),
+    ] {
+        let pos = position(&document, source, needle, offset);
+        let hover = help(server, pos.clone())
+            .await
+            .unwrap_or_else(|| panic!("missing hover for {needle}"));
+        let message = markdown(&hover);
+        assert!(message.contains(expected), "{needle}: {message}");
+        assert_eq!(hover.range.unwrap().start, pos.position, "{needle}");
+        assert!(!message.contains("Timing:"), "{needle}: {message}");
+        assert!(!message.contains("Binding:"), "{needle}: {message}");
     }
 }
 

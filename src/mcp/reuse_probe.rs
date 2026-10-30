@@ -133,6 +133,7 @@ impl Checkout {
             // Copying is inside the timed acquisition. Only immutable analysis
             // Arcs are shared; the next request owns its Workspace and controls.
             let retained = SourceSnapshot {
+                source_declaration: None,
                 source_structure: None,
                 workspace: snapshot
                     .workspace

@@ -1,7 +1,7 @@
 //! Written-source presentation over the shared inventory and availability trace.
 
 use super::*;
-use crate::engine::analysis::source_inventory::SourceItemKind;
+use crate::engine::analysis::source_inventory::{SourceItem, SourceItemKind};
 use crate::engine::analysis_configuration::{
     SourceAvailability, SourceFileSelection, SourceFileStructure, SourceStructureQuery,
 };
@@ -143,6 +143,9 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
         .iter()
         .filter(|item| item.span.start <= byte && byte < item.span.end)
         .min_by_key(|item| item.span.end - item.span.start)?;
+    if syntax_intel::display_equation_tag_at(&file.inventory, &file.text, item, byte) {
+        return None;
+    }
     let availability = file
         .availability
         .iter()
@@ -200,10 +203,28 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
     }
     // A containing statement supplies availability, not the hovered name.
     // Reuse its retained lexical tokens for a precise inner token and range.
-    let (name, selection, option) = if item.selection.start <= byte && byte < item.selection.end {
+    let (name, selection, option) = if let Some(span) = file.inventory.ordinary_name_use(item, byte)
+    {
+        (
+            &file.text[span.start as usize..span.end as usize],
+            span,
+            None,
+        )
+    } else if item.selection.start <= byte && byte < item.selection.end {
         (
             item.name.as_deref().unwrap_or("Written source"),
             item.selection,
+            None,
+        )
+    } else if let Some(site) = file
+        .inventory
+        .named_sites
+        .iter()
+        .find(|site| site.span.start <= byte && byte < site.span.end)
+    {
+        (
+            file.text[site.span.start as usize..site.span.end as usize].trim_matches(['\'', '"']),
+            site.span,
             None,
         )
     } else if item.kind == SourceItemKind::MacroDefinition && overridden.is_some() {
@@ -240,6 +261,21 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
         };
         (name, token.span, option)
     };
+    let declaration_lookup = ((state == SourceAvailability::Inactive
+        || state == SourceAvailability::Unknown && root != *document)
+        && option.is_none())
+    .then(|| {
+        inner.workspace.written_declaration_at_use(
+            root.as_str(),
+            document.as_str(),
+            &file,
+            item,
+            byte,
+        )
+    });
+    let use_declaration = declaration_lookup
+        .as_ref()
+        .and_then(|lookup| lookup.declaration.as_ref());
     let mut message = if control || overridden.is_some() {
         format!(
             "**{name}** · {}",
@@ -250,21 +286,55 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
             }
         )
     } else if item.kind == SourceItemKind::Declaration && selection == item.selection {
-        let mut description = format!(
-            "**{name}**\n\nWritten declaration: `{}`.",
-            item.written_kind.as_deref().unwrap_or("declaration")
-        );
-        if let Some(metadata) = &item.declaration_metadata {
-            let settings = inner.presentation_for(document);
-            if settings.name_details.long_name
-                && let Some(long_name) = &metadata.long_name
-            {
-                description.push_str(&format!("\n\nLong name: {}", names::literal(long_name)));
-            }
-            if settings.name_details.tex
-                && let Some(tex_name) = &metadata.tex_name
-            {
-                description.push_str(&format!("\n\nTeX label: {}", names::code(tex_name)));
+        declaration_description(inner, document, name, item)
+    } else if let Some(declaration) = use_declaration {
+        let mut description = if let Some(rhs) = declaration.item.local_definition {
+            let text = if declaration.file == normalize_uri(document.as_str()) {
+                Some(file.text.as_str())
+            } else {
+                declaration_lookup
+                    .as_ref()
+                    .and_then(|lookup| {
+                        lookup
+                            .sources
+                            .iter()
+                            .find(|source| source.file == declaration.file)
+                    })
+                    .map(|source| source.text.as_str())
+            };
+            format!(
+                "**Written model-local variable** {}\n\nExpression: {}",
+                names::code(name),
+                names::code(
+                    text.and_then(|text| text.get(rhs.start as usize..rhs.end as usize))
+                        .unwrap_or_default()
+                )
+            )
+        } else {
+            declaration_description(
+                inner,
+                document,
+                declaration.item.name.as_deref().unwrap_or(name),
+                &declaration.item,
+            )
+        };
+        if declaration.file != normalize_uri(document.as_str()) {
+            let root_file = normalize_uri(root.as_str());
+            let path = std::path::Path::new(&declaration.file);
+            let display = std::path::Path::new(&root_file)
+                .parent()
+                .and_then(|parent| path.strip_prefix(parent).ok())
+                .unwrap_or(path)
+                .to_string_lossy();
+            let location = format!("{}:{}", display.replace('\\', "/"), declaration.line);
+            if let Some(url) = file_url_from_path_key(&declaration.file) {
+                description.push_str(&format!(
+                    "\n\nDeclared in: [{}]({url}#L{}).",
+                    names::literal(&location),
+                    declaration.line
+                ));
+            } else {
+                description.push_str(&format!("\n\nDeclared in: {}.", names::code(&location)));
             }
         }
         description
@@ -276,7 +346,8 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
             .get(rhs.start as usize..rhs.end as usize)
             .unwrap_or_default();
         format!(
-            "**{name}**\n\nWritten model-local expression: {}",
+            "**Written model-local variable** {}\n\nExpression: {}",
+            names::code(name),
             names::code(expression)
         )
     } else {
@@ -296,6 +367,13 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
         };
         format!("**{name}**\n\n{reason}")
     };
+    if let Some(cause) = declaration_lookup
+        .as_ref()
+        .and_then(|lookup| lookup.cause.as_ref())
+    {
+        message.push_str("\n\n");
+        message.push_str(cause);
+    }
     if state == SourceAvailability::Unknown
         && let Some(cause) = availability.and_then(|row| {
             if control {
@@ -371,6 +449,44 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
     Some(hover)
 }
 
+fn declaration_description(inner: &Inner, document: &Url, name: &str, item: &SourceItem) -> String {
+    let kind = item.written_kind.as_deref().unwrap_or("declaration");
+    let mut parts = vec![
+        names::declaration_heading(name, kind, true)
+            .or_else(|| names::typed_heading(name, kind, true))
+            .unwrap_or_else(|| {
+                format!(
+                    "**Written declaration**: {} ({})",
+                    names::code(name),
+                    names::code(kind)
+                )
+            }),
+    ];
+    if let Some(namespace) = &item.source_namespace {
+        parts.push(format!("Owner: {}", names::code(namespace)));
+    }
+    if names::typed_label(kind).is_some()
+        && let Some(record) = crate::engine::catalog::syntax::records()
+            .iter()
+            .find(|record| {
+                record.name == kind
+                    && matches!(record.kind.as_str(), "command" | "block" | "declaration")
+            })
+    {
+        parts.push(record.summary.clone());
+    }
+    if let Some(metadata) = &item.declaration_metadata {
+        let settings = inner.presentation_for(document);
+        names::append_name_metadata(
+            &mut parts,
+            metadata.long_name.as_deref(),
+            metadata.tex_name.as_deref(),
+            &settings.name_details,
+        );
+    }
+    parts.join("\n\n")
+}
+
 pub(super) fn candidates(inner: &mut Inner, arguments: &[Value]) -> Value {
     let Some(params) = arguments
         .first()
@@ -407,6 +523,746 @@ pub(super) fn candidates(inner: &mut Inner, arguments: &[Value]) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn active_and_written_declaration_metadata_share_style_and_preferences() {
+        // Guards style drift, lost Markdown escaping or settings, and selected
+        // model values/timing leaking into written-source descriptions.
+        let root = Url::parse("untitled:hover-style.mod").unwrap();
+        for (kind, role) in [
+            ("var", "Endogenous variable"),
+            ("parameters", "Parameter"),
+            ("varexo", "Exogenous variable"),
+            ("varexo_det", "Deterministic exogenous variable"),
+        ] {
+            for active in [0, 1] {
+                let calibration = if kind == "parameters" {
+                    "subject=0.875;\n"
+                } else {
+                    ""
+                };
+                let text = format!(
+                    "var y;\n{kind} subject $S`label$ (long_name='Capital *[gross]*');\n{calibration}@#if {active}\nmodel;y=subject;end;\n@#endif\n"
+                );
+                let (service, _socket) = new_service();
+                let server = service.inner();
+                server.upsert(root.clone(), text.clone(), 1);
+                let byte = text.find("subject;end").unwrap();
+                let pos = TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: root.clone() },
+                    position: span_range(&LineIndex::new(&text), &text, Span::new(byte, byte))
+                        .start,
+                };
+                for (long_name, tex) in [(true, true), (true, false), (false, true), (false, false)]
+                {
+                    server
+                        .lock_inner()
+                        .settings
+                        .apply(&json!({"nameDetails":{"longName":long_name,"tex":tex}}));
+                    let result = server.hover_at(&pos).unwrap();
+                    let HoverContents::Markup(markup) = result.contents else {
+                        panic!("markdown hover")
+                    };
+                    let heading = if active == 1 {
+                        format!("**{role}**: `subject`")
+                    } else {
+                        format!("**Written {}**: `subject`", role.to_ascii_lowercase())
+                    };
+                    assert!(
+                        markup.value.starts_with(&heading),
+                        "{kind}/{active}: {}",
+                        markup.value
+                    );
+                    assert_eq!(
+                        markup.value.contains(r"Capital \*\[gross\]\*"),
+                        long_name,
+                        "{}",
+                        markup.value
+                    );
+                    assert_eq!(
+                        markup.value.contains("TeX: ``S`label``"),
+                        tex,
+                        "{}",
+                        markup.value
+                    );
+                    assert!(
+                        !markup.value.contains("Long name:")
+                            && !markup.value.contains("TeX label:"),
+                        "{}",
+                        markup.value
+                    );
+                    if active == 0 {
+                        assert!(
+                            !markup.value.contains("Value:")
+                                && !markup.value.contains("Timing:")
+                                && !markup.value.contains("0.875"),
+                            "{}",
+                            markup.value
+                        );
+                    } else if kind == "parameters" {
+                        assert!(markup.value.contains("Value: `0.875`"), "{}", markup.value);
+                    }
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn active_and_written_model_local_definitions_share_expression_style() {
+        // Guards source definition hover keeping the old name-first layout
+        // while the active definition uses a role heading and Expression label.
+        let root = Url::parse("untitled:local-hover-style.mod").unwrap();
+        for active in [0, 1] {
+            let text = format!("var y;\n@#if {active}\nmodel;#temp=log(1);y=temp;end;\n@#endif\n");
+            let (service, _socket) = new_service();
+            let server = service.inner();
+            server.upsert(root.clone(), text.clone(), 1);
+            let byte = text.find("temp=log").unwrap();
+            let result = server
+                .hover_at(&TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: root.clone() },
+                    position: span_range(&LineIndex::new(&text), &text, Span::new(byte, byte))
+                        .start,
+                })
+                .unwrap();
+            let HoverContents::Markup(markup) = result.contents else {
+                panic!("markdown hover")
+            };
+            let heading = if active == 1 {
+                "**Model-local variable** `temp`"
+            } else {
+                "**Written model-local variable** `temp`"
+            };
+            assert!(
+                markup.value.starts_with(heading) && markup.value.contains("Expression: `log(1)`"),
+                "{}",
+                markup.value
+            );
+            assert!(
+                !markup.value.contains("Value:") && !markup.value.contains("Timing:"),
+                "{}",
+                markup.value
+            );
+        }
+    }
+
+    struct IncludeFiles(std::path::PathBuf);
+    impl IncludeFiles {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "dygnosis-hover-includes-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+        fn root(&self) -> Url {
+            Url::from_file_path(self.0.join("main.mod")).unwrap()
+        }
+    }
+    impl Drop for IncludeFiles {
+        fn drop(&mut self) {
+            for name in ["decl.inc", "nested.inc"] {
+                let _ = std::fs::remove_file(self.0.join(name));
+            }
+            let _ = std::fs::remove_dir(&self.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn inactive_include_hover_reads_nested_declarations_without_executing_them() {
+        // Guards unopened declaration includes, unknown variable timing parsed
+        // as a generic call, stale disk metadata, and new semantic dependencies.
+        use crate::engine::language::parser::PARSE_EXPANDED_BUILDS;
+        let files = IncludeFiles::new();
+        let root = files.root();
+        let child = Url::from_file_path(files.0.join("decl.inc")).unwrap();
+        std::fs::write(
+            files.0.join("decl.inc"),
+            "@#include \"nested.inc\"\nparameters rho $R$ (long_name='Persistence');\n",
+        )
+        .unwrap();
+        std::fs::write(
+            files.0.join("nested.inc"),
+            "var capital $K$ (long_name='Capital');\n",
+        )
+        .unwrap();
+        let text = "var live;model;live=0;end;\n@#if 0\n@#include \"decl.inc\"\nmodel;capital=capital(-1)+rho;end;\n@#endif\n";
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(root.clone(), text.into(), 1);
+        let revision = server
+            .lock_inner()
+            .workspace
+            .input_revision(root.as_str())
+            .unwrap();
+        let at = |character| TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: root.clone() },
+            position: Position::new(3, character),
+        };
+        let capital = serde_json::to_string(&server.hover_at(&at(14)).unwrap()).unwrap();
+        assert!(
+            capital.contains("**Written ")
+                && capital.contains("Capital")
+                && capital.contains("nested.inc#L1"),
+            "{capital}"
+        );
+        let parameter = serde_json::to_string(&server.hover_at(&at(26)).unwrap()).unwrap();
+        assert!(
+            parameter.contains("Persistence") && parameter.contains("decl.inc#L2"),
+            "{parameter}"
+        );
+        let builds = PARSE_EXPANDED_BUILDS.with(|builds| builds.get());
+        assert_eq!(
+            serde_json::to_string(&server.hover_at(&at(14)).unwrap()).unwrap(),
+            capital
+        );
+        assert_eq!(
+            PARSE_EXPANDED_BUILDS.with(|builds| builds.get()),
+            builds,
+            "warm includes reuse the existing source inventories"
+        );
+        std::fs::write(
+            files.0.join("nested.inc"),
+            "var capital $K$ (long_name='Updated');\n",
+        )
+        .unwrap();
+        let updated = serde_json::to_string(&server.hover_at(&at(14)).unwrap()).unwrap();
+        assert!(
+            updated.contains("Updated") && !updated.contains("Capital"),
+            "{updated}"
+        );
+        let mut inner = server.lock_inner();
+        assert_eq!(
+            inner.workspace.input_revision(root.as_str()).unwrap(),
+            revision
+        );
+        assert!(inner.workspace.owner_roots(child.as_str()).is_empty());
+        assert!(inner.workspace.source_inventory(child.as_str()).is_none());
+        assert!(
+            inner
+                .workspace
+                .include_records(root.as_str())
+                .unwrap()
+                .resolved
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn inactive_include_hover_withholds_ambiguous_or_unchecked_candidates() {
+        // Guards a local declaration hiding an include competitor, computed
+        // and cyclic edges, and named operators mistaken for ordinary names.
+        let root = Url::parse("file:///C:/dygnosis-hover-candidates/main.mod").unwrap();
+        let child = Url::parse("file:///C:/dygnosis-hover-candidates/decl.inc").unwrap();
+        for (body, include, declaration, expression, reason) in [
+            (
+                "var shared_name;",
+                "\"decl.inc\"",
+                "var shared_name;",
+                "shared_name",
+                "More than one",
+            ),
+            (
+                "var shared_name;",
+                "PATH",
+                "var shared_name;",
+                "shared_name",
+                "computed include",
+            ),
+            (
+                "@#include \"decl.inc\"",
+                "\"decl.inc\"",
+                "",
+                "shared_name",
+                "cycle",
+            ),
+            (
+                "@#if FLAG\nvar shared_name;\n@#endif",
+                "\"decl.inc\"",
+                "",
+                "shared_name",
+                "another macro branch",
+            ),
+            (
+                "external_function(name=shared_name);",
+                "\"decl.inc\"",
+                "var shared_name;",
+                "shared_name(1)",
+                "not supported by source lookup",
+            ),
+        ] {
+            let (service, _socket) = new_service();
+            let server = service.inner();
+            server
+                .lock_inner()
+                .workspace
+                .update_document(child.as_str(), body);
+            let text = format!(
+                "@#if 0\n{declaration}\n@#include {include}\nmodel;y={expression};end;\n@#endif\n"
+            );
+            server.upsert(root.clone(), text.clone(), 1);
+            let result = hover(
+                &mut server.lock_inner(),
+                &root,
+                text.rfind("shared_name").unwrap() as u32,
+            )
+            .unwrap();
+            let value = serde_json::to_string(&result).unwrap();
+            assert!(
+                !value.contains("**Written ") && value.contains(reason),
+                "{text}: {value}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn dormant_editor_hover_uses_a_direct_parent_route_and_existing_inventories() {
+        // Guards Unknown availability suppressing source facts in an opened
+        // dormant include, and a new parse just to use a smaller hover allowance.
+        use crate::engine::language::parser::PARSE_EXPANDED_BUILDS;
+        let root = Url::parse("file:///C:/dygnosis-hover-parent/main.mod").unwrap();
+        let child = Url::parse("file:///C:/dygnosis-hover-parent/decl.inc").unwrap();
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(root.clone(),"parameters rho $R$ (long_name='Persistence');\n@#if 0\n@#include \"decl.inc\"\n@#endif\n".into(),1);
+        server.upsert(
+            child.clone(),
+            "var local_name;\nmodel;local_name=rho;end;\n".into(),
+            1,
+        );
+        {
+            let mut inner = server.lock_inner();
+            inner
+                .document_contexts
+                .insert(normalize_uri(child.as_str()), root.clone());
+            inner.workspace.source_inventory(root.as_str()).unwrap();
+            inner.workspace.source_inventory(child.as_str()).unwrap();
+        }
+        let builds = PARSE_EXPANDED_BUILDS.with(|builds| builds.get());
+        let result = server
+            .hover_at(&TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: child.clone() },
+                position: Position::new(1, 17),
+            })
+            .unwrap();
+        let value = serde_json::to_string(&result).unwrap();
+        assert!(
+            value.contains("Persistence") && value.contains("main.mod#L1"),
+            "{value}"
+        );
+        assert_eq!(
+            PARSE_EXPANDED_BUILDS.with(|builds| builds.get()),
+            builds,
+            "existing complete inventories remain reusable under the hover cap"
+        );
+        server.upsert(
+            root.clone(),
+            "@#if 0\n@#include \"decl.inc\"\n@#include \"decl.inc\"\n@#endif\n".into(),
+            2,
+        );
+        let result = server
+            .hover_at(&TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: child },
+                position: Position::new(1, 6),
+            })
+            .unwrap();
+        let value = serde_json::to_string(&result).unwrap();
+        assert!(
+            value.contains("**Written ")
+                && value.contains("Parent-file declarations were not checked"),
+            "{value}"
+        );
+    }
+
+    #[tokio::test]
+    async fn include_hover_preserves_overlay_precedence_and_enforces_source_bounds() {
+        // Guards a cached disk body replacing an open overlay, and an automatic
+        // hover reading an oversized include or borrowing a sibling search path.
+        let files = IncludeFiles::new();
+        let root = files.root();
+        let child = Url::from_file_path(files.0.join("decl.inc")).unwrap();
+        std::fs::write(
+            files.0.join("decl.inc"),
+            "parameters rho (long_name='Disk');",
+        )
+        .unwrap();
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(
+            root.clone(),
+            "@#if 0\n@#include \"decl.inc\"\nmodel;y=rho;end;\n@#endif\n".into(),
+            1,
+        );
+        let at = TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: root.clone() },
+            position: Position::new(2, 8),
+        };
+        assert!(
+            serde_json::to_string(&server.hover_at(&at).unwrap())
+                .unwrap()
+                .contains("Disk")
+        );
+        server
+            .lock_inner()
+            .workspace
+            .update_document(child.as_str(), "parameters rho (long_name='Overlay');");
+        assert!(
+            serde_json::to_string(&server.hover_at(&at).unwrap())
+                .unwrap()
+                .contains("Overlay")
+        );
+        server
+            .lock_inner()
+            .workspace
+            .remove_document(child.as_str());
+        assert!(
+            serde_json::to_string(&server.hover_at(&at).unwrap())
+                .unwrap()
+                .contains("Disk")
+        );
+        std::fs::write(files.0.join("decl.inc"), " ".repeat(256 * 1024 + 1)).unwrap();
+        let bounded = serde_json::to_string(&server.hover_at(&at).unwrap()).unwrap();
+        assert!(
+            bounded.contains("262144-byte source limit") && !bounded.contains("**Written "),
+            "{bounded}"
+        );
+
+        let other = IncludeFiles::new();
+        std::fs::write(other.0.join("nested.inc"), "parameters rho;").unwrap();
+        let search = other.0.to_string_lossy().replace('\\', "/");
+        let text = format!(
+            "@#if 1\n@#includepath \"{search}\"\n@#else\n@#include \"nested.inc\"\nmodel;y=rho;end;\n@#endif\n"
+        );
+        server.upsert(root.clone(), text, 2);
+        let value = serde_json::to_string(
+            &server
+                .hover_at(&TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: root },
+                    position: Position::new(4, 8),
+                })
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !value.contains("**Written ")
+                && value.contains("unavailable in the configured include paths"),
+            "{value}"
+        );
+        let relative = format!(
+            "../{}/nested.inc",
+            other.0.file_name().unwrap().to_string_lossy()
+        );
+        server.upsert(at.text_document.uri.clone(),format!("@#if 0\n@#includepath \"{search}\"\n@#include \"{relative}\"\nmodel;y=rho;end;\n@#endif\n"),3);
+        let value = serde_json::to_string(
+            &server
+                .hover_at(&TextDocumentPositionParams {
+                    text_document: at.text_document,
+                    position: Position::new(3, 8),
+                })
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            value.contains("**Written ") && value.contains("nested.inc#L1"),
+            "direct relative includes do not depend on written search paths: {value}"
+        );
+    }
+
+    #[tokio::test]
+    async fn include_hover_bounds_nested_acquisition_before_a_later_declaration() {
+        // Guards a deep literal chain consuming unbounded source work on hover.
+        let root = Url::parse("file:///C:/dygnosis-hover-depth/main.mod").unwrap();
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        for index in 0..9 {
+            let child = format!("file:///C:/dygnosis-hover-depth/child{index}.inc");
+            let text = if index == 8 {
+                "parameters rho;".into()
+            } else {
+                format!("@#include \"child{}.inc\"\n", index + 1)
+            };
+            server.lock_inner().workspace.update_document(&child, text);
+        }
+        server.upsert(
+            root.clone(),
+            "@#if 0\n@#include \"child0.inc\"\nmodel;y=rho;end;\n@#endif\n".into(),
+            1,
+        );
+        let value = serde_json::to_string(
+            &server
+                .hover_at(&TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: root },
+                    position: Position::new(2, 8),
+                })
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !value.contains("**Written ") && value.contains("8-level include limit"),
+            "{value}"
+        );
+    }
+
+    #[tokio::test]
+    async fn inactive_include_hover_recovers_when_the_configured_work_allowance_is_raised() {
+        // Guards an independent include-inventory ceiling ignoring the user's
+        // larger root allowance, including reuse after an incomplete attempt.
+        use crate::engine::language::parser::PARSE_EXPANDED_BUILDS;
+        let root = Url::parse("file:///C:/dygnosis-hover-work/main.mod").unwrap();
+        let child = Url::parse("file:///C:/dygnosis-hover-work/decl.inc").unwrap();
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        let rows = 700;
+        server
+            .lock_inner()
+            .workspace
+            .update_document(child.as_str(), "parameters filler;\n".repeat(rows));
+        server.upsert(root.clone(),"parameters mu_cngdp;\nvar live;model;live=0;end;\n@#if 0\n@#include \"decl.inc\"\nmodel;live=mu_cngdp;end;\n@#endif\n".into(),1);
+        let at = TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: root },
+            position: Position::new(4, 11),
+        };
+        server
+            .lock_inner()
+            .settings
+            .apply(&json!({"macroWorkLimit":200_000}));
+        let low = serde_json::to_string(&server.hover_at(&at).unwrap()).unwrap();
+        assert!(
+            low.contains("work allowance"),
+            "low configured allowance must reach the actual source mechanism: {low}"
+        );
+        for limit in [2_000_000, 20_000_000] {
+            server
+                .lock_inner()
+                .settings
+                .apply(&json!({"macroWorkLimit":limit}));
+            let value = serde_json::to_string(&server.hover_at(&at).unwrap()).unwrap();
+            assert!(
+                value.contains("**Written parameter**") && !value.contains("work allowance"),
+                "raising configured work to {limit} must release source inspection ({rows} rows): {value}"
+            );
+            let builds = PARSE_EXPANDED_BUILDS.with(|builds| builds.get());
+            assert_eq!(
+                serde_json::to_string(&server.hover_at(&at).unwrap()).unwrap(),
+                value
+            );
+            assert_eq!(
+                PARSE_EXPANDED_BUILDS.with(|builds| builds.get()),
+                builds,
+                "successful written source facts must be reused on repeat hover"
+            );
+        }
+        server
+            .lock_inner()
+            .settings
+            .apply(&json!({"macroWorkLimit":200_000}));
+        let lowered = serde_json::to_string(&server.hover_at(&at).unwrap()).unwrap();
+        assert!(
+            lowered.contains("work allowance") && !lowered.contains("**Written parameter**"),
+            "a completed high-work inventory must not bypass a later lower allowance: {lowered}"
+        );
+    }
+
+    #[tokio::test]
+    async fn inactive_name_uses_show_written_declarations_without_model_facts() {
+        // Guards inactive uses losing declaration metadata, borrowing selected
+        // model values/timing, or rebuilding the retained source inventory.
+        use crate::engine::language::parser::PARSE_EXPANDED_BUILDS;
+
+        let root = Url::parse("file:///C:/dygnosis-inactive-use/main.mod").unwrap();
+        let text = "var capital $K$ (long_name='Capital');\nparameters rho $R$ (long_name='Persistence');\nrho=0.9;\nmodel;capital=rho*capital(-1);end;\n@#if 0\nvar hidden $H$ (long_name='Hidden variable');\nmodel;\n# temp = rho*hidden;\nhidden = capital(+2)+rho+temp;\nend;\n@#endif\n";
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(root.clone(), text.into(), 1);
+        let inventory = file(&mut server.lock_inner(), &root).unwrap().inventory;
+        let builds = PARSE_EXPANDED_BUILDS.with(|builds| builds.get());
+        for _ in 0..2 {
+            for (line, character, name, kind, long_name, tex) in [
+                (7, 9, "rho", "parameter", "Persistence", "R"),
+                (
+                    7,
+                    13,
+                    "hidden",
+                    "endogenous variable",
+                    "Hidden variable",
+                    "H",
+                ),
+                (
+                    8,
+                    0,
+                    "hidden",
+                    "endogenous variable",
+                    "Hidden variable",
+                    "H",
+                ),
+                (8, 9, "capital", "endogenous variable", "Capital", "K"),
+                (8, 21, "rho", "parameter", "Persistence", "R"),
+            ] {
+                let hover = server
+                    .hover_at(&TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri: root.clone() },
+                        position: Position::new(line, character),
+                    })
+                    .unwrap();
+                let HoverContents::Markup(markup) = hover.contents else {
+                    panic!("markdown hover")
+                };
+                assert_eq!(
+                    markup.value,
+                    format!("**Written {kind}**: `{name}`\n\n{long_name}\n\nTeX: `{tex}`")
+                );
+                assert_eq!(
+                    hover.range.unwrap(),
+                    Range::new(
+                        Position::new(line, character),
+                        Position::new(line, character + name.len() as u32)
+                    )
+                );
+            }
+        }
+        assert_eq!(PARSE_EXPANDED_BUILDS.with(|builds| builds.get()), builds);
+        assert!(Arc::ptr_eq(
+            &inventory,
+            &file(&mut server.lock_inner(), &root).unwrap().inventory
+        ));
+
+        server
+            .lock_inner()
+            .settings
+            .apply(&json!({"nameDetails":{"longName":false,"tex":false}}));
+        let hover = server
+            .hover_at(&TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: root },
+                position: Position::new(8, 9),
+            })
+            .unwrap();
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("markdown hover")
+        };
+        assert_eq!(markup.value, "**Written endogenous variable**: `capital`");
+    }
+
+    #[tokio::test]
+    async fn inactive_name_uses_do_not_guess_written_bindings() {
+        // Guards false attribution from a sibling/nested branch, duplicate
+        // declarations, model-local scopes, equation tags, or qualified names.
+        let root = Url::parse("file:///C:/dygnosis-inactive-ambiguous/main.mod").unwrap();
+        for (declarations, expression, resolves) in [
+            ("var shared_name;\n", "shared_name", true),
+            ("@#if 1\nvar shared_name;\n@#else\n", "shared_name", false),
+            ("@#if 0\nvar shared_name;\n@#endif\n", "shared_name", false),
+            ("var shared_name; var shared_name;\n", "shared_name", false),
+            (
+                "model;# shared_name=1;end;\nvar shared_name;\n",
+                "shared_name",
+                true,
+            ),
+            ("var shared_name;\n", "pkg.shared_name", false),
+            ("var shared_name;\n", "shared_name.field", false),
+            (
+                "parameters shared_name;\n",
+                "VAR_EXPECTATION(shared_name)",
+                false,
+            ),
+            (
+                "parameters shared_name;\n",
+                "PAC_EXPECTATION(shared_name)",
+                false,
+            ),
+            ("parameters shared_name;\n", "@{callee}(shared_name)", false),
+        ] {
+            let has_sibling = declarations.contains("@#else");
+            let text = if has_sibling {
+                format!("{declarations}model;y={expression};end;\n@#endif\n")
+            } else {
+                format!("@#if 0\n{declarations}model;y={expression};end;\n@#endif\n")
+            };
+            let (service, _socket) = new_service();
+            let server = service.inner();
+            server.upsert(root.clone(), text.clone(), 1);
+            let byte = text.rfind("shared_name").unwrap() as u32;
+            let mut inner = server.lock_inner();
+            if declarations.starts_with("model;#") {
+                let inventory = file(&mut inner, &root).unwrap().inventory;
+                assert!(
+                    inventory
+                        .items
+                        .iter()
+                        .any(|row| row.name.as_deref() == Some("shared_name")
+                            && row.local_definition.is_some()),
+                    "fixture must exercise the retained local definition"
+                );
+                assert!(
+                    inventory
+                        .compatible_candidates(byte)
+                        .any(|row| row.name.as_deref() == Some("shared_name")),
+                    "fixture must also retain a declaration candidate"
+                );
+            }
+            let result = hover(&mut inner, &root, byte).unwrap();
+            let HoverContents::Markup(markup) = result.contents else {
+                panic!("markdown hover")
+            };
+            assert_eq!(
+                markup.value.contains("**Written "),
+                resolves,
+                "{text}: {}",
+                markup.value
+            );
+            if !resolves {
+                assert!(markup.value.contains("inactive"), "{}", markup.value);
+            }
+        }
+
+        let text = "@#if 0\nvar shared_name;\nmodel;[shared_name='label'] y=0;end;\n@#endif\n";
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(root.clone(), text.into(), 1);
+        let mut inner = server.lock_inner();
+        assert!(hover(&mut inner, &root, text.rfind("shared_name").unwrap() as u32).is_none());
+    }
+
+    #[tokio::test]
+    async fn inactive_uses_keep_sibling_metadata_and_command_roles_separate() {
+        // Guards active sibling metadata leaking into an inactive name, and
+        // command option names being mistaken for trailing ordinary-name uses.
+        let root = Url::parse("file:///C:/dygnosis-inactive-sibling/main.mod").unwrap();
+        let text = "@#if 1\nparameters shared_name $A$ (long_name='Active parameter');\nshared_name=0.75;\nvar y;model;y=shared_name;end;\n@#else\nvar shared_name $B$ (long_name='Inactive variable');\nmodel;shared_name=shared_name(-2);end;\nstoch_simul(order=1) shared_name;\n@#endif\n";
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        server.upsert(root.clone(), text.into(), 1);
+        for (line, character) in [(6, 6), (6, 18), (7, 21)] {
+            let result = server
+                .hover_at(&TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: root.clone() },
+                    position: Position::new(line, character),
+                })
+                .unwrap();
+            let HoverContents::Markup(markup) = result.contents else {
+                panic!("markdown hover")
+            };
+            assert_eq!(
+                markup.value,
+                "**Written endogenous variable**: `shared_name`\n\nInactive variable\n\nTeX: `B`"
+            );
+        }
+        let result = server
+            .hover_at(&TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: root },
+                position: Position::new(7, 13),
+            })
+            .unwrap();
+        assert!(
+            !serde_json::to_string(&result)
+                .unwrap()
+                .contains("**Written ")
+        );
+    }
 
     #[tokio::test]
     async fn inactive_hover_preserves_local_syntax_and_written_facts() {
@@ -459,7 +1315,7 @@ mod tests {
         }
         let declaration = serde_json::to_string(&hover(1, 5)).unwrap();
         assert!(
-            declaration.contains("Written declaration")
+            declaration.contains("**Written ")
                 && declaration.contains("Hidden variable")
                 && declaration.contains('H'),
             "{declaration}"
@@ -467,7 +1323,10 @@ mod tests {
         let definition = serde_json::to_string(&hover(4, 3)).unwrap();
         assert!(definition.contains("log(1)"), "{definition}");
         let usage = serde_json::to_string(&hover(5, 13)).unwrap();
-        assert!(!usage.contains("log(1)"), "{usage}");
+        assert!(
+            usage.contains("**Written model-local variable**") && usage.contains("log(1)"),
+            "{usage}"
+        );
     }
 
     #[tokio::test]
@@ -945,7 +1804,7 @@ mod tests {
             assert!(
                 markup
                     .value
-                    .starts_with("**hidden**\n\nWritten declaration: `var`."),
+                    .starts_with("**Written endogenous variable**: `hidden`"),
                 "{}",
                 markup.value
             );
@@ -957,7 +1816,7 @@ mod tests {
                     .contains("Model values, timing and equation numbers")
             );
             if state == "inactive" {
-                assert_eq!(markup.value, "**hidden**\n\nWritten declaration: `var`.");
+                assert_eq!(markup.value, "**Written endogenous variable**: `hidden`");
             } else {
                 assert!(
                     markup

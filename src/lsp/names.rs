@@ -1,5 +1,33 @@
 //! Negotiated semantic roles and literal written-name presentation.
 
+pub(crate) fn typed_label(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        "heterogeneity_dimension" => "Heterogeneity dimension",
+        "database" => "Database",
+        "var_model" => "VAR auxiliary model",
+        "trend_component_model" => "Trend component auxiliary model",
+        "var_expectation_model" => "VAR expectation model",
+        "pac_model" => "PAC model",
+        "named_subsample" => "Named subsample",
+        "trend_var" => "Trend variable",
+        "log_trend_var" => "Log trend variable",
+        "external_function" => "External function",
+        _ => return None,
+    })
+}
+
+pub(crate) fn typed_heading(name: &str, kind: &str, written: bool) -> Option<String> {
+    let mut label = typed_label(kind)?.to_owned();
+    if written && !label.starts_with("PAC ") && !label.starts_with("VAR ") {
+        label.get_mut(..1)?.make_ascii_lowercase();
+    }
+    Some(format!(
+        "**{}{label}** {}",
+        if written { "Written " } else { "" },
+        code(name)
+    ))
+}
+
 use crate::engine::language::expr::ExprKind;
 use crate::engine::language::model::Model;
 use crate::engine::language::span::Span;
@@ -184,6 +212,42 @@ pub(crate) fn literal(value: &str) -> String {
             }
         })
         .collect()
+}
+
+pub(crate) fn declaration_heading(name: &str, kind: &str, written: bool) -> Option<String> {
+    let role = match kind {
+        "var" => "Endogenous variable",
+        "varexo" => "Exogenous variable",
+        "varexo_det" => "Deterministic exogenous variable",
+        "parameters" => "Parameter",
+        "trend_var" => "Trend variable",
+        "log_trend_var" => "Log trend variable",
+        _ => return None,
+    };
+    let role = if written {
+        format!("Written {}", role.to_ascii_lowercase())
+    } else {
+        role.to_owned()
+    };
+    Some(format!("**{role}**: {}", code(name)))
+}
+
+pub(crate) fn append_name_metadata(
+    parts: &mut Vec<String>,
+    long_name: Option<&str>,
+    tex_name: Option<&str>,
+    preferences: &super::settings::NameDetails,
+) {
+    if preferences.long_name
+        && let Some(long_name) = long_name
+    {
+        parts.push(literal(long_name));
+    }
+    if preferences.tex
+        && let Some(tex_name) = tex_name
+    {
+        parts.push(format!("TeX: {}", code(tex_name)));
+    }
 }
 
 fn role(kind: &str) -> Option<NameRole> {

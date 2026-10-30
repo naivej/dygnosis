@@ -4539,7 +4539,7 @@ fn decl_hover_markdown(
         .final_symbol_kind(name)
         .or_else(|| model.final_kind_or_written_if_excluded(name));
     if kind == Some("var") {
-        let mut parts = vec![format!("**Endogenous variable**: `{word}`")];
+        let mut parts = vec![names::declaration_heading(word, "var", false)?];
         if let Some(info) = classify_variable_timing(model).get(word) {
             parts.push(format_timing_line(info));
         }
@@ -4547,17 +4547,17 @@ fn decl_hover_markdown(
         return Some(parts.join("\n\n"));
     }
     if kind == Some("varexo_det") {
-        let mut parts = vec![format!("**Deterministic exogenous variable**: `{word}`")];
+        let mut parts = vec![names::declaration_heading(word, "varexo_det", false)?];
         append_name_metadata(&mut parts, model, word, preferences);
         return Some(parts.join("\n\n"));
     }
     if kind == Some("varexo") {
-        let mut parts = vec![format!("**Exogenous variable**: `{word}`")];
+        let mut parts = vec![names::declaration_heading(word, "varexo", false)?];
         append_name_metadata(&mut parts, model, word, preferences);
         return Some(parts.join("\n\n"));
     }
     if kind == Some("parameters") {
-        let mut parts = vec![format!("**Parameter**: `{word}`")];
+        let mut parts = vec![names::declaration_heading(word, "parameters", false)?];
         match assigned_number(model, word) {
             Some(n) => parts.push(format!("Value: `{n}`")),
             None => parts.push("Value: *not available to Dygnosis*".into()),
@@ -4582,16 +4582,12 @@ fn append_name_metadata(
     else {
         return;
     };
-    if preferences.name_details.long_name
-        && let Some(long) = &declaration.long_name
-    {
-        parts.push(crate::lsp::names::literal(long));
-    }
-    if preferences.name_details.tex
-        && let Some(tex) = &declaration.tex_name
-    {
-        parts.push(format!("TeX: {}", crate::lsp::names::code(tex)));
-    }
+    names::append_name_metadata(
+        parts,
+        declaration.long_name.as_deref(),
+        declaration.tex_name.as_deref(),
+        &preferences.name_details,
+    );
 }
 
 fn find_named<'a>(decls: &'a [Decl], model: &Model, word: &str) -> Option<&'a Decl> {

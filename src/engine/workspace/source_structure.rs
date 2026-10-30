@@ -71,7 +71,7 @@ fn reserve_slot<T>(
     Ok(())
 }
 
-fn site_bytes(site: &DirectiveSite) -> usize {
+pub(super) fn site_bytes(site: &DirectiveSite) -> usize {
     size_of::<DirectiveSite>()
         .saturating_add(target_owned_bytes(&site.target))
         .saturating_add(site.expected_text.capacity())
@@ -498,6 +498,7 @@ impl Workspace {
             }) {
                 spend(&mut budget, 2)?;
                 files.push(SourceFileStructure {
+                    lookup: None,
                     file: identity,
                     source_revision,
                     text: Arc::clone(&doc.source),
@@ -758,6 +759,7 @@ impl Workspace {
                 });
             }
             files.push(SourceFileStructure {
+                lookup: None,
                 file: identity,
                 source_revision,
                 text: Arc::clone(&doc.source),
@@ -769,7 +771,10 @@ impl Workspace {
         // Include targets are projected only after the explicit list has been
         // acquired, so selecting a dormant literal target can satisfy browsing
         // coverage without making it an executed source.
-        let lookup = self.source_lookup(&mut budget).map_err(expression_error)?;
+        let lookup = Arc::new(self.source_lookup(&mut budget).map_err(expression_error)?);
+        for file in &mut files {
+            file.lookup = Some(Arc::clone(&lookup));
+        }
         let mut unresolved = HashMap::new();
         if let Some(records) = trace.as_ref().and_then(|_| self.records.get(&key)) {
             for missing in &records.unresolved {

@@ -237,6 +237,14 @@ pub enum SemiStructuralKind {
 }
 
 impl SemiStructuralKind {
+    pub(crate) fn source_kind(self) -> &'static str {
+        match self {
+            Self::VarModel => "var_model",
+            Self::TrendComponentModel => "trend_component_model",
+            Self::VarExpectationModel => "var_expectation_model",
+            Self::PacModel => "pac_model",
+        }
+    }
     pub(crate) fn option_can_repeat(self, name: &str) -> bool {
         let name = name.to_ascii_lowercase();
         match self {

@@ -23,12 +23,7 @@ pub(super) struct Fact {
 }
 
 fn model_kind(kind: SemiStructuralKind) -> &'static str {
-    match kind {
-        SemiStructuralKind::VarModel => "var_model",
-        SemiStructuralKind::TrendComponentModel => "trend_component_model",
-        SemiStructuralKind::VarExpectationModel => "var_expectation_model",
-        SemiStructuralKind::PacModel => "pac_model",
-    }
+    kind.source_kind()
 }
 
 fn fact(facts: &mut Vec<Fact>, kind: &'static str, name: &str) -> usize {

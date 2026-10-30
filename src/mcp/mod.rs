@@ -15,6 +15,8 @@ mod retention;
 #[cfg(test)]
 mod reuse_probe;
 pub(crate) mod source;
+#[cfg(test)]
+mod source_declaration_tests;
 mod source_views;
 pub(crate) mod workspace_diagnose;
 

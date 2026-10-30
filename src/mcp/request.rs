@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use super::result::{Detail, Pages, ResultOptions, ToolResult};
 use super::source::{RequestControl, SourceArgs, SourceSnapshot};
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub(crate) struct Target {
     /// Exact source file key. Null or omitted selects the root; text sources have no file identity.
     pub file: Option<String>,
@@ -408,7 +408,7 @@ fn dispatch_query(
     let acquired = if params.analysis.is_none() && inspection.is_none() {
         super::source::resolve_source(input, params.expected_revision.as_deref(), &control)
     } else {
-        super::source::resolve_source_configured(
+        super::source::resolve_source_inspecting(
             input,
             params.expected_revision.as_deref(),
             &control,
