@@ -62,7 +62,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E020", ExplainEntry {
         title: "Undeclared identifier in model block",
-        body: "An identifier appears in the `model` block but is not declared as a `var`, `varexo`, or `parameters` symbol. Dynare refuses: `Unknown symbol: alpph`.\n\n**Warrant**\n\nThe editor sentence names the undeclared identifier in the equation and may include a Did-you-mean suggestion; Dynare's string is the generic `Unknown symbol`.\n\n**Fix**\n\n- Add the identifier to the appropriate declaration block\n- Correct a typo (a close-match suggestion may appear)\n- If the symbol is a local helper, define it in the parameter   section before use",
+        body: "An identifier appears in the `model` block but is not declared as a `var`, `varexo`, or `parameters` symbol or defined as a model-local variable. Dynare refuses: `Unknown symbol: alpph`.\n\n**Warrant**\n\nThe editor sentence names the undeclared identifier in the equation and may include a Did-you-mean suggestion; Dynare's string is the generic `Unknown symbol`.\n\n**Fix**\n\n- Add the identifier to the appropriate declaration block\n- Correct a typo (a close-match suggestion may appear)\n- For a model-local variable, define it before use inside the model block, for example `# helper = alpha + beta;`",
         kind: ExplainKind::Shared,
     }),
     ("E023", ExplainEntry {
@@ -157,12 +157,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("I208", ExplainEntry {
         title: "Counted equation has no name tag",
-        body: "At least one surviving counted model equation has no nonempty `name` tag. This is a writing preference; it does not mean Dynare will refuse the model.\n\nEach note counts unnamed equations from one written `model` block, or surviving replacement rows from one `model_replace` block. `#` locals, static-only rows, and removed equations are not counted. Repeated macro executions of the same written block contribute to one note per model file. Incomplete expansion withholds the note. The note points to the block that owns the equations.\n\nUse **Add equation tags** to add names such as `eq1` and `eq2` to the unnamed equations counted by this note, including equations in an included file. It chooses the lowest unused positive `eqN`. Names do not change when equations move. Empty literal `name` values are filled in place; existing names and other tags stay as written. If the include belongs to several model files, the action title identifies the selected model file. It also shows how many rows were skipped when an edit is not safe. Repeated macro text is edited only when one literal name works for every affected copy; otherwise it stays as written. After an input changes, request the current action again.",
+        body: "At least one counted model equation has no nonempty `name` tag. This is a writing preference; Dynare does not require it.\n\nUse **Add equation tags** to add names such as `eq1` and `eq2`.",
         kind: ExplainKind::Added,
     }),
     ("I209", ExplainEntry {
         title: "Declaration has no long_name",
-        body: "At least one `var`, `varexo`, `varexo_det`, or `parameters` name has no nonempty explicit `long_name`. This is a writing preference; it does not mean Dynare will refuse the model.\n\nEach note counts eligible symbols from one written declaration statement. Each symbol is counted once in its scope and belongs to its first eligible declaration. Repeated macro executions of the same written statement contribute to one note per model file. Generated auxiliaries, model-local names, and other declaration kinds are not counted. Incomplete expansion withholds the note. The note points to the declaration statement.\n\nUse **Add long names** to give each symbol counted by this note its own name. For example, the action adds `(long_name='y')` beside `y` in `var y;`. It changes only the symbols counted by this note, including symbols in an included file. Empty literal values are filled in place; existing nonempty values stay as written. TeX, partition options, comments, and other declaration options stay unchanged. If the include belongs to several model files, the action title identifies the selected model file. It shows how many rows were skipped when an edit is not safe. Repeated macro text is edited only when one literal value works for every affected copy; otherwise it stays as written. After an input changes, request the current action again.",
+        body: "At least one `var`, `varexo`, `varexo_det`, or `parameters` name has no nonempty `long_name`. This is a writing preference; Dynare does not require it.\n\nUse **Add long names** to add a label, for example `var y (long_name='y');`.",
         kind: ExplainKind::Added,
     }),
     ("I211", ExplainEntry {
@@ -1959,32 +1959,32 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E186", ExplainEntry {
         title: "Unused written endogenous variable",
-        body: "Dynare refuses before MATLAB: `Error: x not used in the model block`. Dygnosis emits E186 on the declaration when x has no written use in aggregate or heterogeneous equations and no local, surgery, planner, or BVAR exception can change that result. A complete file without a `model` block is also checked, after Check has passed. An earlier Check Error such as E021 stops this later Transform check. A use lost only after rewriting is outside this check. The severity prefix is omitted from our message because the transport already labels Errors.\n\n**Fix**\n\nUse x in a model equation or remove its declaration.",
+        body: "The endogenous variable is not used in the written model equations. Dynare refuses: `Error: x not used in the model block`. Dygnosis cannot detect every case that becomes unused after Dynare rewrites the model.\n\n**Warrant**\n\nThe transport already labels Errors, so the diagnostic omits Dynare's severity prefix.\n\n**Fix**\n\nUse x in a model equation or remove its declaration.",
         kind: ExplainKind::Shared,
     }),
     ("E187", ExplainEntry {
         title: "Ramsey FOCs leave Lagrange unused",
-        body: "Dynare refuses: `the following Lagrange multiplier(s) do(es) not appear in first-order conditions`. Catching step: transform (rewrite). Owner: skip-rewrite E. This code is never emitted.",
+        body: "Dynare refuses: `the following Lagrange multiplier(s) do(es) not appear in first-order conditions`. Dygnosis cannot check this condition because it depends on equations rewritten by Dynare. This code is never emitted. Run Dynare to check it.",
         kind: ExplainKind::Skipped,
     }),
     ("E188", ExplainEntry {
         title: "Plain aggregate equation count mismatch",
-        body: "Dynare refuses before MATLAB: `There are 2 equations but 1 endogenous variables!`. Dygnosis emits E188 when the written aggregate count differs and the file has no helper-generating expression, model surgery, planner exemption, or incomplete expansion. A complete comparison such as `a >= b;` counts as one equation, with an implicit zero right-hand side. Counts changed by Dynare's rewrite are outside this check; W013 remains guidance there. The `ERROR:` prefix is omitted because the transport already labels Errors.\n\n**Fix**\n\nMatch counted model equations to distinct endogenous variables.\n\n**Range warrant**\n\nThe range selects the first safely mapped aggregate `model` keyword in execution order. The count still combines aggregate blocks. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
+        body: "The number of written aggregate model equations does not match the number of endogenous variables. Dynare refuses: `There are 2 equations but 1 endogenous variables!` Dynare may change these counts when it rewrites a model. W013 provides guidance for other written-count mismatches.\n\n**Warrant**\n\nThe transport already labels Errors, so the diagnostic omits Dynare's severity prefix.\n\n**Fix**\n\nMatch model equations to distinct endogenous variables.\n\n**Range warrant**\n\nThe range selects the first safely mapped aggregate `model` keyword in execution order. The count still combines aggregate blocks. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E189", ExplainEntry {
         title: "Division by zero after a direct constant equation",
-        body: "Dynare refuses before MATLAB when a direct finite constant equation `x=C` makes a whole left- or right-hand side `N/(x-C)` zero. N is a nonzero finite literal or a single name. Dygnosis emits E189 on the written denominator even when the constant equation comes later. The official line is shortened after the equation number because substitution lists and arithmetic detail depend on the rewrite; the transport already labels severity. A negative unary constant such as `x=-1`, zero numerator, nested division, and other substitution chains remain outside this check.\n\n**Fix**\n\nChange the constant or denominator so it cannot simplify to zero.",
+        body: "A constant equation such as `x=1` makes the denominator in `N/(x-1)` zero when Dynare substitutes it. Dynare refuses: `Division by zero when substituting constants in equation N`. Dygnosis detects this error only for some written expressions.\n\n**Warrant**\n\nThe official line is shortened after the equation number because substitution lists and arithmetic detail depend on the rewrite; the transport already labels severity.\n\n**Fix**\n\nChange the constant or denominator so it cannot simplify to zero.",
         kind: ExplainKind::Shared,
     }),
     ("E190", ExplainEntry {
         title: "Partial-information expectation needs one variable",
-        body: "Dynare refuses before MATLAB: `In Partial Information models, EXPECTATION(0)(X) can only be used when X is a single variable.` Dygnosis emits E190 for a direct sum of two distinct written variables with partial_information only when neither operand has another defining equation. Identity expressions and substitutions such as `y+0` or `z=0+0; EXPECTATION(0)(y+z)` may simplify to one variable and are not rejected by this check; model-local substitution remains outside it. The `ERROR:` prefix is omitted because the transport already labels Errors.\n\n**Fix**\n\nWrite one variable inside EXPECTATION(0), or define the expression in a separate model equation.",
+        body: "With `partial_information`, `EXPECTATION(0)` must contain a single variable after Dynare simplifies the model. Dynare refuses: `In Partial Information models, EXPECTATION(0)(X) can only be used when X is a single variable.` Dygnosis checks only some expressions for this error.\n\n**Warrant**\n\nThe transport already labels Errors, so the diagnostic omits Dynare's severity prefix.\n\n**Fix**\n\nWrite one variable inside EXPECTATION(0), or define the expression in a separate model equation.",
         kind: ExplainKind::Shared,
     }),
     ("E191", ExplainEntry {
         title: "Excluded name still assigned in initval or endval",
-        body: "Dynare 7.2 contains an intended writer Error for an excluded name assigned earlier in `initval` or `endval`, but its symbol lookup throws before that Error branch. The observed Write run aborts with `NoTypeSpecificIDException`, without the intended ERROR sentence. This code is never emitted. Dygnosis's separate **W212** gives written-file guidance for the proven pattern.",
+        body: "Dynare 7.2 can stop without its intended error message when an excluded name is still assigned in `initval` or `endval`. Dygnosis reports the written pattern as **W212**. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("W186", ExplainEntry {
@@ -1994,12 +1994,12 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("W187", ExplainEntry {
         title: "Generated .m nests more than 32 parentheses",
-        body: "Dynare warns: `A .m file created by Dynare will have more than 32 nested parenthesis…`. Catching step: writer. Owner: skip-writer W. The trigger is the nesting depth of their generated text, not of the file. This code is never emitted.",
+        body: "Dynare warns: `A .m file created by Dynare will have more than 32 nested parenthesis…`. This depends on the generated MATLAB file, which Dygnosis does not check. This code is never emitted. Run Dynare to check it.",
         kind: ExplainKind::Skipped,
     }),
     ("E192", ExplainEntry {
         title: "Plain heterogeneous equation count mismatch",
-        body: "Dynare refuses before MATLAB: `There are 1 equations but 2 endogenous variables in the model for heterogeneity dimension 'h'!`. Dygnosis emits E192 for a written mismatch in a dimension whose equations cannot generate helpers. It sums multiple blocks of the same dimension. Counts changed by Dynare's rewrite remain outside this check; W208 remains guidance there. The `ERROR:` prefix is omitted because the transport already labels Errors.\n\n**Fix**\n\nMatch counted equations to distinct endogenous names in that dimension.\n\n**Range warrant**\n\nThe range selects the first safely mapped `model` keyword for the affected heterogeneity dimension. The count still combines that dimension's blocks. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
+        body: "The number of written equations and endogenous variables in a heterogeneity dimension does not match. Dynare refuses: `There are 1 equations but 2 endogenous variables in the model for heterogeneity dimension 'h'!` Dynare may change these counts when it rewrites a model. W208 provides guidance for other written-count mismatches.\n\n**Warrant**\n\nThe transport already labels Errors, so the diagnostic omits Dynare's severity prefix.\n\n**Fix**\n\nMatch model equations to distinct endogenous variables in that dimension.\n\n**Range warrant**\n\nThe range selects the first safely mapped `model` keyword for the affected heterogeneity dimension. The count still combines that dimension's blocks. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E193", ExplainEntry {
@@ -2009,7 +2009,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E194", ExplainEntry {
         title: "Remaining pac_expectation after substitution",
-        body: "Dynare refuses a PAC operator left after substitution. Catching step: transform (rewrite). Directly written unmatched pac_expectation and pac_target_nonstationary are E451 and E452; any remaining rewrite-only case needs a source-mapped internal rewrite. Owner: unversioned skip-rewrite E. This code is never emitted.",
+        body: "Dynare refuses a PAC operator left after substitution. Dygnosis reports directly written unmatched `pac_expectation` and `pac_target_nonstationary` as E451 and E452, but cannot check cases that depend on Dynare's rewritten equations. This code is never emitted. Run Dynare to check those cases.",
         kind: ExplainKind::Skipped,
     }),
     ("E459", ExplainEntry {
@@ -2158,6 +2158,21 @@ pub fn explain(code: &str) -> Option<ExplainEntry> {
 pub fn render_markdown(code: &str) -> Option<String> {
     let entry = explain(code)?;
     Some(format!("### {code}: {}\n\n{}\n", entry.title, entry.body))
+}
+
+/// Render correction guidance without the internal wording and range warrants.
+pub fn render_user_markdown(code: &str) -> Option<String> {
+    let mut markdown = render_markdown(code)?;
+    for heading in ["\n\n**Warrant**\n\n", "\n\n**Range warrant**\n\n"] {
+        while let Some(start) = markdown.find(heading) {
+            let body = start + heading.len();
+            let end = markdown[body..]
+                .find("\n\n**")
+                .map_or(markdown.len(), |offset| body + offset);
+            markdown.replace_range(start..end, "");
+        }
+    }
+    Some(markdown)
 }
 
 /// Sorted catalog keys that have explanations.

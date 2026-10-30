@@ -331,7 +331,7 @@
     condition_correspondence_unpaired: "Condition pairing unavailable; shown as Removed and Added.",
     occurrence_correspondence_unpaired: "Occurrence pairing unavailable; shown as Removed and Added.",
     complementarity_unmatched: "Condition compared as text only.",
-    references_partial: "Equation reference list is partial.",
+    references_partial: "Some equation references were omitted to limit the comparison size.",
     reference_limit: "Equation reference list reached its limit.",
     detail_output_partial: "This comparison is too large to show every detail. Use Text diff to review the files.",
     history_identity_unavailable: "Source text and source links are unavailable for some historical values.",

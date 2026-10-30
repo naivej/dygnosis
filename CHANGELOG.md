@@ -2,6 +2,10 @@
 
 ## v0.11.39
 
+- Clarify model owner selection, workspace coverage and diagnostic guidance in
+  Help. The status bar no longer suggests that clicking it selects an owner.
+- Comparison messages explain unreadable includes and omitted equation references.
+  Option descriptions and MCP setup instructions are corrected.
 - Open Help from the Command Palette or the Dygnosis extension's gear or context
   menu in **Extensions**.
 - Find more actions in the Command Palette, including saving or resetting an

@@ -465,7 +465,8 @@ test("ambiguous background model counts explain the owner-selection action", asy
   const env = setup(document("file:///workspace/helper.mod"));
   env.service.rootForDocument = async () => undefined;
   const registration = registerStatus(env.service); await flush();
-  assert.match(env.host.items[0].text, /choose model owner/);
+  assert.match(env.host.items[0].text, /model owner needed/);
+  assert.equal(env.host.items[0].command, "outline.focus");
   assert.match(env.host.items[0].tooltip, /Dygnosis: Choose model owner/);
   assert.equal(env.service.requests.length, 0);
   registration.dispose();

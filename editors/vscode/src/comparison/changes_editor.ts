@@ -281,7 +281,7 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     let document = uri ? undefined : vscode.window.activeTextEditor?.document;
     if (uri?.scheme === "file") {
       try { document = await vscode.workspace.openTextDocument(uri); checkSelection(token); }
-      catch (error) { checkSelection(token); if (/\.(mod|dyn)$/i.test(uri.path)) return { anchor: { kind: "working", root_uri: uri.toString() }, context_uri: uri.toString() }; throw new Error("The selected include has no available model owner.", { cause: error }); }
+      catch (error) { checkSelection(token); if (/\.(mod|dyn)$/i.test(uri.path)) return { anchor: { kind: "working", root_uri: uri.toString() }, context_uri: uri.toString() }; throw new Error(`Could not open ${fileLabel(uri.toString())}: ${failureText(error)}. Comparison did not start.`, { cause: error }); }
     } else if (uri) document = await vscode.workspace.openTextDocument(uri);
     checkSelection(token);
     if (!document) return undefined;

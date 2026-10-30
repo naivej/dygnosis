@@ -19,6 +19,15 @@ function activateHost(env) {
   assert.equal(activate(context), service); return context;
 }
 
+// Guards an unreadable include being reported as an owner-selection problem.
+test("an include that cannot be opened reports the cause and stops comparison", async t => {
+  const { host } = setup(t), included = Uri.joinPath(rootUri, "unreadable.inc");
+  host.loadText = async uri => { if (uri.toString() === included.toString()) throw new Error("permission denied"); };
+  await host.open({ resourceUri: included });
+  assert.equal(host.panels.length, 0);
+  assert.match(host.notifications[0], /Could not open unreadable\.inc: permission denied\. Comparison did not start\./);
+});
+
 test("Diff webviews load assets from the extension installation", async t => {
   const { host, vscode } = setup(t); await host.open();
   const panel = host.panels[0], [media] = panel.webview.options.localResourceRoots;

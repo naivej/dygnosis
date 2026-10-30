@@ -165,7 +165,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("datafile", "filename = FILENAME (deprecated)"),
             (
                 "diffuse_filter",
-                "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+                "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
             ),
             (
                 "diffuse_kalman_tol",
@@ -177,7 +177,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "filter_decomposition",
-                "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+                "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
             ),
             (
                 "filter_step_ahead",
@@ -185,7 +185,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "filtered_vars",
-                "Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e.",
+                "Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e. E_{t}{y_{t+1}}.",
             ),
             ("first_obs", "The observation number or the date (see"),
             (
@@ -468,7 +468,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("order", "Order of Taylor approximation."),
             (
                 "partial_information",
-                "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+                "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
             ),
             ("periods", "Number of periods of the simulation."),
             (
@@ -498,7 +498,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "simul_replic",
-                "Number of series to simulate when empirical moments are requested (i.e.",
+                "Number of series to simulate when empirical moments are requested (i.e. periods > 0).",
             ),
             ("solve_algo", "Determines the non-linear solver to use."),
             ("stderr_multiples", ""),
@@ -534,7 +534,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "brooks_gelman_plotrows",
-                "Number of parameters to depict along the rows of the figures depicting the :citeBrooks:1998 convergence diagnostics.",
+                "Number of parameters to depict along the rows of the figures depicting the Brooks (1998) convergence diagnostics.",
             ),
             (
                 "conditional_likelihood",
@@ -577,7 +577,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("diagonal_only", ""),
             (
                 "diffuse_filter",
-                "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+                "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
             ),
             (
                 "diffuse_kalman_tol",
@@ -619,7 +619,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("emas_tolf", ""),
             (
                 "endogenous_prior",
-                "Use endogenous priors as in :citeChristiano:2011.",
+                "Use endogenous priors as in Christiano (2011).",
             ),
             (
                 "estimate_initial_states_endogenous_prior",
@@ -627,7 +627,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "fast_kalman_filter",
-                "Select the fast Kalman filter using Chandrasekhar recursions as described by :citeHerbst:2015.",
+                "Select the fast Kalman filter using Chandrasekhar recursions as described by Herbst (2015).",
             ),
             ("filter_algorithm", "Sets the particle filter algorithm."),
             (
@@ -636,7 +636,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "filter_decomposition",
-                "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+                "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
             ),
             (
                 "filter_step_ahead",
@@ -644,7 +644,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "filtered_vars",
-                "Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e.",
+                "Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e. E_{t}{y_{t+1}}.",
             ),
             ("first_obs", "The observation number or the date (see"),
             (
@@ -653,11 +653,11 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "frequentist_smoother",
-                "If set to true, the frequentist smoother will be run in cases where the Bayesian smoother usually triggered with smoother is not run (e.g.",
+                "Run the frequentist smoother when the Bayesian smoother is not run, such as during maximum likelihood estimation or when mh_replic=0.",
             ),
             (
                 "geweke_interval",
-                "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>) after discarding the first mh_drop <mh_drop = DOUBLE> percent of draws as a burnin.",
+                "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>) after discarding the first mh_drop <mh_drop = DOUBLE> percent of draws as a burnin.",
             ),
             ("graph_format", "graph_format = ( FORMAT, FORMAT..."),
             (
@@ -687,7 +687,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "load_results_after_load_mh",
-                "This option is available when loading a previous MCMC run without adding additional draws, i.e.",
+                "When loading an MCMC run with load_mh_file and mh_replic=0, load previously computed convergence diagnostics, marginal data density, and posterior statistics from the results file instead of recomputing them.",
             ),
             (
                 "logdata",
@@ -836,7 +836,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("order", "Order of Taylor approximation."),
             (
                 "partial_information",
-                "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+                "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
             ),
             ("particle_filter_options", "A list of NAME and VALUE pairs."),
             ("plot_priors", "Control the plotting of priors."),
@@ -883,11 +883,11 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "raftery_lewis_diagnostics",
-                "Triggers the computation of the :citeRaftery:1992 convergence diagnostics.",
+                "Triggers the computation of the Raftery (1992) convergence diagnostics.",
             ),
             (
                 "raftery_lewis_qrs",
-                "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the :citeRaftery:1992 convergence diagnostics.",
+                "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the Raftery (1992) convergence diagnostics.",
             ),
             (
                 "relative_irf",
@@ -946,7 +946,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "taper_steps",
-                "Percent tapering used for the spectral window in the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>).",
+                "Percent tapering used for the spectral window in the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>).",
             ),
             (
                 "tex",
@@ -993,11 +993,11 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "integration",
-                "Governs the quadrature method for numerical integration over future uncertainty when using stochastic extended path, i.e.",
+                "Governs the quadrature method for numerical integration over future uncertainty when using stochastic extended path, i.e. order greater than 0.",
             ),
             (
                 "lmmcp",
-                "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irr",
+                "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
             ),
             (
                 "number_of_quadrature_nodes",
@@ -1197,7 +1197,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("first_obs", "The observation number or the date (see"),
             (
                 "first_simulation_period",
-                "Assign a date to the first simulation period, i.e.",
+                "Set the observation number or date at which the simulation or forecast starts.",
             ),
             ("last_obs", "The observation number or the date (see"),
             (
@@ -1231,7 +1231,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "diffuse_filter",
-                "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+                "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
             ),
             (
                 "diffuse_kalman_tol",
@@ -1240,7 +1240,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("graph_format", "graph_format = ( FORMAT, FORMAT..."),
             (
                 "grid_nbr",
-                "Number of grid points in [-pi;pi] to approximate the integral to compute :citeQu:2012's G criteria.",
+                "Number of grid points in [-pi;pi] to approximate the integral to compute Qu (2012)'s G criteria.",
             ),
             ("gsa_sample_file", "If equal to 0, do not use sample file."),
             (
@@ -1263,15 +1263,15 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "max_dim_subsets_groups",
-                "Sets the maximum dimension of groups of parameters for which the above bruteforce search is performed.",
+                "Set the maximum number of parameters in each group tested by checks_via_subsets.",
             ),
             (
                 "no_identification_minimal",
-                "Disables computations of identification check based on :citeKomunjer:2011's D, i.e.",
+                "Disables computations of identification check based on Komunjer (2011)'s D, i.e. minimal state-space system and observational equivalent spectral density transformations.",
             ),
             (
                 "no_identification_moments",
-                "Disables computations of identification check based on :citeIskrev:2010's J, i.e.",
+                "Disables computations of identification check based on Iskrev (2010)'s J, i.e. derivative of first two moments.",
             ),
             (
                 "no_identification_reducedform",
@@ -1279,7 +1279,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "no_identification_spectrum",
-                "Disables computations of identification check based on :citeQu:2012's G, i.e.",
+                "Disables computations of identification check based on Qu (2012)'s G, i.e. Gram matrix of derivatives of first moment plus outer product of derivatives of spectral density.",
             ),
             (
                 "no_identification_strength",
@@ -1398,7 +1398,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "type",
-                "For quarterly data, valid arguments are: qoq for quarter-on-quarter plots, yoy for year-on-year plots of growth rates, aoa for annualized variables, i.e.",
+                "For quarterly data, valid arguments are: qoq for quarter-on-quarter plots, yoy for year-on-year plots of growth rates, aoa for annualized variables, i.e. the value in the last quarter for each year is plotted.",
             ),
             (
                 "with_epilogue",
@@ -1418,12 +1418,12 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("first_obs", "The observation number or the date (see"),
             (
                 "first_simulation_period",
-                "Assign a date to the first simulation period, i.e.",
+                "Set the observation number or date at which the simulation or forecast starts.",
             ),
             ("last_obs", "The observation number or the date (see"),
             (
                 "last_simulation_period",
-                "Assign a date to the last simulation period, i.e.",
+                "Set the observation number or date at which the simulation or forecast ends.",
             ),
             (
                 "nobs",
@@ -1517,7 +1517,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "brooks_gelman_plotrows",
-                "Number of parameters to depict along the rows of the figures depicting the :citeBrooks:1998 convergence diagnostics.",
+                "Number of parameters to depict along the rows of the figures depicting the Brooks (1998) convergence diagnostics.",
             ),
             (
                 "burnin",
@@ -1556,7 +1556,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("first_obs", "The observation number or the date (see"),
             (
                 "geweke_interval",
-                "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>) after discarding the first mh_drop <mh_drop = DOUBLE> percent of draws as a burnin.",
+                "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>) after discarding the first mh_drop <mh_drop = DOUBLE> percent of draws as a burnin.",
             ),
             ("graph_format", "graph_format = ( FORMAT, FORMAT..."),
             (
@@ -1581,7 +1581,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "load_results_after_load_mh",
-                "This option is available when loading a previous MCMC run without adding additional draws, i.e.",
+                "When loading an MCMC run with load_mh_file and mh_replic=0, load previously computed convergence diagnostics, marginal data density, and posterior statistics from the results file instead of recomputing them.",
             ),
             (
                 "logdata",
@@ -1711,7 +1711,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("noprint", "Don’t print anything."),
             (
                 "one_sided_hp_filter",
-                "Uses the one-sided HP filter with \\lambda = DOUBLE described in :citeStock:1999 before computing moments.",
+                "Uses the one-sided HP filter with \\lambda = DOUBLE described in Stock (1999) before computing moments.",
             ),
             ("optim", "A list of NAME and VALUE pairs."),
             ("order", "Order of Taylor approximation."),
@@ -1754,11 +1754,11 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "raftery_lewis_diagnostics",
-                "Triggers the computation of the :citeRaftery:1992 convergence diagnostics.",
+                "Triggers the computation of the Raftery (1992) convergence diagnostics.",
             ),
             (
                 "raftery_lewis_qrs",
-                "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the :citeRaftery:1992 convergence diagnostics.",
+                "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the Raftery (1992) convergence diagnostics.",
             ),
             (
                 "relative_irf",
@@ -1792,7 +1792,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "taper_steps",
-                "Percent tapering used for the spectral window in the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>).",
+                "Percent tapering used for the spectral window in the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>).",
             ),
             (
                 "tex",
@@ -1934,9 +1934,12 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
                 "file_tag",
                 "The portion of the filename associated with this run.",
             ),
-            ("final_subperiod", "The final period of data (i.e."),
+            (
+                "final_subperiod",
+                "The final period of the data, for example an integer from 1 to 12 for monthly data.",
+            ),
             ("final_year", "The last year of data."),
-            ("freq", "Frequency of the data (e.g."),
+            ("freq", "Frequency of the data (e.g. monthly, 12)."),
             (
                 "function_convergence_criterion",
                 "The convergence criterion for the objective function when max_repeated_optimizations_runs is positive.",
@@ -1945,7 +1948,10 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
                 "gsig2_lmdm",
                 "The variance for each independent \\lambda parameter under SimsZha restrictions.",
             ),
-            ("initial_subperiod", "The first period of data (i.e."),
+            (
+                "initial_subperiod",
+                "The first period of data (i.e. for quarterly data, an integer in [1,4]).",
+            ),
             ("initial_year", "The first year of data."),
             (
                 "max_block_iterations",
@@ -2162,7 +2168,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("horizon", "The forecast horizon."),
             (
                 "no_error_bands",
-                "Do not output percentile error bands (i.e.",
+                "Do not output percentile error bands (i.e. compute mean).",
             ),
             (
                 "output_file_tag",
@@ -2309,7 +2315,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("likelihood_first_period_occbin_update", ""),
             (
                 "likelihood_inversion_filter",
-                "Employ the inversion filter of :citeCubaBorda:2019 when estimating the model.",
+                "Employ the inversion filter of CubaBorda (2019) when estimating the model.",
             ),
             ("likelihood_max_check_ahead_periods", ""),
             (
@@ -2330,7 +2336,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "likelihood_piecewise_kalman_filter",
-                "Employ the piecewise Kalman filter of :citeGiovannini:2021 when estimating the model.",
+                "Employ the piecewise Kalman filter of Giovannini (2021) when estimating the model.",
             ),
             ("particle_filtering", "particle_filtering = BOOLEAN"),
             (
@@ -2371,7 +2377,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "simul_max_check_ahead_periods",
-                "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e.",
+                "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing simul_check_ahead_periods ever further.",
             ),
             (
                 "simul_maxit",
@@ -2379,7 +2385,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "simul_periodic_solution",
-                "Accept a periodic solution where the solution alternates between two sets of results across iterations, i.e.",
+                "Accept a periodic solution where the solution alternates between two sets of results across iterations, i.e. is not found to be unique.",
             ),
             (
                 "simul_periodic_solution_strict",
@@ -2413,11 +2419,11 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "smoother_inversion_filter",
-                "Employ the inversion filter of :citeCubaBorda:2019 when running the smoother.",
+                "Employ the inversion filter of CubaBorda (2019) when running the smoother.",
             ),
             (
                 "smoother_max_check_ahead_periods",
-                "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e.",
+                "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing smoother_check_ahead_periods ever further.",
             ),
             (
                 "smoother_max_number_of_iterations",
@@ -2437,7 +2443,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "smoother_piecewise_kalman_filter",
-                "Employ the piecewise Kalman filter of :citeGiovannini:2021 when running the smoother.",
+                "Employ the piecewise Kalman filter of Giovannini (2021) when running the smoother.",
             ),
             (
                 "smoother_plot",
@@ -2462,7 +2468,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "simul_max_check_ahead_periods",
-                "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e.",
+                "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing simul_check_ahead_periods ever further.",
             ),
             (
                 "simul_maxit",
@@ -2470,7 +2476,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "simul_periodic_solution",
-                "Accept a periodic solution where the solution alternates between two sets of results across iterations, i.e.",
+                "Accept a periodic solution where the solution alternates between two sets of results across iterations, i.e. is not found to be unique.",
             ),
             (
                 "simul_periodic_solution_strict",
@@ -2639,7 +2645,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("order", "Order of Taylor approximation."),
             (
                 "partial_information",
-                "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+                "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
             ),
             ("periods", "Number of periods of the simulation."),
             (
@@ -2677,7 +2683,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "simul_replic",
-                "Number of series to simulate when empirical moments are requested (i.e.",
+                "Number of series to simulate when empirical moments are requested (i.e. periods > 0).",
             ),
             ("solve_algo", "Determines the non-linear solver to use."),
             ("stderr_multiples", ""),
@@ -2739,11 +2745,11 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "first_simulation_period",
-                "Assign a date to the first simulation period, i.e.",
+                "Assign a date to the first simulation period, i.e. the first period in which endogenous variables are solved for.",
             ),
             (
                 "last_simulation_period",
-                "Assign a date to the last simulation period, i.e.",
+                "Assign a date to the last simulation period, i.e. the last period in which endogenous variables are solved for.",
             ),
             ("periods", "Number of periods of the simulation."),
         ],
@@ -2785,7 +2791,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "homotopy_exclude_varexo",
-                "A list of exogenous variables which are to be excluded from the homotopy procedure, i.e.",
+                "A list of exogenous variables which are to be excluded from the homotopy procedure, i.e. which must be kept at their value corresponding to 100% of the shock during all homotopy iterations.",
             ),
             (
                 "homotopy_initial_step_size",
@@ -2825,7 +2831,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "lmmcp",
-                "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irr",
+                "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
             ),
             (
                 "markowitz",
@@ -2841,7 +2847,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "no_homotopy",
-                "This option tells Dynare to not try a homotopy technique (as described above) if the problem cannot be solved directly.",
+                "Do not try a homotopy technique if the perfect foresight problem cannot be solved directly.",
             ),
             ("noprint", "Don’t print anything."),
             (
@@ -2883,11 +2889,11 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "first_simulation_period",
-                "Assign a date to the first simulation period, i.e.",
+                "Assign a date to the first simulation period, i.e. the first period in which endogenous variables are solved for.",
             ),
             (
                 "last_simulation_period",
-                "Assign a date to the last simulation period, i.e.",
+                "Assign a date to the last simulation period, i.e. the last period in which endogenous variables are solved for.",
             ),
             ("periods", "Number of periods of the simulation."),
         ],
@@ -2933,7 +2939,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "homotopy_exclude_varexo",
-                "A list of exogenous variables which are to be excluded from the homotopy procedure, i.e.",
+                "A list of exogenous variables which are to be excluded from the homotopy procedure, i.e. which must be kept at their value corresponding to 100% of the shock during all homotopy iterations.",
             ),
             (
                 "homotopy_initial_step_size",
@@ -2973,7 +2979,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "lmmcp",
-                "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irr",
+                "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
             ),
             (
                 "markowitz",
@@ -2989,7 +2995,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "no_homotopy",
-                "This option tells Dynare to not try a homotopy technique (as described above) if the problem cannot be solved directly.",
+                "Do not try a homotopy technique if the perfect foresight problem cannot be solved directly.",
             ),
             ("noprint", "Don’t print anything."),
             (
@@ -3075,14 +3081,17 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
                 "If passed, plots decomposition using plot_init_date as initial period.",
             ),
             ("realtime", "Which kind of shock decomposition to plot."),
-            ("screen_shocks", "For large models (i.e."),
+            (
+                "screen_shocks",
+                "For large models (i.e. for models with more than 16 shocks), plots only the shocks that have the largest historical contribution for chosen selected variable_names.",
+            ),
             (
                 "steadystate",
                 "If passed, the the y-axis value of the zero line in the shock decomposition plot is translated to the steady-state level.",
             ),
             (
                 "type",
-                "For quarterly data, valid arguments are: qoq for quarter-on-quarter plots, yoy for year-on-year plots of growth rates, aoa for annualized variables, i.e.",
+                "For quarterly data, valid arguments are: qoq for quarter-on-quarter plots, yoy for year-on-year plots of growth rates, aoa for annualized variables, i.e. the value in the last quarter for each year is plotted.",
             ),
             (
                 "use_shock_groups",
@@ -3255,7 +3264,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("order", "Order of Taylor approximation."),
             (
                 "partial_information",
-                "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+                "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
             ),
             ("periods", "Number of periods of the simulation."),
             (
@@ -3285,7 +3294,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "simul_replic",
-                "Number of series to simulate when empirical moments are requested (i.e.",
+                "Number of series to simulate when empirical moments are requested (i.e. periods > 0).",
             ),
             ("solve_algo", "Determines the non-linear solver to use."),
             ("stderr_multiples", ""),
@@ -3368,7 +3377,10 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("dummy_obs", ""),
             ("eq_cms", ""),
             ("eq_ms", ""),
-            ("final_subperiod", "The final period of data (i.e."),
+            (
+                "final_subperiod",
+                "The final period of the data, for example an integer from 1 to 12 for monthly data.",
+            ),
             ("final_year", "The last year of data."),
             ("flat_prior", ""),
             ("foreband", ""),
@@ -3376,7 +3388,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
                 "forecast",
                 "Computes the posterior distribution of a forecast on INTEGER periods after the end of the sample used in estimation.",
             ),
-            ("freq", "Frequency of the data (e.g."),
+            ("freq", "Frequency of the data (e.g. monthly, 12)."),
             (
                 "gsig2_lmdm",
                 "The variance for each independent \\lambda parameter under SimsZha restrictions.",
@@ -3391,7 +3403,10 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("indxovr", ""),
             ("indxparr", ""),
             ("indxscalesstates", ""),
-            ("initial_subperiod", "The first period of data (i.e."),
+            (
+                "initial_subperiod",
+                "The first period of data (i.e. for quarterly data, an integer in [1,4]).",
+            ),
             ("initial_year", "The first year of data."),
             ("ncms", ""),
             ("ncsk", ""),
@@ -3449,7 +3464,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("datafile", "filename = FILENAME (deprecated)"),
             (
                 "diffuse_filter",
-                "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+                "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
             ),
             (
                 "diffuse_kalman_tol",
@@ -3461,7 +3476,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "filter_decomposition",
-                "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+                "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
             ),
             ("first_obs", "The observation number or the date (see"),
             ("graph_format", "graph_format = ( FORMAT, FORMAT..."),
@@ -3560,11 +3575,11 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "pvalue_corr",
-                "The threshold pvalue for significant correlation in filtered samples (i.e.",
+                "The threshold pvalue for significant correlation in filtered samples (i.e. plot bivariate samples when pvalue< pvalue_corr).",
             ),
             (
                 "pvalue_ks",
-                "The threshold pvalue for significant Kolmogorov-Smirnov test (i.e.",
+                "The threshold pvalue for significant Kolmogorov-Smirnov test (i.e. plot parameters with pvalue< pvalue_ks).",
             ),
             (
                 "redform",
@@ -3623,7 +3638,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("datafile", "filename = FILENAME (deprecated)"),
             (
                 "diffuse_filter",
-                "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+                "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
             ),
             (
                 "diffuse_kalman_tol",
@@ -3635,7 +3650,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "filter_decomposition",
-                "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+                "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
             ),
             ("first_obs", "The observation number or the date (see"),
             (
@@ -3648,7 +3663,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "init_state",
-                "If equal to 0, the shock decomposition is computed conditional on the smoothed state variables in period 0, i.e.",
+                "If equal to 0, the shock decomposition is computed conditional on the smoothed state variables in period 0, i.e. the smoothed shocks starting in period 1 are used.",
             ),
             ("kalman_algo", "0"),
             (
@@ -3778,7 +3793,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "first_simulation_period",
-                "Assign a date to the first simulation period, i.e.",
+                "Assign a date to the first simulation period, i.e. the first period in which endogenous variables are solved for.",
             ),
             (
                 "gmres_restart",
@@ -3786,7 +3801,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "homotopy_exclude_varexo",
-                "A list of exogenous variables which are to be excluded from the homotopy procedure, i.e.",
+                "A list of exogenous variables which are to be excluded from the homotopy procedure, i.e. which must be kept at their value corresponding to 100% of the shock during all homotopy iterations.",
             ),
             (
                 "homotopy_initial_step_size",
@@ -3822,7 +3837,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "last_simulation_period",
-                "Assign a date to the last simulation period, i.e.",
+                "Assign a date to the last simulation period, i.e. the last period in which endogenous variables are solved for.",
             ),
             (
                 "linear_approximation",
@@ -3830,7 +3845,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "lmmcp",
-                "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irr",
+                "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
             ),
             (
                 "markowitz",
@@ -3846,7 +3861,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "no_homotopy",
-                "This option tells Dynare to not try a homotopy technique (as described above) if the problem cannot be solved directly.",
+                "Do not try a homotopy technique if the perfect foresight problem cannot be solved directly.",
             ),
             ("noprint", "Don’t print anything."),
             ("periods", "Number of periods of the simulation."),
@@ -4065,12 +4080,12 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ("noprint", "Don’t print anything."),
             (
                 "one_sided_hp_filter",
-                "Uses the one-sided HP filter with \\lambda = DOUBLE described in :citeStock:1999 before computing moments.",
+                "Uses the one-sided HP filter with \\lambda = DOUBLE described in Stock (1999) before computing moments.",
             ),
             ("order", "Order of Taylor approximation."),
             (
                 "partial_information",
-                "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+                "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
             ),
             ("periods", "Number of periods of the simulation."),
             ("print", "Print results (opposite of noprint)."),
@@ -4096,7 +4111,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "simul_replic",
-                "Number of series to simulate when empirical moments are requested (i.e.",
+                "Number of series to simulate when empirical moments are requested (i.e. periods > 0).",
             ),
             ("solve_algo", "Determines the non-linear solver to use."),
             (
@@ -4314,7 +4329,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ("bounds", "Bounds for the named parameter or shock setting."),
     (
         "brooks_gelman_plotrows",
-        "Number of parameters to depict along the rows of the figures depicting the :citeBrooks:1998 convergence diagnostics.",
+        "Number of parameters to depict along the rows of the figures depicting the Brooks (1998) convergence diagnostics.",
     ),
     (
         "burnin",
@@ -4433,7 +4448,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "diffuse_filter",
-        "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+        "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
     ),
     (
         "diffuse_kalman_tol",
@@ -4484,7 +4499,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ("duration", "The duration of the regimes or regimes."),
     (
         "endogenous_prior",
-        "Use endogenous priors as in :citeChristiano:2011.",
+        "Use endogenous priors as in Christiano (2011).",
     ),
     (
         "endogenous_terminal_period",
@@ -4517,7 +4532,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "fast_kalman_filter",
-        "Select the fast Kalman filter using Chandrasekhar recursions as described by :citeHerbst:2015.",
+        "Select the fast Kalman filter using Chandrasekhar recursions as described by Herbst (2015).",
     ),
     (
         "fast_realtime",
@@ -4543,7 +4558,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "filter_decomposition",
-        "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+        "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
     ),
     (
         "filter_init_periods_using_particles",
@@ -4619,9 +4634,12 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "filtered_vars",
-        "Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e.",
+        "Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e. E_{t}{y_{t+1}}.",
     ),
-    ("final_subperiod", "The final period of data (i.e."),
+    (
+        "final_subperiod",
+        "The final period of the data, for example an integer from 1 to 12 for monthly data.",
+    ),
     ("final_year", "The last year of data."),
     (
         "first_deriv_provided",
@@ -4630,7 +4648,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ("first_obs", "The observation number or the date (see"),
     (
         "first_simulation_period",
-        "Assign a date to the first simulation period, i.e.",
+        "Set the first simulation period.",
     ),
     (
         "flip",
@@ -4664,10 +4682,10 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
         "free_parameters",
         "A vector of free parameters to initialize theta of the model.",
     ),
-    ("freq", "Frequency of the data (e.g."),
+    ("freq", "Frequency of the data (e.g. monthly, 12)."),
     (
         "frequentist_smoother",
-        "If set to true, the frequentist smoother will be run in cases where the Bayesian smoother usually triggered with smoother is not run (e.g.",
+        "Run the frequentist smoother when the Bayesian smoother is not run, such as during maximum likelihood estimation or when mh_replic=0.",
     ),
     ("fsolve_options", "A list of NAME and VALUE pairs."),
     (
@@ -4680,7 +4698,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "geweke_interval",
-        "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>) after discarding the first mh_drop <mh_drop = DOUBLE> percent of draws as a burnin.",
+        "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>) after discarding the first mh_drop <mh_drop = DOUBLE> percent of draws as a burnin.",
     ),
     (
         "gmres_restart",
@@ -4689,7 +4707,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ("graph_format", "graph_format = ( FORMAT, FORMAT..."),
     (
         "grid_nbr",
-        "Number of grid points in [-pi;pi] to approximate the integral to compute :citeQu:2012's G criteria.",
+        "Number of grid points in [-pi;pi] to approximate the integral to compute Qu (2012)'s G criteria.",
     ),
     ("gsa_sample_file", "If equal to 0, do not use sample file."),
     (
@@ -4702,7 +4720,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "homotopy_exclude_varexo",
-        "A list of exogenous variables which are to be excluded from the homotopy procedure, i.e.",
+        "A list of exogenous variables which are to be excluded from the homotopy procedure, i.e. which must be kept at their value corresponding to 100% of the shock during all homotopy iterations.",
     ),
     (
         "homotopy_force_continue",
@@ -4769,9 +4787,12 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ("init2shocks", "init2shocks = NAME"),
     (
         "init_state",
-        "If equal to 0, the shock decomposition is computed conditional on the smoothed state variables in period 0, i.e.",
+        "If equal to 0, the shock decomposition is computed conditional on the smoothed state variables in period 0, i.e. the smoothed shocks starting in period 1 are used.",
     ),
-    ("initial_subperiod", "The first period of data (i.e."),
+    (
+        "initial_subperiod",
+        "The first period of data (i.e. for quarterly data, an integer in [1,4]).",
+    ),
     ("initial_year", "The first year of data."),
     (
         "instruments",
@@ -4779,7 +4800,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "integration",
-        "Governs the quadrature method for numerical integration over future uncertainty when using stochastic extended path, i.e.",
+        "Governs the quadrature method for numerical integration over future uncertainty when using stochastic extended path, i.e. order greater than 0.",
     ),
     (
         "interactive",
@@ -4831,7 +4852,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ("last_obs", "The observation number or the date (see"),
     (
         "last_simulation_period",
-        "Assign a date to the last simulation period, i.e.",
+        "Set the last simulation period.",
     ),
     ("learnt_in", LEARNT_IN),
     ("lik_init", "Type of initialization of Kalman filter:"),
@@ -4849,7 +4870,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "likelihood_inversion_filter",
-        "Employ the inversion filter of :citeCubaBorda:2019 when estimating the model.",
+        "Employ the inversion filter of CubaBorda (2019) when estimating the model.",
     ),
     (
         "likelihood_max_kalman_iterations",
@@ -4869,7 +4890,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "likelihood_piecewise_kalman_filter",
-        "Employ the piecewise Kalman filter of :citeGiovannini:2021 when estimating the model.",
+        "Employ the piecewise Kalman filter of Giovannini (2021) when estimating the model.",
     ),
     (
         "linear_approximation",
@@ -4877,7 +4898,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "lmmcp",
-        "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irr",
+        "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
     ),
     (
         "load_ident_files",
@@ -4893,7 +4914,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "load_results_after_load_mh",
-        "This option is available when loading a previous MCMC run without adding additional draws, i.e.",
+        "When loading an MCMC run with load_mh_file and mh_replic=0, load previously computed convergence diagnostics, marginal data density, and posterior statistics from the results file instead of recomputing them.",
     ),
     ("load_rmse", "If equal to 1, load previous RMSE analysis."),
     (
@@ -4943,7 +4964,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "max_dim_subsets_groups",
-        "Sets the maximum dimension of groups of parameters for which the above bruteforce search is performed.",
+        "Set the maximum number of parameters in each group tested by checks_via_subsets.",
     ),
     (
         "max_iterations_increment_value",
@@ -5099,19 +5120,19 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "no_error_bands",
-        "Do not output percentile error bands (i.e.",
+        "Do not output percentile error bands (i.e. compute mean).",
     ),
     (
         "no_homotopy",
-        "This option tells Dynare to not try a homotopy technique (as described above) if the problem cannot be solved directly.",
+        "Do not try a homotopy technique if the perfect foresight problem cannot be solved directly.",
     ),
     (
         "no_identification_minimal",
-        "Disables computations of identification check based on :citeKomunjer:2011's D, i.e.",
+        "Disables computations of identification check based on Komunjer (2011)'s D, i.e. minimal state-space system and observational equivalent spectral density transformations.",
     ),
     (
         "no_identification_moments",
-        "Disables computations of identification check based on :citeIskrev:2010's J, i.e.",
+        "Disables computations of identification check based on Iskrev (2010)'s J, i.e. derivative of first two moments.",
     ),
     (
         "no_identification_reducedform",
@@ -5119,7 +5140,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "no_identification_spectrum",
-        "Disables computations of identification check based on :citeQu:2012's G, i.e.",
+        "Disables computations of identification check based on Qu (2012)'s G, i.e. Gram matrix of derivatives of first moment plus outer product of derivatives of spectral density.",
     ),
     (
         "no_identification_strength",
@@ -5211,7 +5232,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "one_sided_hp_filter",
-        "Uses the one-sided HP filter with \\lambda = DOUBLE described in :citeStock:1999 before computing moments.",
+        "Uses the one-sided HP filter with \\lambda = DOUBLE described in Stock (1999) before computing moments.",
     ),
     (
         "opt_algo",
@@ -5250,7 +5271,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "partial_information",
-        "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+        "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
     ),
     ("particle_filter_options", "A list of NAME and VALUE pairs."),
     ("particle_filtering", "particle_filtering = BOOLEAN"),
@@ -5367,11 +5388,11 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "pvalue_corr",
-        "The threshold pvalue for significant correlation in filtered samples (i.e.",
+        "The threshold pvalue for significant correlation in filtered samples (i.e. plot bivariate samples when pvalue< pvalue_corr).",
     ),
     (
         "pvalue_ks",
-        "The threshold pvalue for significant Kolmogorov-Smirnov test (i.e.",
+        "The threshold pvalue for significant Kolmogorov-Smirnov test (i.e. plot parameters with pvalue< pvalue_ks).",
     ),
     (
         "qz_criterium",
@@ -5383,11 +5404,11 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "raftery_lewis_diagnostics",
-        "Triggers the computation of the :citeRaftery:1992 convergence diagnostics.",
+        "Triggers the computation of the Raftery (1992) convergence diagnostics.",
     ),
     (
         "raftery_lewis_qrs",
-        "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the :citeRaftery:1992 convergence diagnostics.",
+        "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the Raftery (1992) convergence diagnostics.",
     ),
     (
         "random_function_convergence_criterion",
@@ -5462,7 +5483,10 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
         "schur_vec_tol",
         "Tolerance level used to find nonstationary variables in Schur decomposition of the transition matrix.",
     ),
-    ("screen_shocks", "For large models (i.e."),
+    (
+        "screen_shocks",
+        "For large models (i.e. for models with more than 16 shocks), plots only the shocks that have the largest historical contribution for chosen selected variable_names.",
+    ),
     (
         "se_tolx",
         "Step size for numerical differentiation when computing standard errors with a two-sided finite difference method.",
@@ -5507,7 +5531,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "simul_max_check_ahead_periods",
-        "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e.",
+        "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing simul_check_ahead_periods ever further.",
     ),
     (
         "simul_maxit",
@@ -5515,7 +5539,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "simul_periodic_solution",
-        "Accept a periodic solution where the solution alternates between two sets of results across iterations, i.e.",
+        "Accept a periodic solution where the solution alternates between two sets of results across iterations, i.e. is not found to be unique.",
     ),
     (
         "simul_periodic_solution_strict",
@@ -5528,7 +5552,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ("simul_periods", "Number of periods of the simulation."),
     (
         "simul_replic",
-        "Number of series to simulate when empirical moments are requested (i.e.",
+        "Number of series to simulate when empirical moments are requested (i.e. periods > 0).",
     ),
     (
         "simul_reset_check_ahead_periods",
@@ -5581,11 +5605,11 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "smoother_inversion_filter",
-        "Employ the inversion filter of :citeCubaBorda:2019 when running the smoother.",
+        "Employ the inversion filter of CubaBorda (2019) when running the smoother.",
     ),
     (
         "smoother_max_check_ahead_periods",
-        "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e.",
+        "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing smoother_check_ahead_periods ever further.",
     ),
     (
         "smoother_max_number_of_iterations",
@@ -5605,7 +5629,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "smoother_piecewise_kalman_filter",
-        "Employ the piecewise Kalman filter of :citeGiovannini:2021 when running the smoother.",
+        "Employ the piecewise Kalman filter of Giovannini (2021) when running the smoother.",
     ),
     (
         "smoother_plot",
@@ -5652,7 +5676,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "taper_steps",
-        "Percent tapering used for the spectral window in the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>).",
+        "Percent tapering used for the spectral window in the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>).",
     ),
     (
         "tex",
@@ -5733,7 +5757,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "type",
-        "For quarterly data, valid arguments are: qoq for quarter-on-quarter plots, yoy for year-on-year plots of growth rates, aoa for annualized variables, i.e.",
+        "For quarterly data, valid arguments are: qoq for quarter-on-quarter plots, yoy for year-on-year plots of growth rates, aoa for annualized variables, i.e. the value in the last quarter for each year is plotted.",
     ),
     (
         "use_first_order_solution",

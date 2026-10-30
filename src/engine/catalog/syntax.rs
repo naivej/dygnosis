@@ -190,6 +190,106 @@ mod tests {
     use super::*;
 
     #[test]
+    fn option_help_keeps_complete_standalone_descriptions() {
+        // Guards truncated abbreviations and raw manual citation roles in both
+        // contextual syntax results and the fallback used by editor hover.
+        for (parent, name) in [
+            ("identification", "no_identification_minimal"),
+            ("ms_variance_decomposition", "no_error_bands"),
+            ("perfect_foresight_solver", "no_homotopy"),
+            ("estimation", "filter_decomposition"),
+            ("identification", "max_dim_subsets_groups"),
+        ] {
+            let rows = query(&SyntaxQuery {
+                name: Some(name.into()),
+                parent: Some(parent.into()),
+                ..Default::default()
+            });
+            let summary = &rows.records.first().expect(name).summary;
+            assert!(!description_is_fragment(summary), "{name}: {summary}");
+            assert!(!summary.contains(":cite") && !summary.contains("above"));
+            let fallback = super::super::option_doc(name);
+            assert!(!description_is_fragment(fallback), "{name}: {fallback}");
+            assert!(!fallback.contains(":cite") && !fallback.contains("above"));
+        }
+    }
+
+    #[test]
+    fn occbin_check_ahead_limits_name_the_matching_mode() {
+        // Guards copying the smoother description onto the simulation option.
+        for (name, target, parents) in [
+            (
+                "simul_max_check_ahead_periods",
+                "simul_check_ahead_periods",
+                &["occbin_setup", "occbin_solver"][..],
+            ),
+            (
+                "smoother_max_check_ahead_periods",
+                "smoother_check_ahead_periods",
+                &["occbin_setup"][..],
+            ),
+        ] {
+            assert!(super::super::option_doc(name).contains(target), "{name}");
+            for parent in parents {
+                let rows = query(&SyntaxQuery {
+                    name: Some(name.into()),
+                    parent: Some((*parent).into()),
+                    ..Default::default()
+                });
+                assert!(
+                    rows.records.first().expect(name).summary.contains(target),
+                    "{parent}/{name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn option_help_keeps_file_periods_and_loaded_results_in_context() {
+        // Guards substituting date-only setup help for file observation numbers,
+        // and describing only when load_results_after_load_mh can be used.
+        for (parent, name) in [
+            ("histval_file", "first_simulation_period"),
+            ("initval_file", "first_simulation_period"),
+            ("initval_file", "last_simulation_period"),
+        ] {
+            let rows = query(&SyntaxQuery {
+                name: Some(name.into()),
+                parent: Some(parent.into()),
+                ..Default::default()
+            });
+            let text = &rows.records.first().expect(name).summary;
+            assert!(
+                text.contains("observation number or date"),
+                "{parent}/{name}: {text}"
+            );
+        }
+        for name in ["first_simulation_period", "last_simulation_period"] {
+            let rows = query(&SyntaxQuery {
+                name: Some(name.into()),
+                parent: Some("perfect_foresight_setup".into()),
+                ..Default::default()
+            });
+            let text = &rows.records.first().expect(name).summary;
+            assert!(
+                text.contains("date") && !text.contains("observation number"),
+                "{name}: {text}"
+            );
+        }
+        let rows = query(&SyntaxQuery {
+            name: Some("load_results_after_load_mh".into()),
+            parent: Some("estimation".into()),
+            ..Default::default()
+        });
+        let text = &rows.records.first().unwrap().summary;
+        assert!(
+            text.contains("load previously computed convergence diagnostics"),
+            "{text}"
+        );
+        assert!(text.contains("instead of recomputing"), "{text}");
+    }
+
+    #[test]
     fn published_records_have_unique_selectors_and_usable_shapes() {
         // Guards ambiguous record selection and incomplete reference payloads after regeneration.
         let mut ids = std::collections::HashSet::new();

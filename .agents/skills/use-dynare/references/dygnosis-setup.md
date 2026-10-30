@@ -24,7 +24,7 @@ changing a host configuration need the user's consent; reuse consent already giv
    (table in step 3). An entry that exists is **configured but unavailable**. No entry means
    **absent**: go to step 2.
 
-Common causes of "configured but unavailable": a wrong or relative executable path, a missing `mcp`
+Common causes of "configured but unavailable": a wrong or relative executable path, an obsolete `mcp`
 argument, an executable for another OS or architecture, a server that the user has not approved, a
 project that the host does not trust, and a configuration that needs a reload or a new session.
 
@@ -32,10 +32,10 @@ project that the host does not trust, and a configuration that needs a reload or
 
 Use the first route that works.
 
-1. **Reuse a compatible executable.** Candidates: a path that the user gives, `dygnosis` on `PATH`, the
+1. **Reuse a compatible executable.** Candidates: a path that the user gives, `dygnosis-mcp` on `PATH`, the
    command of an existing `.mcp.json` entry, or the copy that the VS Code extension manages. The
-   extension command **Dygnosis: Set up MCP for this project** creates that copy at `bin/dygnosis.exe`
-   (Windows) or `bin/dygnosis` (macOS, Linux) in the extension's global storage. Run
+   extension command **Dygnosis: Set up MCP for this workspace** creates that copy at `bin/dygnosis-mcp.exe`
+   (Windows) or `bin/dygnosis-mcp` (macOS, Linux) in the extension's global storage. Run
    `<path> --version`. The executable must run on the machine that runs the agent.
 2. **Download a release.** Open [GitHub Releases](https://github.com/naivej/dygnosis/releases). Choose
    the asset for the OS and architecture of the machine that runs the agent. Release targets:
@@ -55,18 +55,18 @@ Use the first route that works.
 
 Rules for every host:
 
-- The command is the **absolute path** of the executable. `mcp` is a **separate argument**.
+- The command is the **absolute path** of `dygnosis-mcp`. It takes no `mcp` argument.
 - Prefer project scope. Keep the other servers and unrelated keys in the file.
 - The path belongs to the machine that runs the agent. A remote agent needs its own executable.
-- In JSON, escape Windows backslashes (`"C:\\tools\\dygnosis\\dygnosis.exe"`) or use forward slashes.
+- In JSON, escape Windows backslashes (`"C:\\tools\\dygnosis\\dygnosis-mcp.exe"`) or use forward slashes.
 
 | Host | Configuration | Check |
 |---|---|---|
 | VS Code with the Dygnosis extension | No file needed: the extension registers a native **Dygnosis** server. Start it from **MCP: List Servers**. | **MCP: List Servers**, the server's Output |
-| Claude Code | `claude mcp add --scope project dygnosis -- <absolute-path> mcp` writes `.mcp.json` at the project root. In VS Code, **Dygnosis: Set up MCP for this project** writes the same format. | `claude mcp list`, `claude mcp get dygnosis`, `/mcp` |
-| Codex | Project `.codex/config.toml` (trusted projects only) or `~/.codex/config.toml`, below. Or `codex mcp add dygnosis -- <absolute-path> mcp`. | `codex mcp list`, `/mcp` |
+| Claude Code | `claude mcp add --scope project dygnosis -- <absolute-path>` writes `.mcp.json` at the project root. In VS Code, **Dygnosis: Set up MCP for this workspace** writes the same format. | `claude mcp list`, `claude mcp get dygnosis`, `/mcp` |
+| Codex | Project `.codex/config.toml` (trusted projects only) or `~/.codex/config.toml`, below. Or `codex mcp add dygnosis -- <absolute-path>`. | `codex mcp list`, `/mcp` |
 | Cursor | Project `.cursor/mcp.json` or `~/.cursor/mcp.json`, below. | Output panel, channel "MCP Logs"; the server toggle in the settings |
-| Other hosts | Use the host's own format with the same command and argument. | The host's MCP status |
+| Other hosts | Use the host's own format with the same command and no arguments. | The host's MCP status |
 
 `.mcp.json` (Claude Code) and `.cursor/mcp.json` (Cursor):
 
@@ -75,20 +75,19 @@ Rules for every host:
   "mcpServers": {
     "dygnosis": {
       "type": "stdio",
-      "command": "/absolute/path/to/dygnosis",
-      "args": ["mcp"]
+      "command": "/absolute/path/to/dygnosis-mcp",
+      "args": []
     }
   }
 }
 ```
 
 `.codex/config.toml` (Codex). On Windows, write the path as a single-quoted TOML string, which keeps
-backslashes: `command = 'C:\tools\dygnosis\dygnosis.exe'`.
+backslashes: `command = 'C:\tools\dygnosis\dygnosis-mcp.exe'`.
 
 ```toml
 [mcp_servers.dygnosis]
-command = "/absolute/path/to/dygnosis"
-args = ["mcp"]
+command = "/absolute/path/to/dygnosis-mcp"
 ```
 
 The `.mcp.json` format is Claude Code's. It is not a format for every client.
@@ -162,7 +161,6 @@ server does not install this skill.
 
 ## More help
 
-- [MCP without VS Code](https://github.com/naivej/dygnosis/blob/main/help/get-started.md#mcp-without-vs-code)
 - [Connect an agent](https://github.com/naivej/dygnosis/blob/main/help/agents.md) (VS Code native MCP and
   project setup)
 - [Troubleshooting](https://github.com/naivej/dygnosis/blob/main/help/troubleshoot.md) (executable

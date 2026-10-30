@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use dygnosis::explain::{explain, known_codes, render_markdown};
+use dygnosis::explain::{explain, known_codes};
 use dygnosis::span::{LineIndex, Position};
 use dygnosis::{
     Diagnostic, McpReference, McpWorkspaceReference, Workspace, analyze, auto_fix, check_e061,
@@ -1032,7 +1032,7 @@ fn model_info_includes_parse_summary() {
 
 #[test]
 fn explain_e001_matches_library() {
-    let expected = render_markdown("E001").expect("E001 is documented");
+    let expected = dygnosis::explain::render_user_markdown("E001").expect("E001 is documented");
     assert_eq!(dynare_explain("E001"), expected);
 }
 

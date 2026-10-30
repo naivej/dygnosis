@@ -736,7 +736,7 @@ test("diff notes keep useful missing-detail warnings and a plain fallback", () =
   const env = webview(), snapshot = parseCurrent(response()), row = snapshot.rows[0];
   row.semantic.limits = [{ code: "references_partial", reason: "Direct local references were omitted by the comparison-wide reference limit.", omitted: 12, owner: "semantic_equations" }];
   env.render(snapshot);
-  assert.equal(descendants(env.elements.results).find(element => element.className === "group-notes").textContent, "Equation reference list is partial. 12 omitted.");
+  assert.equal(descendants(env.elements.results).find(element => element.className === "group-notes").textContent, "Some equation references were omitted to limit the comparison size. 12 omitted.");
   row.semantic.limits.push({ code: "future_limit", reason: "Unknown retained producer correspondence.", omitted: 5, owner: "future" }); env.render(snapshot);
   assert.match(env.elements.results.textContent, /Some details could not be compared\. Use Text diff to review the files\./);
   assert.doesNotMatch(env.elements.results.textContent, /producer|correspondence/);

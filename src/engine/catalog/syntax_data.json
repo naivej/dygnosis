@@ -24388,7 +24388,7 @@
     "signatures": [
       "brooks_gelman_plotrows = NONNEGATIVE_INTEGER"
     ],
-    "summary": "Number of parameters to depict along the rows of the figures depicting the :citeBrooks:1998 convergence diagnostics.",
+    "summary": "Number of parameters to depict along the rows of the figures depicting the Brooks (1998) convergence diagnostics.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -24409,7 +24409,7 @@
     "signatures": [
       "brooks_gelman_plotrows = NONNEGATIVE_INTEGER"
     ],
-    "summary": "Number of parameters to depict along the rows of the figures depicting the :citeBrooks:1998 convergence diagnostics.",
+    "summary": "Number of parameters to depict along the rows of the figures depicting the Brooks (1998) convergence diagnostics.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -25399,7 +25399,7 @@
         "signatures": [
           "diffuse_filter"
         ],
-        "description": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+        "description": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
         "grammar_sources": [
           "src/DynareBison.yy:4404"
         ],
@@ -25445,7 +25445,7 @@
           "filter_decomposition",
           "filter_decomposition = true | false"
         ],
-        "description": "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+        "description": "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
         "grammar_sources": [
           "src/DynareBison.yy:4719",
           "src/DynareBison.yy:4721"
@@ -27855,7 +27855,7 @@
       "cpf_weights = amisanotristani",
       "cpf_weights = murrayjonesparslow"
     ],
-    "summary": "Use the approach in :citeAmisano:2010.",
+    "summary": "Use the approach in Amisano (2010).",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -29079,7 +29079,7 @@
     "signatures": [
       "diffuse_filter"
     ],
-    "summary": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+    "summary": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -29100,7 +29100,7 @@
     "signatures": [
       "diffuse_filter"
     ],
-    "summary": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+    "summary": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -29121,7 +29121,7 @@
     "signatures": [
       "diffuse_filter"
     ],
-    "summary": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+    "summary": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -29142,7 +29142,7 @@
     "signatures": [
       "diffuse_filter"
     ],
-    "summary": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+    "summary": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -29163,7 +29163,7 @@
     "signatures": [
       "diffuse_filter"
     ],
-    "summary": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+    "summary": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -29918,7 +29918,7 @@
         "signatures": [
           "partial_information"
         ],
-        "description": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+        "description": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
         "grammar_sources": [
           "src/DynareBison.yy:4435"
         ],
@@ -31867,7 +31867,7 @@
     "signatures": [
       "endogenous_prior"
     ],
-    "summary": "Use endogenous priors as in :citeChristiano:2011.",
+    "summary": "Use endogenous priors as in Christiano (2011).",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -32707,7 +32707,7 @@
         "signatures": [
           "brooks_gelman_plotrows = NONNEGATIVE_INTEGER"
         ],
-        "description": "Number of parameters to depict along the rows of the figures depicting the :citeBrooks:1998 convergence diagnostics.",
+        "description": "Number of parameters to depict along the rows of the figures depicting the Brooks (1998) convergence diagnostics.",
         "grammar_sources": [
           "src/DynareBison.yy:4396"
         ],
@@ -32851,7 +32851,7 @@
           "cpf_weights = amisanotristani",
           "cpf_weights = murrayjonesparslow"
         ],
-        "description": "Use the approach in :citeAmisano:2010.",
+        "description": "Use the approach in Amisano (2010).",
         "grammar_sources": [
           "src/DynareBison.yy:4509",
           "src/DynareBison.yy:4510"
@@ -32895,7 +32895,7 @@
         "signatures": [
           "diffuse_filter"
         ],
-        "description": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+        "description": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
         "grammar_sources": [
           "src/DynareBison.yy:4404"
         ],
@@ -33126,7 +33126,7 @@
         "signatures": [
           "endogenous_prior"
         ],
-        "description": "Use endogenous priors as in :citeChristiano:2011.",
+        "description": "Use endogenous priors as in Christiano (2011).",
         "grammar_sources": [
           "src/DynareBison.yy:4804"
         ],
@@ -33157,7 +33157,7 @@
         "signatures": [
           "fast_kalman_filter"
         ],
-        "description": "Select the fast Kalman filter using Chandrasekhar recursions as described by :citeHerbst:2015.",
+        "description": "Select the fast Kalman filter using Chandrasekhar recursions as described by Herbst (2015).",
         "grammar_sources": [
           "src/DynareBison.yy:4372"
         ],
@@ -33203,7 +33203,7 @@
           "filter_decomposition",
           "filter_decomposition = true | false"
         ],
-        "description": "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+        "description": "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
         "grammar_sources": [
           "src/DynareBison.yy:4719",
           "src/DynareBison.yy:4721"
@@ -33298,7 +33298,7 @@
         "signatures": [
           "geweke_interval = [NUMBER, ...]"
         ],
-        "description": "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1) after discarding the first mh_drop percent of draws as a burnin.",
+        "description": "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1) after discarding the first mh_drop percent of draws as a burnin.",
         "grammar_sources": [
           "src/DynareBison.yy:4393"
         ],
@@ -33486,7 +33486,7 @@
         "signatures": [
           "load_results_after_load_mh"
         ],
-        "description": "This option is available when loading a previous MCMC run without adding additional draws, i.e. when load_mh_file is specified with mh_replic=0.",
+        "description": "When loading an MCMC run with load_mh_file and mh_replic=0, load previously computed convergence diagnostics, marginal data density, and posterior statistics from the results file instead of recomputing them.",
         "grammar_sources": [
           "src/DynareBison.yy:4348"
         ],
@@ -34087,7 +34087,7 @@
         "signatures": [
           "partial_information"
         ],
-        "description": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+        "description": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
         "grammar_sources": [
           "src/DynareBison.yy:4435"
         ],
@@ -34303,7 +34303,7 @@
         "signatures": [
           "raftery_lewis_diagnostics"
         ],
-        "description": "Triggers the computation of the :citeRaftery:1992 convergence diagnostics.",
+        "description": "Triggers the computation of the Raftery (1992) convergence diagnostics.",
         "grammar_sources": [
           "src/DynareBison.yy:4394"
         ],
@@ -34317,7 +34317,7 @@
         "signatures": [
           "raftery_lewis_qrs = [NUMBER, ...]"
         ],
-        "description": "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the :citeRaftery:1992 convergence diagnostics.",
+        "description": "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the Raftery (1992) convergence diagnostics.",
         "grammar_sources": [
           "src/DynareBison.yy:4395"
         ],
@@ -34582,7 +34582,7 @@
         "signatures": [
           "taper_steps = [INTEGER, ...]"
         ],
-        "description": "Percent tapering used for the spectral window in the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1).",
+        "description": "Percent tapering used for the spectral window in the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1).",
         "grammar_sources": [
           "src/DynareBison.yy:4392"
         ],
@@ -34985,7 +34985,7 @@
         "signatures": [
           "lmmcp"
         ],
-        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
+        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
         "grammar_sources": [
           "src/DynareBison.yy:4841"
         ],
@@ -35180,7 +35180,7 @@
     "signatures": [
       "fast_kalman_filter"
     ],
-    "summary": "Select the fast Kalman filter using Chandrasekhar recursions as described by :citeHerbst:2015.",
+    "summary": "Select the fast Kalman filter using Chandrasekhar recursions as described by Herbst (2015).",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -35658,7 +35658,7 @@
       "filter_decomposition",
       "filter_decomposition = true | false"
     ],
-    "summary": "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+    "summary": "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -35682,7 +35682,7 @@
       "filter_decomposition",
       "filter_decomposition = true | false"
     ],
-    "summary": "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+    "summary": "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -35706,7 +35706,7 @@
       "filter_decomposition",
       "filter_decomposition = true | false"
     ],
-    "summary": "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+    "summary": "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -35730,7 +35730,7 @@
       "filter_decomposition",
       "filter_decomposition = true | false"
     ],
-    "summary": "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+    "summary": "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -36760,7 +36760,7 @@
       "first_simulation_period = DATE",
       "first_simulation_period = NONNEGATIVE_INTEGER"
     ],
-    "summary": "Assign a date to the first simulation period, i.e. the first period in which endogenous variables are solved for.",
+    "summary": "Set the observation number or date at which the simulation or forecast starts.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -36784,7 +36784,7 @@
       "first_simulation_period = DATE",
       "first_simulation_period = NONNEGATIVE_INTEGER"
     ],
-    "summary": "Assign a date to the first simulation period, i.e. the first period in which endogenous variables are solved for.",
+    "summary": "Set the observation number or date at which the simulation or forecast starts.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -37722,7 +37722,7 @@
     "signatures": [
       "geweke_interval = [NUMBER, ...]"
     ],
-    "summary": "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1) after discarding the first mh_drop percent of draws as a burnin.",
+    "summary": "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1) after discarding the first mh_drop percent of draws as a burnin.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -37743,7 +37743,7 @@
     "signatures": [
       "geweke_interval = [NUMBER, ...]"
     ],
-    "summary": "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1) after discarding the first mh_drop percent of draws as a burnin.",
+    "summary": "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1) after discarding the first mh_drop percent of draws as a burnin.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -38346,7 +38346,7 @@
     "signatures": [
       "grid_nbr = NONNEGATIVE_INTEGER"
     ],
-    "summary": "Number of grid points in [-pi;pi] to approximate the integral to compute :citeQu:2012's G criteria.",
+    "summary": "Number of grid points in [-pi;pi] to approximate the integral to compute Qu (2012)'s G criteria.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -39527,7 +39527,7 @@
           "first_simulation_period = DATE",
           "first_simulation_period = NONNEGATIVE_INTEGER"
         ],
-        "description": "Assign a date to the first simulation period, i.e. the first period in which endogenous variables are solved for.",
+        "description": "Set the observation number or date at which the simulation or forecast starts.",
         "grammar_sources": [
           "src/DynareBison.yy:4223",
           "src/DynareBison.yy:4224"
@@ -40562,7 +40562,7 @@
         "signatures": [
           "diffuse_filter"
         ],
-        "description": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+        "description": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
         "grammar_sources": [
           "src/DynareBison.yy:4404"
         ],
@@ -40621,7 +40621,7 @@
         "signatures": [
           "grid_nbr = NONNEGATIVE_INTEGER"
         ],
-        "description": "Number of grid points in [-pi;pi] to approximate the integral to compute :citeQu:2012's G criteria.",
+        "description": "Number of grid points in [-pi;pi] to approximate the integral to compute Qu (2012)'s G criteria.",
         "grammar_sources": [
           "src/DynareBison.yy:4896"
         ],
@@ -40739,7 +40739,7 @@
         "signatures": [
           "max_dim_subsets_groups = NONNEGATIVE_INTEGER"
         ],
-        "description": "Sets the maximum dimension of groups of parameters for which the above bruteforce search is performed.",
+        "description": "Set the maximum number of parameters in each group tested by checks_via_subsets.",
         "grammar_sources": [
           "src/DynareBison.yy:4901"
         ],
@@ -40753,7 +40753,7 @@
         "signatures": [
           "no_identification_minimal"
         ],
-        "description": "Disables computations of identification check based on :citeKomunjer:2011's D, i.e. minimal state-space system and observational equivalent spectral density transformations.",
+        "description": "Disables computations of identification check based on Komunjer (2011)'s D, i.e. minimal state-space system and observational equivalent spectral density transformations.",
         "grammar_sources": [
           "src/DynareBison.yy:4893"
         ],
@@ -40767,7 +40767,7 @@
         "signatures": [
           "no_identification_moments"
         ],
-        "description": "Disables computations of identification check based on :citeIskrev:2010's J, i.e. derivative of first two moments.",
+        "description": "Disables computations of identification check based on Iskrev (2010)'s J, i.e. derivative of first two moments.",
         "grammar_sources": [
           "src/DynareBison.yy:4892"
         ],
@@ -40795,7 +40795,7 @@
         "signatures": [
           "no_identification_spectrum"
         ],
-        "description": "Disables computations of identification check based on :citeQu:2012's G, i.e. Gram matrix of derivatives of first moment plus outer product of derivatives of spectral density.",
+        "description": "Disables computations of identification check based on Qu (2012)'s G, i.e. Gram matrix of derivatives of first moment plus outer product of derivatives of spectral density.",
         "grammar_sources": [
           "src/DynareBison.yy:4894"
         ],
@@ -42027,7 +42027,7 @@
           "first_simulation_period = DATE",
           "first_simulation_period = NONNEGATIVE_INTEGER"
         ],
-        "description": "Assign a date to the first simulation period, i.e. the first period in which endogenous variables are solved for.",
+        "description": "Set the observation number or date at which the simulation or forecast starts.",
         "grammar_sources": [
           "src/DynareBison.yy:4223",
           "src/DynareBison.yy:4224"
@@ -42061,7 +42061,7 @@
           "last_simulation_period = DATE",
           "last_simulation_period = NONNEGATIVE_INTEGER"
         ],
-        "description": "Assign a date to the last simulation period, i.e. the last period in which endogenous variables are solved for.",
+        "description": "Set the observation number or date at which the simulation or forecast ends.",
         "grammar_sources": [
           "src/DynareBison.yy:4226",
           "src/DynareBison.yy:4227"
@@ -43737,7 +43737,7 @@
       "last_simulation_period = DATE",
       "last_simulation_period = NONNEGATIVE_INTEGER"
     ],
-    "summary": "Assign a date to the last simulation period, i.e. the last period in which endogenous variables are solved for.",
+    "summary": "Set the observation number or date at which the simulation or forecast ends.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -44136,7 +44136,7 @@
     "signatures": [
       "likelihood_inversion_filter"
     ],
-    "summary": "Employ the inversion filter of :citeCubaBorda:2019 when estimating the model.",
+    "summary": "Employ the inversion filter of CubaBorda (2019) when estimating the model.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -44262,7 +44262,7 @@
     "signatures": [
       "likelihood_piecewise_kalman_filter"
     ],
-    "summary": "Employ the piecewise Kalman filter of :citeGiovannini:2021 when estimating the model.",
+    "summary": "Employ the piecewise Kalman filter of Giovannini (2021) when estimating the model.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -44407,7 +44407,7 @@
     "signatures": [
       "lmmcp"
     ],
-    "summary": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
+    "summary": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -44428,7 +44428,7 @@
     "signatures": [
       "lmmcp"
     ],
-    "summary": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
+    "summary": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -44449,7 +44449,7 @@
     "signatures": [
       "lmmcp"
     ],
-    "summary": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
+    "summary": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -44470,7 +44470,7 @@
     "signatures": [
       "lmmcp"
     ],
-    "summary": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
+    "summary": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -44672,7 +44672,7 @@
     "signatures": [
       "load_results_after_load_mh"
     ],
-    "summary": "This option is available when loading a previous MCMC run without adding additional draws, i.e. when load_mh_file is specified with mh_replic=0.",
+    "summary": "When loading an MCMC run with load_mh_file and mh_replic=0, load previously computed convergence diagnostics, marginal data density, and posterior statistics from the results file instead of recomputing them.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -44693,7 +44693,7 @@
     "signatures": [
       "load_results_after_load_mh"
     ],
-    "summary": "This option is available when loading a previous MCMC run without adding additional draws, i.e. when load_mh_file is specified with mh_replic=0.",
+    "summary": "When loading an MCMC run with load_mh_file and mh_replic=0, load previously computed convergence diagnostics, marginal data density, and posterior statistics from the results file instead of recomputing them.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -45983,7 +45983,7 @@
     "signatures": [
       "max_dim_subsets_groups = NONNEGATIVE_INTEGER"
     ],
-    "summary": "Sets the maximum dimension of groups of parameters for which the above bruteforce search is performed.",
+    "summary": "Set the maximum number of parameters in each group tested by checks_via_subsets.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -46558,7 +46558,7 @@
         "signatures": [
           "brooks_gelman_plotrows = NONNEGATIVE_INTEGER"
         ],
-        "description": "Number of parameters to depict along the rows of the figures depicting the :citeBrooks:1998 convergence diagnostics.",
+        "description": "Number of parameters to depict along the rows of the figures depicting the Brooks (1998) convergence diagnostics.",
         "grammar_sources": [
           "src/DynareBison.yy:4396"
         ],
@@ -46735,7 +46735,7 @@
         "signatures": [
           "geweke_interval = [NUMBER, ...]"
         ],
-        "description": "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1) after discarding the first mh_drop percent of draws as a burnin.",
+        "description": "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1) after discarding the first mh_drop percent of draws as a burnin.",
         "grammar_sources": [
           "src/DynareBison.yy:4393"
         ],
@@ -46850,7 +46850,7 @@
         "signatures": [
           "load_results_after_load_mh"
         ],
-        "description": "This option is available when loading a previous MCMC run without adding additional draws, i.e. when load_mh_file is specified with mh_replic=0.",
+        "description": "When loading an MCMC run with load_mh_file and mh_replic=0, load previously computed convergence diagnostics, marginal data density, and posterior statistics from the results file instead of recomputing them.",
         "grammar_sources": [
           "src/DynareBison.yy:4348"
         ],
@@ -47359,7 +47359,7 @@
         "signatures": [
           "one_sided_hp_filter = NONNEGATIVE_NUMBER"
         ],
-        "description": "Uses the one-sided HP filter with \\lambda = DOUBLE described in :citeStock:1999 before computing moments.",
+        "description": "Uses the one-sided HP filter with \\lambda = DOUBLE described in Stock (1999) before computing moments.",
         "grammar_sources": [
           "src/DynareBison.yy:4104"
         ],
@@ -47541,7 +47541,7 @@
         "signatures": [
           "raftery_lewis_diagnostics"
         ],
-        "description": "Triggers the computation of the :citeRaftery:1992 convergence diagnostics.",
+        "description": "Triggers the computation of the Raftery (1992) convergence diagnostics.",
         "grammar_sources": [
           "src/DynareBison.yy:4394"
         ],
@@ -47555,7 +47555,7 @@
         "signatures": [
           "raftery_lewis_qrs = [NUMBER, ...]"
         ],
-        "description": "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the :citeRaftery:1992 convergence diagnostics.",
+        "description": "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the Raftery (1992) convergence diagnostics.",
         "grammar_sources": [
           "src/DynareBison.yy:4395"
         ],
@@ -47698,7 +47698,7 @@
         "signatures": [
           "taper_steps = [INTEGER, ...]"
         ],
-        "description": "Percent tapering used for the spectral window in the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1).",
+        "description": "Percent tapering used for the spectral window in the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1).",
         "grammar_sources": [
           "src/DynareBison.yy:4392"
         ],
@@ -49284,7 +49284,7 @@
       "model_comparison INSTRUCTION ...;",
       "model_comparison(marginal_density) INSTRUCTION ...;"
     ],
-    "summary": "This command computes odds ratios and estimate a posterior density over a collection of models (see e.g. :citeKoop:2003, Ch. 1).",
+    "summary": "This command computes odds ratios and estimate a posterior density over a collection of models (see e.g. Koop (2003), Ch. 1).",
     "aliases": [],
     "options": [
       {
@@ -51935,7 +51935,7 @@
     "signatures": [
       "no_homotopy"
     ],
-    "summary": "This option tells Dynare to not try a homotopy technique (as described above) if the problem cannot be solved directly.",
+    "summary": "Do not try a homotopy technique if the perfect foresight problem cannot be solved directly.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -51956,7 +51956,7 @@
     "signatures": [
       "no_homotopy"
     ],
-    "summary": "This option tells Dynare to not try a homotopy technique (as described above) if the problem cannot be solved directly.",
+    "summary": "Do not try a homotopy technique if the perfect foresight problem cannot be solved directly.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -51977,7 +51977,7 @@
     "signatures": [
       "no_homotopy"
     ],
-    "summary": "This option tells Dynare to not try a homotopy technique (as described above) if the problem cannot be solved directly.",
+    "summary": "Do not try a homotopy technique if the perfect foresight problem cannot be solved directly.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -51998,7 +51998,7 @@
     "signatures": [
       "no_identification_minimal"
     ],
-    "summary": "Disables computations of identification check based on :citeKomunjer:2011's D, i.e. minimal state-space system and observational equivalent spectral density transformations.",
+    "summary": "Disables computations of identification check based on Komunjer (2011)'s D, i.e. minimal state-space system and observational equivalent spectral density transformations.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -52019,7 +52019,7 @@
     "signatures": [
       "no_identification_moments"
     ],
-    "summary": "Disables computations of identification check based on :citeIskrev:2010's J, i.e. derivative of first two moments.",
+    "summary": "Disables computations of identification check based on Iskrev (2010)'s J, i.e. derivative of first two moments.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -52061,7 +52061,7 @@
     "signatures": [
       "no_identification_spectrum"
     ],
-    "summary": "Disables computations of identification check based on :citeQu:2012's G, i.e. Gram matrix of derivatives of first moment plus outer product of derivatives of spectral density.",
+    "summary": "Disables computations of identification check based on Qu (2012)'s G, i.e. Gram matrix of derivatives of first moment plus outer product of derivatives of spectral density.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -54617,7 +54617,7 @@
         "signatures": [
           "likelihood_inversion_filter"
         ],
-        "description": "Employ the inversion filter of :citeCubaBorda:2019 when estimating the model.",
+        "description": "Employ the inversion filter of CubaBorda (2019) when estimating the model.",
         "grammar_sources": [
           "src/DynareBison.yy:4931"
         ],
@@ -54701,7 +54701,7 @@
         "signatures": [
           "likelihood_piecewise_kalman_filter"
         ],
-        "description": "Employ the piecewise Kalman filter of :citeGiovannini:2021 when estimating the model.",
+        "description": "Employ the piecewise Kalman filter of Giovannini (2021) when estimating the model.",
         "grammar_sources": [
           "src/DynareBison.yy:4932"
         ],
@@ -55035,7 +55035,7 @@
         "signatures": [
           "smoother_inversion_filter"
         ],
-        "description": "Employ the inversion filter of :citeCubaBorda:2019 when running the smoother.",
+        "description": "Employ the inversion filter of CubaBorda (2019) when running the smoother.",
         "grammar_sources": [
           "src/DynareBison.yy:4952"
         ],
@@ -55119,7 +55119,7 @@
         "signatures": [
           "smoother_piecewise_kalman_filter"
         ],
-        "description": "Employ the piecewise Kalman filter of :citeGiovannini:2021 when running the smoother.",
+        "description": "Employ the piecewise Kalman filter of Giovannini (2021) when running the smoother.",
         "grammar_sources": [
           "src/DynareBison.yy:4953"
         ],
@@ -55425,7 +55425,7 @@
     "signatures": [
       "one_sided_hp_filter = NONNEGATIVE_NUMBER"
     ],
-    "summary": "Uses the one-sided HP filter with \\lambda = DOUBLE described in :citeStock:1999 before computing moments.",
+    "summary": "Uses the one-sided HP filter with \\lambda = DOUBLE described in Stock (1999) before computing moments.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -55446,7 +55446,7 @@
     "signatures": [
       "one_sided_hp_filter = NONNEGATIVE_NUMBER"
     ],
-    "summary": "Uses the one-sided HP filter with \\lambda = DOUBLE described in :citeStock:1999 before computing moments.",
+    "summary": "Uses the one-sided HP filter with \\lambda = DOUBLE described in Stock (1999) before computing moments.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -56353,7 +56353,7 @@
         "signatures": [
           "partial_information"
         ],
-        "description": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+        "description": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
         "grammar_sources": [
           "src/DynareBison.yy:4435"
         ],
@@ -57583,7 +57583,7 @@
     "signatures": [
       "partial_information"
     ],
-    "summary": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+    "summary": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -57604,7 +57604,7 @@
     "signatures": [
       "partial_information"
     ],
-    "summary": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+    "summary": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -57625,7 +57625,7 @@
     "signatures": [
       "partial_information"
     ],
-    "summary": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+    "summary": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -57646,7 +57646,7 @@
     "signatures": [
       "partial_information"
     ],
-    "summary": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+    "summary": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -57667,7 +57667,7 @@
     "signatures": [
       "partial_information"
     ],
-    "summary": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+    "summary": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -58166,7 +58166,7 @@
         "signatures": [
           "lmmcp"
         ],
-        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
+        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
         "grammar_sources": [
           "src/DynareBison.yy:4841"
         ],
@@ -58222,7 +58222,7 @@
         "signatures": [
           "no_homotopy"
         ],
-        "description": "This option tells Dynare to not try a homotopy technique (as described above) if the problem cannot be solved directly.",
+        "description": "Do not try a homotopy technique if the perfect foresight problem cannot be solved directly.",
         "grammar_sources": [
           "src/DynareBison.yy:4825"
         ],
@@ -58807,7 +58807,7 @@
         "signatures": [
           "lmmcp"
         ],
-        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
+        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
         "grammar_sources": [
           "src/DynareBison.yy:4841"
         ],
@@ -58863,7 +58863,7 @@
         "signatures": [
           "no_homotopy"
         ],
-        "description": "This option tells Dynare to not try a homotopy technique (as described above) if the problem cannot be solved directly.",
+        "description": "Do not try a homotopy technique if the perfect foresight problem cannot be solved directly.",
         "grammar_sources": [
           "src/DynareBison.yy:4825"
         ],
@@ -62683,7 +62683,7 @@
     "signatures": [
       "raftery_lewis_diagnostics"
     ],
-    "summary": "Triggers the computation of the :citeRaftery:1992 convergence diagnostics.",
+    "summary": "Triggers the computation of the Raftery (1992) convergence diagnostics.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -62704,7 +62704,7 @@
     "signatures": [
       "raftery_lewis_diagnostics"
     ],
-    "summary": "Triggers the computation of the :citeRaftery:1992 convergence diagnostics.",
+    "summary": "Triggers the computation of the Raftery (1992) convergence diagnostics.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -62725,7 +62725,7 @@
     "signatures": [
       "raftery_lewis_qrs = [NUMBER, ...]"
     ],
-    "summary": "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the :citeRaftery:1992 convergence diagnostics.",
+    "summary": "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the Raftery (1992) convergence diagnostics.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -62746,7 +62746,7 @@
     "signatures": [
       "raftery_lewis_qrs = [NUMBER, ...]"
     ],
-    "summary": "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the :citeRaftery:1992 convergence diagnostics.",
+    "summary": "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the Raftery (1992) convergence diagnostics.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -63367,7 +63367,7 @@
         "signatures": [
           "partial_information"
         ],
-        "description": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+        "description": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
         "grammar_sources": [
           "src/DynareBison.yy:4435"
         ],
@@ -65863,7 +65863,7 @@
         "signatures": [
           "diffuse_filter"
         ],
-        "description": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+        "description": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
         "grammar_sources": [
           "src/DynareBison.yy:4404"
         ],
@@ -65909,7 +65909,7 @@
           "filter_decomposition",
           "filter_decomposition = true | false"
         ],
-        "description": "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+        "description": "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
         "grammar_sources": [
           "src/DynareBison.yy:4719",
           "src/DynareBison.yy:4721"
@@ -66861,7 +66861,7 @@
         "signatures": [
           "diffuse_filter"
         ],
-        "description": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+        "description": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
         "grammar_sources": [
           "src/DynareBison.yy:4404"
         ],
@@ -66907,7 +66907,7 @@
           "filter_decomposition",
           "filter_decomposition = true | false"
         ],
-        "description": "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+        "description": "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
         "grammar_sources": [
           "src/DynareBison.yy:4719",
           "src/DynareBison.yy:4721"
@@ -68107,7 +68107,7 @@
         "signatures": [
           "lmmcp"
         ],
-        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
+        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
         "grammar_sources": [
           "src/DynareBison.yy:4841"
         ],
@@ -68163,7 +68163,7 @@
         "signatures": [
           "no_homotopy"
         ],
-        "description": "This option tells Dynare to not try a homotopy technique (as described above) if the problem cannot be solved directly.",
+        "description": "Do not try a homotopy technique if the perfect foresight problem cannot be solved directly.",
         "grammar_sources": [
           "src/DynareBison.yy:4825"
         ],
@@ -69964,7 +69964,7 @@
     "signatures": [
       "smoother_inversion_filter"
     ],
-    "summary": "Employ the inversion filter of :citeCubaBorda:2019 when running the smoother.",
+    "summary": "Employ the inversion filter of CubaBorda (2019) when running the smoother.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -70090,7 +70090,7 @@
     "signatures": [
       "smoother_piecewise_kalman_filter"
     ],
-    "summary": "Employ the piecewise Kalman filter of :citeGiovannini:2021 when running the smoother.",
+    "summary": "Employ the piecewise Kalman filter of Giovannini (2021) when running the smoother.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -72188,7 +72188,7 @@
         "signatures": [
           "one_sided_hp_filter = NONNEGATIVE_NUMBER"
         ],
-        "description": "Uses the one-sided HP filter with \\lambda = DOUBLE described in :citeStock:1999 before computing moments.",
+        "description": "Uses the one-sided HP filter with \\lambda = DOUBLE described in Stock (1999) before computing moments.",
         "grammar_sources": [
           "src/DynareBison.yy:4104"
         ],
@@ -72216,7 +72216,7 @@
         "signatures": [
           "partial_information"
         ],
-        "description": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+        "description": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
         "grammar_sources": [
           "src/DynareBison.yy:4435"
         ],
@@ -72931,7 +72931,7 @@
     "signatures": [
       "taper_steps = [INTEGER, ...]"
     ],
-    "summary": "Percent tapering used for the spectral window in the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1).",
+    "summary": "Percent tapering used for the spectral window in the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1).",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -72952,7 +72952,7 @@
     "signatures": [
       "taper_steps = [INTEGER, ...]"
     ],
-    "summary": "Percent tapering used for the spectral window in the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1).",
+    "summary": "Percent tapering used for the spectral window in the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1).",
     "aliases": [],
     "options": [],
     "grammar_sources": [

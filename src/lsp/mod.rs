@@ -5136,7 +5136,7 @@ fn explain_command(arguments: &[Value]) -> Value {
     let Some(code) = code else {
         return json!({"error":"Explain Diagnostic requires a diagnostic code, for example W010.", "code":"INVALID_ARGUMENTS"});
     };
-    match explain::render_markdown(&code) {
+    match explain::render_user_markdown(&code) {
         Some(md) => Value::String(md),
         None => {
             let known = explain::known_codes().join(", ");

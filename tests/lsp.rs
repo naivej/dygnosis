@@ -3080,7 +3080,7 @@ async fn explain_diagnostic_w013_and_unknown_e040() {
         .await
         .expect("explain rpc")
         .expect("w013 value");
-    let expected = dygnosis::explain::render_markdown("W013").expect("library W013");
+    let expected = dygnosis::explain::render_user_markdown("W013").expect("library W013");
     assert_eq!(w013, serde_json::Value::String(expected));
 
     let e040 = service

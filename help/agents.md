@@ -26,14 +26,14 @@ this model with `HEAD~1`.”
 | [dynare_rename](tool:dynare_rename) | Proposed edits to rename a symbol safely across the model and its includes. |
 | [dynare_actions](tool:dynare_actions) | Available source refactorings (such as shock templates or bulk naming) and diagnostic quick fixes. |
 | [dynare_format](tool:dynare_format) | Indented, formatted model text for a file or selected line range. |
-| [dynare_extract](tool:dynare_extract) | Standalone model fragment containing selected equations with their required declarations and model locals. |
+| [dynare_extract](tool:dynare_extract) | Selected equations with their required declarations and model locals; reports omitted setup needed to run the fragment. |
 
 ## Check and compare
 
 | Tool | What it provides |
 |---|---|
 | [dynare_diagnose](tool:dynare_diagnose) | Diagnostics and check status for a model or a batch of model roots. |
-| [dynare_diagnostic_info](tool:dynare_diagnostic_info) | Explanations and fix guidance for diagnostic codes (`Shared`, `Added` and `Skipped`). |
+| [dynare_diagnostic_info](tool:dynare_diagnostic_info) | Explanations and fix guidance for diagnostic codes, with `Shared`, `Added` and `Skipped` labels. |
 | [dynare_compare_models](tool:dynare_compare_models) | Structural and text differences between two models or between Git revisions and working files. |
 
 ## Connect MCP

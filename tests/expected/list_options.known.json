@@ -174,7 +174,7 @@
         "name": "datafile"
       },
       {
-        "description": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+        "description": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
         "name": "diffuse_filter"
       },
       {
@@ -186,7 +186,7 @@
         "name": "filter_covariance"
       },
       {
-        "description": "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+        "description": "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
         "name": "filter_decomposition"
       },
       {
@@ -194,7 +194,7 @@
         "name": "filter_step_ahead"
       },
       {
-        "description": "Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e.",
+        "description": "Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e. E_{t}{y_{t+1}}.",
         "name": "filtered_vars"
       },
       {
@@ -615,7 +615,7 @@
         "name": "order"
       },
       {
-        "description": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+        "description": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
         "name": "partial_information"
       },
       {
@@ -655,7 +655,7 @@
         "name": "replic"
       },
       {
-        "description": "Number of series to simulate when empirical moments are requested (i.e.",
+        "description": "Number of series to simulate when empirical moments are requested (i.e. periods > 0).",
         "name": "simul_replic"
       },
       {
@@ -702,7 +702,7 @@
         "name": "bayesian_irf"
       },
       {
-        "description": "Number of parameters to depict along the rows of the figures depicting the :citeBrooks:1998 convergence diagnostics.",
+        "description": "Number of parameters to depict along the rows of the figures depicting the Brooks (1998) convergence diagnostics.",
         "name": "brooks_gelman_plotrows"
       },
       {
@@ -754,7 +754,7 @@
         "name": "diagonal_only"
       },
       {
-        "description": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+        "description": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
         "name": "diffuse_filter"
       },
       {
@@ -814,7 +814,7 @@
         "name": "emas_tolf"
       },
       {
-        "description": "Use endogenous priors as in :citeChristiano:2011.",
+        "description": "Use endogenous priors as in Christiano (2011).",
         "name": "endogenous_prior"
       },
       {
@@ -822,7 +822,7 @@
         "name": "estimate_initial_states_endogenous_prior"
       },
       {
-        "description": "Select the fast Kalman filter using Chandrasekhar recursions as described by :citeHerbst:2015.",
+        "description": "Select the fast Kalman filter using Chandrasekhar recursions as described by Herbst (2015).",
         "name": "fast_kalman_filter"
       },
       {
@@ -834,7 +834,7 @@
         "name": "filter_covariance"
       },
       {
-        "description": "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+        "description": "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
         "name": "filter_decomposition"
       },
       {
@@ -842,7 +842,7 @@
         "name": "filter_step_ahead"
       },
       {
-        "description": "Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e.",
+        "description": "Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e. E_{t}{y_{t+1}}.",
         "name": "filtered_vars"
       },
       {
@@ -854,11 +854,11 @@
         "name": "forecast"
       },
       {
-        "description": "If set to true, the frequentist smoother will be run in cases where the Bayesian smoother usually triggered with smoother is not run (e.g.",
+        "description": "Run the frequentist smoother when the Bayesian smoother is not run, such as during maximum likelihood estimation or when mh_replic=0.",
         "name": "frequentist_smoother"
       },
       {
-        "description": "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>) after discarding the first mh_drop <mh_drop = DOUBLE> percent of draws as a burnin.",
+        "description": "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>) after discarding the first mh_drop <mh_drop = DOUBLE> percent of draws as a burnin.",
         "name": "geweke_interval"
       },
       {
@@ -910,7 +910,7 @@
         "name": "load_mh_file"
       },
       {
-        "description": "This option is available when loading a previous MCMC run without adding additional draws, i.e.",
+        "description": "When loading an MCMC run with load_mh_file and mh_replic=0, load previously computed convergence diagnostics, marginal data density, and posterior statistics from the results file instead of recomputing them.",
         "name": "load_results_after_load_mh"
       },
       {
@@ -1074,7 +1074,7 @@
         "name": "order"
       },
       {
-        "description": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+        "description": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
         "name": "partial_information"
       },
       {
@@ -1134,11 +1134,11 @@
         "name": "qz_zero_threshold"
       },
       {
-        "description": "Triggers the computation of the :citeRaftery:1992 convergence diagnostics.",
+        "description": "Triggers the computation of the Raftery (1992) convergence diagnostics.",
         "name": "raftery_lewis_diagnostics"
       },
       {
-        "description": "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the :citeRaftery:1992 convergence diagnostics.",
+        "description": "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the Raftery (1992) convergence diagnostics.",
         "name": "raftery_lewis_qrs"
       },
       {
@@ -1206,7 +1206,7 @@
         "name": "sub_draws"
       },
       {
-        "description": "Percent tapering used for the spectral window in the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>).",
+        "description": "Percent tapering used for the spectral window in the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>).",
         "name": "taper_steps"
       },
       {
@@ -1268,11 +1268,11 @@
         "name": "hybrid"
       },
       {
-        "description": "Governs the quadrature method for numerical integration over future uncertainty when using stochastic extended path, i.e.",
+        "description": "Governs the quadrature method for numerical integration over future uncertainty when using stochastic extended path, i.e. order greater than 0.",
         "name": "integration"
       },
       {
-        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irr",
+        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
         "name": "lmmcp"
       },
       {
@@ -1564,7 +1564,7 @@
         "name": "first_obs"
       },
       {
-        "description": "Assign a date to the first simulation period, i.e.",
+        "description": "Set the observation number or date at which the simulation or forecast starts.",
         "name": "first_simulation_period"
       },
       {
@@ -1603,7 +1603,7 @@
         "name": "checks_via_subsets"
       },
       {
-        "description": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+        "description": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
         "name": "diffuse_filter"
       },
       {
@@ -1619,7 +1619,7 @@
         "name": "graph_format"
       },
       {
-        "description": "Number of grid points in [-pi;pi] to approximate the integral to compute :citeQu:2012's G criteria.",
+        "description": "Number of grid points in [-pi;pi] to approximate the integral to compute Qu (2012)'s G criteria.",
         "name": "grid_nbr"
       },
       {
@@ -1651,15 +1651,15 @@
         "name": "max_dim_cova_group"
       },
       {
-        "description": "Sets the maximum dimension of groups of parameters for which the above bruteforce search is performed.",
+        "description": "Set the maximum number of parameters in each group tested by checks_via_subsets.",
         "name": "max_dim_subsets_groups"
       },
       {
-        "description": "Disables computations of identification check based on :citeKomunjer:2011's D, i.e.",
+        "description": "Disables computations of identification check based on Komunjer (2011)'s D, i.e. minimal state-space system and observational equivalent spectral density transformations.",
         "name": "no_identification_minimal"
       },
       {
-        "description": "Disables computations of identification check based on :citeIskrev:2010's J, i.e.",
+        "description": "Disables computations of identification check based on Iskrev (2010)'s J, i.e. derivative of first two moments.",
         "name": "no_identification_moments"
       },
       {
@@ -1667,7 +1667,7 @@
         "name": "no_identification_reducedform"
       },
       {
-        "description": "Disables computations of identification check based on :citeQu:2012's G, i.e.",
+        "description": "Disables computations of identification check based on Qu (2012)'s G, i.e. Gram matrix of derivatives of first moment plus outer product of derivatives of spectral density.",
         "name": "no_identification_spectrum"
       },
       {
@@ -1806,7 +1806,7 @@
         "name": "steadystate"
       },
       {
-        "description": "For quarterly data, valid arguments are: qoq for quarter-on-quarter plots, yoy for year-on-year plots of growth rates, aoa for annualized variables, i.e.",
+        "description": "For quarterly data, valid arguments are: qoq for quarter-on-quarter plots, yoy for year-on-year plots of growth rates, aoa for annualized variables, i.e. the value in the last quarter for each year is plotted.",
         "name": "type"
       },
       {
@@ -1837,7 +1837,7 @@
         "name": "first_obs"
       },
       {
-        "description": "Assign a date to the first simulation period, i.e.",
+        "description": "Set the observation number or date at which the simulation or forecast starts.",
         "name": "first_simulation_period"
       },
       {
@@ -1845,7 +1845,7 @@
         "name": "last_obs"
       },
       {
-        "description": "Assign a date to the last simulation period, i.e.",
+        "description": "Set the observation number or date at which the simulation or forecast ends.",
         "name": "last_simulation_period"
       },
       {
@@ -1938,7 +1938,7 @@
         "name": "bounded_shock_support"
       },
       {
-        "description": "Number of parameters to depict along the rows of the figures depicting the :citeBrooks:1998 convergence diagnostics.",
+        "description": "Number of parameters to depict along the rows of the figures depicting the Brooks (1998) convergence diagnostics.",
         "name": "brooks_gelman_plotrows"
       },
       {
@@ -1986,7 +1986,7 @@
         "name": "first_obs"
       },
       {
-        "description": "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>) after discarding the first mh_drop <mh_drop = DOUBLE> percent of draws as a burnin.",
+        "description": "Percentage of MCMC draws at the beginning and end of the MCMC chain taken to compute the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>) after discarding the first mh_drop <mh_drop = DOUBLE> percent of draws as a burnin.",
         "name": "geweke_interval"
       },
       {
@@ -2018,7 +2018,7 @@
         "name": "load_mh_file"
       },
       {
-        "description": "This option is available when loading a previous MCMC run without adding additional draws, i.e.",
+        "description": "When loading an MCMC run with load_mh_file and mh_replic=0, load previously computed convergence diagnostics, marginal data density, and posterior statistics from the results file instead of recomputing them.",
         "name": "load_results_after_load_mh"
       },
       {
@@ -2154,7 +2154,7 @@
         "name": "noprint"
       },
       {
-        "description": "Uses the one-sided HP filter with \\lambda = DOUBLE described in :citeStock:1999 before computing moments.",
+        "description": "Uses the one-sided HP filter with \\lambda = DOUBLE described in Stock (1999) before computing moments.",
         "name": "one_sided_hp_filter"
       },
       {
@@ -2206,11 +2206,11 @@
         "name": "qz_zero_threshold"
       },
       {
-        "description": "Triggers the computation of the :citeRaftery:1992 convergence diagnostics.",
+        "description": "Triggers the computation of the Raftery (1992) convergence diagnostics.",
         "name": "raftery_lewis_diagnostics"
       },
       {
-        "description": "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the :citeRaftery:1992 convergence diagnostics.",
+        "description": "Sets the quantile of the CDF q that is estimated with precision r with a probability s in the Raftery (1992) convergence diagnostics.",
         "name": "raftery_lewis_qrs"
       },
       {
@@ -2250,7 +2250,7 @@
         "name": "sub_draws"
       },
       {
-        "description": "Percent tapering used for the spectral window in the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>).",
+        "description": "Percent tapering used for the spectral window in the Geweke (1992), Geweke (1999) convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>).",
         "name": "taper_steps"
       },
       {
@@ -2421,7 +2421,7 @@
         "name": "file_tag"
       },
       {
-        "description": "The final period of data (i.e.",
+        "description": "The final period of the data, for example an integer from 1 to 12 for monthly data.",
         "name": "final_subperiod"
       },
       {
@@ -2429,7 +2429,7 @@
         "name": "final_year"
       },
       {
-        "description": "Frequency of the data (e.g.",
+        "description": "Frequency of the data (e.g. monthly, 12).",
         "name": "freq"
       },
       {
@@ -2441,7 +2441,7 @@
         "name": "gsig2_lmdm"
       },
       {
-        "description": "The first period of data (i.e.",
+        "description": "The first period of data (i.e. for quarterly data, an integer in [1,4]).",
         "name": "initial_subperiod"
       },
       {
@@ -2709,7 +2709,7 @@
         "name": "horizon"
       },
       {
-        "description": "Do not output percentile error bands (i.e.",
+        "description": "Do not output percentile error bands (i.e. compute mean).",
         "name": "no_error_bands"
       },
       {
@@ -2858,7 +2858,7 @@
         "name": "likelihood_curb_retrench"
       },
       {
-        "description": "Employ the inversion filter of :citeCubaBorda:2019 when estimating the model.",
+        "description": "Employ the inversion filter of CubaBorda (2019) when estimating the model.",
         "name": "likelihood_inversion_filter"
       },
       {
@@ -2882,7 +2882,7 @@
         "name": "likelihood_periods"
       },
       {
-        "description": "Employ the piecewise Kalman filter of :citeGiovannini:2021 when estimating the model.",
+        "description": "Employ the piecewise Kalman filter of Giovannini (2021) when estimating the model.",
         "name": "likelihood_piecewise_kalman_filter"
       },
       {
@@ -2926,7 +2926,7 @@
         "name": "simul_debug"
       },
       {
-        "description": "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e.",
+        "description": "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing simul_check_ahead_periods ever further.",
         "name": "simul_max_check_ahead_periods"
       },
       {
@@ -2934,7 +2934,7 @@
         "name": "simul_maxit"
       },
       {
-        "description": "Accept a periodic solution where the solution alternates between two sets of results across iterations, i.e.",
+        "description": "Accept a periodic solution where the solution alternates between two sets of results across iterations, i.e. is not found to be unique.",
         "name": "simul_periodic_solution"
       },
       {
@@ -2974,11 +2974,11 @@
         "name": "smoother_first_period_occbin_update"
       },
       {
-        "description": "Employ the inversion filter of :citeCubaBorda:2019 when running the smoother.",
+        "description": "Employ the inversion filter of CubaBorda (2019) when running the smoother.",
         "name": "smoother_inversion_filter"
       },
       {
-        "description": "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e.",
+        "description": "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing smoother_check_ahead_periods ever further.",
         "name": "smoother_max_check_ahead_periods"
       },
       {
@@ -2998,7 +2998,7 @@
         "name": "smoother_periods"
       },
       {
-        "description": "Employ the piecewise Kalman filter of :citeGiovannini:2021 when running the smoother.",
+        "description": "Employ the piecewise Kalman filter of Giovannini (2021) when running the smoother.",
         "name": "smoother_piecewise_kalman_filter"
       },
       {
@@ -3025,7 +3025,7 @@
         "name": "simul_debug"
       },
       {
-        "description": "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e.",
+        "description": "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing simul_check_ahead_periods ever further.",
         "name": "simul_max_check_ahead_periods"
       },
       {
@@ -3033,7 +3033,7 @@
         "name": "simul_maxit"
       },
       {
-        "description": "Accept a periodic solution where the solution alternates between two sets of results across iterations, i.e.",
+        "description": "Accept a periodic solution where the solution alternates between two sets of results across iterations, i.e. is not found to be unique.",
         "name": "simul_periodic_solution"
       },
       {
@@ -3247,7 +3247,7 @@
         "name": "order"
       },
       {
-        "description": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+        "description": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
         "name": "partial_information"
       },
       {
@@ -3291,7 +3291,7 @@
         "name": "silent_optimizer"
       },
       {
-        "description": "Number of series to simulate when empirical moments are requested (i.e.",
+        "description": "Number of series to simulate when empirical moments are requested (i.e. periods > 0).",
         "name": "simul_replic"
       },
       {
@@ -3367,11 +3367,11 @@
         "name": "endval_steady_nocheck"
       },
       {
-        "description": "Assign a date to the first simulation period, i.e.",
+        "description": "Assign a date to the first simulation period, i.e. the first period in which endogenous variables are solved for.",
         "name": "first_simulation_period"
       },
       {
-        "description": "Assign a date to the last simulation period, i.e.",
+        "description": "Assign a date to the last simulation period, i.e. the last period in which endogenous variables are solved for.",
         "name": "last_simulation_period"
       },
       {
@@ -3418,7 +3418,7 @@
         "name": "gmres_restart"
       },
       {
-        "description": "A list of exogenous variables which are to be excluded from the homotopy procedure, i.e.",
+        "description": "A list of exogenous variables which are to be excluded from the homotopy procedure, i.e. which must be kept at their value corresponding to 100% of the shock during all homotopy iterations.",
         "name": "homotopy_exclude_varexo"
       },
       {
@@ -3458,7 +3458,7 @@
         "name": "linear_approximation"
       },
       {
-        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irr",
+        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
         "name": "lmmcp"
       },
       {
@@ -3474,7 +3474,7 @@
         "name": "minimal_solving_periods"
       },
       {
-        "description": "This option tells Dynare to not try a homotopy technique (as described above) if the problem cannot be solved directly.",
+        "description": "Do not try a homotopy technique if the perfect foresight problem cannot be solved directly.",
         "name": "no_homotopy"
       },
       {
@@ -3545,11 +3545,11 @@
         "name": "endval_steady_nocheck"
       },
       {
-        "description": "Assign a date to the first simulation period, i.e.",
+        "description": "Assign a date to the first simulation period, i.e. the first period in which endogenous variables are solved for.",
         "name": "first_simulation_period"
       },
       {
-        "description": "Assign a date to the last simulation period, i.e.",
+        "description": "Assign a date to the last simulation period, i.e. the last period in which endogenous variables are solved for.",
         "name": "last_simulation_period"
       },
       {
@@ -3600,7 +3600,7 @@
         "name": "gmres_restart"
       },
       {
-        "description": "A list of exogenous variables which are to be excluded from the homotopy procedure, i.e.",
+        "description": "A list of exogenous variables which are to be excluded from the homotopy procedure, i.e. which must be kept at their value corresponding to 100% of the shock during all homotopy iterations.",
         "name": "homotopy_exclude_varexo"
       },
       {
@@ -3640,7 +3640,7 @@
         "name": "linear_approximation"
       },
       {
-        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irr",
+        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
         "name": "lmmcp"
       },
       {
@@ -3656,7 +3656,7 @@
         "name": "minimal_solving_periods"
       },
       {
-        "description": "This option tells Dynare to not try a homotopy technique (as described above) if the problem cannot be solved directly.",
+        "description": "Do not try a homotopy technique if the perfect foresight problem cannot be solved directly.",
         "name": "no_homotopy"
       },
       {
@@ -3775,7 +3775,7 @@
         "name": "realtime"
       },
       {
-        "description": "For large models (i.e.",
+        "description": "For large models (i.e. for models with more than 16 shocks), plots only the shocks that have the largest historical contribution for chosen selected variable_names.",
         "name": "screen_shocks"
       },
       {
@@ -3783,7 +3783,7 @@
         "name": "steadystate"
       },
       {
-        "description": "For quarterly data, valid arguments are: qoq for quarter-on-quarter plots, yoy for year-on-year plots of growth rates, aoa for annualized variables, i.e.",
+        "description": "For quarterly data, valid arguments are: qoq for quarter-on-quarter plots, yoy for year-on-year plots of growth rates, aoa for annualized variables, i.e. the value in the last quarter for each year is plotted.",
         "name": "type"
       },
       {
@@ -3995,7 +3995,7 @@
         "name": "order"
       },
       {
-        "description": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+        "description": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
         "name": "partial_information"
       },
       {
@@ -4031,7 +4031,7 @@
         "name": "replic"
       },
       {
-        "description": "Number of series to simulate when empirical moments are requested (i.e.",
+        "description": "Number of series to simulate when empirical moments are requested (i.e. periods > 0).",
         "name": "simul_replic"
       },
       {
@@ -4156,7 +4156,7 @@
         "name": "datafile"
       },
       {
-        "description": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+        "description": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
         "name": "diffuse_filter"
       },
       {
@@ -4168,7 +4168,7 @@
         "name": "filter_covariance"
       },
       {
-        "description": "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+        "description": "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
         "name": "filter_decomposition"
       },
       {
@@ -4320,11 +4320,11 @@
         "name": "prior_range"
       },
       {
-        "description": "The threshold pvalue for significant correlation in filtered samples (i.e.",
+        "description": "The threshold pvalue for significant correlation in filtered samples (i.e. plot bivariate samples when pvalue< pvalue_corr).",
         "name": "pvalue_corr"
       },
       {
-        "description": "The threshold pvalue for significant Kolmogorov-Smirnov test (i.e.",
+        "description": "The threshold pvalue for significant Kolmogorov-Smirnov test (i.e. plot parameters with pvalue< pvalue_ks).",
         "name": "pvalue_ks"
       },
       {
@@ -4399,7 +4399,7 @@
         "name": "datafile"
       },
       {
-        "description": "Uses the diffuse Kalman filter (as described in :citeDurbin:2012 and :citeKoopman:2003 for the multivariate and :citeKoopman:2000 for the univariate filter) to estimate models with non-stationary observed variables.",
+        "description": "Uses the diffuse Kalman filter (as described in Durbin (2012) and Koopman (2003) for the multivariate and Koopman (2000) for the univariate filter) to estimate models with non-stationary observed variables.",
         "name": "diffuse_filter"
       },
       {
@@ -4411,7 +4411,7 @@
         "name": "filter_covariance"
       },
       {
-        "description": "Triggers the computation of the shock decomposition of the above k-step ahead filtered values.",
+        "description": "Compute the shock decomposition of the k-step-ahead filtered values requested by filter_step_ahead.",
         "name": "filter_decomposition"
       },
       {
@@ -4427,7 +4427,7 @@
         "name": "heteroskedastic_filter"
       },
       {
-        "description": "If equal to 0, the shock decomposition is computed conditional on the smoothed state variables in period 0, i.e.",
+        "description": "If equal to 0, the shock decomposition is computed conditional on the smoothed state variables in period 0, i.e. the smoothed shocks starting in period 1 are used.",
         "name": "init_state"
       },
       {
@@ -4558,7 +4558,7 @@
         "name": "endval_steady_nocheck"
       },
       {
-        "description": "Assign a date to the first simulation period, i.e.",
+        "description": "Assign a date to the first simulation period, i.e. the first period in which endogenous variables are solved for.",
         "name": "first_simulation_period"
       },
       {
@@ -4566,7 +4566,7 @@
         "name": "gmres_restart"
       },
       {
-        "description": "A list of exogenous variables which are to be excluded from the homotopy procedure, i.e.",
+        "description": "A list of exogenous variables which are to be excluded from the homotopy procedure, i.e. which must be kept at their value corresponding to 100% of the shock during all homotopy iterations.",
         "name": "homotopy_exclude_varexo"
       },
       {
@@ -4602,7 +4602,7 @@
         "name": "iter_tol"
       },
       {
-        "description": "Assign a date to the last simulation period, i.e.",
+        "description": "Assign a date to the last simulation period, i.e. the last period in which endogenous variables are solved for.",
         "name": "last_simulation_period"
       },
       {
@@ -4610,7 +4610,7 @@
         "name": "linear_approximation"
       },
       {
-        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver :citekanzow/petra:2004, which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irr",
+        "description": "Solves the perfect foresight model with a Levenberg-Marquardt mixed complementarity problem (LMMCP) solver kanzow and petra (2004), which allows to consider inequality constraints on the endogenous variables (such as a zero lower bound, henceforth ZLB, on the nominal interest rate or a model with irreversible investment).",
         "name": "lmmcp"
       },
       {
@@ -4626,7 +4626,7 @@
         "name": "minimal_solving_periods"
       },
       {
-        "description": "This option tells Dynare to not try a homotopy technique (as described above) if the problem cannot be solved directly.",
+        "description": "Do not try a homotopy technique if the perfect foresight problem cannot be solved directly.",
         "name": "no_homotopy"
       },
       {
@@ -4974,7 +4974,7 @@
         "name": "noprint"
       },
       {
-        "description": "Uses the one-sided HP filter with \\lambda = DOUBLE described in :citeStock:1999 before computing moments.",
+        "description": "Uses the one-sided HP filter with \\lambda = DOUBLE described in Stock (1999) before computing moments.",
         "name": "one_sided_hp_filter"
       },
       {
@@ -4982,7 +4982,7 @@
         "name": "order"
       },
       {
-        "description": "Computes the solution of the model under partial information, along the lines of :citePearlman:1986.",
+        "description": "Computes the solution of the model under partial information, along the lines of Pearlman (1986).",
         "name": "partial_information"
       },
       {
@@ -5014,7 +5014,7 @@
         "name": "replic"
       },
       {
-        "description": "Number of series to simulate when empirical moments are requested (i.e.",
+        "description": "Number of series to simulate when empirical moments are requested (i.e. periods > 0).",
         "name": "simul_replic"
       },
       {

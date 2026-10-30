@@ -33,7 +33,7 @@
     },
     "virtualWorkspaces": {
       "supported": "limited",
-      "description": "Grammar only on virtual filesystems. Native analysis requires a file-backed workspace."
+      "description": "Syntax highlighting is available for virtual files. Model analysis is available for file-backed and untitled Dynare documents."
     }
   },
   "activationEvents": [
@@ -891,7 +891,7 @@
               "equations"
             ],
             "scope": "resource",
-            "description": "Aggregate counts shown in the status bar, in this order. Empty hides the bar."
+            "description": "Total model counts shown in the status bar, in this order. Empty hides the bar."
           },
           "dynare.outline.activity": {
             "type": "string",

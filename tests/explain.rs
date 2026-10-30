@@ -122,9 +122,9 @@ const VACATED: &[&str] = &[
 ];
 
 const WARRANT_CODES: &[&str] = &[
-    "E001", "E020", "E023", "E058", "E062", "E090", "E093", "E101", "E130", "E193", "E270", "E271",
-    "E279", "E282", "E288", "E294", "E304", "E317", "E319", "E322", "E337", "E380", "E426", "E481",
-    "W022", "W170", "W131",
+    "E001", "E020", "E023", "E058", "E062", "E090", "E093", "E101", "E130", "E186", "E188", "E189",
+    "E190", "E192", "E193", "E270", "E271", "E279", "E282", "E288", "E294", "E304", "E317", "E319",
+    "E322", "E337", "E380", "E426", "E481", "W022", "W170", "W131",
 ];
 
 const FORBIDDEN: &[&str] = &[
@@ -321,8 +321,10 @@ fn skip_keys_are_not_emitted_on_trend_rbc_gov_inv() {
 
 #[test]
 fn mcp_explain_matches_rendered_markdown() {
-    assert_eq!(dynare_explain("W013"), render_markdown("W013").unwrap());
-    assert_eq!(dynare_explain("W013"), expected_markdown("W013.md"));
+    assert_eq!(
+        dynare_explain("W013"),
+        dygnosis::explain::render_user_markdown("W013").unwrap()
+    );
     for code in ["E040", "DYNR", "W071", "E010", "P001"] {
         let text = dynare_explain(code);
         assert!(
@@ -330,6 +332,17 @@ fn mcp_explain_matches_rendered_markdown() {
             "{code}: {text}"
         );
         assert!(!text.contains("python_dynare_lsp"), "{code}");
+    }
+}
+
+#[test]
+fn user_guidance_omits_internal_warrants_without_losing_fixes() {
+    // Guards MCP and LSP guidance exposing implementation warrants or dropping later fixes.
+    for code in ["E001", "E020", "E025", "W013"] {
+        let text = dygnosis::explain::render_user_markdown(code).unwrap();
+        assert!(!text.contains("**Warrant**"), "{code}");
+        assert!(!text.contains("**Range warrant**"), "{code}");
+        assert!(text.contains("**Fix**"), "{code}");
     }
 }
 

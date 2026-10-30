@@ -19,9 +19,10 @@ across files.
 | Information | A style or completeness note, such as missing equation `name` tags (`I208`), missing `long_name` labels (`I209`) or incomplete macro expansion (`I211`). |
 
 Each diagnostic has a code such as `W031`. Search for the code in Help or
-browse the [diagnostic code list](reference.md). A clean **Problems** panel
-means no static source issues were detected; run official Dynare in MATLAB or
-Octave to verify steady states and solver conditions.
+browse the [diagnostic code list](reference.md). A clean **Problems** panel shows
+no visible issues. Hidden checks and unchecked models can still have problems.
+Run official Dynare in MATLAB or Octave to verify steady states and solver
+conditions.
 
 ## Follow a related location
 

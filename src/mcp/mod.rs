@@ -1044,9 +1044,9 @@ fn mcp_compare_input(
     (model, ws, active, revision)
 }
 
-/// `explain::render_markdown`, or the unknown-code string using Rust `known_codes()`.
+/// User-facing diagnostic guidance, or the unknown-code string using Rust `known_codes()`.
 pub fn dynare_explain(code: &str) -> String {
-    match explain::render_markdown(code) {
+    match explain::render_user_markdown(code) {
         Some(rendered) => rendered,
         None => format!(
             "No documentation found for code '{code}'. Known codes: {}",

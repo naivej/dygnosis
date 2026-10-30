@@ -10,10 +10,9 @@ owner**.
 - **Single parent model**: Dygnosis links the included file to its owner
   automatically. If an `.inc` helper is unlinked, open its parent `.mod` or
   `.dyn` file once to connect them.
-- **Shared across several models**: Click **Dynare: choose model owner** in the
-  status bar (or run **Dygnosis: Choose model owner**) to pick which parent
-  model provides context for diagnostics, **Outline**, navigation and macro
-  expansion.
+- **Shared across several models**: Run **Dygnosis: Choose model owner** from
+  the Command Palette to pick which parent model provides context for
+  diagnostics, **Outline**, navigation and macro expansion.
 - **Standalone `.mod` or `.dyn` file**: When a `.mod` or `.dyn` file is also
   included by another model, run **Dygnosis: Treat this file as a model root**
   to check it on its own.
