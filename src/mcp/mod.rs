@@ -29,9 +29,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::engine::analysis::equations::{
-    CountGap, EquationRow, count_gap, equations, explain_equation, heterogeneous_equations,
-};
+use crate::engine::analysis::equations::{CountGap, EquationRow, count_gap, explain_equation};
 use crate::engine::analysis::model_info::incomplete_model_status;
 use crate::engine::analysis::model_info::{
     heterogeneous_dimension_names, model_info_json, related_files_json,
@@ -309,8 +307,8 @@ fn equations_with_unit(unit: &McpUnit, name: Option<&str>, index: Option<usize>)
         status["count_gap"] = Value::Null;
         return status;
     }
-    let rows = equations(&unit.model);
-    let heterogeneous = heterogeneous_equations(&unit.model);
+    let (rows, heterogeneous) =
+        crate::engine::analysis::equations::equation_collections(&unit.model);
     let gap = count_gap(&unit.model);
     let mut out = json!({
         "equations": [],

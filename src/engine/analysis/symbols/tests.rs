@@ -20,6 +20,33 @@ fn choose(view: &SemanticModel, name: &str) -> Binding {
     view.select(Selector::Name(name)).unwrap().unwrap()
 }
 
+// Guards deep model copies and one declaration-history scan per queried name.
+#[test]
+fn binding_inventory_borrows_model_and_indexes_declarations_once() {
+    let names: Vec<_> = (0..128).map(|i| format!("x{i}")).collect();
+    let equations: String = names
+        .iter()
+        .map(|name| format!("{name}=p*{name}(-1);\n"))
+        .collect();
+    let text = format!("var {};parameters p;model;{equations}end;", names.join(" "));
+    let mut workspace = Workspace::overlay_documents(&BTreeMap::from([("root.mod".into(), text)]));
+    let owner = workspace.effective_model_snapshot("root.mod").unwrap();
+    let view = SemanticModel::capture(&mut workspace, "root.mod", "indexed".into()).unwrap();
+    assert!(Arc::ptr_eq(&owner, &view.model));
+    ordinary::DECLARATION_EVENT_VISITS.with(|count| count.set(0));
+    for _ in 0..2 {
+        for name in &names {
+            let binding = choose(&view, name);
+            assert_eq!(binding.kind, "var");
+            assert!(binding.declaration.is_some());
+        }
+    }
+    assert_eq!(
+        ordinary::DECLARATION_EVENT_VISITS.with(std::cell::Cell::get),
+        owner.symbol_type_events.len()
+    );
+}
+
 // Empty written targets must not ask every binding to construct references.
 // Quoted external declarations and semantic tag operands remain real targets.
 #[test]
@@ -214,9 +241,12 @@ fn cancelled_binding_and_call_projection_do_not_publish_partial_facts() {
     use std::sync::atomic::AtomicBool;
     let view = model("parameters p;p=.5;var y;model;y=sin(p)+cos(p);end;");
     let flag = Arc::new(AtomicBool::new(false));
-    crate::engine::control::cancel_after(&flag, 2);
+    ordinary::DECLARATION_EVENT_VISITS.with(|count| count.set(0));
+    crate::engine::control::cancel_after(&flag, 7);
     assert!(crate::engine::control::run(Some(flag), || view.bindings()).is_err());
     assert!(view.bindings.get().is_none());
+    assert!(view.ordinary_declarations.get().is_none());
+    assert!(ordinary::DECLARATION_EVENT_VISITS.with(std::cell::Cell::get) > 0);
     let binding = choose(&view, "sin");
     let flag = Arc::new(AtomicBool::new(false));
     crate::engine::control::cancel_after(&flag, 2);

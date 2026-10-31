@@ -690,56 +690,139 @@ pub(super) fn declaration(
     view: &SemanticModel,
     name: &str,
 ) -> Result<((String, Span), &'static str), Refusal> {
-    let model = &view.model;
-    let tags = &view.tags;
-    let event = model
-        .symbol_type_events
-        .iter()
-        .enumerate()
-        .find(|(_, event)| model.name(event.name) == name);
-    let tag_declaration = tags.iter().find(|tag| tag.declaration && tag.name == name);
-    let event_order = |index| {
-        model
-            .type_event_occurrences
-            .iter()
-            .find(|(event, _)| *event == index)
-            .map(|(_, range)| range.end)
-    };
-    let declaration = match (event, tag_declaration) {
-        (Some((index, _)), Some(tag))
-            if tag.declaration_order < event_order(index).ok_or(MAPPING)? =>
-        {
-            tag.written.clone().ok_or(MAPPING)?
+    view.ordinary_declarations()
+        .ok_or(CANCELLED)?
+        .declaration(view, name)
+}
+
+struct Events {
+    first: usize,
+    last: usize,
+    accepted_kind: Option<crate::engine::language::model::SymbolKind>,
+}
+
+/// One snapshot's declaration lookup and accepted final kinds. Event order,
+/// rather than source position, distinguishes repeated macro executions.
+pub(super) struct DeclarationFacts {
+    events: HashMap<Name, Events>,
+    orders: Vec<Option<usize>>,
+    tags: HashMap<String, (usize, usize)>,
+    dimensions: HashMap<Name, Option<Name>>,
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static DECLARATION_EVENT_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl DeclarationFacts {
+    pub(super) fn collect(view: &SemanticModel) -> Self {
+        let mut events = HashMap::<Name, Events>::new();
+        for (index, event) in view.model.symbol_type_events.iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                break;
+            }
+            #[cfg(test)]
+            DECLARATION_EVENT_VISITS.with(|count| count.set(count.get() + 1));
+            let facts = events.entry(event.name).or_insert(Events {
+                first: index,
+                last: index,
+                accepted_kind: None,
+            });
+            facts.last = index;
+            if view.accepted_events.contains(&index) {
+                facts.accepted_kind = Some(event.kind);
+            }
         }
-        (Some((_, event)), _) => view
-            .written(if event.kind.as_str() == "external_function" {
-                view.external_name_span(event.span)
-            } else {
-                event.span
-            })
-            .ok_or(MAPPING)?,
-        (None, Some(tag)) => tag.written.clone().ok_or(MAPPING)?,
-        (None, None) => return Err(BINDING),
-    };
-    let latest_tag = tags
-        .iter()
-        .filter(|tag| tag.declaration && tag.name == name)
-        .map(|tag| tag.declaration_order)
-        .max();
-    let latest_event = model
-        .symbol_type_events
-        .iter()
-        .enumerate()
-        .rev()
-        .find(|(_, event)| model.name(event.name) == name);
-    let kind = match latest_event {
-        Some((index, event))
-            if latest_tag.is_none_or(|order| event_order(index).is_some_and(|at| at > order)) =>
-        {
-            model.final_symbol_kind(event.name).ok_or(MAPPING)?
+        let mut orders = vec![None; view.model.symbol_type_events.len()];
+        for (event, range) in &view.model.type_event_occurrences {
+            if crate::engine::control::cancelled() {
+                break;
+            }
+            if let Some(order) = orders.get_mut(*event) {
+                order.get_or_insert(range.end);
+            }
         }
-        _ if latest_tag.is_some() => "var",
-        _ => return Err(BINDING),
-    };
-    Ok((declaration, kind))
+        let mut tags = HashMap::<String, (usize, usize)>::new();
+        for (index, tag) in view.tags.iter().enumerate() {
+            if crate::engine::control::cancelled() {
+                break;
+            }
+            if tag.declaration {
+                let entry = tags
+                    .entry(tag.name.clone())
+                    .or_insert((index, tag.declaration_order));
+                entry.1 = entry.1.max(tag.declaration_order);
+            }
+        }
+        let mut dimensions = HashMap::new();
+        for row in &view.model.written_declarations {
+            if crate::engine::control::cancelled() {
+                break;
+            }
+            dimensions
+                .entry(row.declaration.name)
+                .or_insert_with(|| row.declaration.heterogeneity.map(|(name, _)| name));
+        }
+        Self {
+            events,
+            orders,
+            tags,
+            dimensions,
+        }
+    }
+
+    pub(super) fn accepted_kind(
+        &self,
+        name: Name,
+    ) -> Option<crate::engine::language::model::SymbolKind> {
+        self.events.get(&name)?.accepted_kind
+    }
+
+    pub(super) fn dimension(&self, name: Name) -> Option<Name> {
+        self.dimensions.get(&name).copied().flatten()
+    }
+
+    pub(super) fn declaration(
+        &self,
+        view: &SemanticModel,
+        name: &str,
+    ) -> Result<((String, Span), &'static str), Refusal> {
+        let events = view
+            .model
+            .intern
+            .lookup(name)
+            .and_then(|name| self.events.get(&name));
+        let first =
+            events.map(|events| (events.first, &view.model.symbol_type_events[events.first]));
+        let tag = self.tags.get(name).map(|(first, _)| &view.tags[*first]);
+        let declaration = match (first, tag) {
+            (Some((index, _)), Some(tag))
+                if tag.declaration_order < self.orders[index].ok_or(MAPPING)? =>
+            {
+                tag.written.clone().ok_or(MAPPING)?
+            }
+            (Some((_, event)), _) => view
+                .written(if event.kind.as_str() == "external_function" {
+                    view.external_name_span(event.span)
+                } else {
+                    event.span
+                })
+                .ok_or(MAPPING)?,
+            (None, Some(tag)) => tag.written.clone().ok_or(MAPPING)?,
+            (None, None) => return Err(BINDING),
+        };
+        let latest_tag = self.tags.get(name).map(|(_, order)| *order);
+        let kind = match events {
+            Some(events)
+                if latest_tag
+                    .is_none_or(|order| self.orders[events.last].is_some_and(|at| at > order)) =>
+            {
+                view.model.symbol_type_events[events.last].kind.as_str()
+            }
+            _ if latest_tag.is_some() => "var",
+            _ => return Err(BINDING),
+        };
+        Ok((declaration, kind))
+    }
 }

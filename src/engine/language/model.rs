@@ -2446,6 +2446,86 @@ pub enum ShocksSemiFamily {
     EndOfStmt,
 }
 
+/// Final event facts for one immutable analysis. Callers share this index within
+/// their existing pass; mutable public Model fields do not retain stale caches.
+pub(crate) struct FinalSymbolTypes {
+    kinds: HashMap<Name, SymbolKind>,
+    changed: HashSet<Name>,
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static FINAL_TYPE_EVENT_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl FinalSymbolTypes {
+    pub(crate) fn collect(model: &Model) -> Self {
+        let mut result = Self {
+            kinds: HashMap::new(),
+            changed: HashSet::new(),
+        };
+        for event in &model.symbol_type_events {
+            if crate::engine::control::cancelled() {
+                break;
+            }
+            #[cfg(test)]
+            FINAL_TYPE_EVENT_VISITS.with(|count| count.set(count.get() + 1));
+            result.kinds.insert(event.name, event.kind);
+            if event.changed {
+                result.changed.insert(event.name);
+            }
+        }
+        result
+    }
+
+    pub(crate) fn heterogeneity(&self, decl: &Decl) -> Option<Name> {
+        decl.heterogeneity
+            .filter(|_| !self.changed.contains(&decl.name))
+            .map(|(name, _)| name)
+    }
+
+    pub(crate) fn kind(&self, name: Name) -> Option<&'static str> {
+        self.kinds.get(&name).copied().map(SymbolKind::as_str)
+    }
+
+    pub(crate) fn declarations<'a>(&self, model: &'a Model, kinds: &[&str]) -> Vec<&'a Decl> {
+        let lists = [
+            (&model.endogenous, "var"),
+            (&model.exogenous, "varexo"),
+            (&model.deterministic_exogenous, "varexo_det"),
+            (&model.parameters, "parameters"),
+        ];
+        let (written, other): (Vec<_>, Vec<_>) = lists
+            .into_iter()
+            .partition(|(_, kind)| kinds.contains(kind));
+        let mut seen = HashSet::new();
+        written
+            .into_iter()
+            .chain(other)
+            .flat_map(|(list, kind)| list.iter().map(move |decl| (decl, kind)))
+            .chain(
+                model
+                    .retyped_trend_decls
+                    .iter()
+                    .map(|decl| (decl, "trend_var")),
+            )
+            .take_while(|_| !crate::engine::control::cancelled())
+            .filter(|(decl, written)| {
+                kinds.contains(
+                    &self
+                        .kinds
+                        .get(&decl.name)
+                        .copied()
+                        .map(SymbolKind::as_str)
+                        .unwrap_or(written),
+                )
+            })
+            .map(|(decl, _)| decl)
+            .filter(|decl| seen.insert(decl.name))
+            .collect()
+    }
+}
+
 impl Model {
     /// Written ranges discarded by this model's selected macro execution.
     pub fn inactive_macro_spans(&self) -> &[Span] {
@@ -2735,24 +2815,24 @@ impl Model {
     /// name. Declarations stay on their written list, so a `change_type(var)`
     /// parameter or exogenous name is endogenous here and a retyped `var` is not.
     pub fn final_endogenous(&self) -> Vec<&Decl> {
-        self.final_decls(&["var"])
+        let types = FinalSymbolTypes::collect(self);
+        types
+            .declarations(self, &["var"])
             .into_iter()
-            .filter(|decl| self.final_heterogeneity(decl).is_none())
+            .filter(|decl| types.heterogeneity(decl).is_none())
             .collect()
     }
 
     /// A successful type change makes a heterogeneous declaration ordinary.
     /// Keep the written dimension on `Decl` for source-oriented reads.
     pub(crate) fn final_heterogeneity(&self, decl: &Decl) -> Option<Name> {
-        let changed = self
-            .symbol_type_events
-            .iter()
-            .any(|event| event.name == decl.name && event.changed);
-        if changed {
-            None
-        } else {
-            decl.heterogeneity.map(|(name, _)| name)
-        }
+        let (dimension, _) = decl.heterogeneity?;
+        let changed = self.symbol_type_events.iter().any(|event| {
+            #[cfg(test)]
+            FINAL_TYPE_EVENT_VISITS.with(|count| count.set(count.get() + 1));
+            event.name == decl.name && event.changed
+        });
+        if changed { None } else { Some(dimension) }
     }
 
     /// Parameter declarations by final type, first declaration per name, the
@@ -2773,35 +2853,7 @@ impl Model {
 
     /// First declaration per name whose final type is one of `kinds`.
     pub(crate) fn final_decls(&self, kinds: &[&str]) -> Vec<&Decl> {
-        let mut final_kind = HashMap::new();
-        for event in &self.symbol_type_events {
-            final_kind.insert(event.name, event.kind.as_str());
-        }
-        let lists = [
-            (&self.endogenous, "var"),
-            (&self.exogenous, "varexo"),
-            (&self.deterministic_exogenous, "varexo_det"),
-            (&self.parameters, "parameters"),
-        ];
-        let (written, other): (Vec<_>, Vec<_>) = lists
-            .into_iter()
-            .partition(|(_, written_kind)| kinds.contains(written_kind));
-        let mut seen = HashSet::new();
-        written
-            .into_iter()
-            .chain(other)
-            .flat_map(|(list, written_kind)| list.iter().map(move |decl| (decl, written_kind)))
-            .chain(
-                self.retyped_trend_decls
-                    .iter()
-                    .map(|decl| (decl, "trend_var")),
-            )
-            .filter(|(decl, written_kind)| {
-                kinds.contains(&final_kind.get(&decl.name).copied().unwrap_or(written_kind))
-            })
-            .map(|(decl, _)| decl)
-            .filter(|decl| seen.insert(decl.name))
-            .collect()
+        FinalSymbolTypes::collect(self).declarations(self, kinds)
     }
 
     /// Final type is `varexo` or `varexo_det`, falling back to the written lists.

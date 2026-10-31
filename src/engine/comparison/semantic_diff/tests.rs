@@ -23,6 +23,30 @@ fn field<'a>(row: &'a SemanticRow, name: &str) -> &'a FieldChange {
         .expect("named field")
 }
 
+// Guards a full value walk per parameter or per semantic field, and the loss
+// of calibration fields when the parameter exists on only one side.
+#[test]
+fn comparison_shares_final_values_for_changed_and_one_sided_parameters() {
+    use crate::engine::analysis::model_info::ASSIGNED_NUMBER_PASSES;
+    let before = parse("parameters p q gone unknown; p=1; q=2*p; gone=3; unknown=4;");
+    let after = parse("parameters p q added unknown; p=2; q=2*p; added=5; unknown=opaque();");
+    ASSIGNED_NUMBER_PASSES.with(|count| count.set(0));
+    let diff = compare_models(&before, &after);
+    assert_eq!(ASSIGNED_NUMBER_PASSES.with(std::cell::Cell::get), 2);
+    let q = row(&diff, SemanticFamily::Parameters, "q");
+    assert_eq!(field(q, "evaluated_value").numeric_difference, Some(2.0));
+    let unknown = row(&diff, SemanticFamily::Parameters, "unknown");
+    assert_eq!(
+        field(unknown, "evaluated_value").after.state,
+        ValueState::Unknown
+    );
+    for (name, side, value) in [("gone", true, 3.0), ("added", false, 5.0)] {
+        let detail = field(row(&diff, SemanticFamily::Symbols, name), "evaluated_value");
+        let selected = if side { &detail.before } else { &detail.after };
+        assert_eq!(*selected, FieldState::number(Some(value)));
+    }
+}
+
 #[test]
 fn parameter_expression_value_and_finite_difference_are_separate() {
     let before = parse("parameters p; p=1;");

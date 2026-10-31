@@ -797,7 +797,7 @@ mod snapshot_tests {
             panic!("one standalone view required")
         };
         assert!(matches!(view.analysis, LocalAnalysis::Standalone { .. }));
-        assert!(!std::ptr::eq(view.model(), &effective.model));
+        assert!(!std::ptr::eq(view.model(), &*effective.model));
         let target = text.find("y=z").unwrap() as u32 + 2;
         let bindings = selected(view, &uri, target);
         assert_eq!(bindings.len(), 1);
@@ -812,7 +812,7 @@ mod snapshot_tests {
         let views = views(inner, uri);
         assert_eq!(views.len(), 1);
         assert!(
-            std::ptr::eq(views[0].model(), &semantic.model),
+            std::ptr::eq(views[0].model(), &*semantic.model),
             "local requests cloned the shared semantic model"
         );
         assert!(

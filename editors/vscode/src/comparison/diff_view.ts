@@ -244,7 +244,3 @@ export function normalizeChoices(value: unknown, defaults: DiffPreferences): Dif
     group,
   };
 }
-
-export function sameTarget(left: DiffTarget | null, right: DiffTarget | null): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}

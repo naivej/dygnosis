@@ -6,7 +6,7 @@ use crate::engine::analysis::equations::count_gap;
 use crate::engine::analysis::equations::{IdentClass, identifier_class};
 use crate::engine::analysis::model_locals::ModelLocals;
 use crate::engine::language::intern::Name;
-use crate::engine::language::model::Model;
+use crate::engine::language::model::{Assignment, Model};
 use crate::engine::language::span::Span;
 use serde_json::{Value, json};
 
@@ -89,14 +89,65 @@ pub(crate) fn arithmetic_number(
     value.filter(|value| !strict || value.is_finite())
 }
 
-/// Legacy final-value walk and numeric source reader remain unchanged.
+/// Final values from the legacy parameter-then-helper walk, not execution traces.
 pub fn assigned_number(model: &Model, name: &str) -> Option<f64> {
+    let name = model.intern.lookup(name)?;
+    legacy_assigned_values(model, |_| {}).get(&name).copied()
+}
+
+#[derive(Default)]
+pub(crate) struct AssignedNumbers<'a> {
+    values: HashMap<Name, f64>,
+    assignments: HashMap<Name, &'a Assignment>,
+}
+
+impl<'a> AssignedNumbers<'a> {
+    pub(crate) fn value(&self, model: &Model, name: &str) -> Option<f64> {
+        self.values.get(&model.intern.lookup(name)?).copied()
+    }
+
+    pub(crate) fn assignment(&self, model: &Model, name: &str) -> Option<&'a Assignment> {
+        self.assignments.get(&model.intern.lookup(name)?).copied()
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static ASSIGNED_NUMBER_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+pub(crate) fn assigned_numbers(model: &Model) -> AssignedNumbers<'_> {
+    let mut assignments = HashMap::new();
+    let values = legacy_assigned_values(model, |assignment| {
+        assignments.insert(assignment.name, assignment);
+    });
+    AssignedNumbers {
+        values,
+        assignments,
+    }
+}
+
+// Single-name hover queries need values only. Comparison also keeps the last
+// parameter assignment during this same walk, without another source pass.
+fn legacy_assigned_values<'a>(
+    model: &'a Model,
+    mut parameter: impl FnMut(&'a Assignment),
+) -> HashMap<Name, f64> {
+    #[cfg(test)]
+    ASSIGNED_NUMBER_PASSES.with(|count| count.set(count.get() + 1));
     let mut known = HashMap::new();
-    for a in model
+    for (index, a) in model
         .param_assignments
         .iter()
         .chain(model.helper_assignments.iter())
+        .enumerate()
     {
+        if crate::engine::control::cancelled() {
+            break;
+        }
+        if index < model.param_assignments.len() {
+            parameter(a);
+        }
         let value = a
             .expr
             .and_then(|id| arithmetic_number(model, id, &known, false));
@@ -109,13 +160,7 @@ pub fn assigned_number(model: &Model, name: &str) -> Option<f64> {
             }
         }
     }
-    known.iter().find_map(|(n, v)| {
-        if model.name(*n) == name {
-            Some(*v)
-        } else {
-            None
-        }
-    })
+    known
 }
 
 /// Shared count fields for MCP and LSP. Locations are added by each transport.
@@ -143,21 +188,25 @@ pub(crate) fn model_info_json_with_locals_and_timing(
             &collected_locals
         }
     };
-    let endogenous: Vec<String> = model
-        .final_endogenous()
+    let endogenous: Vec<String> = timing
+        .symbols
+        .declarations(model, &["var"])
         .into_iter()
+        .filter(|decl| timing.symbols.heterogeneity(decl).is_none())
         .map(|d| model.name(d.name).to_string())
         .collect();
-    let exogenous: Vec<String> = model
-        .final_decls(&["varexo", "varexo_det"])
+    let exogenous: Vec<String> = timing
+        .symbols
+        .declarations(model, &["varexo", "varexo_det"])
         .into_iter()
-        .filter(|decl| model.final_heterogeneity(decl).is_none())
+        .filter(|decl| timing.symbols.heterogeneity(decl).is_none())
         .map(|d| model.name(d.name).to_string())
         .collect();
-    let parameters: Vec<String> = model
-        .final_parameters()
+    let parameters: Vec<String> = timing
+        .symbols
+        .declarations(model, &["parameters"])
         .into_iter()
-        .filter(|decl| model.final_heterogeneity(decl).is_none())
+        .filter(|decl| timing.symbols.heterogeneity(decl).is_none())
         .map(|d| model.name(d.name).to_string())
         .collect();
     let mut static_vars = Vec::new();
@@ -180,22 +229,25 @@ pub(crate) fn model_info_json_with_locals_and_timing(
     let heterogeneous_dimensions: Vec<Value> = heterogeneous_dimension_names(model)
         .into_iter()
         .map(|dimension| {
-            let names: Vec<String> = model
-                .final_decls(&["var"])
+            let names: Vec<String> = timing
+                .symbols
+                .declarations(model, &["var"])
                 .into_iter()
-                .filter(|decl| model.final_heterogeneity(decl) == Some(dimension))
+                .filter(|decl| timing.symbols.heterogeneity(decl) == Some(dimension))
                 .map(|decl| model.name(decl.name).to_string())
                 .collect();
-            let shocks: Vec<String> = model
-                .final_decls(&["varexo", "varexo_det"])
+            let shocks: Vec<String> = timing
+                .symbols
+                .declarations(model, &["varexo", "varexo_det"])
                 .into_iter()
-                .filter(|decl| model.final_heterogeneity(decl) == Some(dimension))
+                .filter(|decl| timing.symbols.heterogeneity(decl) == Some(dimension))
                 .map(|decl| model.name(decl.name).to_string())
                 .collect();
-            let params: Vec<String> = model
-                .final_parameters()
+            let params: Vec<String> = timing
+                .symbols
+                .declarations(model, &["parameters"])
                 .into_iter()
-                .filter(|decl| model.final_heterogeneity(decl) == Some(dimension))
+                .filter(|decl| timing.symbols.heterogeneity(decl) == Some(dimension))
                 .map(|decl| model.name(decl.name).to_string())
                 .collect();
             let mut static_vars = Vec::new();

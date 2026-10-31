@@ -76,8 +76,54 @@ pub struct CountGap {
 }
 
 pub fn equations(model: &Model) -> Vec<EquationRow> {
-    let timing = TimingAnalysis::new(model);
-    let locals = crate::engine::analysis::model_locals::ModelLocals::collect(model);
+    aggregate_rows(model, &EquationFacts::collect(model))
+}
+
+struct EquationFacts {
+    timing: TimingAnalysis,
+    local_sites: HashSet<(
+        crate::engine::language::intern::Name,
+        Span,
+        Option<crate::engine::language::intern::Name>,
+    )>,
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static EQUATION_FACT_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl EquationFacts {
+    fn collect(model: &Model) -> Self {
+        #[cfg(test)]
+        EQUATION_FACT_BUILDS.with(|count| count.set(count.get() + 1));
+        let timing = TimingAnalysis::new(model);
+        let locals = crate::engine::analysis::model_locals::ModelLocals::collect(model);
+        let local_sites = locals
+            .uses
+            .into_iter()
+            .take_while(|_| !crate::engine::control::cancelled())
+            .map(|usage| (usage.name, usage.span, usage.dimension))
+            .collect();
+        Self {
+            timing,
+            local_sites,
+        }
+    }
+}
+
+/// Both equation scopes use one final-type, timing and model-local pass.
+pub(crate) fn equation_collections(
+    model: &Model,
+) -> (Vec<EquationRow>, Vec<HeterogeneousEquationBlockRows>) {
+    let facts = EquationFacts::collect(model);
+    (
+        aggregate_rows(model, &facts),
+        heterogeneous_rows(model, &facts),
+    )
+}
+
+fn aggregate_rows(model: &Model, facts: &EquationFacts) -> Vec<EquationRow> {
     let mut rows = Vec::new();
     for eq in &model.equations {
         if crate::engine::control::cancelled() {
@@ -86,14 +132,19 @@ pub fn equations(model: &Model) -> Vec<EquationRow> {
         if !is_counted(eq) {
             continue;
         }
-        rows.push(equation_row(model, eq, rows.len(), &timing, None, &locals));
+        rows.push(equation_row(model, eq, rows.len(), None, facts));
     }
     rows
 }
 
 pub(crate) fn heterogeneous_equations(model: &Model) -> Vec<HeterogeneousEquationBlockRows> {
-    let timing = TimingAnalysis::new(model);
-    let locals = crate::engine::analysis::model_locals::ModelLocals::collect(model);
+    if model.heterogeneous_models.is_empty() {
+        return Vec::new();
+    }
+    heterogeneous_rows(model, &EquationFacts::collect(model))
+}
+
+fn heterogeneous_rows(model: &Model, facts: &EquationFacts) -> Vec<HeterogeneousEquationBlockRows> {
     let mut next_index = HashMap::new();
     model
         .heterogeneous_models
@@ -111,9 +162,8 @@ pub(crate) fn heterogeneous_equations(model: &Model) -> Vec<HeterogeneousEquatio
                         model,
                         eq,
                         *index,
-                        &timing,
                         Some(block.dimension),
-                        &locals,
+                        facts,
                     ));
                     *index += 1;
                 }
@@ -131,21 +181,25 @@ fn equation_row(
     model: &Model,
     eq: &Equation,
     index: usize,
-    timing: &TimingAnalysis,
     heterogeneous_dimension: Option<crate::engine::language::intern::Name>,
-    locals: &crate::engine::analysis::model_locals::ModelLocals,
+    facts: &EquationFacts,
 ) -> EquationRow {
+    let timing = &facts.timing;
     let idents = model
         .ident_refs(eq)
         .into_iter()
         .map(|reference| {
             let name = model.name(reference.name).to_string();
-            let model_local = locals.uses.iter().any(|usage| {
-                usage.name == reference.name
-                    && usage.span == reference.span
-                    && usage.dimension == heterogeneous_dimension
-            });
-            let class = identifier_class(model, reference.name, model_local);
+            let model_local = facts.local_sites.contains(&(
+                reference.name,
+                reference.span,
+                heterogeneous_dimension,
+            ));
+            let kind = timing
+                .symbols
+                .kind(reference.name)
+                .or_else(|| model.final_kind_or_written_if_excluded(reference.name));
+            let class = identifier_kind_class(kind, model_local);
             let timing_class = if class == IdentClass::Endogenous {
                 let classes = if heterogeneous_dimension.is_some() {
                     &timing.all
@@ -281,10 +335,19 @@ pub(crate) fn identifier_class(
     if model_local {
         return IdentClass::ModelLocal;
     }
-    match model
-        .final_symbol_kind(name)
-        .or_else(|| model.final_kind_or_written_if_excluded(name))
-    {
+    identifier_kind_class(
+        model
+            .final_symbol_kind(name)
+            .or_else(|| model.final_kind_or_written_if_excluded(name)),
+        model_local,
+    )
+}
+
+fn identifier_kind_class(kind: Option<&str>, model_local: bool) -> IdentClass {
+    if model_local {
+        return IdentClass::ModelLocal;
+    }
+    match kind {
         Some("var") => IdentClass::Endogenous,
         Some("varexo_det") => IdentClass::VarexoDet,
         Some("varexo") => IdentClass::Varexo,

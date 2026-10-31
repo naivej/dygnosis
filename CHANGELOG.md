@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.11.41
+
+- Symbol queries, equation inspection and model counts respond faster in large
+  models, including MCP Symbol Info with selected sections or small pages.
+- Model Diff compares large parameter calibrations faster, including added,
+  removed and retyped parameters.
+
 ## v0.11.40
 
 - Hover on a name in an inactive macro branch can show a matching written

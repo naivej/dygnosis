@@ -9,8 +9,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::engine::analysis::equations::{EquationRow, equations, heterogeneous_equations};
-use crate::engine::analysis::model_info::assigned_number;
+use crate::engine::analysis::equations::{
+    EquationRow, HeterogeneousEquationBlockRows, equation_collections,
+};
+use crate::engine::analysis::model_info::{AssignedNumbers, assigned_numbers};
 use crate::engine::comparison::semantic_diff::{
     ComparisonBudgets, ComparisonCoverage, ComparisonVersions, SemanticDiff, SourceChanges,
 };
@@ -429,10 +431,18 @@ pub fn compare_models_with_budgets(
     let par_b = names(model_b, &model_b.final_decls(&["parameters"]));
 
     let common_params: HashSet<String> = par_a.intersection(&par_b).cloned().collect();
-    let changed_parameter_values = changed_params(model_a, model_b, &common_params);
+    let (values_a, values_b) = if par_a.is_empty() && par_b.is_empty() {
+        (AssignedNumbers::default(), AssignedNumbers::default())
+    } else {
+        (assigned_numbers(model_a), assigned_numbers(model_b))
+    };
+    let changed_parameter_values =
+        changed_params(model_a, model_b, &common_params, &values_a, &values_b);
 
-    let (old_equations, old_count) = counted_equations(model_a);
-    let (new_equations, new_count) = counted_equations(model_b);
+    let (old_rows, old_heterogeneous) = equation_collections(model_a);
+    let (new_rows, new_heterogeneous) = equation_collections(model_b);
+    let (old_equations, old_count) = counted_equations(old_rows);
+    let (new_equations, new_count) = counted_equations(new_rows);
     let mut input_counts = (
         declaration_counts(model_a, &variables_a),
         declaration_counts(model_b, &variables_b),
@@ -442,7 +452,8 @@ pub fn compare_models_with_budgets(
     let (added_eq, removed_eq, changed_eq, unmatched_same_name) =
         diff_equations(&old_equations, &new_equations, AGGREGATE_DOMAIN, None);
 
-    let heterogeneous_equations = diff_heterogeneous_equations(model_a, model_b, &mut input_counts);
+    let heterogeneous_equations =
+        diff_heterogeneous_equations(old_heterogeneous, new_heterogeneous, &mut input_counts);
     let mut diff = ModelDiff {
         input_counts,
         added_endogenous: sorted_diff(&end_b, &end_a),
@@ -467,7 +478,9 @@ pub fn compare_models_with_budgets(
         source_changes: SourceChanges::default(),
         coverage: ComparisonCoverage::default(),
     };
-    crate::engine::comparison::semantic_diff::populate(model_a, model_b, &mut diff);
+    crate::engine::comparison::semantic_diff::populate(
+        model_a, model_b, &values_a, &values_b, &mut diff,
+    );
     crate::engine::comparison::semantic_diff::enforce_output_budget(&mut diff);
     diff
 }
@@ -2241,19 +2254,30 @@ pub(crate) fn parameter_value_changed(before: Option<f64>, after: Option<f64>) -
     }
 }
 
-fn changed_params(a: &Model, b: &Model, common: &HashSet<String>) -> Vec<ParameterChange> {
+fn changed_params(
+    a: &Model,
+    b: &Model,
+    common: &HashSet<String>,
+    values_a: &AssignedNumbers<'_>,
+    values_b: &AssignedNumbers<'_>,
+) -> Vec<ParameterChange> {
     let mut out = Vec::new();
     let mut names: Vec<&String> = common.iter().collect();
     names.sort();
     for name in names {
-        let old_raw = last_assignment(a, name)
+        if crate::engine::control::cancelled() {
+            break;
+        }
+        let old_raw = values_a
+            .assignment(a, name)
             .map(|asg| asg.expression.clone())
             .unwrap_or_default();
-        let new_raw = last_assignment(b, name)
+        let new_raw = values_b
+            .assignment(b, name)
             .map(|asg| asg.expression.clone())
             .unwrap_or_default();
-        let old_value = assigned_number(a, name);
-        let new_value = assigned_number(b, name);
+        let old_value = values_a.value(a, name);
+        let new_value = values_b.value(b, name);
         let num_changed = parameter_value_changed(old_value, new_value);
         let expr_changed = normalize_expr(&old_raw) != normalize_expr(&new_raw);
         if num_changed || expr_changed {
@@ -2285,8 +2309,7 @@ pub(crate) fn normalize_equation(text: &str) -> String {
 const AGGREGATE_DOMAIN: &str = "aggregate";
 const HETEROGENEOUS_DOMAIN: &str = "heterogeneous";
 
-fn counted_equations(model: &Model) -> (Vec<EquationRow>, usize) {
-    let rows = equations(model);
+fn counted_equations(rows: Vec<EquationRow>) -> (Vec<EquationRow>, usize) {
     let count = crate::engine::analysis::equations::collapsed_counted_rows(&rows);
     (
         rows.into_iter()
@@ -2298,9 +2321,11 @@ fn counted_equations(model: &Model) -> (Vec<EquationRow>, usize) {
 
 /// Counted rows of one dimension, concatenated in source order. Indexes already
 /// continue across blocks of that dimension.
-fn counted_heterogeneous(model: &Model) -> BTreeMap<String, Vec<EquationRow>> {
+fn counted_heterogeneous(
+    blocks: Vec<HeterogeneousEquationBlockRows>,
+) -> BTreeMap<String, Vec<EquationRow>> {
     let mut by_dimension: BTreeMap<String, Vec<EquationRow>> = BTreeMap::new();
-    for block in heterogeneous_equations(model) {
+    for block in blocks {
         let dimension = block.dimension;
         let rows = block
             .equations
@@ -2312,8 +2337,8 @@ fn counted_heterogeneous(model: &Model) -> BTreeMap<String, Vec<EquationRow>> {
 }
 
 fn diff_heterogeneous_equations(
-    before: &Model,
-    after: &Model,
+    before: Vec<HeterogeneousEquationBlockRows>,
+    after: Vec<HeterogeneousEquationBlockRows>,
     counts: &mut (ComparisonCounts, ComparisonCounts),
 ) -> Vec<HeterogeneousEquationDiff> {
     let old = counted_heterogeneous(before);

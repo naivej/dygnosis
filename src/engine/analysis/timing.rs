@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::engine::language::intern::Name;
-use crate::engine::language::model::{Equation, Model};
+use crate::engine::language::model::{Equation, FinalSymbolTypes, Model};
 
 /// Combined dynamic lead/lag class. This is not a solver classification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,6 +40,7 @@ pub(crate) struct TimingAnalysis {
     marked: HashSet<Name>,
     pub aggregate: HashMap<String, TimingInfo>,
     pub all: HashMap<String, TimingInfo>,
+    pub symbols: FinalSymbolTypes,
 }
 
 impl TimingAnalysis {
@@ -62,6 +63,7 @@ impl TimingAnalysis {
             marked,
             aggregate: HashMap::new(),
             all: HashMap::new(),
+            symbols: FinalSymbolTypes::collect(model),
         };
         let mut aggregate_offsets = HashMap::new();
         for equation in &model.equations {
@@ -70,12 +72,13 @@ impl TimingAnalysis {
             }
             analysis.record_aggregate(model, equation, &mut aggregate_offsets);
         }
-        let declarations = model.final_decls(&["var"]);
+        let declarations = analysis.symbols.declarations(model, &["var"]);
         let dimensions: HashMap<Name, Name> = declarations
             .iter()
             .filter_map(|declaration| {
-                model
-                    .final_heterogeneity(declaration)
+                analysis
+                    .symbols
+                    .heterogeneity(declaration)
                     .map(|dimension| (declaration.name, dimension))
             })
             .collect();
@@ -108,7 +111,7 @@ impl TimingAnalysis {
                 break;
             }
             let name = model.name(declaration.name).to_string();
-            if model.final_heterogeneity(declaration).is_none() {
+            if analysis.symbols.heterogeneity(declaration).is_none() {
                 let mut timing = classify_offsets(aggregate_offsets.get(&declaration.name));
                 timing.predetermined_convention = analysis.is_predetermined(declaration.name);
                 analysis.aggregate.insert(name.clone(), timing.clone());
@@ -188,10 +191,6 @@ pub fn classify_variable_timing(model: &Model) -> HashMap<String, TimingInfo> {
     TimingAnalysis::new(model).all
 }
 
-pub(crate) fn classify_aggregate_variable_timing(model: &Model) -> HashMap<String, TimingInfo> {
-    TimingAnalysis::new(model).aggregate
-}
-
 /// Aggregate endogenous, timing-class, and varexo counts. No BK; no Python labels.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StructureSummary {
@@ -206,7 +205,8 @@ pub struct StructureSummary {
 
 /// Predetermined / forward-looking / static counts for the aggregate model.
 pub fn structure_summary(model: &Model) -> StructureSummary {
-    let timing = classify_aggregate_variable_timing(model);
+    let analysis = TimingAnalysis::new(model);
+    let timing = &analysis.aggregate;
     let mut predetermined = 0;
     let mut forward_looking = 0;
     let mut static_vars = 0;
@@ -238,16 +238,52 @@ pub fn structure_summary(model: &Model) -> StructureSummary {
         }
     }
     StructureSummary {
-        endogenous: model.final_endogenous().len(),
+        endogenous: analysis
+            .symbols
+            .declarations(model, &["var"])
+            .into_iter()
+            .filter(|decl| analysis.symbols.heterogeneity(decl).is_none())
+            .count(),
         predetermined,
         forward_looking,
         static_vars,
-        varexo: model
-            .final_decls(&["varexo", "varexo_det"])
+        varexo: analysis
+            .symbols
+            .declarations(model, &["varexo", "varexo_det"])
             .into_iter()
-            .filter(|decl| model.final_heterogeneity(decl).is_none())
+            .filter(|decl| analysis.symbols.heterogeneity(decl).is_none())
             .count(),
         max_lead,
         max_lag,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Guards rescanning every type event for each heterogeneous declaration.
+    #[test]
+    fn timing_indexes_final_dimensions_in_one_event_pass() {
+        use crate::engine::language::model::FINAL_TYPE_EVENT_VISITS;
+        let names: Vec<_> = (0..128).map(|i| format!("x{i}")).collect();
+        let equations: String = names
+            .iter()
+            .map(|name| format!("{name}={name}(-1);\n"))
+            .collect();
+        let model = crate::engine::language::parser::parse(&format!(
+            "heterogeneity_dimension h;var(heterogeneity=h) {};model(heterogeneity=h);{equations}end;",
+            names.join(" ")
+        ));
+        FINAL_TYPE_EVENT_VISITS.with(|count| count.set(0));
+        let timing = TimingAnalysis::new(&model);
+        assert!(timing.aggregate.is_empty());
+        for name in &names {
+            assert_eq!(timing.all[name].offsets, [-1, 0]);
+        }
+        assert_eq!(
+            FINAL_TYPE_EVENT_VISITS.with(std::cell::Cell::get),
+            model.symbol_type_events.len()
+        );
     }
 }

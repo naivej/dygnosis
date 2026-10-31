@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use crate::engine::language::span::LineIndex;
 use rmcp::model::CallToolResult;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -9,6 +10,12 @@ use serde_json::{Value, json};
 
 use super::result::{Detail, Pages, ResultOptions, ToolResult};
 use super::source::{RequestControl, SourceArgs, SourceSnapshot};
+
+#[cfg(test)]
+thread_local! {
+    static SYMBOL_REFERENCE_PROJECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SYMBOL_OCCURRENCE_PROJECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub(crate) struct Target {
@@ -435,9 +442,13 @@ fn dispatch_query(
         "dynare_symbol_info" if params.view == Some(super::canonical::View::Source) => {
             super::source_views::symbols(&snapshot, &params)?
         }
-        "dynare_find_references" | "dynare_symbol_info" | "dynare_rename" => {
-            symbols(tool, &params, &mut snapshot)?
-        }
+        "dynare_find_references" | "dynare_symbol_info" | "dynare_rename" => symbols(
+            tool,
+            &params,
+            &mut snapshot,
+            &arguments,
+            &mut projected_pages,
+        )?,
         "dynare_diagnose" => {
             let diagnostics =
                 crate::engine::diagnostics::check_in_workspace_with_origins_controlled(
@@ -1256,8 +1267,8 @@ fn equation_query(
         .analyses
         .values()
         .all(|analysis| analysis.coverage["complete"] == true);
-    let rows = super::equations(&snapshot.model);
-    let heterogeneous = super::heterogeneous_equations(&snapshot.model);
+    let (rows, heterogeneous) =
+        crate::engine::analysis::equations::equation_collections(&snapshot.model);
     let gap = crate::engine::analysis::equations::count_gap_with_rows(&snapshot.model, &rows);
     let mut gap = super::count_gap_json(&gap);
     if params.agent_output {
@@ -1470,6 +1481,8 @@ fn symbols(
     tool: &str,
     params: &Params,
     snapshot: &mut SourceSnapshot,
+    arguments: &Value,
+    projected: &mut Option<Pages>,
 ) -> Result<ToolResult, rmcp::ErrorData> {
     let rename = tool == "dynare_rename";
     if rename && snapshot.model.is_analysis_preview() {
@@ -1518,6 +1531,26 @@ fn symbols(
             return Ok(result);
         }
     };
+    let complete = snapshot
+        .analyses
+        .values()
+        .all(|analysis| analysis.coverage["complete"] == true);
+    let mut pages = if rename {
+        None
+    } else {
+        let Ok(pages) = prepare_pages(tool, arguments, params, &snapshot.revision) else {
+            return Ok(ToolResult::new(Value::Null));
+        };
+        Some(pages)
+    };
+    let want = |section: &str| {
+        !params.agent_output
+            || params
+                .output
+                .sections
+                .iter()
+                .any(|selected| selected == section)
+    };
     let mut metadata = None;
     if tool == "dynare_symbol_info"
         && (!params.agent_output
@@ -1528,65 +1561,96 @@ fn symbols(
                 .all(|section| section == "references"))
     {
         let mut data = binding_json(snapshot, &binding);
-        let declaration = model
-            .model
-            .written_declarations
-            .iter()
-            .zip(&snapshot.report.model_map.declarations)
-            .find(|(decl, source)| {
-                (binding.is_ordinary()
-                    || matches!(
-                        binding.kind.as_str(),
-                        "trend_var" | "log_trend_var" | "external_function"
-                    ))
-                    && model.model.name(decl.declaration.name) == binding.name
-                    && binding.declaration.as_ref().is_some_and(|(file, span)| {
-                        source.segments.iter().any(|segment| {
-                            segment.file.as_deref().unwrap_or(&snapshot.root) == file
-                                && segment.span.start <= span.start
-                                && span.end <= segment.span.end
+        if want("metadata") {
+            let declaration = model
+                .model
+                .written_declarations
+                .iter()
+                .zip(&snapshot.report.model_map.declarations)
+                .find(|(decl, source)| {
+                    (binding.is_ordinary()
+                        || matches!(
+                            binding.kind.as_str(),
+                            "trend_var" | "log_trend_var" | "external_function"
+                        ))
+                        && model.model.name(decl.declaration.name) == binding.name
+                        && binding.declaration.as_ref().is_some_and(|(file, span)| {
+                            source.segments.iter().any(|segment| {
+                                segment.file.as_deref().unwrap_or(&snapshot.root) == file
+                                    && segment.span.start <= span.start
+                                    && span.end <= segment.span.end
+                            })
                         })
-                    })
-            })
-            .map(|(decl, _)| decl);
-        data["long_name"] =
-            json!(declaration.and_then(|decl| decl.declaration.long_name.as_deref()));
-        data["tex_name"] = json!(declaration.and_then(|decl| decl.declaration.tex_name.as_deref()));
-        data["written_kind"] = json!(declaration.map(|decl| decl.written_kind.as_str()));
-        data["timing"] = if !binding.is_ordinary() {
-            Value::Null
-        } else {
-            let timing = crate::engine::analysis::timing::classify_variable_timing(&model.model);
-            timing
-                .get(&binding.name)
-                .map(|fact| json!({"class":fact.class.label(),"offsets":fact.offsets}))
-                .unwrap_or(Value::Null)
-        };
+                })
+                .map(|(decl, _)| decl);
+            data["long_name"] =
+                json!(declaration.and_then(|decl| decl.declaration.long_name.as_deref()));
+            data["tex_name"] =
+                json!(declaration.and_then(|decl| decl.declaration.tex_name.as_deref()));
+            data["written_kind"] = json!(declaration.map(|decl| decl.written_kind.as_str()));
+            data["timing"] = if !binding.is_ordinary() {
+                Value::Null
+            } else {
+                let timing =
+                    crate::engine::analysis::timing::classify_variable_timing(&model.model);
+                timing
+                    .get(&binding.name)
+                    .map(|fact| json!({"class":fact.class.label(),"offsets":fact.offsets}))
+                    .unwrap_or(Value::Null)
+            };
+            if binding.is_local() {
+                data["expression"] = json!(model.local_expression(&binding));
+            }
+        }
         // Assignment traces keep their execution positions. A trace value is
         // not a claim that later native code retained that final value.
-        let values = if binding.is_ordinary()
-            && (!params.agent_output
-                || params
-                    .output
-                    .sections
-                    .iter()
-                    .any(|section| section == "assignments"))
-        {
-            crate::engine::analysis::assignment_values::assignment_values(&model.model)
-        } else {
-            Vec::new()
-        };
-        data["assignment_values"] = json!(values.iter().filter_map(|value| {
-            let statement = &model.model.statements[value.statement_id];
-            let assignment = match statement.assignment? {
-                crate::engine::language::model::AssignmentIndex::Parameter(index) => &model.model.param_assignments[index],
-                crate::engine::language::model::AssignmentIndex::Helper(index) => &model.model.helper_assignments[index],
+        if want("assignments") {
+            let values = if binding.is_ordinary() {
+                crate::engine::analysis::assignment_values::assignment_values(&model.model)
+            } else {
+                Vec::new()
             };
-            (model.model.name(assignment.name)==binding.name).then(||json!({"value":value.value,
-                "statement_id":value.statement_id,"expression":assignment.expression,"provenance":"assignment execution position"}))
-        }).collect::<Vec<_>>());
-        if binding.is_local() {
-            data["expression"] = json!(model.local_expression(&binding));
+            let values: Vec<_> = values
+                .iter()
+                .filter_map(|value| {
+                    let statement = &model.model.statements[value.statement_id];
+                    let assignment = match statement.assignment? {
+                        crate::engine::language::model::AssignmentIndex::Parameter(index) => {
+                            &model.model.param_assignments[index]
+                        }
+                        crate::engine::language::model::AssignmentIndex::Helper(index) => {
+                            &model.model.helper_assignments[index]
+                        }
+                    };
+                    (model.model.name(assignment.name) == binding.name)
+                        .then_some((value, assignment))
+                })
+                .collect();
+            let range = if params.agent_output {
+                pages.as_mut().unwrap().projection_range(
+                    "binding.assignment_values",
+                    values.len(),
+                    complete,
+                )
+            } else {
+                0..values.len()
+            };
+            data["assignment_values"] = json!(values[range].iter().map(|(value, assignment)|json!({"value":value.value,
+            "statement_id":value.statement_id,"expression":assignment.expression,"provenance":"assignment execution position"})).collect::<Vec<_>>());
+        }
+        // Preserve the generic collection order: assignment values, timing
+        // offsets, expanded occurrences, then written references.
+        if params.agent_output
+            && let Some(offsets) = data
+                .pointer_mut("/timing/offsets")
+                .and_then(Value::as_array_mut)
+        {
+            let range = pages.as_mut().unwrap().projection_range(
+                "binding.timing.offsets",
+                offsets.len(),
+                complete,
+            );
+            *offsets = offsets.drain(range).collect();
         }
         if !params.agent_output {
             return Ok(ToolResult::new(data));
@@ -1630,71 +1694,86 @@ fn symbols(
         return Ok(result);
     }
     let occurrences = model.references(&binding, params.include_declaration.unwrap_or(true));
-    let mut locations = BTreeMap::<(String, u32, u32), Value>::new();
-    let mut expanded = Vec::new();
+    let references = want("references");
+    let mut locations = BTreeMap::<(&str, u32, u32), usize>::new();
+    let mut verified = Vec::with_capacity(occurrences.len());
     let mut omitted = 0;
-    let expanded_index = crate::engine::language::span::LineIndex::new(&model.model.source);
-    for occurrence in occurrences {
-        let written = occurrence
-            .written
-            .as_ref()
-            .and_then(|(file, span)| location(snapshot, file, *span));
-        if let (Some((file, span)), Some(mut row)) = (&occurrence.written, written.clone()) {
-            row["role"] = json!(occurrence.role);
-            row["dimension"] = json!(occurrence.dimension);
-            row["declaration"] = json!(occurrence.declaration);
-            locations
-                .entry((file.clone(), span.start, span.end))
-                .or_insert(row);
+    // Coverage still checks every accepted use, including definition-only
+    // queries. Coordinate conversion and JSON are limited to selected rows.
+    for (index, occurrence) in occurrences.iter().enumerate() {
+        if crate::engine::control::cancelled() {
+            return Err(rmcp::ErrorData::internal_error(
+                "The request was cancelled",
+                None,
+            ));
+        }
+        let written = occurrence.written.as_ref().filter(|(file, span)| {
+            snapshot
+                .text(Some(file))
+                .and_then(|text| text.get(span.start as usize..span.end as usize))
+                .is_some()
+                && snapshot.line_indexes.contains_key(file)
+        });
+        verified.push(written.is_some());
+        if let Some((file, span)) = written {
+            if references {
+                locations
+                    .entry((file.as_str(), span.start, span.end))
+                    .or_insert(index);
+            }
         } else {
             omitted += 1;
         }
-        if params.occurrences.unwrap_or(false) {
-            expanded.push(json!({"occurrence_id":format!("{}:use:{}:{}",snapshot.revision,occurrence.order,occurrence.role),
-                "expanded_order":occurrence.order,"expanded_range":{
-                    "line":expanded_index.position(&model.model.source,occurrence.span.start).line+1,
-                    "column":expanded_index.position(&model.model.source,occurrence.span.start).character+1,
-                    "end_line":expanded_index.position(&model.model.source,occurrence.span.end).line+1,
-                    "end_column":expanded_index.position(&model.model.source,occurrence.span.end).character+1
-                },"role":occurrence.role,"dimension":occurrence.dimension,"written":written}));
-        }
     }
     let mut result = ToolResult::new(
-        json!({"binding":binding_json(snapshot,&binding),"references":locations.into_values().collect::<Vec<_>>() }),
+        json!({"binding": metadata.unwrap_or_else(|| binding_json(snapshot, &binding))}),
     );
-    if let Some(mut data) = metadata {
-        let sections = &params.output.sections;
-        if !sections.iter().any(|section| section == "assignments") {
-            data.as_object_mut().unwrap().remove("assignment_values");
-        }
-        if !sections.iter().any(|section| section == "metadata") {
-            for key in [
-                "long_name",
-                "tex_name",
-                "written_kind",
-                "timing",
-                "expression",
-            ] {
-                data.as_object_mut().unwrap().remove(key);
-            }
-        }
-        result.data["binding"] = data;
-    }
-    if params.agent_output
-        && !params
-            .output
-            .sections
-            .iter()
-            .any(|section| section == "references")
-    {
-        result.data.as_object_mut().unwrap().remove("references");
-    }
+    let page_state = pages.as_mut().expect("read-only symbol pages");
     if params.occurrences.unwrap_or(false) {
-        result.data["occurrences"] = json!(expanded);
+        let range = page_state.projection_range("occurrences", occurrences.len(), complete);
+        let expanded_index = (!range.is_empty()).then(|| LineIndex::new(&model.model.source));
+        result.data["occurrences"] = json!(range.map(|index| {
+            #[cfg(test)]
+            SYMBOL_OCCURRENCE_PROJECTIONS.with(|count| count.set(count.get() + 1));
+            let occurrence = &occurrences[index];
+            let expanded_index = expanded_index.as_ref().unwrap();
+            let start = expanded_index.position(&model.model.source, occurrence.span.start);
+            let end = expanded_index.position(&model.model.source, occurrence.span.end);
+            let written = verified[index].then(|| {
+                let (file, span) = occurrence.written.as_ref().unwrap();
+                location(snapshot, file, *span).unwrap()
+            });
+            json!({"occurrence_id":format!("{}:use:{}:{}",snapshot.revision,occurrence.order,occurrence.role),
+                "expanded_order":occurrence.order,"expanded_range":{
+                    "line":start.line+1,"column":start.character+1,"end_line":end.line+1,"end_column":end.character+1
+                },"role":occurrence.role,"dimension":occurrence.dimension,"written":written})
+        }).collect::<Vec<_>>());
+    }
+    if references {
+        let range = page_state.projection_range("references", locations.len(), complete);
+        result.data["references"] = json!(
+            locations
+                .values()
+                .skip(range.start)
+                .take(range.len())
+                .map(|index| {
+                    #[cfg(test)]
+                    SYMBOL_REFERENCE_PROJECTIONS.with(|count| count.set(count.get() + 1));
+                    let occurrence = &occurrences[*index];
+                    let (file, span) = occurrence.written.as_ref().unwrap();
+                    let mut row = location(snapshot, file, *span).unwrap();
+                    row["role"] = json!(occurrence.role);
+                    row["dimension"] = json!(occurrence.dimension);
+                    row["declaration"] = json!(occurrence.declaration);
+                    row
+                })
+                .collect::<Vec<_>>()
+        );
     }
     if omitted > 0 {
         result.cause("partial","UNVERIFIED_TARGET",format!("{omitted} accepted occurrences have no verified written location. Their source targets were omitted."));
     }
+    *projected = pages;
     Ok(result)
 }
 
@@ -2002,6 +2081,85 @@ mod tests {
                 "{selector}"
             );
         }
+    }
+
+    #[test]
+    fn symbol_sections_and_pages_project_only_returned_uses() {
+        // Guards full reference/occurrence JSON construction for a small page
+        // or a definition-only query, including the shared collection order.
+        for extra in [
+            json!({"sections":["definition"]}),
+            json!({"sections":["references"],"page_size":2}),
+            json!({"sections":["references"],"occurrences":true,"page_size":2}),
+            json!({"sections":["metadata","references"],"page_size":1}),
+        ] {
+            SYMBOL_REFERENCE_PROJECTIONS.with(|count| count.set(0));
+            SYMBOL_OCCURRENCE_PROJECTIONS.with(|count| count.set(0));
+            let mut args =
+                json!({"source":projection_source(),"symbol":{"kind":"name","name":"y"}});
+            args.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let result = super::super::canonical::dispatch(
+                "dynare_symbol_info",
+                args,
+                RequestControl::default(),
+            )
+            .unwrap()
+            .structured_content
+            .unwrap();
+            let count = |name: &str| result["data"][name].as_array().map_or(0, Vec::len);
+            assert_eq!(
+                SYMBOL_REFERENCE_PROJECTIONS.with(std::cell::Cell::get),
+                count("references"),
+                "{extra}"
+            );
+            assert_eq!(
+                SYMBOL_OCCURRENCE_PROJECTIONS.with(std::cell::Cell::get),
+                count("occurrences"),
+                "{extra}"
+            );
+            if extra["sections"] == json!(["definition"]) {
+                assert!(result["data"].get("references").is_none());
+                assert!(result["data"]["binding"].get("timing").is_none());
+            }
+            if extra["occurrences"] == true
+                || extra["sections"] == json!(["metadata", "references"])
+            {
+                assert_eq!(
+                    count("references"),
+                    0,
+                    "an earlier collection must consume the row allowance"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn equation_scopes_share_fact_collection() {
+        // Guards redoing final-type, timing and local analysis for each scope.
+        let args = json!({"source":projection_source(),"page_size":1});
+        let mut snapshot = super::super::source::resolve_source(
+            serde_json::from_value(projection_source()).unwrap(),
+            None,
+            &RequestControl::default(),
+        )
+        .unwrap();
+        let params = Params {
+            agent_output: true,
+            output: ResultOptions {
+                page_size: Some(1),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        crate::engine::analysis::equations::EQUATION_FACT_BUILDS.with(|count| count.set(0));
+        let result = equation_query(&mut snapshot, &params, &args, &mut None).unwrap();
+        assert_eq!(result.data["equations"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            crate::engine::analysis::equations::EQUATION_FACT_BUILDS.with(std::cell::Cell::get),
+            1
+        );
     }
 
     #[test]

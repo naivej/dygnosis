@@ -27,8 +27,14 @@ pub use source::{
 use crate::engine::comparison::ModelDiff;
 use crate::engine::language::model::Model;
 
-pub(crate) fn populate(before: &Model, after: &Model, diff: &mut ModelDiff) {
-    fields::populate(before, after, diff);
+pub(crate) fn populate(
+    before: &Model,
+    after: &Model,
+    values_before: &crate::engine::analysis::model_info::AssignedNumbers<'_>,
+    values_after: &crate::engine::analysis::model_info::AssignedNumbers<'_>,
+    diff: &mut ModelDiff,
+) {
+    fields::populate(before, after, values_before, values_after, diff);
     equations::populate(before, after, diff);
     let mut claims = occurrences::TokenClaims::with_expression_budget(
         diff.semantic.budgets.serialized_output_bytes,

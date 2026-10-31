@@ -1,18 +1,24 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::engine::analysis::model_info::assigned_number;
+use crate::engine::analysis::model_info::AssignedNumbers;
 use crate::engine::analysis::timing::TimingAnalysis;
 use crate::engine::comparison::{
-    ModelDiff, ShockSetting, final_symbol_declarations, last_assignment, normalize_equation,
-    normalize_expr, parameter_value_changed,
+    ModelDiff, ShockSetting, final_symbol_declarations, normalize_equation, normalize_expr,
+    parameter_value_changed,
 };
 use crate::engine::language::model::{Decl, Model};
 
 use super::schema::*;
 
-pub(super) fn populate(before: &Model, after: &Model, diff: &mut ModelDiff) {
-    parameters(before, after, diff);
-    symbols(before, after, diff);
+pub(super) fn populate(
+    before: &Model,
+    after: &Model,
+    values_before: &AssignedNumbers<'_>,
+    values_after: &AssignedNumbers<'_>,
+    diff: &mut ModelDiff,
+) {
+    parameters(before, after, values_before, values_after, diff);
+    symbols(before, after, values_before, values_after, diff);
     equation_fields(diff);
     shocks(before, after, diff);
     diff.coverage.families = vec![
@@ -79,20 +85,27 @@ fn coverage(family: SemanticFamily, fields: &[&str]) -> FamilyCoverage {
     }
 }
 
-fn assignment_expression(model: &Model, name: &str) -> FieldState {
-    last_assignment(model, name)
+fn assignment_expression(model: &Model, values: &AssignedNumbers<'_>, name: &str) -> FieldState {
+    values
+        .assignment(model, name)
         .map(|assignment| FieldState::text(&assignment.expression))
         .unwrap_or_else(FieldState::absent)
 }
 
-fn evaluated_value(model: &Model, name: &str) -> FieldState {
-    if last_assignment(model, name).is_none() {
+fn evaluated_value(model: &Model, values: &AssignedNumbers<'_>, name: &str) -> FieldState {
+    if values.assignment(model, name).is_none() {
         return FieldState::absent();
     }
-    FieldState::number(assigned_number(model, name))
+    FieldState::number(values.value(model, name))
 }
 
-fn parameters(before: &Model, after: &Model, diff: &mut ModelDiff) {
+fn parameters(
+    before: &Model,
+    after: &Model,
+    values_before: &AssignedNumbers<'_>,
+    values_after: &AssignedNumbers<'_>,
+    diff: &mut ModelDiff,
+) {
     for (index, change) in diff.changed_parameter_values.iter().enumerate() {
         let mut row = SemanticRow::new(
             SemanticFamily::Parameters,
@@ -100,21 +113,21 @@ fn parameters(before: &Model, after: &Model, diff: &mut ModelDiff) {
             &change.name,
         );
         row.pointer = format!("/changed_parameter_values/{index}");
-        row.before = Some(parameter_side(before, &change.name));
-        row.after = Some(parameter_side(after, &change.name));
+        row.before = Some(parameter_side(before, values_before, &change.name));
+        row.after = Some(parameter_side(after, values_after, &change.name));
         let mut expression = FieldChange::new(
             "expression",
             "Assigned expression",
-            assignment_expression(before, &change.name),
-            assignment_expression(after, &change.name),
+            assignment_expression(before, values_before, &change.name),
+            assignment_expression(after, values_after, &change.name),
         );
         expression.changed = normalize_expr(&change.old_raw) != normalize_expr(&change.new_raw)
             || expression.before.state != expression.after.state;
         let mut value = FieldChange::new(
             "evaluated_value",
             "Evaluated value",
-            evaluated_value(before, &change.name),
-            evaluated_value(after, &change.name),
+            evaluated_value(before, values_before, &change.name),
+            evaluated_value(after, values_after, &change.name),
         );
         value.changed = parameter_value_changed(change.old_value, change.new_value)
             || value.before.state != value.after.state;
@@ -135,22 +148,24 @@ fn parameters(before: &Model, after: &Model, diff: &mut ModelDiff) {
     }
 }
 
-fn parameter_side(model: &Model, name: &str) -> RowSide {
+fn parameter_side(model: &Model, values: &AssignedNumbers<'_>, name: &str) -> RowSide {
     let mut side = RowSide::named(name, ComparisonScope::global());
-    side.provenance = last_assignment(model, name).map(|assignment| OccurrenceProvenance {
-        span: assignment.span,
-        parse_order: Some(assignment.active_tokens.start),
-        equation_id: None,
-        statement_id: model
-            .statements
-            .iter()
-            .find(|statement| {
-                !assignment.active_tokens.is_empty()
-                    && statement.token_range.start <= assignment.active_tokens.start
-                    && assignment.active_tokens.end <= statement.token_range.end
-            })
-            .map(|statement| statement.id),
-    });
+    side.provenance = values
+        .assignment(model, name)
+        .map(|assignment| OccurrenceProvenance {
+            span: assignment.span,
+            parse_order: Some(assignment.active_tokens.start),
+            equation_id: None,
+            statement_id: model
+                .statements
+                .iter()
+                .find(|statement| {
+                    !assignment.active_tokens.is_empty()
+                        && statement.token_range.start <= assignment.active_tokens.start
+                        && assignment.active_tokens.end <= statement.token_range.end
+                })
+                .map(|statement| statement.id),
+        });
     side
 }
 
@@ -216,7 +231,13 @@ fn symbol_values(
     ])
 }
 
-fn symbols(before: &Model, after: &Model, diff: &mut ModelDiff) {
+fn symbols(
+    before: &Model,
+    after: &Model,
+    values_before: &AssignedNumbers<'_>,
+    values_after: &AssignedNumbers<'_>,
+    diff: &mut ModelDiff,
+) {
     let old_timing = TimingAnalysis::new(before);
     let new_timing = TimingAnalysis::new(after);
     let old = final_symbol_declarations(before);
@@ -285,12 +306,12 @@ fn symbols(before: &Model, after: &Model, diff: &mut ModelDiff) {
                     "expression",
                     "Assigned expression",
                     if old_is_parameter {
-                        assignment_expression(before, name)
+                        assignment_expression(before, values_before, name)
                     } else {
                         FieldState::absent()
                     },
                     if new_is_parameter {
-                        assignment_expression(after, name)
+                        assignment_expression(after, values_after, name)
                     } else {
                         FieldState::absent()
                     },
@@ -299,12 +320,12 @@ fn symbols(before: &Model, after: &Model, diff: &mut ModelDiff) {
                     "evaluated_value",
                     "Evaluated value",
                     if old_is_parameter {
-                        evaluated_value(before, name)
+                        evaluated_value(before, values_before, name)
                     } else {
                         FieldState::absent()
                     },
                     if new_is_parameter {
-                        evaluated_value(after, name)
+                        evaluated_value(after, values_after, name)
                     } else {
                         FieldState::absent()
                     },

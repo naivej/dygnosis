@@ -326,11 +326,7 @@ fn explain_calls_them_writing_preferences() {
         let entry = explain(code).unwrap();
         assert_eq!(entry.kind, ExplainKind::Added);
         assert!(entry.body.contains("writing preference"));
-        assert!(
-            entry
-                .body
-                .contains("does not mean Dynare will refuse the model")
-        );
+        assert!(entry.body.contains("Dynare does not require it"));
     }
 }
 

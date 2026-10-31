@@ -98,7 +98,7 @@ impl Refusal {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct LocalIdentity {
     name: Name,
     dimension: Option<Name>,
@@ -180,7 +180,7 @@ pub(crate) struct Rename {
 pub(crate) struct SemanticModel {
     pub root: String,
     pub revision: String,
-    pub model: Model,
+    pub model: Arc<Model>,
     pub complete: bool,
     pub sources: HashMap<String, String>,
     source_documents: BTreeMap<String, SourceDocument>,
@@ -190,6 +190,7 @@ pub(crate) struct SemanticModel {
     mappings: HashMap<Span, (String, Span)>,
     tags: Vec<tags::Reference>,
     bindings: OnceLock<Vec<Binding>>,
+    ordinary_declarations: OnceLock<ordinary::DeclarationFacts>,
     ordinary_sites: OnceLock<HashMap<Name, Vec<Reference>>>,
     accepted_calls: HashMap<ExprId, (usize, Span)>,
     call_sites: OnceLock<HashMap<String, Vec<Reference>>>,
@@ -259,7 +260,7 @@ impl SemanticModel {
         revision: String,
     ) -> Result<Self, Refusal> {
         check_cancelled()?;
-        let model = workspace.get_effective_model(root).ok_or(SOURCE)?.clone();
+        let model = workspace.effective_model_snapshot(root).ok_or(SOURCE)?;
         let includes_complete = workspace.includes_complete(root);
         let report = workspace.expand_report(root).ok_or(SOURCE)?;
         let complete = includes_complete && report.complete && report.model_map.complete;
@@ -343,6 +344,7 @@ impl SemanticModel {
             mappings,
             tags: Vec::new(),
             bindings: OnceLock::new(),
+            ordinary_declarations: OnceLock::new(),
             ordinary_sites: OnceLock::new(),
             accepted_calls,
             call_sites: OnceLock::new(),
@@ -442,17 +444,24 @@ impl SemanticModel {
         self.bindings.get().unwrap()
     }
 
+    fn ordinary_declarations(&self) -> Option<&ordinary::DeclarationFacts> {
+        if crate::engine::control::cancelled() {
+            return None;
+        }
+        if self.ordinary_declarations.get().is_none() {
+            let facts = ordinary::DeclarationFacts::collect(self);
+            check_cancelled().ok()?;
+            let _ = self.ordinary_declarations.set(facts);
+        }
+        self.ordinary_declarations.get()
+    }
+
     fn collect_bindings(&self) -> Vec<Binding> {
         let mut result = Vec::new();
         let mut names = HashSet::new();
-        let kinds: HashMap<_, _> = self
-            .model
-            .symbol_type_events
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| self.accepted_events.contains(index))
-            .map(|(_, event)| (event.name, event.kind))
-            .collect();
+        let Some(declarations) = self.ordinary_declarations() else {
+            return result;
+        };
         for (index, event) in self.model.symbol_type_events.iter().enumerate() {
             if !self.accepted_events.contains(&index) {
                 continue;
@@ -462,14 +471,18 @@ impl SemanticModel {
             }
             let name = self.model.name(event.name);
             if !names.insert(name.to_owned())
-                || kinds
-                    .get(&event.name)
+                || declarations
+                    .accepted_kind(event.name)
                     .is_some_and(|kind| kind.as_str() == "model_local_variable")
             {
                 continue;
             }
-            let kind = kinds.get(&event.name).unwrap_or(&event.kind).as_str();
-            let declaration = ordinary::declaration(self, name)
+            let kind = declarations
+                .accepted_kind(event.name)
+                .unwrap_or(event.kind)
+                .as_str();
+            let declaration = declarations
+                .declaration(self, name)
                 .ok()
                 .map(|(target, _)| target)
                 .filter(|(file, span)| {
@@ -483,13 +496,9 @@ impl SemanticModel {
                 name: name.into(),
                 kind: kind.into(),
                 namespace: None,
-                dimension: self
-                    .model
-                    .written_declarations
-                    .iter()
-                    .find(|row| row.declaration.name == event.name)
-                    .and_then(|row| row.declaration.heterogeneity.as_ref())
-                    .map(|(dimension, _)| self.model.name(*dimension).into()),
+                dimension: declarations
+                    .dimension(event.name)
+                    .map(|dimension| self.model.name(dimension).into()),
                 declaration,
                 definition: None,
                 identity: Identity::Ordinary,
@@ -512,47 +521,49 @@ impl SemanticModel {
                 });
             }
         }
+        let mut local_keys = HashSet::new();
+        let mut defined_names = HashSet::new();
         for (id, definition) in self.facts.definitions.iter().enumerate() {
             if crate::engine::control::cancelled() {
                 break;
             }
-            result.push(self.local_binding(LocalIdentity {
+            defined_names.insert(definition.name);
+            let key = LocalIdentity {
                 name: definition.name,
                 dimension: definition.dimension,
                 declaration: definition.declaration,
                 definition: Some(id),
-            }));
+            };
+            local_keys.insert(key);
+            result.push(self.local_binding(key));
         }
         for (id, declaration) in self.facts.declarations.iter().enumerate() {
             if crate::engine::control::cancelled() {
                 break;
             }
-            if !self
-                .facts
-                .definitions
-                .iter()
-                .any(|definition| definition.name == declaration.name)
-            {
-                result.push(self.local_binding(LocalIdentity {
+            if !defined_names.contains(&declaration.name) {
+                let key = LocalIdentity {
                     name: declaration.name,
                     dimension: None,
                     declaration: Some(id),
                     definition: None,
-                }));
+                };
+                local_keys.insert(key);
+                result.push(self.local_binding(key));
             }
         }
         for usage in &self.facts.uses {
             if crate::engine::control::cancelled() {
                 break;
             }
-            let binding = self.local_binding(LocalIdentity {
+            let key = LocalIdentity {
                 name: usage.name,
                 dimension: usage.dimension,
                 declaration: usage.declaration,
                 definition: usage.definition,
-            });
-            if !result.contains(&binding) {
-                result.push(binding);
+            };
+            if local_keys.insert(key) {
+                result.push(self.local_binding(key));
             }
         }
         // Calls are retained expression facts, including valid built-in names.
@@ -573,7 +584,7 @@ impl SemanticModel {
             }
             let name = match expr.kind {
                 crate::engine::language::expr::ExprKind::Call { callee, .. }
-                    if !kinds.contains_key(&callee) =>
+                    if declarations.accepted_kind(callee).is_none() =>
                 {
                     Some(self.model.name(callee))
                 }
