@@ -24,7 +24,7 @@ function buildEngine(root = path.resolve(__dirname, '..'), { release = false, ta
   try {
     output = childProcess.execFileSync('cargo', args, {
       cwd: root, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true,
-      timeout: 20 * 60 * 1000, maxBuffer: 32 * 1024 * 1024,
+      timeout: (release ? 40 : 20) * 60 * 1000, maxBuffer: 32 * 1024 * 1024,
     });
   } catch (error) {
     throw new Error(`Could not build the workspace engine: ${error.message}`, { cause: error });
