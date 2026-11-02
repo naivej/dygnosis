@@ -15,9 +15,9 @@ use serde_json::{Value, json};
 
 use crate::engine::comparison::compare_snapshots::{
     CapturedSnapshot, GitSnapshotInput, MAX_SNAPSHOT_FILES, MAX_SNAPSHOT_SOURCE_BYTES,
-    ManifestEntry, SnapshotCapture, SnapshotCoordinates, SnapshotFailure, SourceFact,
-    capture_git_snapshot_with_limit, capture_working_snapshot_configured,
-    compare_captured_snapshots, tree_path,
+    ManifestEntry, SnapshotCapture, SnapshotCoordinates, SnapshotFailure, SnapshotLookup,
+    SourceFact, capture_git_snapshot_with_limit, capture_working_snapshot_configured,
+    compare_captured_snapshots, tree_parent, tree_path,
 };
 use crate::engine::workspace::Workspace;
 
@@ -273,6 +273,16 @@ impl Acquisition<'_> {
     ) -> Result<CapturedSnapshot, SnapshotFailure> {
         self.check()?;
         let root_file = selector.root_file();
+        let selector_key = analysis
+            .and_then(|analysis| analysis.equation_selection.as_ref())
+            .and_then(|selection| selection.file.as_deref())
+            .and_then(|file| {
+                SnapshotLookup {
+                    repository_path: self.repository.to_string_lossy().replace('\\', "/"),
+                    ..Default::default()
+                }
+                .path(tree_parent(root_file), file)
+            });
         let repository_uri = tower_lsp::lsp_types::Url::from_directory_path(&self.repository)
             .map_err(|_| {
                 SnapshotFailure::new(
@@ -354,8 +364,21 @@ impl Acquisition<'_> {
                                             Some(key),
                                         ));
                                     }
-                                    SourceFact::Text {
-                                        text: decode_source(bytes),
+                                    if selector_key.as_deref() == Some(key.as_str()) {
+                                        match String::from_utf8(bytes) {
+                                            Ok(text) => SourceFact::Text { text },
+                                            Err(error) => SourceFact::Failure {
+                                                code: "ANALYSIS_SELECTOR_FILE_INVALID".into(),
+                                                message: format!(
+                                                    "Equation selector file '{key}' is not valid UTF-8 at byte {}. Save it as UTF-8 without a BOM.",
+                                                    error.utf8_error().valid_up_to()
+                                                ),
+                                            },
+                                        }
+                                    } else {
+                                        SourceFact::Text {
+                                            text: decode_source(bytes),
+                                        }
                                     }
                                 }
                                 Err(failure)
@@ -942,6 +965,58 @@ mod tests {
     }
 
     const ROOT: &str = "var y;\nmodel;\n@#include \"equations.inc\"\nend;\n";
+
+    #[test]
+    fn historical_selector_preserves_bytes_and_refuses_invalid_utf8() {
+        // Guards Latin-1 fallback or newline conversion changing selector evidence.
+        use sha2::{Digest, Sha256};
+        let repo = TestRepository::new();
+        repo.write(
+            "models/main.mod",
+            "var y z;model;[name='policy'] y=0;[name='base'] z=0;end;",
+        );
+        let bytes = b"policy\r\n";
+        std::fs::write(repo.0.join("models/selection.txt"), bytes).unwrap();
+        let valid = repo.commit();
+        let analysis: crate::engine::analysis_configuration::AnalysisConfiguration =
+            serde_json::from_value(
+                json!({"equation_selection":{"mode":"exclude","file":"selection.txt"}}),
+            )
+            .unwrap();
+        let compare = |reference: &str| {
+            compare_repository(
+                RepositoryComparison {
+                    repository_path: repo.0.to_string_lossy().into_owned(),
+                    before: git("models/main.mod", reference),
+                    after: git("models/main.mod", reference),
+                    search_paths: vec![],
+                    analysis_before: Some(analysis.clone()),
+                    analysis_after: Some(analysis.clone()),
+                },
+                &|| false,
+            )
+        };
+        let result = compare(&valid);
+        assert_eq!(result["state"], "result", "{result}");
+        let receipt = &result["inputs"]["before"]["analysis"]["selector_file"];
+        assert_eq!(receipt["file"], "models/selection.txt");
+        assert_eq!(
+            receipt["byte_sha256"],
+            format!("{:x}", Sha256::digest(bytes))
+        );
+        assert!(
+            result["source_changes"]["files"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::write(repo.0.join("models/selection.txt"), [0xff, b'\n']).unwrap();
+        let invalid = repo.commit();
+        let refused = compare(&invalid);
+        assert_eq!(refused["state"], "failure", "{refused}");
+        assert_eq!(refused["code"], "ANALYSIS_SELECTOR_FILE_INVALID");
+        assert_eq!(refused["file_key"], "models/selection.txt");
+    }
 
     #[test]
     fn incomplete_repository_pair_retains_both_analysis_summaries_without_counts() {

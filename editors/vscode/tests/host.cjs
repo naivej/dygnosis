@@ -559,6 +559,9 @@ exports.run = async function run() {
     evidence.artifacts_before = await historyArtifacts();
     const extension = vscode.extensions.getExtension("CoconutWater.dygnosis");
     assert.ok(extension);
+    evidence.extension_path = extension.extensionPath;
+    evidence.extension_version = extension.packageJSON.version;
+    evidence.extension_entrypoint_sha256 = createHash("sha256").update(await fs.readFile(path.resolve(extension.extensionPath, extension.packageJSON.main))).digest("hex");
     const service = await extension.activate();
     assert.ok(["all", "mcp", "semantic", "folding", "presentation", "rename", "workspace", "syntax", "lifecycle", "analysis", "help"].includes(scope), "Unknown native host scope");
     if (scope === "help") {

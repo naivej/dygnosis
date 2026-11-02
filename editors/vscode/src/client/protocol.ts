@@ -35,7 +35,8 @@ export type AnalysisOverride =
   { kind: "definition"; target: GuardedTarget; expression: string } |
   { kind: "skip_definition"; target: GuardedTarget } |
   { kind: "branch"; target: GuardedTarget; branch_id: string | null };
-export interface EquationSelection { mode: "include" | "exclude"; tag?: string; values: string[] }
+export interface EquationSelection { mode: "include" | "exclude"; tag?: string; values?: string[]; file?: string }
+export interface SelectorFileReceipt { file: string; tag: string; value_count: number; byte_sha256: string }
 export interface AnalysisConfiguration { name?: string; defines?: { name: string; expression: string }[]; overrides?: AnalysisOverride[]; equation_selection?: EquationSelection }
 export interface OverrideReceipt {
   operation: AnalysisOverride; name?: string | null; application: "applied" | "not_reached" | "unknown";
@@ -48,6 +49,7 @@ export interface AnalysisMetadata {
   selection: { configuration_id: string; name: string | null; preview: boolean; invocation_scope: string };
   configuration: AnalysisConfiguration; selection_generation: number; include_paths: string[] | null;
   macro_complete: boolean | null; model_complete: boolean | null; overrides: OverrideReceipt[];
+  selector_file?: SelectorFileReceipt;
   override_names?: (string | null)[];
   override_branch_labels?: (string | null)[];
   cause?: { code: string; message: string; target?: GuardedTarget } | null;
@@ -130,8 +132,10 @@ export function analysisConfiguration(value: unknown): value is AnalysisConfigur
     (value.equation_selection === undefined || record(value.equation_selection) &&
       ["include", "exclude"].includes(String(value.equation_selection.mode)) &&
       (value.equation_selection.tag === undefined || typeof value.equation_selection.tag === "string" && /^[A-Za-z_]\w*$/.test(value.equation_selection.tag)) &&
-      Array.isArray(value.equation_selection.values) && value.equation_selection.values.length > 0 &&
-      value.equation_selection.values.every(item => typeof item === "string" && item.trim().length > 0));
+      ((Array.isArray(value.equation_selection.values) && value.equation_selection.values.length > 0 &&
+        value.equation_selection.values.every(item => typeof item === "string" && item.trim().length > 0) && value.equation_selection.file === undefined) ||
+       (typeof value.equation_selection.file === "string" && value.equation_selection.file.trim().length > 0 &&
+        value.equation_selection.values === undefined && value.equation_selection.tag === undefined)));
 }
 export function presetBinding(value: unknown): value is PresetBinding {
   return record(value) && natural(value.operation_index) && nullableString(value.file) &&
@@ -154,6 +158,8 @@ export function parseAnalysisMetadata(value: unknown): AnalysisMetadata {
         value.override_names.length === (value.configuration.overrides?.length ?? 0)) ||
       !(value.override_branch_labels === undefined || Array.isArray(value.override_branch_labels) && value.override_branch_labels.every(nullableString) &&
         value.override_branch_labels.length === (value.configuration.overrides?.length ?? 0)) ||
+      !(value.selector_file === undefined || record(value.selector_file) && typeof value.selector_file.file === "string" &&
+        typeof value.selector_file.tag === "string" && natural(value.selector_file.value_count) && /^[0-9a-f]{64}$/.test(String(value.selector_file.byte_sha256))) ||
       value.state === "stale" && (!record(value.cause) || typeof value.cause.code !== "string" || typeof value.cause.message !== "string" ||
         value.cause.target !== undefined && !guardedTarget(value.cause.target))) {
     throw new Error("Unsupported or invalid analysis configuration. Use the bundled engine or update dynare.serverPath.");

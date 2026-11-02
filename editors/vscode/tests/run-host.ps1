@@ -3,6 +3,12 @@ $ErrorActionPreference = 'Stop'
 $electronRunAsNode = $env:ELECTRON_RUN_AS_NODE
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 $extensionRoot = Split-Path -Parent $PSScriptRoot
+$testedExtension = $extensionRoot
+if ($env:DYGNOSIS_HOST_EXTENSION_PATH) {
+    $testedExtension = (Resolve-Path -LiteralPath $env:DYGNOSIS_HOST_EXTENSION_PATH).Path
+    $testedManifest = Get-Content -Raw -LiteralPath (Join-Path $testedExtension 'package.json') | ConvertFrom-Json
+    if ($testedManifest.name -ne 'dygnosis' -or $testedManifest.publisher -ne 'coconutwater') { throw 'The tested extension must be a Dygnosis package.' }
+}
 $scope = $env:DYGNOSIS_HOST_SCOPE
 if ($scope -and $scope -notin @('all', 'mcp', 'semantic', 'folding', 'presentation', 'rename', 'workspace', 'syntax', 'lifecycle', 'analysis', 'help')) { throw 'Unknown DYGNOSIS_HOST_SCOPE.' }
 $testRoot = Join-Path $extensionRoot '.test-data'
@@ -53,7 +59,7 @@ $env:DYGNOSIS_HOST_RESULT = Join-Path $hostRoot 'result.json'
 $env:DYGNOSIS_HOST_RUN_ID = $runId
 $arguments = @(
     ('"' + $workspaceTarget + '"'),
-    ('--extensionDevelopmentPath="' + $extensionRoot + '"'),
+    ('--extensionDevelopmentPath="' + $testedExtension + '"'),
     ('--extensionTestsPath="' + (Join-Path $PSScriptRoot 'host.cjs') + '"'),
     ('--user-data-dir="' + (Join-Path $hostRoot 'profile') + '"'),
     ('--extensions-dir="' + (Join-Path $hostRoot 'extensions') + '"'),

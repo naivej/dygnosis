@@ -41,6 +41,25 @@ function service(folder, limits) {
   };
   return { sources: new GitSources(api, fileUri, limits), repository: repositories[0] };
 }
+
+test("selector captures preserve UTF-8 bytes and never reuse permissive model decoding", async t => {
+  // Guards raw-byte receipt changes and invalid UTF-8 accepted from the blob cache.
+  const { folder, sources, repository: repo } = await fixture(t);
+  await fs.writeFile(path.join(folder, "selectors.txt"), "name=\r\npolicy\r\nother\r");
+  await fs.writeFile(path.join(folder, "invalid.txt"), Buffer.from([0xff, 0x0a]));
+  git(folder, "add", "."); git(folder, "commit", "-m", "selector byte fixtures");
+  const commit = await sources.resolve(repo, "HEAD");
+  const permissive = await sources.capture(repo, commit, "selectors.txt");
+  assert.equal(permissive.source("selectors.txt").text, "name=\r\npolicy\r\nother\n");
+  const strict = await sources.capture(repo, commit, "selectors.txt", undefined, "selectors.txt");
+  assert.equal(strict.source("selectors.txt").text, "name=\r\npolicy\r\nother\r");
+  const model = await sources.capture(repo, commit, "invalid.txt");
+  assert.equal(model.source("invalid.txt").kind, "text");
+  const invalid = await sources.capture(repo, commit, "main.mod", undefined, "invalid.txt");
+  await invalid.load(["invalid.txt"]);
+  assert.equal(invalid.source("invalid.txt").kind, "failure");
+  assert.equal(invalid.source("invalid.txt").code, "ANALYSIS_SELECTOR_FILE_INVALID");
+});
 async function fixture(t) {
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), "dygnosis-git-source-"));
   t.after(async () => {

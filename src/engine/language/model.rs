@@ -2803,14 +2803,6 @@ impl Model {
             .map(|event| event.kind.as_str())
     }
 
-    /// `name` is a parameter at byte `at`, falling back to the written list.
-    pub fn parameter_at(&self, name: Name, at: u32) -> bool {
-        match self.symbol_kind_before(name, at) {
-            Some(kind) => kind == "parameters",
-            None => self.parameters.iter().any(|decl| decl.name == name),
-        }
-    }
-
     /// Aggregate endogenous declarations by final type, first declaration per
     /// name. Declarations stay on their written list, so a `change_type(var)`
     /// parameter or exogenous name is endogenous here and a retyped `var` is not.

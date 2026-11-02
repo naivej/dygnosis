@@ -549,6 +549,37 @@ pub(crate) fn capture_git_snapshot_with_limit(
         needed.insert(input.root_file.clone());
     }
     if let Some(analysis) = &input.analysis {
+        if let Some(selection) = &analysis.equation_selection
+            && let Some(file) = &selection.file
+        {
+            let Some(path) = tree_path(tree_parent(&input.root_file), file) else {
+                return SnapshotCapture::Failure(SnapshotFailure::new(
+                    "UNSUPPORTED_SOURCE",
+                    "The historical selector file is outside the selected tree",
+                    Some(file.clone()),
+                ));
+            };
+            let Some(entry) = input.manifest.get(&path) else {
+                return SnapshotCapture::Failure(SnapshotFailure::new(
+                    "ANALYSIS_SELECTOR_FILE_MISSING",
+                    "The equation selector file is absent from the selected historical tree",
+                    Some(path),
+                ));
+            };
+            if !matches!(entry.mode.as_str(), "100644" | "100755") {
+                return SnapshotCapture::Failure(SnapshotFailure::new(
+                    "UNSUPPORTED_SOURCE",
+                    "Historical selector files cannot be symlinks or gitlinks",
+                    Some(path),
+                ));
+            }
+            if let Some(SourceFact::Failure { code, message }) = input.sources.get(&path) {
+                return SnapshotCapture::Failure(SnapshotFailure::new(code, message, Some(path)));
+            }
+            if !input.sources.contains_key(&path) {
+                needed.insert(path);
+            }
+        }
         for operation in &analysis.overrides {
             let Some(file) = &operation.target().file else {
                 return SnapshotCapture::Failure(SnapshotFailure::new(
@@ -1240,6 +1271,7 @@ mod source_identity_tests {
                 macro_complete: true,
                 model_complete: true,
                 overrides: Vec::new(),
+                selector_file: None,
             }),
             input_id: if historical { "old" } else { "new" }.into(),
             revision: String::new(),

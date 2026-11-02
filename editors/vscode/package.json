@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.42",
+  "version": "0.11.43",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -704,10 +704,13 @@
                     },
                     "equation_selection": {
                       "type": "object",
-                      "description": "Select equations by explicit tag values for analysis.",
+                      "description": "Select equations by tag values or a selector file. Relative file paths start at the model folder. Save selector edits to update analysis.",
                       "required": [
-                        "mode",
-                        "values"
+                        "mode"
+                      ],
+                      "oneOf": [
+                        { "required": ["values"], "not": { "required": ["file"] } },
+                        { "required": ["file"], "not": { "anyOf": [{ "required": ["values"] }, { "required": ["tag"] }] } }
                       ],
                       "additionalProperties": false,
                       "properties": {
@@ -720,7 +723,12 @@
                         "tag": {
                           "type": "string",
                           "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
-                          "default": "name"
+                          "description": "Tag for explicit values; defaults to name. A selector file uses its tag header or defaults to name."
+                        },
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Saved UTF-8 file without a BOM, with one tag value per nonempty line and an optional first tag= header. Use file alone, without tag or values."
                         },
                         "values": {
                           "type": "array",

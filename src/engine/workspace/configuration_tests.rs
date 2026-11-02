@@ -91,6 +91,70 @@ fn equation_selection_reuses_source_parse_and_restores_guarded_results() {
 }
 
 #[test]
+fn supplied_selector_uses_alias_safe_map_path_without_parsing_as_dynare() {
+    // Guards backslash/dot supplied-key resolution, no host-disk fallback, and
+    // selector text staying outside the Dynare parser and source inventory.
+    let mut files = BTreeMap::from([
+        (
+            r"Models\./main.mod".to_owned(),
+            "var a b; model; [name='a'] a=a(-1); [name='b'] b=b(-1); end;".to_owned(),
+        ),
+        ("Models/policy.txt".to_owned(), "name=\na\n".to_owned()),
+    ]);
+    let lazy = HashSet::from([Workspace::supplied_selector_key(
+        r"Models\./main.mod",
+        "policy.txt",
+    )]);
+    let mut ws = Workspace::overlay_documents_with_lazy_files(
+        &files,
+        None,
+        MacroWorkLimit::default(),
+        &lazy,
+    );
+    ws.set_root_analysis_configuration(
+        r"Models\./main.mod",
+        serde_json::from_value(serde_json::json!({
+            "equation_selection":{"mode":"include","file":"policy.txt"}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        ws.get_effective_model(r"Models\./main.mod")
+            .unwrap()
+            .equations[0]
+            .name,
+        "a"
+    );
+    assert!(ws.docs["Models/policy.txt"].model.get().is_none());
+    let source = ws
+        .source_structure(r"Models\./main.mod", &SourceStructureQuery::default())
+        .unwrap();
+    assert!(
+        source
+            .files
+            .iter()
+            .all(|file| file.file.as_deref() != Some("Models/policy.txt"))
+    );
+
+    files.remove("Models/policy.txt");
+    let mut absent = Workspace::overlay_documents(&files);
+    assert_eq!(
+        absent
+            .set_root_analysis_configuration(
+                r"Models\./main.mod",
+                serde_json::from_value(serde_json::json!({
+                    "equation_selection":{"mode":"include","file":"policy.txt"}
+                }))
+                .unwrap(),
+            )
+            .unwrap_err()
+            .code,
+        "ANALYSIS_SELECTOR_FILE_MISSING"
+    );
+}
+
+#[test]
 fn equation_selection_keeps_include_origins_and_pretransform_source_text() {
     // Guards selection moving an included equation's source identity or
     // filtering the expansion text instead of only effective membership.

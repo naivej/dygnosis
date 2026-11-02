@@ -273,7 +273,8 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
     };
     let mut arguments = json!({"comparison":{"kind":"repository","repository_path":directory.to_str().unwrap(),
         "before":{"kind":"git", "root_file":"main.mod", "ref":before},
-        "after":{"kind":"git", "root_file":"main.mod", "ref":after}},"macro_work_limit":100000,"detail":"full"});
+        "after":{"kind":"git", "root_file":"main.mod", "ref":after}},"macro_work_limit":100000,"detail":"full",
+        "sections":["structural","semantic","source","source_text","navigation"]});
     let historical = decode(wire.call("dynare_compare_models", arguments.clone()));
     assert_eq!(historical["state"], "result", "{historical}");
     assert_eq!(historical["inputs"]["before"]["commit"], before);
@@ -336,7 +337,7 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
     assert_eq!(failure["code"], "ROOT_NOT_FOUND");
     assert_eq!(failure["side"], "before");
     assert!(failure.get("changed_equations").is_none());
-    let text = decode(wire.call("dynare_compare_models", json!({"comparison":{"kind":"sources","before":{"kind":"text","text":"var y; model; y=1; end;"},"after":{"kind":"text","text":"var y; model; y=2; end;"}},"detail":"full"})));
+    let text = decode(wire.call("dynare_compare_models", json!({"comparison":{"kind":"sources","before":{"kind":"text","text":"var y; model; y=1; end;"},"after":{"kind":"text","text":"var y; model; y=2; end;"}},"detail":"full","sections":["structural","semantic","navigation"]})));
     assert!(text.get("changed_equations").is_some());
     assert!(text.get("inputs").is_none());
     let supplied_root = "@#include \"body\"\n@#include \"empty\"\n";
@@ -344,7 +345,7 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
     let supplied_new = supplied_old.replace("normal_pdf,.5", "normal_pdf,.6");
     let supplied = decode(wire.call("dynare_compare_models", json!({"comparison":{"kind":"sources",
         "before":{"kind":"map","root":"root.mod","files":{"root.mod":supplied_root,"body":supplied_old,"empty":"","unused":"not executed"}},
-        "after":{"kind":"map","root":"root.mod","files":{"root.mod":supplied_root,"body":supplied_new,"empty":"","unused":"not executed"}}},"detail":"full"})));
+        "after":{"kind":"map","root":"root.mod","files":{"root.mod":supplied_root,"body":supplied_new,"empty":"","unused":"not executed"}}},"detail":"full","sections":["semantic","source","source_text","navigation"]})));
     assert_eq!(supplied["sources"]["before"]["empty"], "");
     assert!(supplied["sources"]["before"].get("unused").is_none());
     assert_eq!(
@@ -404,7 +405,7 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
     }
     let mut sibling_arguments = json!({"comparison":{"kind":"repository","repository_path":workspace.to_str().unwrap(),
         "before":{"kind":"working", "root_file":"main.mod"},
-        "after":{"kind":"working", "root_file":"main.mod"}, "search_paths":["../common"]},"detail":"full"});
+        "after":{"kind":"working", "root_file":"main.mod"}, "search_paths":["../common"]},"detail":"full","sections":["structural"]});
     let sibling_saved = decode(wire.call("dynare_compare_models", sibling_arguments.clone()));
     assert_eq!(sibling_saved["state"], "result", "{sibling_saved}");
     assert_eq!(

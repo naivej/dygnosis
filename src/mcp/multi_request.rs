@@ -234,6 +234,13 @@ pub(super) fn dispatch_batch(
     }
     let mut result = ToolResult::new(Value::Null);
     result.limits = discovery_limits;
+    let coverage_for_job = |job: &str, mut coverage: Value| {
+        if configured_mode {
+            coverage["job_id"] = json!(job);
+            coverage["root"] = json!(job_roots.get(job));
+        }
+        coverage
+    };
     let mut reports = Vec::new();
     let mut coverages = Vec::new();
     let mut snapshots: Vec<(usize, SourceSnapshot)> = Vec::new();
@@ -246,7 +253,7 @@ pub(super) fn dispatch_batch(
         control.check().map_err(source_error)?;
         if stop || index >= control.limits.max_roots {
             reports.push(json!({"root":root,"status":"unfinished","diagnostics":[],"failure":"Batch root or source limit reached before this root was checked","code":"WORK_LIMIT"}));
-            coverages.push(json!({"root":root,"complete":false,"reasons":[{"code":"WORK_LIMIT","message":"This root was not checked"}]}));
+            coverages.push(coverage_for_job(root, json!({"root":root,"complete":false,"reasons":[{"code":"WORK_LIMIT","message":"This root was not checked"}]})));
             continue;
         }
         let input = if let Some(input) = explicit_inputs.get(root) {
@@ -254,7 +261,7 @@ pub(super) fn dispatch_batch(
         } else if let Some(files) = &params.files {
             if !files.contains_key(root) {
                 reports.push(json!({"root":root,"status":"failed","diagnostics":[],"failure":"The exact root key is absent from the supplied file map","code":"ROOT_NOT_FOUND"}));
-                coverages.push(json!({"root":root,"complete":false,"reasons":[{"code":"ROOT_NOT_FOUND","message":"The exact root key is absent from the supplied file map"}]}));
+                coverages.push(coverage_for_job(root, json!({"root":root,"complete":false,"reasons":[{"code":"ROOT_NOT_FOUND","message":"The exact root key is absent from the supplied file map"}]})));
                 continue;
             }
             SourceInput::Map {
@@ -311,7 +318,7 @@ pub(super) fn dispatch_batch(
                 {
                     stop = true;
                     reports.push(json!({"root":root,"status":"unfinished","diagnostics":[],"failure":"The request source-byte or checked-file and lookup-candidate limit was reached. Source capture finished for this root; its diagnostic checks were withheld.","code":"SOURCE_LIMIT","completed":["source capture"],"omitted":["diagnostic checks"]}));
-                    coverages.push(json!({"root":root,"complete":false,"reasons":[{"code":"SOURCE_LIMIT","message":"This root was not checked"}]}));
+                    coverages.push(coverage_for_job(root, json!({"root":root,"complete":false,"reasons":[{"code":"SOURCE_LIMIT","message":"This root was not checked"}]})));
                     continue;
                 }
                 bytes += new_bytes;
@@ -327,7 +334,7 @@ pub(super) fn dispatch_batch(
                     snapshot.inputs["job_id"] = json!(root);
                 }
                 result.inputs.push(snapshot.inputs.clone());
-                coverages.push(snapshot.coverage.clone());
+                coverages.push(coverage_for_job(root, snapshot.coverage.clone()));
                 let include_failure=snapshot.workspace.include_records(&snapshot.root).and_then(|records| {
                     if !records.unresolved.is_empty() {Some(("MISSING_INCLUDE","A required include is unresolved; this root has no diagnostic result"))}
                     else {None}
@@ -386,12 +393,18 @@ pub(super) fn dispatch_batch(
             Err(error) if error.invalid_arguments => return Err(invalid(error.message)),
             Err(error) if error.code == "CANCELLED" => return Err(source_error(error)),
             Err(error) => {
+                if configured_mode {
+                    for mut input in error.inputs {
+                        input["job_id"] = json!(root);
+                        result.inputs.push(input);
+                    }
+                }
                 stop |= error.code == "SOURCE_LIMIT" || error.code == "ROOT_LIMIT";
                 if error.code == "INPUT_CHANGED" {
                     result.cause("refused", "INPUT_CHANGED", error.message.clone());
                 }
                 reports.push(json!({"root":root,"status":if stop {"unfinished"} else {"failed"},"diagnostics":[],"failure":error.message,"code":error.code}));
-                coverages.push(json!({"root":root,"complete":false,"reasons":[{"code":error.code,"message":error.message}]}));
+                coverages.push(coverage_for_job(root, json!({"root":root,"complete":false,"reasons":[{"code":error.code,"message":error.message}]})));
             }
         }
     }
@@ -399,7 +412,10 @@ pub(super) fn dispatch_batch(
         control.check().map_err(source_error)?;
         if !snapshot.workspace.input_snapshot_is_current(&snapshot.root) {
             reports[*index] = json!({"root":reports[*index]["root"],"status":"failed","diagnostics":[],"failure":"Inputs changed while checking this batch root; repeat the request","code":"INPUT_CHANGED"});
-            coverages[*index] = json!({"root":reports[*index]["root"],"complete":false,"reasons":[{"code":"INPUT_CHANGED","message":"Inputs changed while checking this batch root"}]});
+            coverages[*index] = coverage_for_job(
+                reports[*index]["root"].as_str().unwrap(),
+                json!({"root":reports[*index]["root"],"complete":false,"reasons":[{"code":"INPUT_CHANGED","message":"Inputs changed while checking this batch root"}]}),
+            );
         }
     }
     let mut summary = json!({"checked":0,"partial":0,"failed":0,"unfinished":0,"errors":0,"warnings":0,"information":0,"discovery_complete":discovery_complete,"diagnostic_totals_complete":coverages.iter().all(|coverage|coverage["complete"]==true)});
@@ -483,7 +499,7 @@ pub(super) fn dispatch_batch(
     }
     result.selection = pages.finish(&params.output);
     if configured_mode {
-        for row in reports.iter_mut().chain(coverages.iter_mut()) {
+        for row in &mut reports {
             let job = row["root"].as_str().unwrap_or("").to_owned();
             row["job_id"] = json!(job);
             row["root"] = json!(job_roots.get(&job));
@@ -996,6 +1012,13 @@ fn failed_comparison_source(
         (side == "after").then_some((error.code, error.message.as_str())),
     );
     let mut result = ToolResult::refused(error.code, error.message);
+    if let Some(before) = before {
+        result.inputs.push(before.inputs.clone());
+    }
+    for mut input in error.inputs {
+        input["side"] = json!(side);
+        result.inputs.push(input);
+    }
     result.data = json!({"analysis_summaries":summaries});
     if matches!(error.code, "SOURCE_LIMIT" | "ROOT_LIMIT") {
         result.limits.push(json!({"code":error.code,"ceilings":ceilings,"side":side,"affected":"comparison input capture","omitted":"comparison model facts and navigation"}));
@@ -1141,203 +1164,18 @@ fn project_comparison(
     revision: &str,
     result: &mut ToolResult,
 ) -> Result<(), String> {
-    let allowed = [
-        "summary",
-        "structural",
-        "semantic",
-        "references",
-        "source",
-        "source_text",
-        "navigation",
-        "markdown",
-    ];
-    if params
-        .output
-        .sections
-        .iter()
-        .any(|section| !allowed.contains(&section.as_str()))
-    {
-        return Err("Unsupported comparison section".into());
-    }
-    let want = |section: &str| {
-        if params.output.sections.is_empty() {
-            params.output.detail == super::result::Detail::Full
-                || matches!(section, "summary" | "semantic" | "navigation")
-        } else {
-            params
-                .output
-                .sections
-                .iter()
-                .any(|selected| selected == section)
-        }
-    };
-    let mut pages = Pages::new(
-        "v3:dynare_compare_models",
-        revision,
+    super::comparison_projection::project(
+        data,
+        super::comparison_projection::Query {
+            output: &params.output,
+            families: &params.families,
+            kinds: &params.kinds,
+        },
         arguments,
-        &params.output,
-    )?;
-    pages.share_budget();
-    let semantic_complete = data["semantic"]["availability"] == "complete";
-    let source_complete = data["source_changes"]["availability"] == "complete";
-    let mut pointer_map = BTreeMap::new();
-    let mut reference_ids = BTreeSet::new();
-    let projected = params.output.page_size.is_some()
-        || !params.families.is_empty()
-        || !params.kinds.is_empty()
-        || !params.output.sections.is_empty()
-        || params.output.detail == super::result::Detail::Compact;
-    let summary = json!({"semantic_rows":semantic_complete.then(||data["semantic"]["rows"].as_array().map(Vec::len)).flatten(),"available_semantic_rows":data["semantic"]["rows"].as_array().map(Vec::len),"source_files":source_complete.then(||data["source_changes"]["files"].as_array().map(Vec::len)).flatten(),"available_source_files":data["source_changes"]["files"].as_array().map(Vec::len),"semantic_availability":data["semantic"]["availability"],"source_availability":data["source_changes"]["availability"]});
-    if let Some(rows) = data["semantic"]["rows"].as_array_mut() {
-        rows.retain(|row| {
-            params.families.is_empty()
-                || params
-                    .families
-                    .iter()
-                    .any(|family| row["family"] == *family)
-        });
-        rows.retain(|row| {
-            params.kinds.is_empty() || params.kinds.iter().any(|kind| row["change"] == *kind)
-        });
-        if want("semantic") {
-            pages.collection_with_coverage("semantic.rows", rows, semantic_complete);
-            for (index, row) in rows.iter_mut().enumerate() {
-                reference_ids.extend(
-                    row["references"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(Value::as_str)
-                        .map(str::to_owned),
-                );
-                if projected && let Some(pointer) = row["pointer"].as_str().map(str::to_owned) {
-                    let new = format!("/semantic/rows/{index}");
-                    pointer_map.insert(pointer.clone(), new.clone());
-                    row["snapshot_pointer"] = json!(pointer);
-                    row["pointer"] = json!(new);
-                }
-                if params.output.detail == super::result::Detail::Compact {
-                    strip_optional_detail(row);
-                }
-            }
-        } else {
-            rows.clear();
-        }
-    }
-    if let Some(references) = data["semantic"]["references"].as_array_mut() {
-        if want("references") && !want("semantic") {
-            pages.collection_with_coverage("semantic.references", references, semantic_complete);
-        } else if want("semantic") && projected {
-            references.retain(|reference| {
-                reference["pointer"]
-                    .as_str()
-                    .is_some_and(|pointer| reference_ids.contains(pointer))
-            });
-        } else if !want("references") && !want("semantic") {
-            references.clear();
-        }
-        if projected {
-            for (index, reference) in references.iter_mut().enumerate() {
-                if let Some(pointer) = reference["pointer"].as_str().map(str::to_owned) {
-                    let new = format!("/semantic/references/{index}");
-                    pointer_map.insert(pointer.clone(), new.clone());
-                    reference["snapshot_pointer"] = json!(pointer);
-                    reference["pointer"] = json!(new);
-                }
-                if let Some(pointer) = reference["equation_pointer"].as_str().map(str::to_owned) {
-                    reference["snapshot_equation_pointer"] = json!(pointer);
-                    reference["equation_pointer"] = pointer_map
-                        .get(&pointer)
-                        .map(|value| json!(value))
-                        .unwrap_or(Value::Null);
-                }
-            }
-        }
-    }
-    if projected {
-        if let Some(rows) = data["semantic"]["rows"].as_array_mut() {
-            for row in rows {
-                if let Some(references) = row["references"].as_array_mut() {
-                    *references = references
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .filter_map(|pointer| pointer_map.get(pointer).map(|value| json!(value)))
-                        .collect();
-                }
-            }
-        }
-        if let Some(rows) = data["navigation"]["rows"].as_array_mut() {
-            rows.retain_mut(|row| {
-                let Some(id) = row["id"].as_str().map(str::to_owned) else {
-                    return false;
-                };
-                if let Some(pointer) = pointer_map.get(&id) {
-                    row["id"] = json!(pointer);
-                    row["snapshot_pointer"] = json!(id);
-                    true
-                } else {
-                    want("structural") && !id.starts_with("/semantic/")
-                }
-            });
-        }
-    }
-    if want("source") {
-        if let Some(files) = data["source_changes"]["files"].as_array_mut() {
-            pages.collection_with_coverage("source_changes.files", files, source_complete);
-        }
-    } else if let Some(object) = data.as_object_mut() {
-        object.remove("source_changes");
-    }
-    if !want("source_text") {
-        data.as_object_mut().unwrap().remove("sources");
-    }
-    if !want("navigation") {
-        data.as_object_mut().unwrap().remove("navigation");
-    }
-    if !want("markdown") {
-        data.as_object_mut().unwrap().remove("markdown");
-    }
-    if !want("semantic") && !want("references") {
-        data.as_object_mut().unwrap().remove("semantic");
-    }
-    if !want("structural") {
-        let keep = [
-            "semantic",
-            "source_changes",
-            "sources",
-            "navigation",
-            "coverage",
-            "comparison_versions",
-        ];
-        data.as_object_mut()
-            .unwrap()
-            .retain(|key, _| keep.contains(&key.as_str()));
-    }
-    if want("summary") {
-        data["summary"] = summary;
-    }
-    result.selection = pages.finish(&params.output);
-    Ok(())
+        revision,
+        result,
+    )
 }
-
-fn strip_optional_detail(value: &mut Value) {
-    match value {
-        Value::Object(object) => {
-            object.remove("runs");
-            object.remove("statement_text");
-            for child in object.values_mut() {
-                strip_optional_detail(child);
-            }
-        }
-        Value::Array(values) => {
-            for child in values {
-                strip_optional_detail(child);
-            }
-        }
-        _ => {}
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1390,6 +1228,66 @@ mod tests {
                     .all(|row| row["code"] == "E020")
             );
         }
+    }
+
+    #[test]
+    fn configured_selector_refusal_retains_job_input_provenance() {
+        // Guards explicit job identity and requested selector context when a
+        // configured map job stops before source analysis.
+        let result = run(
+            "dynare_workspace_diagnose",
+            json!({"configured_sources":[{
+                "source":{"kind":"map","root":"main.mod","files":{"main.mod":"var y;model;y=1;end;"}},
+                "analysis":{"equation_selection":{"mode":"include","file":"policy.txt"}}
+            }]}),
+            RequestControl::default(),
+        );
+        assert_eq!(result["outcome"]["status"], "refused");
+        assert_eq!(
+            result["data"]["roots"][0]["code"],
+            "ANALYSIS_SELECTOR_FILE_MISSING"
+        );
+        assert_eq!(result["inputs"].as_array().unwrap().len(), 1);
+        assert_eq!(result["inputs"][0]["job_id"], "job:1");
+        assert_eq!(result["inputs"][0]["source_policy"], "map");
+        assert_eq!(result["inputs"][0]["root"], "main.mod");
+        assert_eq!(
+            result["inputs"][0]["analysis"]["configuration"]["equation_selection"]["file"],
+            "policy.txt"
+        );
+        assert_eq!(result["inputs"][0]["analysis"]["acquisition"], "refused");
+        assert!(result["inputs"][0]["revision"].is_null());
+        assert!(result["inputs"][0]["analysis"]["selector_file"].is_null());
+    }
+
+    #[test]
+    fn comparison_selector_refusal_keeps_side_and_requested_input() {
+        // Guards preserving Before-side policy and analysis when comparison
+        // acquisition stops before publishing either model's facts.
+        let result = run(
+            "dynare_compare_models",
+            json!({
+                "file_content_a":"var y;model;y=1;end;",
+                "file_content_b":"var y;model;y=2;end;",
+                "analysis_before":{"equation_selection":{"mode":"include","file":"policy.txt"}}
+            }),
+            RequestControl::default(),
+        );
+        assert_eq!(result["outcome"]["status"], "refused");
+        assert_eq!(
+            result["outcome"]["reasons"][0]["code"],
+            "ANALYSIS_SELECTOR_FILE_UNNAMED_ROOT"
+        );
+        assert_eq!(result["inputs"].as_array().unwrap().len(), 1);
+        assert_eq!(result["inputs"][0]["side"], "before");
+        assert_eq!(result["inputs"][0]["source_policy"], "text");
+        assert_eq!(result["inputs"][0]["root"], Value::Null);
+        assert_eq!(
+            result["inputs"][0]["analysis"]["configuration"]["equation_selection"]["file"],
+            "policy.txt"
+        );
+        assert_eq!(result["inputs"][0]["analysis"]["acquisition"], "refused");
+        assert!(result["inputs"][0]["revision"].is_null());
     }
 
     // A work limit retains complete root results and names every unstarted root.
@@ -1470,10 +1368,7 @@ mod tests {
             value["data"]["summary"]["available_semantic_rows"]
                 .as_u64()
                 .unwrap() as usize,
-            full_value["data"]["semantic"]["rows"]
-                .as_array()
-                .unwrap()
-                .len()
+            1
         );
         assert!(value["data"].get("sources").is_none());
         for row in value["data"]["semantic"]["rows"].as_array().unwrap() {

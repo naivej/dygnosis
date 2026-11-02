@@ -1,7 +1,7 @@
 //! Common MCP source acquisition. Each request owns its workspace and checked
 //! input guards; supplied maps cannot consult server-host files.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex,
@@ -274,6 +274,7 @@ pub struct SourceError {
     pub code: &'static str,
     pub message: String,
     pub invalid_arguments: bool,
+    pub inputs: Vec<Value>,
 }
 
 impl SourceError {
@@ -282,6 +283,7 @@ impl SourceError {
             code: "INVALID_ARGUMENTS",
             message: message.into(),
             invalid_arguments: true,
+            inputs: Vec::new(),
         }
     }
     pub fn failure(code: &'static str, message: impl Into<String>) -> Self {
@@ -289,7 +291,12 @@ impl SourceError {
             code,
             message: message.into(),
             invalid_arguments: false,
+            inputs: Vec::new(),
         }
+    }
+    pub fn with_inputs(mut self, inputs: Vec<Value>) -> Self {
+        self.inputs = inputs;
+        self
     }
 }
 
@@ -601,13 +608,20 @@ fn resolve_source_configured_inner(
             }
             check_files(&files, &control.limits)?;
             validate_paths(&include_dirs)?;
+            let lazy_selector_files: HashSet<_> = analysis
+                .and_then(|analysis| analysis.equation_selection.as_ref())
+                .and_then(|selection| selection.file.as_deref())
+                .map(|file| Workspace::supplied_selector_key(&root, file))
+                .into_iter()
+                .collect();
             let cached = previous.and_then(|previous| previous.copy_for(&root, &owners, control));
             let reused = cached.is_some();
             let mut workspace = cached.unwrap_or_else(|| {
-                Workspace::overlay_documents_with_work_limit(
+                Workspace::overlay_documents_with_lazy_files(
                     &files,
                     Some(Arc::clone(&control.cancelled)),
                     control.macro_work_limit,
+                    &lazy_selector_files,
                 )
             });
             let paths: Vec<_> = include_dirs
@@ -696,7 +710,19 @@ fn resolve_source_configured_inner(
     if reused || analysis.is_some() {
         workspace
             .set_root_analysis_configuration(&root, analysis.cloned().unwrap_or_default())
-            .map_err(|error| SourceError::failure(error.code, error.message))?;
+            .map_err(|error| {
+                SourceError::failure(error.code, error.message).with_inputs(vec![json!({
+                    "source_policy": kind,
+                    "root": root_file,
+                    "synthetic_root": kind == "text",
+                    "include_dirs": include_dirs,
+                    "macro_work_limit": control.macro_work_limit,
+                    "analysis": {
+                        "configuration": analysis,
+                        "acquisition": "refused"
+                    }
+                })])
+            })?;
     }
     let mut analyses = BTreeMap::new();
     let mut owner_proofs = BTreeMap::new();

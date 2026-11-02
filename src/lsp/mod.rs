@@ -2250,6 +2250,8 @@ impl Backend {
                 "document_version":inner.document(&document).map(|doc|doc.version),"revision":revision,"complete":false,
                 "analysis":analysis,"status":"stale","message":cause["message"],"incomplete_reasons":[cause],
                 "owner_roots":inner.known_owner_roots(&document),"browsing_documents":inner.browsing_documents(&root),
+                "dependency_candidates":inner.workspace.input_candidate_paths(root.as_str())
+                    .iter().filter_map(|path| Url::from_file_path(path).ok()).collect::<Vec<_>>(),
                 "statements":[],"declarations":[],"equations":[],"related_files":[],"block_categories":[],"first_model_anchor":null,
                 "inactive_ranges":[]});
         }

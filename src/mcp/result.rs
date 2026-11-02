@@ -18,7 +18,7 @@ pub(crate) struct ResultOptions {
     /// Selected result sections. Omitted sections use the tool's default projection.
     #[serde(default)]
     pub sections: Vec<String>,
-    /// Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.
+    /// Shared response row allowance, from 1 to 1000 (default 25). Set a smaller allowance and compact detail for focused queries.
     pub page_size: Option<usize>,
     /// Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.
     pub continuation: Option<String>,
@@ -261,6 +261,10 @@ struct Cursor {
     revision: String,
     query: String,
     offsets: std::collections::BTreeMap<String, usize>,
+}
+
+pub(super) fn heterogeneous_collection(dimension: &str, block_index: usize) -> String {
+    format!("heterogeneous_equations:{dimension}:{block_index}.equations")
 }
 
 pub(crate) struct Pages {

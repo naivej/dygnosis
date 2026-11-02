@@ -46,7 +46,7 @@ export function parseEquationSelection(raw: string): Omit<EquationSelection, "mo
   return values.length && new Set(values).size === values.length ? { tag: assignment[1], values } : undefined;
 }
 function equationSelectionExpression(selection: EquationSelection): string {
-  const values = selection.values.map(value => `'${value}'`);
+  const values = (selection.values ?? []).map(value => `'${value}'`);
   return `${selection.tag ?? "name"}=${values.length === 1 ? values[0] : `(${values.join(", ")})`}`;
 }
 
@@ -155,7 +155,7 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     if (!invocation.current()) refuse("The source or chosen root changed. Request the analysis action again.");
     await service.setAnalysisConfiguration(invocation.root, side.analysis, proof, side.include_paths, side.preset_bindings, () => invocation.current());
   };
-  type Choice = vscode.QuickPickItem & { side?: AnalysisSide; cause?: string; action?: "save" | "input" | "include" | "exclude" | "clearEquations" | "clearBranches"; index?: number };
+  type Choice = vscode.QuickPickItem & { side?: AnalysisSide; cause?: string; action?: "save" | "input" | "include" | "exclude" | "includeFile" | "excludeFile" | "clearEquations" | "clearBranches"; index?: number };
   const choose = async (invocation: Target, proof: AnalysisContext): Promise<Choice> => {
     const saved = presets(invocation.root);
     const entries: Choice[] = [
@@ -165,6 +165,8 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
       ...(proof.analysis.configuration.defines ?? []).map((input, index) => ({ label: `${input.name}=${input.expression}`, description: "Edit macro input", action: "input" as const, index })),
       { label: "Add macro input…", action: "input", index: -1 },
       { label: "Include equations…", action: "include" }, { label: "Exclude equations…", action: "exclude" },
+      { label: "Include equations from a file…", action: "includeFile", description: "Read saved contents; one tag value per line" },
+      { label: "Exclude equations from a file…", action: "excludeFile", description: "Read saved contents; one tag value per line" },
       ...(proof.analysis.configuration.equation_selection ? [{ label: "Clear equation selection", action: "clearEquations" as const }] : []),
       ...(proof.analysis.configuration.overrides?.some(operation => operation.kind === "branch")
         ? [{ label: "Clear branch previews", description: "Use source conditions", action: "clearBranches" as const }] : []),
@@ -221,12 +223,26 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
       : [...current, ...(input ? [input] : [])];
     await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });
   };
-  const equations = async (invocation: Target, proof: AnalysisContext, mode: "include" | "exclude"): Promise<void> => {
+  const equations = async (invocation: Target, proof: AnalysisContext, mode: "include" | "exclude", fromFile = false): Promise<void> => {
     const choices = modified(proof), previous = choices.equation_selection;
+    if (fromFile) {
+      if (invocation.root.scheme !== "file") refuse("Select a saved Dynare model before using an equation tag file. Unnamed text cannot read files.");
+      const selected = await vscode.window.showOpenDialog({
+        title: "Select equation tag file", canSelectFiles: true, canSelectFolders: false,
+        canSelectMany: false, openLabel: mode === "include" ? "Include tagged equations" : "Exclude tagged equations",
+      });
+      if (!selected?.[0]) throw new CommandCancelled();
+      if (!invocation.current()) refuse("The source or chosen root changed. Select the file again.");
+      const rootPath = invocation.root.fsPath;
+      if (!rootPath) refuse("Select a saved Dynare model before using an equation tag file. Unnamed text cannot read files.");
+      choices.equation_selection = { mode, file: path.relative(path.dirname(rootPath), selected[0].fsPath).split(path.sep).join("/") };
+      await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });
+      return;
+    }
     const invalid = "Enter a tag expression, such as name='policy', endogenous='rate' or name=('policy','demand'). Use single quotes for tag values and give each value once.";
     const raw = await vscode.window.showInputBox({
       title: mode === "include" ? "Include equations" : "Exclude equations", prompt: "Dynare tag expression, for example name='policy', endogenous='rate' or name=('policy','demand')",
-      placeHolder: "name='policy'", value: previous ? equationSelectionExpression(previous) : "",
+      placeHolder: "name='policy'", value: previous?.values ? equationSelectionExpression(previous) : "",
       validateInput: value => parseEquationSelection(value) ? undefined : invalid,
     });
     if (raw === undefined) throw new CommandCancelled();
@@ -281,6 +297,7 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
       if (selected.action === "save") await save(invocation);
       else if (selected.action === "input") await inputs(invocation, proof, selected.index!);
       else if (selected.action === "include" || selected.action === "exclude") await equations(invocation, proof, selected.action);
+      else if (selected.action === "includeFile" || selected.action === "excludeFile") await equations(invocation, proof, selected.action === "includeFile" ? "include" : "exclude", true);
       else if (selected.action === "clearEquations" || selected.action === "clearBranches") {
         const choices = modified(proof);
         if (selected.action === "clearEquations") delete choices.equation_selection;

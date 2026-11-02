@@ -328,6 +328,13 @@ fn configured_jobs_keep_repeated_roots_and_page_by_job_identity() {
     assert_eq!(first["data"]["roots"][0]["job_id"], "job:1");
     assert_eq!(first["data"]["roots"][1]["job_id"], "job:2");
     assert_eq!(first["data"]["roots"][1]["root"], "main.mod");
+    for index in 0..2 {
+        assert_eq!(
+            first["coverage"]["roots"][index]["job_id"],
+            first["data"]["roots"][index]["job_id"]
+        );
+        assert_eq!(first["coverage"]["roots"][index]["root"], "main.mod");
+    }
     assert_ne!(
         first["data"]["root_revisions"]["job:1"],
         first["data"]["root_revisions"]["job:2"]
@@ -350,6 +357,34 @@ fn configured_jobs_keep_repeated_roots_and_page_by_job_identity() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn configured_coverage_keeps_text_partial_and_failed_job_associations() {
+    // Coverage must not derive job identity from an absent or repeated filename.
+    let result = call(
+        "dynare_diagnose",
+        json!({"batch":{"kind":"configured_sources","jobs":[
+            {"source":{"kind":"text","text":"var y;model;y=0;end;"},"analysis":{}},
+            {"source":{"kind":"text","text":"var y;model;y=;end;"},"analysis":{}},
+            {"source":{"kind":"disk","root":"C:/__dygnosis_missing_coverage__.mod"},"analysis":{}}
+        ]}}),
+    );
+    for (index, root) in ["input:1", "input:2", "C:/__dygnosis_missing_coverage__.mod"]
+        .iter()
+        .enumerate()
+    {
+        let job = format!("job:{}", index + 1);
+        assert_eq!(result["data"]["roots"][index]["job_id"], job);
+        assert_eq!(result["coverage"]["roots"][index]["job_id"], job);
+        assert_eq!(result["coverage"]["roots"][index]["root"], *root);
+        if index < 2 {
+            assert!(result["data"]["root_revisions"].get(&job).is_some());
+            assert_eq!(result["inputs"][index]["job_id"], job);
+        }
+    }
+    assert_eq!(result["data"]["roots"][1]["status"], "partial");
+    assert_eq!(result["data"]["roots"][2]["status"], "failed");
 }
 
 #[test]

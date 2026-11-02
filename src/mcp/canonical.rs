@@ -262,6 +262,25 @@ fn invalid(message: impl Into<String>) -> rmcp::ErrorData {
 
 pub(super) fn input_schema(tool: &str) -> Arc<serde_json::Map<String, Value>> {
     let mut schema = super::mcp_input_schema::<Params>().as_ref().clone();
+    if let Some(definitions) = schema.get_mut("definitions").and_then(Value::as_object_mut)
+        && definitions.contains_key("EquationSelection")
+    {
+        definitions.insert("EquationSelection".into(), json!({
+            "type":"object",
+            "properties": {
+                "mode":{"type":"string","enum":["include","exclude"]},
+                "tag":{"type":"string","minLength":1,"pattern":"^[A-Za-z_][A-Za-z0-9_]*$"},
+                "values":{"type":"array","items":{"type":"string","minLength":1},"minItems":1},
+                "file":{"type":"string","minLength":1}
+            },
+            "required":["mode"],
+            "additionalProperties":false,
+            "oneOf":[
+                {"required":["file"],"not":{"anyOf":[{"required":["tag"]},{"required":["values"]}]}},
+                {"required":["values"],"not":{"required":["file"]}}
+            ]
+        }));
+    }
     let allowed = fields(tool);
     schema["properties"]
         .as_object_mut()
@@ -317,12 +336,12 @@ pub(super) fn advertised_tools(structured: bool) -> Vec<Tool> {
             "dynare_rename"=>"Propose a complete rename of one resolved binding. A unique name works directly; a target or binding identity can disambiguate. Incomplete sources, collisions, generated names or incompatible checked owners withhold the complete proposal with a cause. No file is written.",
             "dynare_format"=>"Propose whitespace formatting for the root or selected source file. Optional whole-line line_range is one-based and inclusive. formatIndent is tab or one to eight spaces. Native text and source outside the selected lines retain their layout. No file is written.",
             "dynare_extract"=>"Produce a selected equation fragment with required declarations, local definitions and model context. Names combine with OR; tags combine with AND. Select a returned identity or scoped zero-based index for unnamed equations. Omitted setup is explicit; no numerical or runnable-model claim is inferred.",
-            "dynare_compare_models"=>"Compare two model snapshots with independent analysis_a and analysis_b choices. Same source text can produce different model facts; both choices and revisions remain explicit. Sources use text/map/disk inputs; current disk inputs share validated positive and negative file facts. Repository input selects local Git or saved Working versions on the server host; no fetch or editor-buffer read occurs. Historical targets use that side's source revisions, not current target identities. Filters select semantic families and change kinds; coverage and navigation retain both captured identities. No numerical equivalence is inferred.",
+            "dynare_compare_models"=>"Compare two model snapshots with independent analysis_a and analysis_b choices. Same source text can produce different model facts; both choices and revisions remain explicit. Sources use text/map/disk inputs; current disk inputs share validated positive and negative file facts. Repository input selects local Git or saved Working versions on the server host; no fetch or editor-buffer read occurs. Historical targets use that side's source revisions. Default sections include semantic changes and their direct locations. Request references explicitly to include usages. Semantic changes, structural entries, references and changed source files share page_size; detail does not select additional sections. Filters select the same changes across sections. Request source for whole-file change context, or source_text for captured file contents. Reference owners are snapshot_pointer keys scoped to the two input revisions, including changes on other pages. Navigation needs semantic, structural or reference facts in the selected sections. No numerical equivalence is inferred.",
             _=>unreachable!(),
         };
         let configuration = if matches!(name,"dynare_syntax"|"dynare_diagnostic_info") {String::new()} else {
             let argument=if name=="dynare_compare_models"{"analysis_a and analysis_b"}else{"analysis"};
-            format!(" Optional {argument} selects macro inputs, guarded overrides and explicit equation tag values. Omission selects Source; names do not load editor presets. Discover override targets with dynare_model_info source_structure. Overrides and equation selection create previews that withhold Rename and diagnostic-fix proposals. Equation selection follows full-source Parse and Check; failed selection withholds model facts. Read application receipts and coverage separately. Invocation settings and hooks are not imported.")};
+            format!(" Optional {argument} selects macro inputs, guarded overrides and equation tags by explicit values or a selector file. Use exactly one of values and file; tag applies only to values. Relative selector files resolve from the named root's folder; supplied maps and Git revisions use only their own files. Files contain one literal value per nonempty line, with an optional first tag= header; the default tag is name. Supply UTF-8 without a BOM. analysis.selector_file reports the captured file, tag, unique value count and SHA-256 of its bytes. Unnamed text cannot resolve a selector file; use a named source or explicit values. Omission selects Source; names do not load editor presets. Discover override targets with dynare_model_info source_structure. Overrides and equation selection create previews that withhold Rename and diagnostic-fix proposals. Equation selection follows full-source Parse and Check; failed selection withholds model facts. Read application receipts and coverage separately. Invocation settings and hooks are not imported.")};
         let source_contract = if matches!(name,"dynare_syntax"|"dynare_diagnostic_info") { "" } else {
             " Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. Reused identities require their original expected revision guards."
         };
@@ -379,6 +398,17 @@ pub(super) fn dispatch(
     }
     let params: Params =
         serde_json::from_value(arguments.clone()).map_err(|e| invalid(e.to_string()))?;
+    for analysis in [&params.analysis, &params.analysis_a, &params.analysis_b]
+        .into_iter()
+        .flatten()
+    {
+        analysis.validate_selector_shape().map_err(invalid)?;
+    }
+    if let Some(BatchInput::ConfiguredSources { jobs }) = &params.batch {
+        for job in jobs {
+            job.analysis.validate_selector_shape().map_err(invalid)?;
+        }
+    }
     if params
         .page_size
         .is_some_and(|size| !(1..=1000).contains(&size))
@@ -767,6 +797,15 @@ pub(super) fn page_collections(path: &str, value: &mut Value, pages: &mut Pages,
                 || (path == "forms" && rows.len() == 1);
             if container {
                 for (index, row) in rows.iter_mut().enumerate() {
+                    if path == "heterogeneous_equations" {
+                        let dimension = row["dimension"].as_str().unwrap_or_default();
+                        let block = row["block_index"].as_u64().unwrap_or(index as u64) as usize;
+                        let collection = super::result::heterogeneous_collection(dimension, block);
+                        if let Some(equations) = row.get_mut("equations") {
+                            page_collections(&collection, equations, pages, complete);
+                        }
+                        continue;
+                    }
                     let key = row
                         .get("root")
                         .or_else(|| row.get("id"))
@@ -834,6 +873,7 @@ pub(super) fn page_collections(path: &str, value: &mut Value, pages: &mut Pages,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
     #[test]
     fn unreached_override_reasons_keep_their_captured_target_and_branch_label() {
         // Guards associating two identical application causes with the wrong choice.
@@ -869,6 +909,70 @@ mod tests {
         }
     }
     const MODEL: &str = "var y; varexo e; parameters a; a=.5; model; [name='eq'] y=a*y(-1)+e; end;";
+    #[test]
+    fn equation_pages_keep_repeated_dimension_blocks_and_empty_filtered_blocks() {
+        // Guards lost later blocks, duplicate rows, and false complete counts.
+        let text = "heterogeneity_dimension d; var y; var(heterogeneity=d) a b; model; [name='aggregate'] y=0; end; model(heterogeneity=d); [name='h0'] a=0; end; model(heterogeneity=d); [name='h1'] b=0; end;";
+        for size in [1, 2, 25] {
+            for selected in [None, Some("h1")] {
+                let mut args = json!({"source":source(text),"page_size":size});
+                if let Some(name) = selected {
+                    args["name"] = json!(name);
+                }
+                let mut names = Vec::new();
+                let mut ids = BTreeSet::new();
+                for page in 0..20 {
+                    let result = call("dynare_equations", args.clone());
+                    assert_eq!(result["outcome"]["status"], "ok");
+                    let data = &result["data"];
+                    let mut rows = data["equations"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        result["selection"]["collections"]["equations"]["returned_count"],
+                        rows.len()
+                    );
+                    for block in data["heterogeneous_equations"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                    {
+                        let collection = super::super::result::heterogeneous_collection(
+                            block["dimension"].as_str().unwrap(),
+                            block["block_index"].as_u64().unwrap() as usize,
+                        );
+                        let equations = block["equations"].as_array().unwrap();
+                        assert_eq!(
+                            result["selection"]["collections"][&collection]["returned_count"],
+                            equations.len()
+                        );
+                        rows.extend(equations);
+                    }
+                    assert!(rows.len() <= size);
+                    for row in rows {
+                        names.push(row["name"].as_str().unwrap().to_owned());
+                        assert!(ids.insert(row["equation_id"].as_str().unwrap().to_owned()));
+                    }
+                    if result["selection"]["continuation"].is_null() {
+                        break;
+                    }
+                    assert!(page < 19, "continuation must finish");
+                    args["continuation"] = result["selection"]["continuation"].clone();
+                    args["expected_revision"] = result["inputs"][0]["revision"].clone();
+                }
+                assert_eq!(
+                    names,
+                    if selected.is_some() {
+                        vec!["h1"]
+                    } else {
+                        vec!["aggregate", "h0", "h1"]
+                    }
+                );
+            }
+        }
+    }
     fn source(text: &str) -> Value {
         json!({"kind":"text","text":text})
     }
@@ -1073,6 +1177,45 @@ mod tests {
             json!({"source":source(MODEL),"symbol":{"kind":"target","line":1,"column":5}}),
         );
         assert_eq!(target["data"]["binding"]["name"], "y");
+    }
+
+    #[test]
+    fn selector_file_shape_is_rejected_at_canonical_boundary_and_advertised() {
+        // Guards invalid arguments being reported before tool execution and
+        // schema clients seeing the same exactly-one file/value contract.
+        for analysis in [
+            json!({"equation_selection":{"mode":"include"}}),
+            json!({"equation_selection":{"mode":"include","values":[]}}),
+            json!({"equation_selection":{"mode":"include","file":"x","values":[]}}),
+            json!({"equation_selection":{"mode":"include","file":"x","tag":"name"}}),
+        ] {
+            assert!(
+                dispatch(
+                    "dynare_model_info",
+                    json!({"source":source(MODEL),"analysis":analysis}),
+                    RequestControl::default(),
+                )
+                .is_err()
+            );
+        }
+        for field in ["analysis_a", "analysis_b"] {
+            let mut arguments = json!({
+                "comparison":{"before":{"source":source(MODEL)},"after":{"source":source(MODEL)}}
+            });
+            arguments[field] = json!({"equation_selection":{"mode":"include","values":[]}});
+            assert!(
+                dispatch(
+                    "dynare_compare_models",
+                    arguments,
+                    RequestControl::default(),
+                )
+                .is_err()
+            );
+        }
+        let schema = input_schema("dynare_model_info");
+        let selection = &schema["definitions"]["EquationSelection"];
+        assert_eq!(selection["oneOf"].as_array().unwrap().len(), 2);
+        assert_eq!(selection["properties"]["values"]["minItems"], 1);
     }
 
     // Guards unchanged/no-match edit outcomes returning the entire input as a

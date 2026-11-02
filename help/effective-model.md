@@ -58,8 +58,21 @@ Choose **Include equations…** or **Exclude equations…** to filter model
 equations using Dynare's [`include_eqs` and `exclude_eqs` tag
 rules](https://www.dynare.org/manual/running-dynare.html#exclude-eqs). Enter a
 tag expression with single-quoted values, such as `name='policy'`,
-`endogenous='z'` or `name=('policy','demand')` (selector files are not
-supported).
+`endogenous='z'` or `name=('policy','demand')`.
+
+Alternatively, choose **Include equations from a file…** or **Exclude
+equations from a file…**. The file contains one tag value per line. The default
+tag is `name`; to select another tag, put its name and `=` on the first
+nonempty line, for example:
+
+```text
+group=
+policy
+demand
+```
+
+Relative selector paths start at the model file's folder. Dygnosis reads the
+saved file contents; save changes to the selector file to update the selection.
 
 ```dynare
 var y z;

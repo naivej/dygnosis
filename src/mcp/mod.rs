@@ -3,6 +3,7 @@
 //! The transport and Rust functions share source acquisition and analysis.
 
 mod canonical;
+mod comparison_projection;
 #[cfg(test)]
 mod configuration_tests;
 mod edits;

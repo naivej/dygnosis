@@ -672,11 +672,21 @@ fn identity_eligible(
                 AnalysisOverride::SkipDefinition { target: _ } => {}
             }
         }
-        if let Some(EquationSelection { mode, tag, values }) = equation_selection {
+        if let Some(EquationSelection {
+            mode,
+            tag: _,
+            values,
+            file,
+            ..
+        }) = equation_selection
+        {
             match mode {
                 EquationSelectionMode::Include | EquationSelectionMode::Exclude => {}
             }
-            if values.len() > items || !take(tag) || !values.iter().all(|value| take(value)) {
+            if values.as_ref().is_some_and(|values| {
+                values.len() > items || !values.iter().all(|value| take(value.as_str()))
+            }) || file.as_ref().is_some_and(|file| !take(file.as_str()))
+            {
                 return false;
             }
         }

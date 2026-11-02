@@ -428,6 +428,7 @@ fn dispatch_query(
         Err(error) if error.invalid_arguments => return Err(invalid(error.message)),
         Err(error) => {
             let mut result = ToolResult::refused(error.code, error.message);
+            result.inputs = error.inputs;
             if matches!(error.code, "SOURCE_LIMIT" | "ROOT_LIMIT") {
                 result.limits.push(json!({"code":error.code,"ceilings":control.limits,"affected_work":"source acquisition","omitted":"model analysis and edit proposals"}));
             }
@@ -1386,9 +1387,9 @@ fn equation_query(
                 continue;
             }
             let collection = if params.agent_output {
-                format!("heterogeneous_equations:{}.equations", block.dimension)
+                super::result::heterogeneous_collection(&block.dimension, block.block_index)
             } else {
-                format!("equations:{}", block.dimension)
+                format!("equations:{}:{}", block.dimension, block.block_index)
             };
             let range = pages.projection_range(&collection, selected.len(), complete);
             let rows = selected[range]
@@ -2051,6 +2052,100 @@ mod tests {
             .map(|i| format!("#l{i}=y(-1); [name='e{i}'] y=l{i};\n"))
             .collect::<String>();
         json!({"kind":"text","text":format!("var y; model;\n{rows}end;")})
+    }
+
+    #[test]
+    fn selector_acquisition_refusals_keep_only_requested_input_provenance() {
+        // Guards reporting known request policy and selector configuration
+        // without fabricating a successful source revision or receipt.
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "dygnosis-mcp-selector-refusal-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let root = directory.join("main.mod");
+        std::fs::write(&root, MODEL).unwrap();
+        let root =
+            crate::engine::workspace::include_resolver::normalize_uri(&root.to_string_lossy());
+        let selector = directory.join("policy.txt");
+
+        let invoke = |source: Value, file: &str| {
+            super::super::canonical::dispatch(
+                "dynare_equations",
+                json!({
+                    "source": source,
+                    "analysis": {"equation_selection":{"mode":"include","file":file}}
+                }),
+                RequestControl::default(),
+            )
+            .unwrap()
+            .structured_content
+            .unwrap()
+        };
+        let assert_refusal =
+            |result: &Value, code: &str, policy: &str, expected_root: Value, file: &str| {
+                assert_eq!(result["outcome"]["status"], "refused");
+                assert_eq!(result["outcome"]["reasons"][0]["code"], code);
+                assert!(result["data"].is_null());
+                assert_eq!(result["inputs"].as_array().unwrap().len(), 1);
+                let input = &result["inputs"][0];
+                assert_eq!(input["source_policy"], policy);
+                assert_eq!(input["root"], expected_root);
+                assert_eq!(input["include_dirs"], json!([]));
+                assert_eq!(
+                    input["macro_work_limit"],
+                    json!(RequestControl::default().macro_work_limit)
+                );
+                assert_eq!(
+                    input["analysis"]["configuration"]["equation_selection"]["file"],
+                    file
+                );
+                assert_eq!(input["analysis"]["acquisition"], "refused");
+                assert!(input["revision"].is_null());
+                assert!(input["analysis"]["selector_file"].is_null());
+            };
+
+        let disk = json!({"kind":"disk","root":root});
+        let missing = invoke(disk.clone(), "policy.txt");
+        assert_refusal(
+            &missing,
+            "ANALYSIS_SELECTOR_FILE_MISSING",
+            "disk",
+            json!(root),
+            "policy.txt",
+        );
+
+        std::fs::write(&selector, b"\xef\xbb\xbfa\n").unwrap();
+        let bom = invoke(disk, "policy.txt");
+        assert_refusal(
+            &bom,
+            "ANALYSIS_SELECTOR_FILE_INVALID",
+            "disk",
+            json!(root),
+            "policy.txt",
+        );
+
+        let text = invoke(json!({"kind":"text","text":MODEL}), "policy.txt");
+        assert_eq!(text["outcome"]["status"], "refused");
+        assert_eq!(
+            text["outcome"]["reasons"][0]["code"],
+            "ANALYSIS_SELECTOR_FILE_UNNAMED_ROOT"
+        );
+        assert_eq!(text["inputs"][0]["source_policy"], "text");
+        assert_eq!(text["inputs"][0]["root"], Value::Null);
+        assert_eq!(text["inputs"][0]["synthetic_root"], true);
+        assert_eq!(text["inputs"][0]["analysis"]["acquisition"], "refused");
+        assert!(text["inputs"][0]["revision"].is_null());
+        assert!(text["inputs"][0]["analysis"]["selector_file"].is_null());
+
+        let resolved_directory = directory.canonicalize().unwrap();
+        let temporary = std::env::temp_dir().canonicalize().unwrap();
+        assert!(resolved_directory.starts_with(&temporary) && resolved_directory != temporary);
+        std::fs::remove_dir_all(resolved_directory).unwrap();
     }
 
     #[test]

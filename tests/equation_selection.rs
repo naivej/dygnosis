@@ -120,10 +120,12 @@ fn restoring_equations_restores_exogenous_and_excluded_endogenous_types() {
         selection("include", &["y-law"]),
         AnalysisConfiguration::default(),
     ] {
-        let full = choices
-            .equation_selection
-            .as_ref()
-            .is_none_or(|selection| selection.values.len() == 3);
+        let full = choices.equation_selection.as_ref().is_none_or(|selection| {
+            selection
+                .values
+                .as_ref()
+                .is_some_and(|values| values.len() == 3)
+        });
         workspace
             .set_root_analysis_configuration("main.mod", choices)
             .unwrap();

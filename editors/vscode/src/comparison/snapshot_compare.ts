@@ -62,7 +62,7 @@ export class ComparisonFailure extends Error {
 }
 function configurationKey(value: AnalysisConfiguration): string {
   return JSON.stringify({ name: value.name ?? null, defines: (value.defines ?? []).map(input => [input.name, input.expression]),
-    equation_selection: value.equation_selection ? { mode: value.equation_selection.mode, tag: value.equation_selection.tag ?? "name", values: [...new Set(value.equation_selection.values)].sort() } : null,
+    equation_selection: value.equation_selection ? { mode: value.equation_selection.mode, ...(value.equation_selection.file !== undefined ? { file: value.equation_selection.file } : { tag: value.equation_selection.tag ?? "name", values: [...new Set(value.equation_selection.values)].sort() }) } : null,
     overrides: (value.overrides ?? []).map(operation => [operation.kind, operation.target.file, operation.target.site_id, operation.target.source_revision,
       operation.kind === "definition" ? operation.expression : operation.kind === "branch" ? operation.branch_id : null]) });
 }
@@ -185,7 +185,7 @@ export async function captureComparison(service: DygnosisClient, git: () => Prom
     if (repository.rootUri.toString() !== selector.repository_uri) throw new ComparisonFailure("REPOSITORY_CHANGED", "The selected repository is unavailable. Choose its source again.", side);
     const commit = await sources.resolve(repository, selector.commit, abort.signal);
     commit.requested_ref = selector.requested_ref;
-    const capture = await sources.capture(repository, commit, selector.root_file, abort.signal); captures.set(side, capture);
+    const capture = await sources.capture(repository, commit, selector.root_file, abort.signal, selector.analysis?.equation_selection?.file); captures.set(side, capture);
     const folders = (selector.search_paths ?? searchPaths ?? []).map(folder => {
       const relative = path.relative(repository.rootUri.fsPath, folder).split(path.sep).join("/");
       // Keep an external folder explicit; the engine must refuse it if an active include needs it.
