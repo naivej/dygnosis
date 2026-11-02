@@ -2,8 +2,6 @@
 
 ## v0.11.43
 
-- Include or exclude equations with a selector file in an analysis
-  configuration or MCP request. The editor uses saved selector file contents.
 - MCP equation pages retain all matching equations in repeated heterogeneity
   blocks. Configured batch coverage identifies the correct job.
 - MCP model comparisons page requested changes and references together. Default

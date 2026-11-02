@@ -676,17 +676,12 @@ fn identity_eligible(
             mode,
             tag: _,
             values,
-            file,
-            ..
         }) = equation_selection
         {
             match mode {
                 EquationSelectionMode::Include | EquationSelectionMode::Exclude => {}
             }
-            if values.as_ref().is_some_and(|values| {
-                values.len() > items || !values.iter().all(|value| take(value.as_str()))
-            }) || file.as_ref().is_some_and(|file| !take(file.as_str()))
-            {
+            if values.len() > items || !values.iter().all(|value| take(value.as_str())) {
                 return false;
             }
         }

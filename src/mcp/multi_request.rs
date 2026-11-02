@@ -1231,67 +1231,6 @@ mod tests {
     }
 
     #[test]
-    fn configured_selector_refusal_retains_job_input_provenance() {
-        // Guards explicit job identity and requested selector context when a
-        // configured map job stops before source analysis.
-        let result = run(
-            "dynare_workspace_diagnose",
-            json!({"configured_sources":[{
-                "source":{"kind":"map","root":"main.mod","files":{"main.mod":"var y;model;y=1;end;"}},
-                "analysis":{"equation_selection":{"mode":"include","file":"policy.txt"}}
-            }]}),
-            RequestControl::default(),
-        );
-        assert_eq!(result["outcome"]["status"], "refused");
-        assert_eq!(
-            result["data"]["roots"][0]["code"],
-            "ANALYSIS_SELECTOR_FILE_MISSING"
-        );
-        assert_eq!(result["inputs"].as_array().unwrap().len(), 1);
-        assert_eq!(result["inputs"][0]["job_id"], "job:1");
-        assert_eq!(result["inputs"][0]["source_policy"], "map");
-        assert_eq!(result["inputs"][0]["root"], "main.mod");
-        assert_eq!(
-            result["inputs"][0]["analysis"]["configuration"]["equation_selection"]["file"],
-            "policy.txt"
-        );
-        assert_eq!(result["inputs"][0]["analysis"]["acquisition"], "refused");
-        assert!(result["inputs"][0]["revision"].is_null());
-        assert!(result["inputs"][0]["analysis"]["selector_file"].is_null());
-    }
-
-    #[test]
-    fn comparison_selector_refusal_keeps_side_and_requested_input() {
-        // Guards preserving Before-side policy and analysis when comparison
-        // acquisition stops before publishing either model's facts.
-        let result = run(
-            "dynare_compare_models",
-            json!({
-                "file_content_a":"var y;model;y=1;end;",
-                "file_content_b":"var y;model;y=2;end;",
-                "analysis_before":{"equation_selection":{"mode":"include","file":"policy.txt"}}
-            }),
-            RequestControl::default(),
-        );
-        assert_eq!(result["outcome"]["status"], "refused");
-        assert_eq!(
-            result["outcome"]["reasons"][0]["code"],
-            "ANALYSIS_SELECTOR_FILE_UNNAMED_ROOT"
-        );
-        assert_eq!(result["inputs"].as_array().unwrap().len(), 1);
-        assert_eq!(result["inputs"][0]["side"], "before");
-        assert_eq!(result["inputs"][0]["source_policy"], "text");
-        assert_eq!(result["inputs"][0]["root"], Value::Null);
-        assert_eq!(
-            result["inputs"][0]["analysis"]["configuration"]["equation_selection"]["file"],
-            "policy.txt"
-        );
-        assert_eq!(result["inputs"][0]["analysis"]["acquisition"], "refused");
-        assert!(result["inputs"][0]["revision"].is_null());
-    }
-
-    // A work limit retains complete root results and names every unstarted root.
-    #[test]
     fn root_limit_retains_completed_and_unfinished_accounting() {
         let mut control = RequestControl::default();
         control.limits.max_roots = 1;

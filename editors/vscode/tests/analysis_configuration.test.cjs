@@ -20,7 +20,6 @@ const vscode = {
     get activeTextEditor() { return host.editor; },
     showQuickPick: async (items, options) => { host.picks.push({ items, options }); const answer = host.answers.shift(); return typeof answer === "function" ? answer(items) : answer; },
     showInputBox: async options => { host.inputs.push(options); return host.inputAnswers.shift(); },
-    showOpenDialog: async options => { host.openDialogs.push(options); return host.openAnswers.shift(); },
     showInformationMessage: async message => { host.messages.push(message); },
     showWarningMessage: async (...args) => { host.warnings.push(args); return host.warningAnswer; },
   },
@@ -33,7 +32,6 @@ const vscode = {
 const originalLoad = Module._load;
 Module._load = function (id, ...args) { return id === "vscode" ? vscode : originalLoad.call(this, id, ...args); };
 const { registerAnalysisConfigurations, chooseAnalysisBaseline, analysisLabel, parseMacroInput, parseEquationSelection } = require(compiledModule("analysis_configuration"));
-const { analysisConfiguration } = require(compiledModule("protocol"));
 Module._load = originalLoad;
 
 function metadata(configuration = {}) {
@@ -43,7 +41,7 @@ function metadata(configuration = {}) {
 function setup() {
   const document = { uri: uri("file:///workspace/main.mod"), version: 1, isClosed: false, languageId: "dynare" };
   host = { commands: new Map(), editor: { document, selection: { active: { line: 1, character: 0 } } }, folder: { uri: uri("file:///workspace"), name: "workspace", index: 0 },
-    saved: [], answers: [], inputAnswers: [], openAnswers: [], openDialogs: [], warningAnswer: undefined, warnings: [], updates: [], picks: [], inputs: [], messages: [] };
+    saved: [], answers: [], inputAnswers: [], warningAnswer: undefined, warnings: [], updates: [], picks: [], inputs: [], messages: [] };
   const proof = { schema_version: 1, root_uri: document.uri.toString(), document_uri: document.uri.toString(), document_version: 1, revision: "guarded-source",
     analysis: metadata(), sites: [], source_coverage: { complete: true } };
   const service = { currentInstance: 1, supportsAnalysisConfiguration: true, log() {}, ensureStarted: async () => {},
@@ -143,6 +141,8 @@ test("invalid saved presets retain a visible cause and cannot change analysis", 
     [{ analysis: { overrides: [override, override] }, bindings: [binding, binding] }, /source information/],
     [{ bindings: [{}] }, /source information is invalid/],
     [{ analysis: null }, /Analysis choices/],
+    [{ analysis: { equation_selection: { mode: "exclude", file: "policy.txt" } } }, /Analysis choices/],
+    [{ analysis: { equation_selection: { mode: "exclude", values: ["policy"], file: "policy.txt" } } }, /Analysis choices/],
     [{ includePaths: [2] }, /Include paths/],
     [{ name: " " }, /Configuration name/],
     [{ root: null }, /Model root/],
@@ -294,36 +294,6 @@ test("editing a tag selection preserves quoted commas in both the prompt and the
   await env.run("selectAnalysisConfiguration");
   assert.deepEqual(parseEquationSelection(host.inputs[0].value), { tag: previous.tag, values: previous.values });
   assert.deepEqual(env.service.calls[0][1].equation_selection, previous);
-  env.registration.dispose();
-});
-
-test("selector file choice is exclusive, root-relative, saved in presets and restored", async () => {
-  const env = setup();
-  host.answers.push(items => items.find(item => item.action === "excludeFile"));
-  host.openAnswers.push([{ fsPath: "/workspace/policies/policy.txt" }]);
-  await env.run("selectAnalysisConfiguration");
-  assert.equal(host.openDialogs[0].canSelectFiles, true);
-  assert.equal(host.openDialogs[0].canSelectFolders, false);
-  assert.deepEqual(env.service.calls[0][1].equation_selection, { mode: "exclude", file: "policies/policy.txt" });
-  assert.equal(analysisConfiguration({ equation_selection: { mode: "exclude", file: "policy.txt" } }), true);
-  assert.equal(analysisConfiguration({ equation_selection: { mode: "exclude", file: "policy.txt", tag: "name" } }), false);
-  assert.equal(analysisConfiguration({ equation_selection: { mode: "exclude", values: ["policy"], file: "policy.txt" } }), false);
-  env.proof.analysis.configuration = globalThis.structuredClone(env.service.calls[0][1]);
-  host.inputAnswers.push("Saved file choice");
-  await env.run("saveAnalysisConfiguration");
-  assert.deepEqual(host.updates[0].value[0].analysis.equation_selection, { mode: "exclude", file: "policies/policy.txt" });
-  env.registration.dispose();
-});
-
-test("a file selection can change to explicit values without using the path as a tag", async () => {
-  // Guards dereferencing an absent value list or reusing file contents in the prompt.
-  const env = setup();
-  env.proof.analysis.configuration.equation_selection = { mode: "exclude", file: "policies/policy.txt" };
-  host.answers.push(items => items.find(item => item.action === "include"));
-  host.inputAnswers.push("name='policy'");
-  await env.run("selectAnalysisConfiguration");
-  assert.equal(host.inputs[0].value, "");
-  assert.deepEqual(env.service.calls[0][1].equation_selection, { mode: "include", tag: "name", values: ["policy"] });
   env.registration.dispose();
 });
 

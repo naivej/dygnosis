@@ -244,7 +244,6 @@ pub(crate) fn compact_emitted_prefix(prefix: &str) -> String {
     join_lexemes_recorded(prefix, &tokens, |_, _| {})
 }
 
-#[derive(Clone)]
 pub(crate) enum NavigationSource {
     Unavailable,
     Mapped {

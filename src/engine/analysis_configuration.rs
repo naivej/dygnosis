@@ -23,23 +23,19 @@ pub struct AnalysisConfiguration {
     pub equation_selection: Option<EquationSelection>,
 }
 
-/// Select equations by explicit tag values or one selector file.
+/// Explicit invocation tag values. This input never performs a file lookup.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EquationSelection {
     pub mode: EquationSelectionMode,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tag: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub values: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub file: Option<String>,
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub(crate) resolved_values: Option<Vec<String>>,
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub(crate) resolved_tag: Option<String>,
+    #[serde(default = "default_equation_tag")]
+    pub tag: String,
+    #[schemars(length(min = 1), inner(length(min = 1)))]
+    pub values: Vec<String>,
+}
+
+fn default_equation_tag() -> String {
+    "name".into()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -164,51 +160,6 @@ impl std::fmt::Display for ConfigurationError {
 impl std::error::Error for ConfigurationError {}
 
 impl AnalysisConfiguration {
-    pub fn validate_selector_shape(&self) -> Result<(), String> {
-        let Some(selection) = &self.equation_selection else {
-            return Ok(());
-        };
-        if selection
-            .tag
-            .as_deref()
-            .is_some_and(|tag| !is_equation_tag(tag))
-        {
-            return Err("equation_selection.tag must be a Dynare tag name".into());
-        }
-        match (&selection.file, &selection.values, &selection.tag) {
-            (Some(file), None, None) if !file.trim().is_empty() && !file.contains('\0') => Ok(()),
-            (None, Some(values), _) if !values.is_empty() && values.iter().all(|value| !value.trim().is_empty()) => Ok(()),
-            (Some(_), _, _) => Err("equation_selection.file cannot be combined with tag or values, and must be nonempty".into()),
-            (None, None, _) => Err("equation_selection requires exactly one of nonempty values or file".into()),
-            (None, Some(_), _) => Err("equation_selection.values must contain nonempty strings".into()),
-        }
-    }
-
-    pub fn equation_tag(selection: &EquationSelection) -> &str {
-        selection
-            .resolved_tag
-            .as_deref()
-            .or(selection.tag.as_deref())
-            .unwrap_or("name")
-    }
-
-    pub(crate) fn selection_values(selection: &EquationSelection) -> &[String] {
-        selection
-            .resolved_values
-            .as_deref()
-            .or(selection.values.as_deref())
-            .unwrap_or(&[])
-    }
-
-    pub(crate) fn resolve_selection_values(
-        selection: &mut EquationSelection,
-        tag: String,
-        values: Vec<String>,
-    ) {
-        selection.resolved_values = Some(values);
-        selection.resolved_tag = Some(tag);
-    }
-
     pub fn preview_edit_cause(&self, action: &str) -> String {
         let mut kinds = Vec::new();
         let branches = self
@@ -297,15 +248,16 @@ impl AnalysisConfiguration {
                 } else {
                     "Exclude"
                 },
-                Self::equation_tag(selection),
-                Self::selection_values(selection)
+                selection.tag,
+                selection
+                    .values
                     .iter()
                     .take(2)
                     .cloned()
                     .collect::<Vec<_>>()
                     .join(","),
-                if Self::selection_values(selection).len() > 2 {
-                    format!(" (+{})", Self::selection_values(selection).len() - 2)
+                if selection.values.len() > 2 {
+                    format!(" (+{})", selection.values.len() - 2)
                 } else {
                     String::new()
                 }
@@ -347,25 +299,14 @@ impl AnalysisConfiguration {
             (&left.file, &left.site_id).cmp(&(&right.file, &right.site_id))
         });
         let bytes = if let Some(selection) = &self.equation_selection {
-            if let Some(file) = &selection.file {
-                return serde_json::to_vec(&(
-                    &self.defines,
-                    overrides,
-                    selection.mode,
-                    &selection.tag,
-                    file,
-                ))
-                .map(|bytes| source_revision(std::str::from_utf8(&bytes).expect("JSON is UTF-8")))
-                .expect("typed macro choices are serializable");
-            }
-            let mut values: Vec<_> = selection.values.iter().flatten().collect();
+            let mut values: Vec<_> = selection.values.iter().collect();
             values.sort();
             values.dedup();
             serde_json::to_vec(&(
                 &self.defines,
                 overrides,
                 selection.mode,
-                Self::equation_tag(selection),
+                &selection.tag,
                 values,
             ))
         } else {
@@ -425,141 +366,6 @@ pub struct AnalysisMetadata {
     pub macro_complete: bool,
     pub model_complete: bool,
     pub overrides: Vec<OverrideReceipt>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub selector_file: Option<SelectorFileReceipt>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct SelectorFileReceipt {
-    pub file: String,
-    pub tag: String,
-    pub value_count: usize,
-    pub byte_sha256: String,
-}
-
-pub(crate) fn parse_selector_file(
-    bytes: &[u8],
-    file: &str,
-    cancelled: impl Fn() -> bool,
-) -> Result<(String, Vec<String>), ConfigurationError> {
-    let fail = |cause: &str| {
-        ConfigurationError::new(
-            "ANALYSIS_SELECTOR_FILE_INVALID",
-            format!(
-                "Equation selector file '{file}' {cause}. Save it as UTF-8 without a BOM, with one tag value per line."
-            ),
-        )
-    };
-    let limit_fail = |cause: &str| {
-        ConfigurationError::new(
-            "ANALYSIS_SELECTOR_FILE_LIMIT",
-            format!("Equation selector file '{file}' {cause}. Reduce the file and try again."),
-        )
-    };
-    if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
-        return Err(fail("starts with a UTF-8 BOM"));
-    }
-    let text = std::str::from_utf8(bytes).map_err(|error| {
-        ConfigurationError::new(
-            "ANALYSIS_SELECTOR_FILE_INVALID",
-            format!("Equation selector file '{file}' is not valid UTF-8 at byte {}. Save it as UTF-8 without a BOM.", error.valid_up_to()),
-        )
-    })?;
-    let mut tag = None;
-    let mut started = false;
-    let mut values = Vec::new();
-    let mut seen = HashSet::new();
-    for (index, line) in text.lines().enumerate() {
-        if index >= 500_000 {
-            return Err(limit_fail("contains more than 500,000 physical lines"));
-        }
-        if index % 1024 == 0 && cancelled() {
-            return Err(ConfigurationError::new(
-                "REQUEST_CANCELLED",
-                "Equation selector file reading was cancelled.",
-            ));
-        }
-        let value = line.trim();
-        if value.is_empty() {
-            continue;
-        }
-        if !started {
-            started = true;
-            if value.contains('=') {
-                let Some((name, header_value)) = value.split_once('=') else {
-                    unreachable!()
-                };
-                if !is_equation_tag(name) || !header_value.trim().is_empty() {
-                    return Err(ConfigurationError::new(
-                        "ANALYSIS_SELECTOR_FILE_INVALID",
-                        format!(
-                            "Equation selector file '{file}' has a malformed tag header on line {}. Use a valid tag name followed by `=`, or start with a tag value.",
-                            index + 1
-                        ),
-                    ));
-                }
-                tag = Some(name.to_owned());
-                continue;
-            }
-            tag = Some("name".to_owned());
-        }
-        if seen.insert(value) {
-            if values.len() == 100_000 {
-                return Err(limit_fail("contains more than 100,000 unique values"));
-            }
-            values.push(value.to_owned());
-        }
-    }
-    if !started {
-        return Err(fail("is empty or contains only blank lines"));
-    }
-    if values.is_empty() {
-        return Err(fail("contains a tag header but no values"));
-    }
-    Ok((tag.expect("nonempty selector started"), values))
-}
-
-fn is_equation_tag(value: &str) -> bool {
-    let mut bytes = value.bytes();
-    bytes
-        .next()
-        .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-}
-
-#[cfg(test)]
-mod selector_file_tests {
-    use super::*;
-
-    #[test]
-    fn selector_file_reads_literal_lines_and_reports_unsafe_forms() {
-        // Guards CRLF/whitespace normalization, duplicate de-duplication,
-        // literal commas and non-default tag headers; unsafe bytes must fail.
-        let (tag, values) = parse_selector_file(
-            b" \r\n group=\r\n alpha \r\ncomma, value\r\nalpha\r\n",
-            "policy.txt",
-            || false,
-        )
-        .unwrap();
-        assert_eq!(tag, "group");
-        assert_eq!(values, ["alpha", "comma, value"]);
-        for bytes in [
-            b"".as_slice(),
-            b" \r\n",
-            b"bad-tag=\nx",
-            b"x=\n",
-            b"\xef\xbb\xbfname\n",
-            b"\xff",
-        ] {
-            assert!(parse_selector_file(bytes, "bad.txt", || false).is_err());
-        }
-        assert_eq!(
-            parse_selector_file(b"alpha\n", "names.txt", || false)
-                .unwrap()
-                .0,
-            "name"
-        );
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -871,8 +677,6 @@ pub(crate) struct ResolvedAnalysis {
     pub initial: HashMap<String, crate::engine::language::macro_expand::MacroVal>,
     pub overrides: Vec<ResolvedOverride>,
     pub by_file: HashMap<String, Arc<HashMap<Span, usize>>>,
-    pub selector_file: Option<SelectorFileReceipt>,
-    pub selector_guard: Option<crate::engine::workspace::InputFile>,
 }
 
 /// One original file or reconstructed buffer's lookup into the same choices.
@@ -917,9 +721,6 @@ impl AnalysisConfiguration {
         budget: &mut MacroBudget,
     ) -> Result<HashMap<String, crate::engine::language::macro_expand::MacroVal>, ConfigurationError>
     {
-        self.validate_selector_shape().map_err(|message| {
-            ConfigurationError::new("ANALYSIS_INVALID_EQUATION_SELECTION", message)
-        })?;
         charge(
             budget,
             self.name
@@ -928,37 +729,25 @@ impl AnalysisConfiguration {
         )?;
         let mut names = HashSet::new();
         if let Some(selection) = &self.equation_selection {
-            let tag = Self::equation_tag(selection);
-            charge(budget, tag.len().saturating_add(1))?;
-            let mut bytes = tag.bytes();
+            charge(budget, selection.tag.len().saturating_add(1))?;
+            let mut bytes = selection.tag.bytes();
             if !bytes
                 .next()
                 .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
                 || !bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-                || selection.file.is_none() && selection.values.as_ref().is_none_or(Vec::is_empty)
-                || selection.file.is_some()
-                    && (selection.values.is_some() || selection.tag.is_some())
+                || selection.values.is_empty()
             {
                 return Err(ConfigurationError::new(
                     "ANALYSIS_INVALID_EQUATION_SELECTION",
-                    "Equation selection requires exactly one nonempty values list or file path. A selector file cannot be combined with tag or values.",
+                    "Equation selection requires a tag name and at least one explicit tag value.",
                 ));
             }
-            if let Some(file) = &selection.file {
-                charge(budget, file.len().saturating_add(1))?;
-                if file.trim().is_empty() || file.contains('\0') {
-                    return Err(ConfigurationError::new(
-                        "ANALYSIS_INVALID_EQUATION_SELECTION",
-                        "Equation selection file must be a nonempty path without a null character.",
-                    ));
-                }
-            }
-            for value in selection.values.iter().flatten() {
+            for value in &selection.values {
                 charge(budget, value.len().saturating_add(1))?;
-                if value.is_empty() {
+                if value.trim().is_empty() {
                     return Err(ConfigurationError::new(
                         "ANALYSIS_INVALID_EQUATION_SELECTION",
-                        "Equation selection contains an empty tag value. Supply nonempty explicit tag values; no selection was changed.",
+                        "Equation selection contains a blank tag value. Supply tag values with at least one non-whitespace character; no selection was changed.",
                     ));
                 }
             }

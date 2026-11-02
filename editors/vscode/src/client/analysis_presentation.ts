@@ -18,10 +18,7 @@ export function configurationSummary(analysis: AnalysisConfiguration, paths?: st
     if (count) parts.push(`${count} ${label}${count === 1 ? "" : "s"}`);
   }
   const selection = analysis.equation_selection;
-  if (selection) {
-    const mode = selection.mode === "include" ? "Include" : "Exclude", values = selection.values ?? [];
-    parts.push(short(selection.file !== undefined ? `${mode} equations from ${selection.file}` : `${mode} ${selection.tag ?? "name"}=${values.slice(0, 2).join(",")}${values.length > 2 ? ` (+${values.length - 2})` : ""}`));
-  }
+  if (selection) parts.push(short(`${selection.mode === "include" ? "Include" : "Exclude"} ${selection.tag ?? "name"}=${selection.values.slice(0, 2).join(",")}${selection.values.length > 2 ? ` (+${selection.values.length - 2})` : ""}`));
   if (paths !== undefined && paths !== null) parts.push(`${paths.length} include path${paths.length === 1 ? "" : "s"}`);
   return parts.length ? parts.slice(0, 2).join(" · ") + (parts.length > 2 ? ` · +${parts.length - 2} choices` : "") : "Source";
 }

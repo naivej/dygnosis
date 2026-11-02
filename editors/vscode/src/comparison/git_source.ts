@@ -235,7 +235,7 @@ export class GitSources {
     return pending.result;
   }
 
-  async capture(repository: GitRepository, commit: PinnedCommit, rootFile: string, signal?: AbortSignal, selectorFile?: string): Promise<HistoricalCapture> {
+  async capture(repository: GitRepository, commit: PinnedCommit, rootFile: string, signal?: AbortSignal): Promise<HistoricalCapture> {
     requireCommit(commit.hash);
     if (!exactFileKey(rootFile)) throw new GitSourceError("unsupported_source", "The root path leaves the selected repository.", rootFile);
     const started = Date.now(), key = `${repository.rootUri.toString()}\0${commit.hash}`;
@@ -252,29 +252,19 @@ export class GitSources {
       if (cached.bytes <= this.limits.cacheBytes) { this.manifests.set(key, cached); this.manifestSize += cached.bytes; }
     }
     cancelled(signal);
-    let selectorKey: string | undefined;
-    if (selectorFile !== undefined) {
-      const name = selectorFile.replace(/\\/g, "/");
-      const candidate = path.isAbsolute(selectorFile) ? path.relative(repository.rootUri.fsPath, selectorFile).split(path.sep).join("/") : path.posix.join(path.posix.dirname(rootFile), name);
-      if (exactFileKey(candidate)) selectorKey = candidate;
-    }
-    const capture = new HistoricalCapture(this, repository, commit, rootFile, cached.value, started, selectorKey);
+    const capture = new HistoricalCapture(this, repository, commit, rootFile, cached.value, started);
     await capture.load([rootFile], signal);
     return capture;
   }
 
-  async readBlob(repository: GitRepository, entry: TreeEntry, stats: CaptureStats, signal?: AbortSignal, strictUtf8 = false): Promise<{ text: string; bytes: number }> {
+  async readBlob(repository: GitRepository, entry: TreeEntry, stats: CaptureStats, signal?: AbortSignal): Promise<{ text: string; bytes: number }> {
     if (!["100644", "100755"].includes(entry.mode) || !fullCommit(entry.object_id)) throw new GitSourceError("unsupported_source", "Only regular-file Git blobs can supply historical source text.");
-    const key = `${repository.rootUri.toString()}\0${entry.object_id}\0${strictUtf8 ? "selector" : "model"}`;
+    const key = `${repository.rootUri.toString()}\0${entry.object_id}`;
     const cached = this.blobs.get(key);
     if (cached) { cancelled(signal); this.blobs.delete(key); this.blobs.set(key, cached); stats.cacheHits++; return cached; }
     const output = await this.run(repository.rootUri.fsPath, ["cat-file", "blob", entry.object_id], this.limits.blobBytes, signal);
     stats.blobReads++; stats.blobBytes += output.length;
-    let text: string;
-    if (strictUtf8) {
-      try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(output); }
-      catch { throw new GitSourceError("ANALYSIS_SELECTOR_FILE_INVALID", "The equation selector file is not valid UTF-8. Save it as UTF-8 without a BOM."); }
-    } else text = decodeGitText(output);
+    const text = decodeGitText(output);
     const value = { text, bytes: output.length };
     while (this.blobs.size >= this.limits.captureSources || this.cacheSize + value.bytes > this.limits.cacheBytes) {
       const first = this.blobs.keys().next().value;
@@ -336,7 +326,7 @@ export class HistoricalCapture {
   readonly sources: Record<string, HistoricalSource> = Object.create(null) as Record<string, HistoricalSource>;
   readonly stats: CaptureStats;
   private bytes = 0;
-  constructor(private readonly owner: GitSources, readonly repository: GitRepository, readonly commit: PinnedCommit, readonly rootFile: string, readonly manifest: Record<string, TreeEntry>, private readonly started: number, private readonly selectorKey?: string) {
+  constructor(private readonly owner: GitSources, readonly repository: GitRepository, readonly commit: PinnedCommit, readonly rootFile: string, readonly manifest: Record<string, TreeEntry>, private readonly started: number) {
     this.stats = { manifestEntries: Object.keys(manifest).length, blobReads: 0, blobBytes: 0, cacheHits: 0, durationMs: Date.now() - started };
   }
   input(inputId: string, searchPaths: string[]): HistoricalInput {
@@ -363,7 +353,7 @@ export class HistoricalCapture {
         } else if (!entry) source = { kind: "failure", code: "missing_source", message: `Historical source ${key} is absent at ${this.commit.hash.slice(0, 7)}.` };
         else {
           try {
-            const blob = await this.owner.readBlob(this.repository, entry, this.stats, signal, key === this.selectorKey);
+            const blob = await this.owner.readBlob(this.repository, entry, this.stats, signal);
             if (this.bytes + blob.bytes > this.owner.limits.captureBytes) throw new GitSourceError("capture_limit", `Historical capture exceeds ${this.owner.limits.captureBytes} bytes.`, key);
             this.bytes += blob.bytes; source = { kind: "text", text: blob.text };
           } catch (error) {

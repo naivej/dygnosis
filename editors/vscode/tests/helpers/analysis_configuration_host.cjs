@@ -2,7 +2,6 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const { Buffer } = require("node:buffer");
-const { createHash } = require("node:crypto");
 const path = require("node:path");
 const vscode = require("vscode");
 const { nativeWorkbench, nativeChanges } = require("./native_webview.cjs");
@@ -55,9 +54,9 @@ async function chooseAnyPicker(label, waitFor) {
     await send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, ...point });
   });
 }
-async function input(text, waitFor) {
+async function input(text, waitFor, title = "Save analysis configuration") {
   await waitFor(async () => nativeWorkbench(async send => {
-    const result = await send("Runtime.evaluate", { expression: "(() => { const widget=document.querySelector('.quick-input-widget'), input=widget?.querySelector('input'), box=input?.getBoundingClientRect(); return Boolean(box?.width && box.height && input===document.activeElement && widget.textContent.includes('Save analysis configuration')); })()", returnByValue: true });
+    const result = await send("Runtime.evaluate", { expression: `(() => { const widget=document.querySelector('.quick-input-widget'), input=widget?.querySelector('input'), box=input?.getBoundingClientRect(); return Boolean(box?.width && box.height && input===document.activeElement && widget.textContent.includes(${JSON.stringify(title)})); })()`, returnByValue: true });
     return result.result.value;
   }), "native analysis input is visible");
   await press("a", "KeyA", 65, 2);
@@ -435,129 +434,51 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   assert.ok(splitRows.every(row => !/fragment|source candidate|source template/.test(row.name + " " + row.detail)));
   evidence.checks.push("native Outline keeps inactive literal metadata and type icons, omits endogenous timing, and shows one model/equation entry across included expressions without fragments");
 
-  // A saved selector preset must use the saved file, refresh after a selector-only
-  // edit, withhold stale facts on failure, and recover when the file is repaired.
-  const selectorRootPath = path.join(workspaceRoot, "selector-analysis.mod");
-  const selectorPath = path.join(workspaceRoot, "policy.txt");
-  const selectorSource = "var y z w;\nmodel;\n[name='base'] y=0;\n[name='policy'] z=0;\n[name='other'] w=0;\nend;\n";
-  await fs.writeFile(selectorPath, "policy\n");
-  await writeObservedInput(service, selectorRootPath, selectorSource);
-  const selectorDocument = await vscode.workspace.openTextDocument(selectorRootPath);
-  await vscode.window.showTextDocument(selectorDocument);
-  const selectorUri = selectorDocument.uri;
-  const selectorContext = () => service.analysisContext(selectorUri);
-  const selectorInfo = () => service.modelInfo(selectorUri, selectorUri, true);
-  await waitFor(async () => (await selectorInfo())?.complete === true, "selector-file model source facts are ready");
-  const selectorFolder = vscode.workspace.getWorkspaceFolder(selectorUri);
-  const selectorSettings = vscode.workspace.getConfiguration("dynare", selectorFolder.uri);
-  const selectorSettingsValue = selectorSettings.inspect("analysisConfigurations").workspaceFolderValue;
-  const selectorPresets = Array.isArray(selectorSettingsValue) ? selectorSettingsValue : [];
-  const selectorPreset = {
-    name: "Saved selector",
-    root: path.relative(selectorFolder.uri.fsPath, selectorRootPath).split(path.sep).join("/"),
-    analysis: { equation_selection: { mode: "exclude", file: "policy.txt" } },
-  };
-  await selectorSettings.update("analysisConfigurations", [...selectorPresets.filter(value => value?.name !== selectorPreset.name || value?.root !== selectorPreset.root), selectorPreset], vscode.ConfigurationTarget.WorkspaceFolder);
-  const selectSavedSelector = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
-  await choose("Saved selector", waitFor); await selectSavedSelector;
 
-  const diagnostics = () => vscode.languages.getDiagnostics(selectorUri).map(item => ({
-    code: typeof item.code === "object" ? item.code.value : item.code, severity: item.severity, message: item.message,
-    range: { start: item.range.start, end: item.range.end },
-  }));
-  const selectorIdentity = value => process.platform === "win32" ? path.resolve(value).toLowerCase() : path.resolve(value);
-  const expectedHash = text => createHash("sha256").update(Buffer.from(text, "utf8")).digest("hex");
-  const selectedState = async (names, hash, priorRevision) => {
-    let contextValue, infoValue;
+  // Direct tag values must still work through presets and the native input UI.
+  const tagPath = path.join(workspaceRoot, "tag-selection.mod");
+  const tagSource = "var y z w;\nmodel;\n[name='base'] y=0;\n[name='policy'] z=0;\n[name='other'] w=0;\nend;\n";
+  await writeObservedInput(service, tagPath, tagSource);
+  const tagDocument = await vscode.workspace.openTextDocument(tagPath);
+  await vscode.window.showTextDocument(tagDocument);
+  const tagUri = tagDocument.uri;
+  await waitFor(async () => (await service.modelInfo(tagUri))?.complete === true, "tag-selection source facts are ready");
+  const tagFolder = vscode.workspace.getWorkspaceFolder(tagUri);
+  const tagSettings = vscode.workspace.getConfiguration("dynare", tagFolder.uri);
+  const tagConfigured = tagSettings.inspect("analysisConfigurations").workspaceFolderValue;
+  const tagPreset = { name: "Tagged equations", root: path.relative(tagFolder.uri.fsPath, tagPath).split(path.sep).join("/"),
+    analysis: { equation_selection: { mode: "exclude", tag: "name", values: ["policy"] } } };
+  await tagSettings.update("analysisConfigurations", [...(Array.isArray(tagConfigured) ? tagConfigured : []), tagPreset], vscode.ConfigurationTarget.WorkspaceFolder);
+  const selectTags = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
+  await choose("Tagged equations", waitFor); await selectTags;
+  const selectedTags = async names => {
+    let info;
     await waitFor(async () => {
-      contextValue = await selectorContext();
-      infoValue = await selectorInfo();
-      return contextValue?.analysis.state === "selected" && infoValue?.complete === true &&
-        contextValue.analysis.selector_file?.byte_sha256 === hash &&
-        (!priorRevision || infoValue.revision !== priorRevision);
-    }, "saved selector file produces current selected analysis facts").catch(async error => {
-      error.message += `; analysis=${JSON.stringify(contextValue?.analysis)}; model=${JSON.stringify(infoValue && { complete: infoValue.complete, revision: infoValue.revision, n_equations: infoValue.n_equations, equations: infoValue.equations?.map(row => row.name) })}`;
-      throw error;
-    });
-    assert.equal(contextValue.analysis.configuration.equation_selection.file, "policy.txt");
-    assert.deepEqual(infoValue.equations.map(row => row.name), names);
-    assert.equal(infoValue.n_equations, names.length);
-    assert.equal(selectorIdentity(infoValue.analysis?.selector_file?.file ?? ""), selectorIdentity(selectorPath));
-    assert.equal(infoValue.analysis?.selector_file?.tag, "name");
-    assert.equal(infoValue.analysis?.selector_file?.value_count, 1);
-    assert.equal(infoValue.analysis?.selector_file?.byte_sha256, hash);
-    return { context: contextValue, info: infoValue, diagnostics: diagnostics() };
+      info = await service.modelInfo(tagUri, tagUri, true);
+      return info?.complete === true && JSON.stringify(info.equations.map(row => row.name)) === JSON.stringify(names);
+    }, "direct tag values produce the exact selected equations");
+    assert.equal(info.n_equations, names.length);
+    assert.equal(tagDocument.getText(), tagSource);
+    return { revision: info.revision, equation_names: names, n_equations: info.n_equations,
+      configuration: info.analysis.configuration,
+      diagnostics: vscode.languages.getDiagnostics(tagUri).map(row => ({ code: typeof row.code === "object" ? row.code.value : row.code,
+        message: row.message, range: { start: row.range.start, end: row.range.end } })) };
   };
-  const initialSelector = await selectedState(["base", "other"], expectedHash("policy\n"));
-  assert.equal(initialSelector.context.analysis.selection.name, "Saved selector");
-
-  const modelTextBeforeSelectorEdit = selectorDocument.getText();
-  const previousSelectorRevision = initialSelector.info.revision;
-  await writeObservedInput(service, selectorPath, "other\n");
-  const editedSelector = await selectedState(["base", "policy"], expectedHash("other\n"), previousSelectorRevision);
-  assert.equal(selectorDocument.getText(), modelTextBeforeSelectorEdit, "selector-only edit leaves the model source unchanged");
-  assert.notEqual(editedSelector.info.revision, previousSelectorRevision, "selector bytes participate in the selected input revision");
-
-  const selectorFailureEvents = [];
-  const selectorFailureSubscription = service.onDidInvalidate(event => {
-    if (event.reason === "file" && event.uri && selectorIdentity(vscode.Uri.parse(event.uri).fsPath) === selectorIdentity(selectorPath))
-      selectorFailureEvents.push(event);
-  });
-  try {
-    await fs.rm(selectorPath);
-    await waitFor(() => selectorFailureEvents.length > 0, "native watcher observes selector removal");
-  } finally { selectorFailureSubscription.dispose(); }
-  let missingContext, missingInfo;
-  await waitFor(async () => {
-    missingContext = await selectorContext();
-    missingInfo = await selectorInfo();
-    return missingContext?.analysis.state === "stale" && !!missingContext.analysis.cause?.message;
-  }, "active selector reports the removed file and withholds current selected facts").catch(async error => {
-    error.message += `; analysis=${JSON.stringify(missingContext?.analysis)}; model=${JSON.stringify(missingInfo && { complete: missingInfo.complete, revision: missingInfo.revision, n_equations: missingInfo.n_equations, equations: missingInfo.equations?.map(row => row.name) })}`;
-    throw error;
-  });
-  assert.match(missingContext.analysis.cause.message, /policy\.txt/i);
-  assert.ok(!missingInfo || missingInfo.complete !== true, "a removed selector cannot leave authoritative selected model facts");
-  if (missingInfo) {
-    assert.equal(missingInfo.n_equations, undefined);
-    assert.deepEqual(missingInfo.equations, []);
-  }
-  evidence.selector_file_workflow = {
-    source: selectorRootPath,
-    selector: selectorPath,
-    preset: selectorPreset,
-    initial: { revision: initialSelector.info.revision, equation_names: initialSelector.info.equations.map(row => row.name), n_equations: initialSelector.info.n_equations, receipt: initialSelector.info.analysis.selector_file, diagnostics: initialSelector.diagnostics },
-    after_selector_only_edit: { model_unchanged: selectorDocument.getText() === modelTextBeforeSelectorEdit, revision: editedSelector.info.revision, equation_names: editedSelector.info.equations.map(row => row.name), n_equations: editedSelector.info.n_equations, receipt: editedSelector.info.analysis.selector_file, diagnostics: editedSelector.diagnostics },
-    after_remove: { state: missingContext.analysis.state, message: missingContext.analysis.cause.message, complete: missingInfo?.complete ?? false, n_equations: missingInfo?.n_equations ?? null, equations: missingInfo?.equations?.map(row => row.name) ?? [] },
-  };
-
-  await writeObservedInput(service, selectorPath, "\uFEFFpolicy\n");
-  let invalidContext, invalidInfo;
-  await waitFor(async () => {
-    invalidContext = await selectorContext();
-    invalidInfo = await selectorInfo();
-    return invalidContext?.analysis.state === "stale" && /BOM|byte order/i.test(invalidContext.analysis.cause?.message ?? "");
-  }, "invalid BOM selector has a file-specific explanation and no selected facts");
-  assert.ok(!invalidInfo || invalidInfo.complete !== true, "an invalid selector cannot leave authoritative selected model facts");
-  if (invalidInfo) {
-    assert.equal(invalidInfo.n_equations, undefined);
-    assert.deepEqual(invalidInfo.equations, []);
-  }
-  evidence.selector_file_workflow.after_invalid_file = { state: invalidContext.analysis.state, message: invalidContext.analysis.cause.message, complete: invalidInfo?.complete ?? false };
-
-  await writeObservedInput(service, selectorPath, "policy\n");
-  const recoveredSelector = await selectedState(["base", "other"], expectedHash("policy\n"), editedSelector.info.revision);
-  assert.equal(recoveredSelector.context.analysis.selection.name, "Saved selector");
+  const excludedTags = await selectedTags(["base", "other"]);
+  const includeTags = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
+  await choose("Include equations…", waitFor);
+  await input("name='policy'", waitFor, "Include equations"); await includeTags;
+  const includedTags = await selectedTags(["policy"]);
+  assert.notEqual(includedTags.revision, excludedTags.revision);
   await service.restart();
-  await waitFor(async () => (await selectorContext())?.analysis.state === "selected" &&
-    !(await selectorContext()).analysis.configuration.equation_selection, "server restart leaves saved selector preset inactive");
-  const restoreSelector = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
-  await choose("Saved selector", waitFor); await restoreSelector;
-  const restoredSelector = await selectedState(["base", "other"], expectedHash("policy\n"));
-  assert.equal(restoredSelector.context.analysis.selection.name, "Saved selector");
-  assert.equal(restoredSelector.context.analysis.configuration.equation_selection.file, "policy.txt", "preset restore keeps the root-relative selector file choice");
-  evidence.selector_file_workflow.restored = { name: restoredSelector.context.analysis.selection.name, configuration: restoredSelector.context.analysis.configuration, revision: restoredSelector.info.revision, equation_names: restoredSelector.info.equations.map(row => row.name), n_equations: restoredSelector.info.n_equations, receipt: restoredSelector.info.analysis.selector_file, diagnostics: restoredSelector.diagnostics };
-  evidence.checks.push("native saved selector preset uses the file receipt and exact selected equations; selector-only save changes the revision and refreshes model facts; removed and BOM files explain failure without stale counts or equations; valid bytes recover and the explicit preset restores after restart");
+  await waitFor(async () => !(await service.analysisContext(tagUri))?.analysis.configuration.equation_selection, "restart returns tag selection to Source");
+  await selectedTags(["base", "policy", "other"]);
+  const restoreTags = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
+  await choose("Tagged equations", waitFor); await restoreTags;
+  const restoredTags = await selectedTags(["base", "other"]);
+  assert.deepEqual(restoredTags.configuration.equation_selection, tagPreset.analysis.equation_selection);
+  evidence.tag_selection_workflow = { source: tagPath, excluded: excludedTags, included: includedTags, restored: restoredTags };
+  evidence.checks.push("native tag values support exclude presets, Include equations input, unchanged source and explicit preset restore after restart");
 }
 
 module.exports = { checkAnalysisConfigurations };

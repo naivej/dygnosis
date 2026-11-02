@@ -134,12 +134,6 @@ pub(super) fn metadata(inner: &mut Inner, root: &Url) -> Value {
         "include_paths":paths,"macro_complete":facts.as_ref().map(|facts|facts.macro_complete),
         "model_complete":facts.as_ref().map(|facts|facts.model_complete),
         "overrides":facts.as_ref().map(|facts|facts.overrides.clone()).unwrap_or_default(),"cause":cause});
-    if let Some(receipt) = facts
-        .as_ref()
-        .and_then(|facts| facts.selector_file.as_ref())
-    {
-        metadata["selector_file"] = json!(receipt);
-    }
     if facts.is_none() {
         metadata["override_names"] =
             json!(inner.workspace.root_analysis_override_names(root.as_str()));
@@ -720,73 +714,6 @@ mod tests {
     fn request(root: &Url, proof: &Value, analysis: Value) -> Value {
         json!({"root_uri":root,"document_uri":root,"document_version":proof["document_version"],"expected_revision":proof["revision"],
             "expected_selection_generation":proof["analysis"]["selection_generation"],"analysis":analysis,"include_paths":null})
-    }
-
-    #[tokio::test]
-    async fn failed_selector_model_info_keeps_recovery_watcher_without_a_guarded_target() {
-        // Stale Model Info must keep its recovery watcher and a valid file-specific cause.
-        let file = std::env::temp_dir().join(format!(
-            "dygnosis-lsp-selector-{}-{}.txt",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::write(&file, "keep\n").unwrap();
-        let (mut inner, root) = state("var y;model;[name='keep'] y=0;end;");
-        inner
-            .workspace
-            .set_root_analysis_configuration(
-                root.as_str(),
-                serde_json::from_value(json!({
-                    "equation_selection":{"mode":"include","file":file.to_string_lossy()}
-                }))
-                .unwrap(),
-            )
-            .unwrap();
-        let (service, _socket) = new_service();
-        let server = service.inner();
-        *server.lock_inner() = inner;
-        let model_info = || server.model_info_command(&[json!({"root_uri":root})]);
-        assert!(model_info()["analysis"]["selector_file"].is_object());
-        std::fs::remove_file(&file).unwrap();
-        let missing_info = model_info();
-        assert_eq!(missing_info["complete"], false);
-        let stale = &missing_info["analysis"];
-        assert_eq!(stale["state"], "stale");
-        assert_eq!(stale["cause"]["code"], "ANALYSIS_SELECTOR_FILE_MISSING");
-        assert!(!stale["cause"].as_object().unwrap().contains_key("target"));
-        assert!(stale.get("selector_file").is_none());
-        let candidates = |info: &Value| {
-            info["dependency_candidates"]
-                .as_array()
-                .expect("watcher candidates in stale Model Info")
-                .iter()
-                .map(|uri| {
-                    Url::parse(uri.as_str().unwrap())
-                        .unwrap()
-                        .to_file_path()
-                        .unwrap()
-                })
-                .map(|path| crate::engine::workspace::include_resolver::path_key(&path))
-                .collect::<Vec<_>>()
-        };
-        let file_key = crate::engine::workspace::include_resolver::path_key(&file);
-        assert!(candidates(&missing_info).contains(&file_key));
-        std::fs::write(&file, "\u{feff}keep\n").unwrap();
-        let invalid = model_info();
-        assert_eq!(invalid["analysis"]["state"], "stale");
-        assert_eq!(
-            invalid["analysis"]["cause"]["code"],
-            "ANALYSIS_SELECTOR_FILE_INVALID"
-        );
-        assert!(candidates(&invalid).contains(&file_key));
-        std::fs::write(&file, "keep\n").unwrap();
-        let recovered = model_info();
-        assert_eq!(recovered["analysis"]["state"], "selected");
-        assert_eq!(recovered["complete"], true);
-        std::fs::remove_file(&file).unwrap();
     }
 
     #[test]

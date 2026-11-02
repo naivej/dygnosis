@@ -18,9 +18,8 @@ mod source_declarations;
 pub(crate) use source_declarations::DeclarationLookup;
 mod source_structure;
 
-use sha2::Digest;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -353,7 +352,6 @@ impl SourceDocument {
 
 /// One joined include source and its written-file map. The model, expand view,
 /// and diagnostic locations all read this same snapshot until invalidation.
-#[derive(Clone)]
 struct SplicedSource {
     text: String,
     segments: Vec<SpliceSegment>,
@@ -546,16 +544,6 @@ pub(crate) struct SourceIncludeLookup {
 thread_local! {
     pub(crate) static SOURCE_LOOKUP_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     pub(crate) static INPUT_REVISION_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static SELECTOR_BEFORE_FINAL_GUARD: RefCell<Option<Box<dyn FnOnce()>>> = const { RefCell::new(None) };
-}
-
-#[cfg(test)]
-fn run_selector_before_final_guard_hook() {
-    SELECTOR_BEFORE_FINAL_GUARD.with(|hook| {
-        if let Some(hook) = hook.borrow_mut().take() {
-            hook();
-        }
-    });
 }
 
 #[cfg(any(test, feature = "mcp-perf"))]
@@ -826,33 +814,6 @@ impl Workspace {
             .saturating_add(model.source.len())
             .saturating_add(
                 model
-                    .analysis_context
-                    .as_ref()
-                    .and_then(|context| {
-                        context
-                            .analysis
-                            .choices
-                            .equation_selection
-                            .as_ref()
-                            .map(|selection| {
-                                AnalysisConfiguration::selection_values(selection)
-                                    .iter()
-                                    .map(String::len)
-                                    .sum::<usize>()
-                                    .saturating_add(
-                                        AnalysisConfiguration::selection_values(selection)
-                                            .len()
-                                            .saturating_mul(
-                                                std::mem::size_of::<String>()
-                                                    + 3 * std::mem::size_of::<usize>(),
-                                            ),
-                                    )
-                            })
-                    })
-                    .unwrap_or(0),
-            )
-            .saturating_add(
-                model
                     .expanded_tokens
                     .capacity()
                     .saturating_mul(std::mem::size_of::<crate::engine::language::lexer::Token>()),
@@ -1005,53 +966,10 @@ impl Workspace {
         &mut self,
         key: &str,
     ) -> Result<Option<Arc<ResolvedAnalysis>>, ConfigurationError> {
-        self.checked_analysis_with_observed_selector_guard(key, None)
-    }
-
-    fn checked_analysis_with_observed_selector_guard(
-        &mut self,
-        key: &str,
-        observed_selector_guard: Option<&InputFile>,
-    ) -> Result<Option<Arc<ResolvedAnalysis>>, ConfigurationError> {
         let Some(analysis) = self.root_analyses.get(key).cloned() else {
             return Ok(None);
         };
         let mut budget = self.macro_budget(key);
-        if let Some(receipt) = &analysis.selector_file
-            && !self.overlay_only
-            && self.docs.get(&receipt.file).is_some_and(|doc| doc.overlay)
-        {
-            return Err(selector_overlay_error(&receipt.file));
-        }
-        let selector_guard_changed = match (&analysis.selector_file, observed_selector_guard) {
-            (Some(_), Some(observed)) => analysis.selector_guard.as_ref() != Some(observed),
-            (Some(receipt), None) => {
-                analysis.selector_guard.as_ref() != Some(&self.input_file(&receipt.file))
-            }
-            (None, _) => false,
-        };
-        if selector_guard_changed {
-            let receipt = analysis
-                .selector_file
-                .as_ref()
-                .expect("changed selector guard has a selector receipt");
-            let (bytes, _guard) = self.read_selector_bytes(key, &receipt.file, &mut budget)?.ok_or_else(|| {
-                ConfigurationError::new(
-                    "ANALYSIS_SELECTOR_FILE_MISSING",
-                    format!("Equation selector file '{}' is missing or exceeds the source byte limit. Check the path and file size, then try again.", receipt.file),
-                )
-            })?;
-            if format!("{:x}", sha2::Sha256::digest(&bytes)) != receipt.byte_sha256 {
-                parse_selector_file(&bytes, &receipt.file, || self.cancelled())?;
-                return Err(ConfigurationError::new(
-                    "ANALYSIS_SELECTOR_FILE_STALE",
-                    format!(
-                        "Equation selector file '{}' changed. Retry the analysis to use its saved contents.",
-                        receipt.file
-                    ),
-                ));
-            }
-        }
         for selected in &analysis.overrides {
             let target = selected.operation.target();
             // Root choices outlive the bounded document cache. Reacquire only
@@ -1130,75 +1048,15 @@ impl Workspace {
         if let Some(current) = self
             .root_analyses
             .get(&key)
-            .filter(|current| {
-                same_declared_configuration(&current.choices, &choices) && !paths_changed
-            })
+            .filter(|current| current.choices == choices && !paths_changed)
             .cloned()
         {
-            let observed_selector_guard = current
-                .selector_file
-                .as_ref()
-                .map(|receipt| self.input_file(&receipt.file));
-            let still_current = current.selector_file.is_none()
-                || current.selector_guard.as_ref() == observed_selector_guard.as_ref();
-            if still_current {
-                self.checked_analysis_with_observed_selector_guard(
-                    &key,
-                    observed_selector_guard.as_ref(),
-                )?;
-                return Ok(current.selection.clone());
-            }
+            self.checked_analysis(&key)?;
+            return Ok(current.selection.clone());
         }
-        let previous_selector_file = self
-            .root_analyses
-            .get(&key)
-            .and_then(|analysis| analysis.selector_file.clone());
         let previous_result = self.retain_root_result(&key);
         charge(&mut budget, 1)?;
-        let mut choices = choices;
         let initial = choices.validate_initial(&mut budget)?;
-        let mut selector_file = None;
-        let mut selector_guard = None;
-        let mut selector_source = None;
-        if let Some(selection) = choices.equation_selection.as_mut()
-            && let Some(file) = selection.file.as_deref()
-        {
-            if self.unnamed_roots.contains(&key) {
-                return Err(ConfigurationError::new(
-                    "ANALYSIS_SELECTOR_FILE_UNNAMED_ROOT",
-                    "Equation selector files need a named disk or supplied-map root. Unnamed text and untitled roots cannot resolve selector files; provide explicit values.",
-                ));
-            }
-            let selector_key = self.selector_file_key(&key, file).ok_or_else(|| {
-                ConfigurationError::new(
-                    "ANALYSIS_SELECTOR_FILE_MISSING",
-                    format!("Equation selector file '{file}' is unavailable in this source. Add it to the supplied files or captured revision, use a named disk source, or provide explicit values."),
-                )
-            })?;
-            self.dependency_candidates
-                .entry(key.clone())
-                .or_default()
-                .insert(selector_key.clone());
-            let (bytes, guard) = self.read_selector_bytes(&key, &selector_key, &mut budget)?.ok_or_else(|| {
-                ConfigurationError::new(
-                    "ANALYSIS_SELECTOR_FILE_MISSING",
-                    format!("Equation selector file '{file}' is missing or exceeds the source byte limit. Check the path and file size, then try again."),
-                )
-            })?;
-            let (tag, values) = parse_selector_file(&bytes, &selector_key, || self.cancelled())?;
-            let byte_sha256 = format!("{:x}", sha2::Sha256::digest(&bytes));
-            let value_count = values.len();
-            let text = String::from_utf8(bytes).expect("selector parser validated UTF-8");
-            selector_source = Some((selector_key.clone(), text));
-            AnalysisConfiguration::resolve_selection_values(selection, tag.clone(), values);
-            selector_guard = Some(guard);
-            selector_file = Some(SelectorFileReceipt {
-                file: selector_key,
-                tag,
-                value_count,
-                byte_sha256,
-            });
-        }
         let mut overrides = Vec::new();
         let mut by_file: HashMap<String, HashMap<Span, usize>> = HashMap::new();
         for operation in &choices.overrides {
@@ -1257,22 +1115,6 @@ impl Workspace {
         }
         // All target reads and expression checks complete before selection changes.
         charge(&mut budget, 1)?;
-        #[cfg(test)]
-        run_selector_before_final_guard_hook();
-        if let (Some(receipt), Some(guard)) = (&selector_file, &selector_guard)
-            && self.input_file(&receipt.file) != *guard
-        {
-            return Err(ConfigurationError::new(
-                "ANALYSIS_SELECTOR_FILE_STALE",
-                format!(
-                    "Equation selector file '{}' changed while it was being read. Save a stable file, then try again.",
-                    receipt.file
-                ),
-            ));
-        }
-        if let Some((file, text)) = selector_source {
-            self.retain_selector_source(&key, &file, text);
-        }
         let selection = AnalysisSelection {
             configuration_id: choices.configuration_id(),
             name: choices.name.clone(),
@@ -1310,12 +1152,9 @@ impl Workspace {
                         .into_iter()
                         .map(|(file, sites)| (file, Arc::new(sites)))
                         .collect(),
-                    selector_file: selector_file.clone(),
-                    selector_guard: selector_guard.clone(),
                 }),
             );
         }
-        let selector_changed = previous_selector_file != selector_file;
         if !unchanged {
             self.invalidate_root(&key);
             self.restore_root_result(&key, &selection.configuration_id);
@@ -1338,31 +1177,6 @@ impl Workspace {
                     self.retained_roots.remove(0);
                 }
                 self.retained_roots.push(previous);
-            }
-        } else if selector_changed {
-            // Selector edits change only the post-Parse selection. Retain the
-            // joined source and include walk so macro/source acquisition can
-            // reuse its existing owners.
-            self.invalidate_read(Some(&key));
-            self.effective.remove(&key);
-            self.expand.remove(&key);
-            let execution_inputs = if let Some(analysis) = self.root_analyses.get(&key) {
-                let segments = self.spliced.get(&key).map(|source| source.segments.clone());
-                segments
-                    .map(|segments| {
-                        crate::engine::language::expand::map_execution_inputs(
-                            Arc::clone(analysis),
-                            &segments,
-                            &mut self.macro_budget(&key),
-                        )
-                        .map_err(crate::engine::analysis_configuration::expression_error)
-                    })
-                    .transpose()?
-            } else {
-                None
-            };
-            if let Some(spliced) = self.spliced.get_mut(&key) {
-                Arc::make_mut(spliced).execution_inputs = execution_inputs;
             }
         } else {
             self.refresh_model_analysis_label(&key);
@@ -1482,7 +1296,6 @@ impl Workspace {
             macro_complete: source.macro_complete,
             model_complete: complete,
             overrides,
-            selector_file: analysis.and_then(|analysis| analysis.selector_file.clone()),
         }))
     }
     /// Isolated editor snapshot that preserves this root's include settings.
@@ -1681,17 +1494,6 @@ impl Workspace {
         cancellation: Option<Arc<AtomicBool>>,
         work_limit: MacroWorkLimit,
     ) -> Self {
-        Self::overlay_documents_with_lazy_files(files, cancellation, work_limit, &HashSet::new())
-    }
-
-    /// Construct supplied inputs while keeping designated non-Dynare text
-    /// documents raw until a feature reads them.
-    pub(crate) fn overlay_documents_with_lazy_files(
-        files: &BTreeMap<String, String>,
-        cancellation: Option<Arc<AtomicBool>>,
-        work_limit: MacroWorkLimit,
-        lazy_files: &HashSet<String>,
-    ) -> Self {
         let mut ws = Self {
             overlay_only: true,
             cancellation,
@@ -1702,7 +1504,7 @@ impl Workspace {
             if ws.cancelled() {
                 break;
             }
-            ws.insert_overlay_mode(name, content.clone(), lazy_files.contains(name));
+            ws.insert_overlay(name, content.clone());
         }
         ws
     }
@@ -1739,26 +1541,11 @@ impl Workspace {
             ),
             ..Default::default()
         };
-        let lazy_selector = input
-            .analysis
-            .as_ref()
-            .and_then(|analysis| analysis.equation_selection.as_ref())
-            .and_then(|selection| selection.file.as_deref())
-            .and_then(|file| {
-                workspace.snapshot_lookup.as_ref()?.path(
-                    crate::engine::comparison::compare_snapshots::tree_parent(&input.root_file),
-                    file,
-                )
-            });
         for (key, fact) in &input.sources {
             if let crate::engine::comparison::compare_snapshots::SourceFact::Text { text } = fact {
                 // MacroSource owns normalization and source-offset transport;
                 // guarded targets identify the original acquired bytes.
-                workspace.insert_overlay_mode(
-                    key,
-                    text.clone(),
-                    lazy_selector.as_deref() == Some(key),
-                );
+                workspace.insert_overlay(key, text.clone());
             }
         }
         workspace
@@ -1771,17 +1558,6 @@ impl Workspace {
             normalize_uri(root)
         };
         std::iter::once(key.clone())
-            .chain(
-                self.root_analyses
-                    .get(&key)
-                    .into_iter()
-                    .flat_map(|analysis| {
-                        analysis
-                            .selector_file
-                            .iter()
-                            .map(|receipt| receipt.file.clone())
-                    }),
-            )
             .chain(self.records.get(&key).into_iter().flat_map(|records| {
                 records
                     .resolved
@@ -1820,20 +1596,19 @@ impl Workspace {
     }
 
     /// Store one overlay under `key` exactly. No disk and no path folding.
-    fn insert_overlay_mode(&mut self, key: &str, source: String, lazy_model: bool) {
+    fn insert_overlay(&mut self, key: &str, source: String) {
         self.invalidate_read(None);
         let input_generation = self.overlay_generation(key, &source);
-        let model = (!lazy_model).then(|| {
-            crate::engine::language::parser::parse_with_budget(&source, &mut self.macro_budget(key))
-        });
+        let model = crate::engine::language::parser::parse_with_budget(
+            &source,
+            &mut self.macro_budget(key),
+        );
         self.docs.insert(
             key.to_string(),
             Arc::new(Doc {
                 source: Arc::new(source),
                 source_index: OnceLock::new(),
-                model: model
-                    .map(|model| OnceLock::from(Arc::new(model)))
-                    .unwrap_or_default(),
+                model: OnceLock::from(Arc::new(model)),
                 source_inventory: Mutex::new(Vec::new()),
                 macro_source: Mutex::new(None),
                 work_limit: self.root_macro_work_limit(key),
@@ -2181,12 +1956,6 @@ impl Workspace {
             .flat_map(|inputs| inputs.iter())
             .filter_map(|(path, state)| (self.input_file(path) != *state).then_some(path.clone()))
             .collect();
-        let selector_changed = self.root_analyses.get(&key).is_some_and(|analysis| {
-            analysis.selector_file.as_ref().is_some_and(|receipt| {
-                changed.contains(&receipt.file)
-                    || analysis.selector_guard.as_ref() != Some(&self.input_file(&receipt.file))
-            })
-        });
         // Another retained root can still own a target document after this
         // root's input snapshot was evicted. Validate that cached text before
         // capturing a new guard; fresh disk bytes must not label old text.
@@ -2214,46 +1983,18 @@ impl Workspace {
                 }
             }
         }
-        let selector_only_change = selector_changed
-            && changed.iter().all(|path| {
-                self.root_analyses
-                    .get(&key)
-                    .and_then(|analysis| analysis.selector_file.as_ref())
-                    .is_some_and(|receipt| receipt.file == *path)
-            });
         if !changed.is_empty() {
             for path in changed {
                 if self.docs.get(&path).is_some_and(|doc| !doc.overlay) {
                     self.docs.remove(&path);
                 }
             }
-            if !selector_only_change {
-                self.invalidate_root(&key);
-            }
+            self.invalidate_root(&key);
         }
         let Some(key) = self.ensure_loaded(uri) else {
             self.include_owners.remove(&key);
             return None;
         };
-        if selector_changed {
-            // The selector bytes changed, so the old projection cannot be
-            // retained under the newly captured file guard. Keep joined
-            // source and macro proof, but start a fresh read revision.
-            self.input_snapshots.remove(&key);
-            self.invalidate_read(Some(&key));
-            if selector_only_change {
-                self.effective.remove(&key);
-                self.expand.remove(&key);
-            }
-            if let Some(choices) = self
-                .root_analyses
-                .get(&key)
-                .map(|analysis| analysis.choices.clone())
-                && self.set_root_analysis_configuration(uri, choices).is_err()
-            {
-                return None;
-            }
-        }
         self.checked_analysis(&key).ok()?;
         self.include_records(uri)?;
         self.companion_records(uri)?;
@@ -2325,12 +2066,6 @@ impl Workspace {
                     .overrides
                     .iter()
                     .map(|selected| selected.file.clone()),
-            );
-            files.extend(
-                analysis
-                    .selector_file
-                    .iter()
-                    .map(|receipt| receipt.file.clone()),
             );
         }
         files.insert(key.clone());
@@ -2432,26 +2167,16 @@ impl Workspace {
             .collect()
     }
 
-    /// Exact native input candidates, including a failed active selector.
-    /// Keep that selector watched when its failure prevents a new revision.
-    /// Clients must not repeat the source lookup rules.
+    /// Exact native input candidates. Clients must not repeat the source lookup rules.
     pub(crate) fn input_candidate_paths(&self, uri: &str) -> Vec<PathBuf> {
         let root = normalize_uri(uri);
         self.input_snapshots
             .get(&root)
             .into_iter()
             .flat_map(|snapshot| snapshot.keys())
-            .chain(
-                self.root_analyses
-                    .get(&root)
-                    .and_then(|analysis| analysis.selector_file.as_ref())
-                    .map(|selector| &selector.file),
-            )
             .filter(|key| !is_virtual_uri(key))
             .map(PathBuf::from)
             .filter(|path| path.is_absolute())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
             .collect()
     }
 
@@ -3549,160 +3274,6 @@ impl Workspace {
         } else {
             path_key(path)
         }
-    }
-
-    /// Selector files resolve from the root folder only. Supplied snapshots
-    /// match their captured key set and never consult host disk.
-    fn selector_file_key(&self, root: &str, file: &str) -> Option<String> {
-        if let Some(lookup) = &self.snapshot_lookup {
-            return lookup.path(
-                crate::engine::comparison::compare_snapshots::tree_parent(root),
-                file,
-            );
-        }
-        if self.overlay_only {
-            let candidate = Self::supplied_selector_key(root, file);
-            return self
-                .docs
-                .keys()
-                .find(|key| {
-                    crate::engine::workspace::include_resolver::supplied_path_key(key) == candidate
-                })
-                .cloned()
-                .or(Some(candidate));
-        }
-        let requested = PathBuf::from(file);
-        let path = if requested.is_absolute() {
-            requested
-        } else {
-            Path::new(root)
-                .parent()
-                .unwrap_or(Path::new(""))
-                .join(requested)
-        };
-        Some(path_key(&path))
-    }
-
-    pub(crate) fn supplied_selector_key(root: &str, file: &str) -> String {
-        let path = if overlay_absolute(file) {
-            overlay_key(file)
-        } else {
-            overlay_parent(root)
-                .map_or_else(|| overlay_key(file), |parent| overlay_join(&parent, file))
-        };
-        crate::engine::workspace::include_resolver::supplied_path_key(&path)
-    }
-
-    fn read_selector_bytes(
-        &mut self,
-        _root: &str,
-        key: &str,
-        budget: &mut MacroBudget,
-    ) -> Result<Option<(Vec<u8>, InputFile)>, ConfigurationError> {
-        if !self.overlay_only && self.docs.get(key).is_some_and(|doc| doc.overlay) {
-            return Err(selector_overlay_error(key));
-        }
-        if self.overlay_only {
-            let Some(length) = self.docs.get(key).map(|doc| doc.source.len()) else {
-                return Ok(None);
-            };
-            self.check_source_size(key, length as u64)
-                .map_err(|_| selector_source_limit_error(key))?;
-            let doc = self.docs.get(key).expect("selector overlay still present");
-            let guard = self.input_file(key);
-            charge(budget, doc.source.len().saturating_add(1))?;
-            return Ok(Some((doc.source.as_bytes().to_vec(), guard)));
-        }
-        let path = PathBuf::from(key);
-        let metadata = match std::fs::metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => {
-                return Err(ConfigurationError::new(
-                    "ANALYSIS_SELECTOR_FILE_READ",
-                    format!(
-                        "Equation selector file '{key}' could not be inspected: {error}. Check the path and file permissions, then try again."
-                    ),
-                ));
-            }
-        };
-        if !metadata.is_file() {
-            return Err(ConfigurationError::new(
-                "ANALYSIS_SELECTOR_FILE_READ",
-                format!(
-                    "Equation selector file '{key}' is not a regular file. Choose a UTF-8 text file, then try again."
-                ),
-            ));
-        }
-        let default_limit = 16 * 1024 * 1024;
-        let byte_limit = self
-            .source_limits
-            .map_or(default_limit, |(file, total, _)| file.min(total));
-        self.check_source_size(key, metadata.len())
-            .map_err(|_| selector_source_limit_error(key))?;
-        if metadata.len() > byte_limit as u64 {
-            return Err(selector_source_limit_error(key));
-        }
-        let before = self.input_file(key);
-        if !before.exists || before.directory {
-            return Ok(None);
-        }
-        if let Some(bytes) = before.bytes.as_ref() {
-            if before.length != Some(bytes.len() as u64) || metadata.len() != bytes.len() as u64 {
-                return Err(selector_stale_error(key));
-            }
-            charge(budget, bytes.len().saturating_add(1))?;
-            return Ok(Some((bytes.clone(), before)));
-        }
-        charge(budget, metadata.len() as usize + 1)?;
-        let file = std::fs::File::open(&path).map_err(|error| {
-            ConfigurationError::new(
-                "ANALYSIS_SELECTOR_FILE_READ",
-                format!("Equation selector file '{key}' could not be opened: {error}. Check the path and file permissions, then try again."),
-            )
-        })?;
-        let mut bytes = Vec::with_capacity(metadata.len() as usize);
-        file.take(byte_limit as u64 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|error| {
-                ConfigurationError::new(
-                    "ANALYSIS_SELECTOR_FILE_READ",
-                    format!("Equation selector file '{key}' could not be read: {error}. Check the path and file permissions, then try again."),
-                )
-            })?;
-        if bytes.len() > byte_limit {
-            return Err(selector_source_limit_error(key));
-        }
-        let after = self.input_file(key);
-        if before != after || before.length != Some(bytes.len() as u64) {
-            return Err(selector_stale_error(key));
-        }
-        Ok(Some((bytes, before)))
-    }
-
-    fn retain_selector_source(&mut self, root: &str, file: &str, text: String) {
-        if self
-            .docs
-            .get(file)
-            .is_some_and(|doc| doc.source.as_str() == text && doc.model.get().is_none())
-        {
-            return;
-        }
-        let overlay = self.overlay_only;
-        let source = Arc::new(text);
-        self.docs.insert(
-            file.to_owned(),
-            Arc::new(Doc {
-                source,
-                source_index: OnceLock::new(),
-                model: OnceLock::new(),
-                source_inventory: Mutex::new(Vec::new()),
-                macro_source: Mutex::new(None),
-                work_limit: self.root_macro_work_limit(root),
-                overlay,
-                input_generation: INPUT_GENERATION.fetch_add(1, Ordering::Relaxed),
-            }),
-        );
     }
 
     fn snapshot_include_key(
@@ -5505,21 +5076,6 @@ fn overlay_includepath_key(key: &str, raw: &str) -> String {
     overlay_key(&joined)
 }
 
-fn same_declared_configuration(
-    left: &AnalysisConfiguration,
-    right: &AnalysisConfiguration,
-) -> bool {
-    let mut left = left.clone();
-    let mut right = right.clone();
-    for configuration in [&mut left, &mut right] {
-        if let Some(selection) = configuration.equation_selection.as_mut() {
-            selection.resolved_values = None;
-            selection.resolved_tag = None;
-        }
-    }
-    left == right
-}
-
 pub fn resolve_includepath(key: &str, raw: &str) -> PathBuf {
     let path = PathBuf::from(normalize_separators(raw));
     let path = if path.is_absolute() {
@@ -5615,34 +5171,6 @@ fn read_include_text_inner(
             Ok(Some((bytes.into_iter().map(char::from).collect(), guard)))
         }
     }
-}
-
-/// Inputs above the fixed provenance byte bound keep metadata without a byte copy.
-fn selector_source_limit_error(file: &str) -> ConfigurationError {
-    ConfigurationError::new(
-        "ANALYSIS_SELECTOR_FILE_LIMIT",
-        format!(
-            "Equation selector file '{file}' exceeds the source byte limit. Reduce the file size, then try again."
-        ),
-    )
-}
-
-fn selector_overlay_error(file: &str) -> ConfigurationError {
-    ConfigurationError::new(
-        "ANALYSIS_SELECTOR_FILE_OVERLAY",
-        format!(
-            "Equation selector file '{file}' has open editor text. Close its Dynare tab or use a plain text selector file, then try again. Saving alone does not close the editor text."
-        ),
-    )
-}
-
-fn selector_stale_error(file: &str) -> ConfigurationError {
-    ConfigurationError::new(
-        "ANALYSIS_SELECTOR_FILE_STALE",
-        format!(
-            "Equation selector file '{file}' changed while it was being read. Save a stable file, then try again."
-        ),
-    )
 }
 
 fn read_input_bytes(path: &Path) -> Option<Vec<u8>> {
@@ -6280,7 +5808,7 @@ mod supplied_compare_revision_tests {
         assert!(workspace.input_snapshot_is_current(root));
         assert!(workspace.input_snapshots.contains_key(root));
         assert!(workspace.snapshot_sources(root).contains_key(child));
-        workspace.insert_overlay_mode(child, "var y; model; y=2; end;".into(), false);
+        workspace.insert_overlay(child, "var y; model; y=2; end;".into());
         assert!(!workspace.input_snapshot_is_current(root));
         assert_ne!(workspace.input_revision(root).unwrap(), before);
         assert!(workspace.input_snapshot_is_current(root));

@@ -100,6 +100,46 @@ fn failed_equation_selection_is_explained_without_source_counts() {
 }
 
 #[test]
+fn refused_direct_analysis_configuration_keeps_source_provenance() {
+    // Guards an invalid macro expression losing the named source context.
+    let result = call(
+        "dynare_model_info",
+        json!({
+            "source":source("var a; model; [name='a'] a=a(-1); end;"),
+            "analysis":{"defines":[{"name":"FLAG","expression":"("}]}
+        }),
+    );
+    assert_eq!(result["outcome"]["status"], "refused");
+    assert_eq!(
+        result["outcome"]["reasons"][0]["code"],
+        "ANALYSIS_INVALID_EXPRESSION"
+    );
+    assert_eq!(result["inputs"].as_array().unwrap().len(), 1);
+    let input = &result["inputs"][0];
+    assert_eq!(input["root"], "main.mod");
+    assert_eq!(input["analysis"]["acquisition"], "refused");
+    assert!(input["revision"].is_null());
+}
+
+#[test]
+fn blank_equation_tag_values_are_refused_before_model_projection() {
+    // Guards MCP accepting tag values that editor metadata cannot represent.
+    for value in ["", " ", "\t\n"] {
+        let result = call(
+            "dynare_model_info",
+            json!({"source":source("var a; model; [name='a'] a=0; end;"),
+                "analysis":{"equation_selection":{"mode":"include","values":[value]}}}),
+        );
+        assert_eq!(result["outcome"]["status"], "refused");
+        assert_eq!(
+            result["outcome"]["reasons"][0]["code"],
+            "ANALYSIS_INVALID_EQUATION_SELECTION"
+        );
+        assert!(result["data"].is_null());
+    }
+}
+
+#[test]
 fn request_choices_change_effective_facts_without_leaking_to_the_next_request() {
     // A false definition is present; request-local state must not leak to Source.
     let configured = call(

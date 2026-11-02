@@ -262,25 +262,6 @@ fn invalid(message: impl Into<String>) -> rmcp::ErrorData {
 
 pub(super) fn input_schema(tool: &str) -> Arc<serde_json::Map<String, Value>> {
     let mut schema = super::mcp_input_schema::<Params>().as_ref().clone();
-    if let Some(definitions) = schema.get_mut("definitions").and_then(Value::as_object_mut)
-        && definitions.contains_key("EquationSelection")
-    {
-        definitions.insert("EquationSelection".into(), json!({
-            "type":"object",
-            "properties": {
-                "mode":{"type":"string","enum":["include","exclude"]},
-                "tag":{"type":"string","minLength":1,"pattern":"^[A-Za-z_][A-Za-z0-9_]*$"},
-                "values":{"type":"array","items":{"type":"string","minLength":1},"minItems":1},
-                "file":{"type":"string","minLength":1}
-            },
-            "required":["mode"],
-            "additionalProperties":false,
-            "oneOf":[
-                {"required":["file"],"not":{"anyOf":[{"required":["tag"]},{"required":["values"]}]}},
-                {"required":["values"],"not":{"required":["file"]}}
-            ]
-        }));
-    }
     let allowed = fields(tool);
     schema["properties"]
         .as_object_mut()
@@ -341,7 +322,7 @@ pub(super) fn advertised_tools(structured: bool) -> Vec<Tool> {
         };
         let configuration = if matches!(name,"dynare_syntax"|"dynare_diagnostic_info") {String::new()} else {
             let argument=if name=="dynare_compare_models"{"analysis_a and analysis_b"}else{"analysis"};
-            format!(" Optional {argument} selects macro inputs, guarded overrides and equation tags by explicit values or a selector file. Use exactly one of values and file; tag applies only to values. Relative selector files resolve from the named root's folder; supplied maps and Git revisions use only their own files. Files contain one literal value per nonempty line, with an optional first tag= header; the default tag is name. Supply UTF-8 without a BOM. analysis.selector_file reports the captured file, tag, unique value count and SHA-256 of its bytes. Unnamed text cannot resolve a selector file; use a named source or explicit values. Omission selects Source; names do not load editor presets. Discover override targets with dynare_model_info source_structure. Overrides and equation selection create previews that withhold Rename and diagnostic-fix proposals. Equation selection follows full-source Parse and Check; failed selection withholds model facts. Read application receipts and coverage separately. Invocation settings and hooks are not imported.")};
+            format!(" Optional {argument} selects macro inputs, guarded overrides and equation tags by explicit values. Equation selection uses a tag name (default name) and one or more tag values. Omission selects Source; names do not load editor presets. Discover override targets with dynare_model_info source_structure. Overrides and equation selection create previews that withhold Rename and diagnostic-fix proposals. Equation selection follows full-source Parse and Check; failed selection withholds model facts. Read application receipts and coverage separately. Invocation settings and hooks are not imported.")};
         let source_contract = if matches!(name,"dynare_syntax"|"dynare_diagnostic_info") { "" } else {
             " Source maps read only supplied files. Positions are one-based Unicode scalars with exclusive ends. Reused identities require their original expected revision guards."
         };
@@ -398,17 +379,6 @@ pub(super) fn dispatch(
     }
     let params: Params =
         serde_json::from_value(arguments.clone()).map_err(|e| invalid(e.to_string()))?;
-    for analysis in [&params.analysis, &params.analysis_a, &params.analysis_b]
-        .into_iter()
-        .flatten()
-    {
-        analysis.validate_selector_shape().map_err(invalid)?;
-    }
-    if let Some(BatchInput::ConfiguredSources { jobs }) = &params.batch {
-        for job in jobs {
-            job.analysis.validate_selector_shape().map_err(invalid)?;
-        }
-    }
     if params
         .page_size
         .is_some_and(|size| !(1..=1000).contains(&size))
@@ -1180,14 +1150,12 @@ mod tests {
     }
 
     #[test]
-    fn selector_file_shape_is_rejected_at_canonical_boundary_and_advertised() {
-        // Guards invalid arguments being reported before tool execution and
-        // schema clients seeing the same exactly-one file/value contract.
+    fn equation_selection_accepts_direct_values_and_rejects_obsolete_file_input() {
+        // Guards unknown file fields being rejected instead of silently
+        // activating selector-file behavior, while direct tag values remain valid.
         for analysis in [
-            json!({"equation_selection":{"mode":"include"}}),
-            json!({"equation_selection":{"mode":"include","values":[]}}),
-            json!({"equation_selection":{"mode":"include","file":"x","values":[]}}),
-            json!({"equation_selection":{"mode":"include","file":"x","tag":"name"}}),
+            json!({"equation_selection":{"mode":"include","file":"x","values":["a"]}}),
+            json!({"equation_selection":{"mode":"include","file":"x"}}),
         ] {
             assert!(
                 dispatch(
@@ -1198,11 +1166,16 @@ mod tests {
                 .is_err()
             );
         }
+        let accepted = call(
+            "dynare_model_info",
+            json!({"source":source(MODEL),"analysis":{"equation_selection":{"mode":"include","values":["a"]}}}),
+        );
+        assert_ne!(accepted["outcome"]["status"], "refused");
         for field in ["analysis_a", "analysis_b"] {
             let mut arguments = json!({
                 "comparison":{"before":{"source":source(MODEL)},"after":{"source":source(MODEL)}}
             });
-            arguments[field] = json!({"equation_selection":{"mode":"include","values":[]}});
+            arguments[field] = json!({"equation_selection":{"mode":"include","file":"x"}});
             assert!(
                 dispatch(
                     "dynare_compare_models",
@@ -1214,8 +1187,10 @@ mod tests {
         }
         let schema = input_schema("dynare_model_info");
         let selection = &schema["definitions"]["EquationSelection"];
-        assert_eq!(selection["oneOf"].as_array().unwrap().len(), 2);
+        assert!(selection["properties"].get("file").is_none());
+        assert!(selection["properties"].get("values").is_some());
         assert_eq!(selection["properties"]["values"]["minItems"], 1);
+        assert_eq!(selection["properties"]["values"]["items"]["minLength"], 1);
     }
 
     // Guards unchanged/no-match edit outcomes returning the entire input as a

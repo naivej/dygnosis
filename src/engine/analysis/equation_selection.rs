@@ -93,18 +93,10 @@ fn plan(
             .equations
             .len()
             .saturating_mul(4)
-            .saturating_add(
-                crate::engine::analysis_configuration::AnalysisConfiguration::selection_values(
-                    selection,
-                )
-                .len(),
-            )
+            .saturating_add(selection.values.len())
             .saturating_add(1),
     )?;
-    let tag = crate::engine::analysis_configuration::AnalysisConfiguration::equation_tag(selection);
-    let values =
-        crate::engine::analysis_configuration::AnalysisConfiguration::selection_values(selection);
-    let mut unmatched: HashSet<&str> = values.iter().map(String::as_str).collect();
+    let mut unmatched: HashSet<&str> = selection.values.iter().map(String::as_str).collect();
     let mut removed = vec![false; model.equations.len()];
     let include = selection.mode == EquationSelectionMode::Include;
     // The pin consumes dynamic matches before querying the static-only list.
@@ -117,10 +109,10 @@ fn plan(
             }
             let hit = equation
                 .tag_map
-                .get(tag)
+                .get(&selection.tag)
                 .is_some_and(|value| unmatched.contains(value.as_str()));
             if hit {
-                matched.insert(equation.tag_map[tag].as_str());
+                matched.insert(equation.tag_map[&selection.tag].as_str());
             }
             removed[index] = hit != include;
         }
@@ -184,18 +176,12 @@ fn plan(
             "E335",
             format!(
                 "model_remove/model_replace/exclude_eqs/include_eqs: The equations specified by {} were not found.",
-                crate::engine::analysis_configuration::AnalysisConfiguration::selection_values(
-                    selection
-                )
-                .iter()
-                .map(|value| format!(
-                    "{}={value}",
-                    crate::engine::analysis_configuration::AnalysisConfiguration::equation_tag(
-                        selection
-                    )
-                ))
-                .collect::<Vec<_>>()
-                .join(", ")
+                selection
+                    .values
+                    .iter()
+                    .map(|value| format!("{}={value}", selection.tag))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
         ));
     }
@@ -328,11 +314,8 @@ mod tests {
             let mut model = crate::engine::language::parser::parse(&source(count));
             let selection = EquationSelection {
                 mode: EquationSelectionMode::Exclude,
-                tag: None,
-                values: Some(vec!["e0".into()]),
-                file: None,
-                resolved_values: None,
-                resolved_tag: None,
+                tag: "name".into(),
+                values: vec!["e0".into()],
             };
             let mut budget = MacroBudget::new();
             let before = budget.remaining_work();

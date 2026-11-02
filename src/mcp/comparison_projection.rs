@@ -210,11 +210,7 @@ fn structural_paths(data: &Value) -> Vec<String> {
     paths
 }
 
-fn source_context(
-    nav: &[Value],
-    owners: &Owners,
-    inputs: &[Value],
-) -> [BTreeSet<Option<String>>; 2] {
+fn source_context(nav: &[Value], owners: &Owners) -> [BTreeSet<Option<String>>; 2] {
     let mut files: [BTreeSet<Option<String>>; 2] = Default::default();
     for row in nav {
         if !row["id"]
@@ -235,13 +231,6 @@ fn source_context(
                         .or_else(|| location["file"].as_str())
                         .map(str::to_owned),
                 );
-            }
-        }
-    }
-    if !owners.selected.is_empty() {
-        for (index, input) in inputs.iter().take(2).enumerate() {
-            if let Some(file) = input["analysis"]["selector_file"]["file"].as_str() {
-                files[index].insert(Some(file.to_owned()));
             }
         }
     }
@@ -324,7 +313,7 @@ pub(super) fn project(
     let owners = Owners::new(&rows);
     let available_rows = rows.len();
     let navigation = array(&mut data["navigation"]["rows"]);
-    let source_files = source_context(&navigation, &owners, &result.inputs);
+    let source_files = source_context(&navigation, &owners);
     if query.filtered() {
         if query.wants("markdown") {
             data["markdown"] = json!(filtered_markdown(&rows));

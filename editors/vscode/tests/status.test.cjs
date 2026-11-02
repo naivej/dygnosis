@@ -84,13 +84,6 @@ function analysis(configuration = {}, extra = {}) {
   return { state: "selected", selection: { configuration_id: "choice", name: null, preview: false, invocation_scope: "explicit_macro_inputs" },
     configuration, selection_generation: 1, include_paths: null, macro_complete: true, model_complete: true, overrides: [], ...extra };
 }
-
-test("file selection has a usable configuration label and saved-file explanation", () => {
-  // Guards status rendering dereferencing the absent explicit-value list.
-  const value = modelStatus(facts(document(), { analysis: analysis({ equation_selection: { mode: "exclude", file: "policy.txt" } }) }), ["equations"]);
-  assert.match(tooltipText(value.tooltip), /policy\.txt/);
-  assert.match(tooltipText(value.tooltip), /saved contents/);
-});
 function setup(doc = document()) {
   host = { editor: doc ? { document: doc } : undefined, settings: {}, resourceSettings: new Map(), scopes: [], items: [],
     active: new Emitter(), edited: new Emitter(), closed: new Emitter(), configured: new Emitter() };
