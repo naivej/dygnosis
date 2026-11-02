@@ -148,7 +148,7 @@ export function registerLenses(service: DygnosisClient): vscode.Disposable {
       if (!group || group.declarations.map(row => row.id).join("\n") !== target.ids.join("\n")) { unavailable(target); return; }
       const declaration = group.declarations.length === 1 ? group.declarations[0] : (await vscode.window.showQuickPick(
         group.declarations.map(row => ({ label: row.name, description: `${row.final_kind ?? row.written_kind}${row.dimension ? ` · ${row.dimension}` : ""}`,
-          detail: row.long_name ?? undefined, declaration: row })), { placeHolder: "Choose the symbol for Find All References", matchOnDescription: true }))?.declaration;
+          detail: row.long_name == null ? undefined : `Long name: ${row.long_name || "(empty)"}`, declaration: row })), { placeHolder: "Choose the symbol for Find All References", matchOnDescription: true }))?.declaration;
       if (!declaration) return;
       const fresh = await freshContext(target, true);
       const row = fresh?.declarations.find(candidate => candidate.id === declaration.id);

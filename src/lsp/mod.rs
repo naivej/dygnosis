@@ -1092,7 +1092,7 @@ impl Backend {
             && let Some(option) =
                 syntax_intel::options(&cmd).find(|option| option.name.eq_ignore_ascii_case(&word))
         {
-            let mut md = format!("**`{cmd}` option**: `{word}`");
+            let mut md = format!("**`{cmd}` option**");
             let description =
                 shocks_overwrite_doc(&text, byte, &cmd, &option.name, &option.summary);
             if !description.is_empty() {
@@ -1104,7 +1104,7 @@ impl Backend {
         if word.eq_ignore_ascii_case("heterogeneity")
             && let Some(head) = heterogeneity_declaration_head(&text, byte)
         {
-            let md = format!("**`{head}` option**: `heterogeneity`\n\n{HETEROGENEITY_OPTION}");
+            let md = format!("**`{head}` option**\n\n{HETEROGENEITY_OPTION}");
             return Some(markdown_hover(md, range));
         }
         if let Some(context) = inner.syntax_context(&pos.text_document.uri, &text, byte, false) {
@@ -1120,10 +1120,7 @@ impl Backend {
                 .map(syntax_intel::documentation)
                 .collect();
             if !matches.is_empty() {
-                return Some(markdown_hover(
-                    format!("**`{word}`**\n\n{}", matches.join("\n\n")),
-                    range,
-                ));
+                return Some(markdown_hover(matches.join("\n\n"), range));
             }
         }
         let preferences = inner.presentation_for(&pos.text_document.uri);
@@ -4539,7 +4536,7 @@ fn decl_hover_markdown(
         .final_symbol_kind(name)
         .or_else(|| model.final_kind_or_written_if_excluded(name));
     if kind == Some("var") {
-        let mut parts = vec![names::declaration_heading(word, "var", false)?];
+        let mut parts = vec![names::declaration_heading("var", false)?];
         if let Some(info) = classify_variable_timing(model).get(word) {
             parts.push(format_timing_line(info));
         }
@@ -4547,17 +4544,17 @@ fn decl_hover_markdown(
         return Some(parts.join("\n\n"));
     }
     if kind == Some("varexo_det") {
-        let mut parts = vec![names::declaration_heading(word, "varexo_det", false)?];
+        let mut parts = vec![names::declaration_heading("varexo_det", false)?];
         append_name_metadata(&mut parts, model, word, preferences);
         return Some(parts.join("\n\n"));
     }
     if kind == Some("varexo") {
-        let mut parts = vec![names::declaration_heading(word, "varexo", false)?];
+        let mut parts = vec![names::declaration_heading("varexo", false)?];
         append_name_metadata(&mut parts, model, word, preferences);
         return Some(parts.join("\n\n"));
     }
     if kind == Some("parameters") {
-        let mut parts = vec![names::declaration_heading(word, "parameters", false)?];
+        let mut parts = vec![names::declaration_heading("parameters", false)?];
         match assigned_number(model, word) {
             Some(n) => parts.push(format!("Value: `{n}`")),
             None => parts.push("Value: *not available to Dygnosis*".into()),

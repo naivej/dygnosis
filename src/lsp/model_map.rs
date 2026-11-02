@@ -120,12 +120,15 @@ fn declaration_detail(
     if preferences.name_details.long_name
         && let Some(long) = long_name
     {
-        details.push(long.to_owned());
+        details.push(format!(
+            "Long name: {}",
+            if long.is_empty() { "(empty)" } else { long }
+        ));
     }
     if preferences.name_details.tex
         && let Some(tex) = tex_name
     {
-        details.push(format!("${tex}$"));
+        details.push(format!("TeX: ${tex}$"));
     }
     (!details.is_empty()).then(|| details.join(" · "))
 }

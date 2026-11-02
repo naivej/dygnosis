@@ -166,7 +166,7 @@ mod cache_tests {
             "unchanged hover rebuilt the semantic snapshot"
         );
         assert!(
-            matches!(result.contents, HoverContents::Markup(ref text) if text.value.contains("forecast"))
+            matches!(result.contents, HoverContents::Markup(ref text) if text.value.lines().next() == Some("**VAR auxiliary model**"))
         );
         server
             .did_change(DidChangeTextDocumentParams {
@@ -185,7 +185,12 @@ mod cache_tests {
         let updated = views(&mut server.lock_inner(), &uri).unwrap().remove(0);
         assert!(!Arc::ptr_eq(&before, &updated));
         assert!(
-            matches!(result.contents, HoverContents::Markup(ref text) if text.value.contains("new_forecast"))
+            matches!(result.contents, HoverContents::Markup(ref text) if text.value.lines().next() == Some("**VAR auxiliary model**"))
+        );
+        assert_eq!(
+            result.range.unwrap().end.character - pos.position.character,
+            "new_forecast".len() as u32,
+            "hover must use the edited binding's source range"
         );
     }
 }
@@ -315,12 +320,11 @@ pub(super) fn sites_in_range(
     })
 }
 
-fn description(binding: &Binding) -> String {
-    let mut text = format!(
-        "**{}** {}",
-        label(&binding.kind),
-        names::code(&binding.name)
-    );
+fn description(binding: &Binding, include_name: bool) -> String {
+    let mut text = format!("**{}**", label(&binding.kind));
+    if include_name {
+        text.push_str(&format!(" {}", names::code(&binding.name)));
+    }
     if let Some(namespace) = &binding.namespace {
         text.push_str(&format!("\n\nOwner: {}", names::code(namespace)));
     }
@@ -352,7 +356,7 @@ fn completion(binding: &Binding) -> CompletionItem {
         detail: Some(label(&binding.kind).into()),
         documentation: Some(Documentation::MarkupContent(MarkupContent {
             kind: MarkupKind::Markdown,
-            value: description(binding),
+            value: description(binding, true),
         })),
         ..Default::default()
     }
@@ -449,7 +453,10 @@ pub(super) fn hover(inner: &mut Inner, pos: &TextDocumentPositionParams) -> Opti
     Some(Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
-            value: description(binding),
+            value: description(
+                binding,
+                text.get(span.start as usize..span.end as usize) != Some(binding.name.as_str()),
+            ),
         }),
         range: Some(span_range(&index, &text, *span)),
     }))

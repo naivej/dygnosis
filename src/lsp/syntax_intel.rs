@@ -502,7 +502,7 @@ pub(crate) fn written_syntax_help(
         })
         .map(documentation)
         .collect();
-    (!docs.is_empty()).then(|| format!("**`{word}`**\n\n{}", docs.join("\n\n")))
+    (!docs.is_empty()).then(|| docs.join("\n\n"))
 }
 
 pub(crate) fn options(command: &str) -> impl Iterator<Item = &'static SyntaxRecord> + '_ {

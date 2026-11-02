@@ -16,15 +16,14 @@ pub(crate) fn typed_label(kind: &str) -> Option<&'static str> {
     })
 }
 
-pub(crate) fn typed_heading(name: &str, kind: &str, written: bool) -> Option<String> {
+pub(crate) fn typed_heading(kind: &str, written: bool) -> Option<String> {
     let mut label = typed_label(kind)?.to_owned();
     if written && !label.starts_with("PAC ") && !label.starts_with("VAR ") {
         label.get_mut(..1)?.make_ascii_lowercase();
     }
     Some(format!(
-        "**{}{label}** {}",
-        if written { "Written " } else { "" },
-        code(name)
+        "**{}{label}**",
+        if written { "Written " } else { "" }
     ))
 }
 
@@ -214,7 +213,7 @@ pub(crate) fn literal(value: &str) -> String {
         .collect()
 }
 
-pub(crate) fn declaration_heading(name: &str, kind: &str, written: bool) -> Option<String> {
+pub(crate) fn declaration_heading(kind: &str, written: bool) -> Option<String> {
     let role = match kind {
         "var" => "Endogenous variable",
         "varexo" => "Exogenous variable",
@@ -229,7 +228,7 @@ pub(crate) fn declaration_heading(name: &str, kind: &str, written: bool) -> Opti
     } else {
         role.to_owned()
     };
-    Some(format!("**{role}**: {}", code(name)))
+    Some(format!("**{role}**"))
 }
 
 pub(crate) fn append_name_metadata(
@@ -241,7 +240,25 @@ pub(crate) fn append_name_metadata(
     if preferences.long_name
         && let Some(long_name) = long_name
     {
-        parts.push(literal(long_name));
+        let value = if long_name.is_empty() {
+            "(empty)".to_owned()
+        } else if long_name.starts_with(char::is_whitespace)
+            || long_name.ends_with(char::is_whitespace)
+            || long_name.contains(['\n', '\r'])
+        {
+            let mut value = String::new();
+            for character in long_name.chars() {
+                if character.is_whitespace() {
+                    value.push_str(&format!("&#{};", character as u32));
+                } else {
+                    value.push_str(&literal(&character.to_string()));
+                }
+            }
+            value
+        } else {
+            literal(long_name)
+        };
+        parts.push(format!("Long name: **{value}**"));
     }
     if preferences.tex
         && let Some(tex_name) = tex_name
@@ -436,5 +453,33 @@ impl NameSites {
     }
     pub fn is_write(&self, span: Span) -> bool {
         self.writes.iter().any(|site| contains(*site, span))
+    }
+}
+
+#[cfg(test)]
+mod metadata_presentation_tests {
+    use super::*;
+
+    #[test]
+    fn long_name_keeps_explicit_values_and_escapes_markdown() {
+        // Guards literal labels breaking the Markdown value emphasis.
+        let preferences = super::super::settings::NameDetails {
+            long_name: true,
+            tex: false,
+        };
+        for (value, expected) in [
+            ("pce", "Long name: **pce**"),
+            ("", "Long name: **(empty)**"),
+            ("a*`b", r"Long name: **a\*\`b**"),
+            (" pce ", "Long name: **&#32;pce&#32;**"),
+            ("first\n\nsecond", "Long name: **first&#10;&#10;second**"),
+        ] {
+            let mut parts = Vec::new();
+            append_name_metadata(&mut parts, Some(value), None, &preferences);
+            assert_eq!(parts, [expected]);
+        }
+        let mut parts = Vec::new();
+        append_name_metadata(&mut parts, None, None, &preferences);
+        assert!(parts.is_empty());
     }
 }

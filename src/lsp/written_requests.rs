@@ -105,7 +105,7 @@ pub(super) fn hover(source: &SourceDocument, position: Position) -> Option<Optio
         }
         let description = shocks_overwrite_doc(text, byte, command, &option.name, &option.summary);
         return Some(Some(markdown_hover(
-            format!("**`{command}` option**: `{word}`\n\n{description}"),
+            format!("**`{command}` option**\n\n{description}"),
             range,
         )));
     }
@@ -127,12 +127,7 @@ pub(super) fn hover(source: &SourceDocument, position: Position) -> Option<Optio
         })
         .map(syntax_intel::documentation)
         .collect();
-    (!matches.is_empty()).then(|| {
-        Some(markdown_hover(
-            format!("**`{word}`**\n\n{}", matches.join("\n\n")),
-            range,
-        ))
-    })
+    (!matches.is_empty()).then(|| Some(markdown_hover(matches.join("\n\n"), range)))
 }
 
 impl Backend {

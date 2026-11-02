@@ -610,7 +610,7 @@ async fn ordered_repeated_opens_and_changes_feed_current_hover_pull_and_versions
         }}),
         open(uri, 3, "third"),
         json!({"jsonrpc":"2.0", "method":"textDocument/didChange", "params":{
-            "textDocument":{"uri":uri,"version":4}, "contentChanges":[{"text":"var current; model; current=missing_current; end;"}]
+            "textDocument":{"uri":uri,"version":4}, "contentChanges":[{"text":"var current (long_name='Current'); model; current=missing_current; end;"}]
         }}),
         symbols(2, uri),
         json!({"jsonrpc":"2.0", "id":3, "method":"textDocument/hover", "params":{
@@ -633,7 +633,7 @@ async fn ordered_repeated_opens_and_changes_feed_current_hover_pull_and_versions
         hover["result"]["contents"]["value"]
             .as_str()
             .unwrap()
-            .contains("current"),
+            .contains("Long name: **Current**"),
         "{hover}"
     );
     let pull = timeout(Duration::from_secs(2), wire.response(4))

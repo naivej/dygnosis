@@ -243,6 +243,23 @@ test("optional references group names and same-line statements, preserve retypin
   assert.deepEqual(env.host.references, [{ uri: env.doc.uri.toString(), position: { line: 1, character: 7 } }]);
   assert.equal(env.service.engineRequests.length, 0); env.registration.dispose();
 });
+test("references picker labels explicit long names while retaining symbol identity", async () => {
+  // Guard equal/empty labels being confused with the symbol name or absent metadata.
+  const env = setup(); env.configure("dynare.codeLens.declarationReferences", true);
+  const declarations = [declaration("d1", { long_name: "y" }),
+    declaration("d2", { name: "empty", long_name: "", location: location(undefined, 1, 7, 12) }),
+    declaration("d3", { name: "plain", location: location(undefined, 1, 14, 19) })];
+  env.service.info = () => facts(env.doc, { declarations,
+    statements: [statement("decl1", { kind: "declaration", lens_anchor: location(undefined, 1), equation_count: null })] });
+  env.host.answers.push(undefined);
+  await env.run((await env.provide())[0]);
+  assert.deepEqual(env.host.picks[0].items.map(row => [row.label, row.detail]), [
+    ["y", "Long name: y"], ["empty", "Long name: (empty)"], ["plain", undefined],
+  ]);
+  assert.equal(env.host.references.length, 0);
+  env.registration.dispose();
+});
+
 test("symbol-picker cancellation and stale selections never ask for references", async () => {
   for (const change of ["cancel", "version", "owner", "instance", "settings", "focus", "revision", "mapping"]) {
     const env = setup(); env.configure("dynare.codeLens.declarationReferences", true);

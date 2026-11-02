@@ -69,18 +69,16 @@ async fn inactive_command_hover_uses_the_requested_option_or_name() {
             let hover = help(server, query).await.expect("written token hover");
             let message = markdown(&hover);
             if name == "pac_rent" {
-                assert!(message.contains("`pac_rent`"), "{message}");
-                assert!(message.contains("Written PAC model"), "{message}");
+                assert!(message.starts_with("**Written PAC model**"), "{message}");
+                assert!(!message.contains("`pac_rent`"), "{message}");
+            } else if name == "model_name" {
+                assert!(message.starts_with("**`pac_model` option**\n"), "{message}");
             } else {
-                assert!(message.contains(&format!("`{name}`")), "{message}");
                 assert!(
-                    if name == "model_name" {
-                        message.contains("option")
-                    } else {
-                        message.contains("Define a PAC expectation model")
-                    },
+                    message.contains("Define a PAC expectation model"),
                     "{message}"
                 );
+                assert!(!message.starts_with("**`pac_model`**"), "{message}");
             }
             assert!(!message.contains("Timing:"), "{name}: {message}");
             assert_eq!(
@@ -336,7 +334,11 @@ async fn accepted_typed_names_have_exact_hover_and_negotiated_roles() {
             let hover = help(server, pos.clone())
                 .await
                 .unwrap_or_else(|| panic!("missing {needle} hover"));
-            assert!(markdown(&hover).contains(title), "{needle}: {hover:?}");
+            assert_eq!(
+                markdown(&hover).lines().next(),
+                Some(format!("**{title}**").as_str()),
+                "{needle}: {hover:?}"
+            );
             let range = hover.range.unwrap();
             assert_eq!(range.start, pos.position, "{needle}: exact selection");
             let expected = if custom { custom_type } else { standard };
@@ -438,6 +440,12 @@ async fn named_argument_completion_uses_its_identity_kind() {
             assert!(
                 items.iter().any(|item| item.label == name),
                 "{suffix}: {items:?}"
+            );
+            let item = items.iter().find(|item| item.label == name).unwrap();
+            assert!(
+                matches!(&item.documentation, Some(Documentation::MarkupContent(markdown))
+                if markdown.value.lines().next().is_some_and(|heading| heading.contains(&format!("`{name}`")))),
+                "completion keeps a standalone identity: {item:?}"
             );
         }
         for name in excluded {

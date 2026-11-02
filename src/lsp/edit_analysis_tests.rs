@@ -562,7 +562,7 @@ async fn hover_eligibility_preserves_dormant_source_and_uncertain_strings() {
             "var y;\n@#if 0\nmodel; [name='y'] y=0; end;\n@#endif\nmodel; y=1; end;",
             "y=0",
             0,
-            Some("**Written endogenous variable**: `y`"),
+            Some("**Written endogenous variable**"),
         ),
         (
             "@#define K=1\nvar y; model; [name='y_@{K}'] y=0; end;",
@@ -638,7 +638,11 @@ async fn written_options_and_macro_directives_return_help_before_model_checks() 
     let (service, _socket) = new_service();
     let server = service.inner();
     open_source(server, &uri, source.into(), 1).await;
-    for (line, character, expected) in [(0, 3, "define"), (2, 14, "order"), (3, 9, "solve_algo")] {
+    for (line, character, expected) in [
+        (0, 3, "define"),
+        (2, 14, "Order of Taylor approximation"),
+        (3, 9, "steady` option"),
+    ] {
         let hover = server
             .syntax_hover_at(&TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },

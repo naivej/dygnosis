@@ -152,14 +152,19 @@ async fn explicit_local_forward_use_has_metadata_and_distinct_navigation() {
         "var y; parameters p;\nmodel_local_variable z $Z_t$;\nmodel;\ny=z;\n#z=p*y(-1);\nend;";
     open(server, &uri, text).await;
     let pos = at(&uri, text, "y=z");
+    let items = complete(server, pos.clone()).await;
+    let local = items.iter().find(|item| item.label == "z").unwrap();
     assert!(
-        complete(server, pos.clone())
-            .await
-            .iter()
-            .any(|item| item.label == "z")
+        matches!(&local.documentation, Some(Documentation::MarkupContent(markdown))
+        if markdown.value.starts_with("**Model-local variable** `z`")),
+        "{local:?}"
     );
     let help = hover(server, pos.clone()).await.unwrap();
-    assert!(help.contains("Model-local variable"), "{help}");
+    assert_eq!(
+        help.lines().next(),
+        Some("**Model-local variable**"),
+        "{help}"
+    );
     assert!(help.contains("Z_t"), "{help}");
     assert!(help.contains("p") && help.contains("y"), "{help}");
     assert_eq!(

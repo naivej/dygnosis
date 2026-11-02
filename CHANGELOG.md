@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.11.42
+
+- Hovers omit repeated names and label long names in active and inactive code.
+  Outline and the Find All References picker label long-name details.
+
 ## v0.11.41
 
 - Symbol queries, equation inspection and model counts respond faster in large

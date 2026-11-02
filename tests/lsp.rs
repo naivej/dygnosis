@@ -1284,7 +1284,8 @@ async fn hover_stoch_simul_option() {
     let md = hover_markdown(hover);
     assert!(md.contains("stoch_simul"), "hover: {md}");
     assert!(md.contains("option"), "hover: {md}");
-    assert!(md.contains("`order`"), "hover: {md}");
+    assert_eq!(md.lines().next(), Some("**`stoch_simul` option**"), "{md}");
+    assert!(md.contains("Order of Taylor approximation"), "{md}");
 }
 
 #[tokio::test]
@@ -1891,7 +1892,11 @@ async fn matched_irfs_overwrite_reaches_hover_and_completion() {
             .expect("hover"),
     );
     assert!(md.contains("matched_irfs"), "hover: {md}");
-    assert!(md.contains("`overwrite`"), "hover: {md}");
+    assert_eq!(md.lines().next(), Some("**`matched_irfs` option**"), "{md}");
+    assert!(
+        md.contains("replaces the current matched_irfs block"),
+        "{md}"
+    );
 
     let byte = text.find("matched_irfs(").expect("matched_irfs opener") + "matched_irfs(".len();
     let labels = completion_labels(
@@ -1968,7 +1973,11 @@ async fn shock_overwrite_hover_uses_its_block_description() {
         );
         assert!(md.contains(expected), "{command} hover: {md}");
         assert!(!md.contains(unrelated), "{command} hover: {md}");
-        assert!(md.contains(&format!("`{option}`")), "{command} hover: {md}");
+        assert_eq!(
+            md.lines().next(),
+            Some(format!("**`{command}` option**").as_str()),
+            "{command} hover: {md}"
+        );
 
         let labels = completion_labels(
             service
@@ -2107,7 +2116,8 @@ async fn dotted_prior_reaches_hover_and_completion() {
             .expect("hover"),
     );
     assert!(md.contains("prior"), "hover: {md}");
-    assert!(md.contains("`stdev`"), "hover: {md}");
+    assert_eq!(md.lines().next(), Some("**`prior` option**"), "{md}");
+    assert!(md.contains("NONNEGATIVE_NUMBER"), "{md}");
 
     let byte = text.find("mean=0.5").expect("mean option");
     let labels = completion_labels(

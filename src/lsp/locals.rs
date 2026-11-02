@@ -293,7 +293,7 @@ pub(super) fn hover(inner: &mut Inner, pos: &TextDocumentPositionParams) -> Opti
     let text = inner.document(&pos.text_document.uri)?.text.clone();
     let index = LineIndex::new(&text);
     let byte = index.offset_utf16(&text, span_pos(pos.position));
-    let (_, span) = ident_at(&text, byte)?;
+    let (hovered, span) = ident_at(&text, byte)?;
     let preferences = inner.presentation_for(&pos.text_document.uri);
     let mut descriptions = Vec::new();
     let mut found = false;
@@ -324,7 +324,16 @@ pub(super) fn hover(inner: &mut Inner, pos: &TextDocumentPositionParams) -> Opti
                     .iter()
                     .all(|other| other.as_ref() == Some(first))
             })
-            .map(|markdown| markdown_hover(markdown, Some(range))),
+            .map(|mut markdown| {
+                let repeated = format!(
+                    "**Model-local variable** {}",
+                    crate::lsp::names::code(&hovered)
+                );
+                if markdown.starts_with(&repeated) {
+                    markdown.replace_range(..repeated.len(), "**Model-local variable**");
+                }
+                markdown_hover(markdown, Some(range))
+            }),
     )
 }
 

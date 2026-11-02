@@ -498,9 +498,24 @@ async fn outline_inactive_declarations_keep_metadata_and_icons_without_timing_or
     let mut entries = Vec::new();
     all(&rows, &mut entries);
     for (inactive, active, icon, detail) in [
-        ("hidden", "live", SymbolKind::VARIABLE, "Output · $Y$"),
-        ("hidden_e", "live_e", SymbolKind::FIELD, "Shock · $E$"),
-        ("hidden_p", "live_p", SymbolKind::NUMBER, "Value · $P$"),
+        (
+            "hidden",
+            "live",
+            SymbolKind::VARIABLE,
+            "Long name: Output · TeX: $Y$",
+        ),
+        (
+            "hidden_e",
+            "live_e",
+            SymbolKind::FIELD,
+            "Long name: Shock · TeX: $E$",
+        ),
+        (
+            "hidden_p",
+            "live_p",
+            SymbolKind::NUMBER,
+            "Long name: Value · TeX: $P$",
+        ),
     ] {
         for name in [inactive, active] {
             let row = entries.iter().find(|row| row.name == name).unwrap();
@@ -545,7 +560,7 @@ async fn outline_keeps_literal_metadata_but_omits_unexpanded_metadata() {
             .unwrap()
             .detail
             .as_deref(),
-        Some("Literal · $L$")
+        Some("Long name: Literal · TeX: $L$")
     );
     assert!(
         entries
@@ -1335,7 +1350,10 @@ async fn outline_names_use_written_heterogeneity_and_preserve_declaration_childr
     let c = &declarations[0].children.as_ref().unwrap()[0];
     assert_eq!(c.name, "c");
     assert_eq!(c.kind, SymbolKind::NUMBER);
-    assert_eq!(c.detail.as_deref(), Some("parameters · Consumption · $C$"));
+    assert_eq!(
+        c.detail.as_deref(),
+        Some("parameters · Long name: Consumption · TeX: $C$")
+    );
     assert_eq!(declarations[1].children.as_ref().unwrap()[0].name, "assets");
     let exogenous = rows
         .iter()
@@ -1376,7 +1394,10 @@ async fn outline_names_use_written_heterogeneity_and_preserve_declaration_childr
         .find(|row| row.name == "c")
         .unwrap();
     assert_eq!(c.kind, SymbolKind::VARIABLE);
-    assert_eq!(c.detail.as_deref(), Some("Consumption · $C$"));
+    assert_eq!(
+        c.detail.as_deref(),
+        Some("Long name: Consumption · TeX: $C$")
+    );
 }
 
 #[tokio::test]

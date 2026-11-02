@@ -4850,10 +4850,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
         "Critical value for Smirnov statistics d when reduced-form entries are filtered.",
     ),
     ("last_obs", "The observation number or the date (see"),
-    (
-        "last_simulation_period",
-        "Set the last simulation period.",
-    ),
+    ("last_simulation_period", "Set the last simulation period."),
     ("learnt_in", LEARNT_IN),
     ("lik_init", "Type of initialization of Kalman filter:"),
     (

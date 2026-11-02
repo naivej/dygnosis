@@ -131,6 +131,54 @@ async fn hover(server: &Backend, pos: TextDocumentPositionParams) -> String {
         _ => panic!("expected markdown"),
     }
 }
+#[tokio::test]
+async fn declaration_hover_labels_metadata_without_repeating_the_selected_name() {
+    // Guards the screenshot's repeated heading and unlabelled long name through
+    // real active/inactive LSP requests, including absent and empty metadata.
+    for active in [0, 1] {
+        for (metadata, expected) in [
+            (" (long_name='pce')", Some("pce")),
+            (" (long_name='')", Some("(empty)")),
+            ("", None),
+        ] {
+            let document = uri("compact-hover.mod");
+            let text =
+                format!("@#if {active}\nvar pce{metadata};\nmodel; pce=pce(-1); end;\n@#endif\n");
+            let (service, _socket) = new_service();
+            let server = service.inner();
+            open(server, &document, &text).await;
+            let markdown = hover(server, position(&document, &text, "pce=pce", 0)).await;
+            let heading = if active == 1 {
+                "**Endogenous variable**"
+            } else {
+                "**Written endogenous variable**"
+            };
+            assert_eq!(markdown.lines().next(), Some(heading), "{markdown}");
+            assert!(!markdown.contains("`pce`"), "{markdown}");
+            assert_eq!(
+                markdown.contains("Timing: **predetermined**"),
+                active == 1,
+                "{markdown}"
+            );
+            if let Some(expected) = expected {
+                assert!(
+                    markdown.contains(&format!("Long name: **{expected}**")),
+                    "{markdown}"
+                );
+            } else {
+                assert!(!markdown.contains("Long name:"), "{markdown}");
+            }
+            server
+                .did_change_configuration(DidChangeConfigurationParams {
+                    settings: json!({"nameDetails":{"longName":false}}),
+                })
+                .await;
+            let hidden = hover(server, position(&document, &text, "pce=pce", 0)).await;
+            assert!(!hidden.contains("Long name:"), "{hidden}");
+        }
+    }
+}
+
 async fn full(server: &Backend, document: &Url) -> Vec<SemanticToken> {
     match server
         .semantic_tokens_full(SemanticTokensParams {
@@ -490,9 +538,9 @@ async fn written_metadata_preferences_and_final_role_icons_are_independent() {
     );
     let markdown = hover(server, position(&document, text, "p=p(-1)", 0)).await;
     assert!(
-        markdown.contains("Endogenous variable")
-            && markdown.contains("Price")
-            && markdown.contains("`p`"),
+        markdown.starts_with("**Endogenous variable**\n")
+            && markdown.contains("Long name: **Price**")
+            && markdown.contains("TeX: `p`"),
         "{markdown}"
     );
     let before = dygnosis::dynare_model_info(text, None, None);

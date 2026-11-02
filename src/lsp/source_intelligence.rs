@@ -286,7 +286,7 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
             }
         )
     } else if item.kind == SourceItemKind::Declaration && selection == item.selection {
-        declaration_description(inner, document, name, item)
+        declaration_description(inner, document, name, name, item)
     } else if let Some(declaration) = use_declaration {
         let mut description = if let Some(rhs) = declaration.item.local_definition {
             let text = if declaration.file == normalize_uri(document.as_str()) {
@@ -303,8 +303,7 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
                     .map(|source| source.text.as_str())
             };
             format!(
-                "**Written model-local variable** {}\n\nExpression: {}",
-                names::code(name),
+                "**Written model-local variable**\n\nExpression: {}",
                 names::code(
                     text.and_then(|text| text.get(rhs.start as usize..rhs.end as usize))
                         .unwrap_or_default()
@@ -315,6 +314,7 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
                 inner,
                 document,
                 declaration.item.name.as_deref().unwrap_or(name),
+                name,
                 &declaration.item,
             )
         };
@@ -346,8 +346,7 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
             .get(rhs.start as usize..rhs.end as usize)
             .unwrap_or_default();
         format!(
-            "**Written model-local variable** {}\n\nExpression: {}",
-            names::code(name),
+            "**Written model-local variable**\n\nExpression: {}",
             names::code(expression)
         )
     } else {
@@ -365,7 +364,7 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
                 "Model information is unavailable for this source template."
             }
         };
-        format!("**{name}**\n\n{reason}")
+        reason.to_owned()
     };
     if let Some(cause) = declaration_lookup
         .as_ref()
@@ -387,10 +386,7 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
         message.push_str(&cause.message);
     }
     if let Some((command, option)) = option {
-        message.push_str(&format!(
-            "\n\n**`{command}` option**: `{name}`\n\n{}",
-            option.summary
-        ));
+        message.push_str(&format!("\n\n**`{command}` option**\n\n{}", option.summary));
     }
     if let Some((choice, site)) = overridden {
         use crate::engine::analysis_configuration::AnalysisOverride;
@@ -449,19 +445,22 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
     Some(hover)
 }
 
-fn declaration_description(inner: &Inner, document: &Url, name: &str, item: &SourceItem) -> String {
+fn declaration_description(
+    inner: &Inner,
+    document: &Url,
+    name: &str,
+    hovered: &str,
+    item: &SourceItem,
+) -> String {
     let kind = item.written_kind.as_deref().unwrap_or("declaration");
     let mut parts = vec![
-        names::declaration_heading(name, kind, true)
-            .or_else(|| names::typed_heading(name, kind, true))
-            .unwrap_or_else(|| {
-                format!(
-                    "**Written declaration**: {} ({})",
-                    names::code(name),
-                    names::code(kind)
-                )
-            }),
+        names::declaration_heading(kind, true)
+            .or_else(|| names::typed_heading(kind, true))
+            .unwrap_or_else(|| format!("**Written declaration** ({})", names::code(kind))),
     ];
+    if name != hovered {
+        parts[0].push_str(&format!(" {}", names::code(name)));
+    }
     if let Some(namespace) = &item.source_namespace {
         parts.push(format!("Owner: {}", names::code(namespace)));
     }
@@ -564,9 +563,9 @@ mod tests {
                         panic!("markdown hover")
                     };
                     let heading = if active == 1 {
-                        format!("**{role}**: `subject`")
+                        format!("**{role}**")
                     } else {
-                        format!("**Written {}**: `subject`", role.to_ascii_lowercase())
+                        format!("**Written {}**", role.to_ascii_lowercase())
                     };
                     assert!(
                         markup.value.starts_with(&heading),
@@ -574,7 +573,9 @@ mod tests {
                         markup.value
                     );
                     assert_eq!(
-                        markup.value.contains(r"Capital \*\[gross\]\*"),
+                        markup
+                            .value
+                            .contains(r"Long name: **Capital \*\[gross\]\***"),
                         long_name,
                         "{}",
                         markup.value
@@ -585,12 +586,7 @@ mod tests {
                         "{}",
                         markup.value
                     );
-                    assert!(
-                        !markup.value.contains("Long name:")
-                            && !markup.value.contains("TeX label:"),
-                        "{}",
-                        markup.value
-                    );
+                    assert!(!markup.value.contains("TeX label:"), "{}", markup.value);
                     if active == 0 {
                         assert!(
                             !markup.value.contains("Value:")
@@ -629,9 +625,9 @@ mod tests {
                 panic!("markdown hover")
             };
             let heading = if active == 1 {
-                "**Model-local variable** `temp`"
+                "**Model-local variable**"
             } else {
-                "**Written model-local variable** `temp`"
+                "**Written model-local variable**"
             };
             assert!(
                 markup.value.starts_with(heading) && markup.value.contains("Expression: `log(1)`"),
@@ -1114,7 +1110,7 @@ mod tests {
                 };
                 assert_eq!(
                     markup.value,
-                    format!("**Written {kind}**: `{name}`\n\n{long_name}\n\nTeX: `{tex}`")
+                    format!("**Written {kind}**\n\nLong name: **{long_name}**\n\nTeX: `{tex}`")
                 );
                 assert_eq!(
                     hover.range.unwrap(),
@@ -1144,7 +1140,7 @@ mod tests {
         let HoverContents::Markup(markup) = hover.contents else {
             panic!("markdown hover")
         };
-        assert_eq!(markup.value, "**Written endogenous variable**: `capital`");
+        assert_eq!(markup.value, "**Written endogenous variable**");
     }
 
     #[tokio::test]
@@ -1248,7 +1244,7 @@ mod tests {
             };
             assert_eq!(
                 markup.value,
-                "**Written endogenous variable**: `shared_name`\n\nInactive variable\n\nTeX: `B`"
+                "**Written endogenous variable**\n\nLong name: **Inactive variable**\n\nTeX: `B`"
             );
         }
         let result = server
@@ -1580,7 +1576,10 @@ mod tests {
                 })
                 .unwrap();
             let value = serde_json::to_value(hover).unwrap().to_string();
-            assert!(value.contains("rho"), "{value}");
+            assert!(
+                value.contains("**Parameter**") && value.contains("0.5"),
+                "{value}"
+            );
             assert!(!value.contains("Analysis:"), "{value}");
         }
     }
@@ -1802,9 +1801,7 @@ mod tests {
                 panic!("markdown hover")
             };
             assert!(
-                markup
-                    .value
-                    .starts_with("**Written endogenous variable**: `hidden`"),
+                markup.value.starts_with("**Written endogenous variable**"),
                 "{}",
                 markup.value
             );
@@ -1816,7 +1813,7 @@ mod tests {
                     .contains("Model values, timing and equation numbers")
             );
             if state == "inactive" {
-                assert_eq!(markup.value, "**Written endogenous variable**: `hidden`");
+                assert_eq!(markup.value, "**Written endogenous variable**");
             } else {
                 assert!(
                     markup
