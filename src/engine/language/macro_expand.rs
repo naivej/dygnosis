@@ -37,6 +37,27 @@ type ConfiguredTrace = (
     Vec<MacroMessage>,
     Vec<Span>,
 );
+
+pub(crate) struct CompletedMacroTrace {
+    trace: ConfiguredTrace,
+    work: usize,
+    output: usize,
+}
+
+impl CompletedMacroTrace {
+    pub(crate) fn replay(self, budget: &mut MacroBudget) -> Option<ConfiguredTrace> {
+        if self.work > budget.remaining_work() || self.output > budget.remaining_output() {
+            return None;
+        }
+        budget.spend_work(self.work).ok()?;
+        budget.spend_output(self.output).ok()?;
+        Some(self.trace)
+    }
+}
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CONFIGURED_REPORT_RUNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 type ExpandTracedFull = (
     Vec<Token>,
     Vec<TokenTrace>,
@@ -1204,24 +1225,115 @@ pub(crate) fn expand_macros_with_status_lines_and_evaluations_budget(
 
 pub(crate) fn expand_macros_with_status_configured(
     src: &str,
-    tokens: Vec<Token>,
     lines: &[(Span, u32)],
     evaluations: &[MacroReplay],
     budget: &mut MacroBudget,
     inputs: Option<Arc<MacroExecutionInputs>>,
     cached: Option<&MacroSource>,
+    capture: Option<&mut Option<CompletedMacroTrace>>,
 ) -> ConfiguredStatus {
-    let (out, _, _, errors, discarded, incomplete, reasons, _, _) =
+    let starting_work = budget.remaining_work();
+    let starting_output = budget.remaining_output();
+    let (out, traces, arena, errors, discarded, incomplete, reasons, _, messages) =
         expand_macros_traced_full_configured(
             src,
-            tokens,
+            Vec::new(),
             lines,
             evaluations,
             budget,
             inputs,
             cached,
         );
+    if let Some(capture) = capture
+        && incomplete.is_none()
+        && errors.is_empty()
+        && reasons.is_empty()
+        && bounded_trace(&out, &traces, &arena, &messages, &discarded)
+    {
+        *capture = Some(CompletedMacroTrace {
+            trace: (
+                out.clone(),
+                traces,
+                arena,
+                false,
+                true,
+                messages,
+                discarded.clone(),
+            ),
+            work: starting_work - budget.remaining_work(),
+            output: starting_output - budget.remaining_output(),
+        });
+    }
     (out, errors, incomplete, reasons, discarded)
+}
+
+/// Limit the single pending workspace trace, including the emitted source it
+/// can keep alive. A trace with multiple emitted buffers uses the normal path.
+fn bounded_trace(
+    tokens: &[Token],
+    traces: &Vec<TokenTrace>,
+    arena: &Vec<FrameRec>,
+    messages: &Vec<MacroMessage>,
+    discarded: &[Span],
+) -> bool {
+    const LIMIT: usize = 4 * 1024 * 1024;
+    let mut bytes = std::mem::size_of_val(tokens)
+        .saturating_add(traces.capacity().saturating_mul(size_of::<TokenTrace>()))
+        .saturating_add(arena.capacity().saturating_mul(size_of::<FrameRec>()))
+        .saturating_add(
+            messages
+                .capacity()
+                .saturating_mul(size_of::<MacroMessage>()),
+        )
+        .saturating_add(std::mem::size_of_val(discarded));
+    let mut emitted_source = None;
+    for (index, (token, trace)) in tokens.iter().zip(traces).enumerate() {
+        if bytes > LIMIT || index % 256 == 0 && crate::engine::control::cancelled() {
+            return false;
+        }
+        bytes = bytes
+            .saturating_add(token.lexeme.as_ref().map_or(0, String::len))
+            .saturating_add(trace.frames.capacity().saturating_mul(size_of::<usize>()));
+        if let Some(emitted) = &token.emitted {
+            match emitted_source {
+                Some(source) if !Arc::ptr_eq(source, &emitted.source) => return false,
+                None => emitted_source = Some(&emitted.source),
+                _ => {}
+            }
+        }
+    }
+    if let Some(source) = emitted_source {
+        bytes =
+            bytes
+                .saturating_add(source.text.capacity())
+                .saturating_add(
+                    source
+                        .comment_checkpoints
+                        .capacity()
+                        .saturating_mul(size_of::<usize>()),
+                )
+                .saturating_add(source.origins.capacity().saturating_mul(size_of::<
+                    crate::engine::language::native_line::EmittedOrigin,
+                >()));
+        for origin in &source.origins {
+            if bytes > LIMIT {
+                return false;
+            }
+            bytes =
+                bytes.saturating_add(origin.frames.capacity().saturating_mul(size_of::<usize>()));
+        }
+    }
+    for frame in arena {
+        bytes = bytes
+            .saturating_add(frame.variable.as_ref().map_or(0, String::capacity))
+            .saturating_add(frame.value.as_ref().map_or(0, String::capacity));
+    }
+    for message in messages {
+        bytes = bytes
+            .saturating_add(message.message.capacity())
+            .saturating_add(message.file.as_ref().map_or(0, String::capacity));
+    }
+    bytes <= LIMIT && !crate::engine::control::cancelled()
 }
 
 pub(crate) fn expand_macros_traced_configured(
@@ -1233,6 +1345,8 @@ pub(crate) fn expand_macros_traced_configured(
     inputs: Option<Arc<MacroExecutionInputs>>,
     cached: Option<&MacroSource>,
 ) -> ConfiguredTrace {
+    #[cfg(test)]
+    CONFIGURED_REPORT_RUNS.with(|runs| runs.set(runs.get() + 1));
     let (out, traces, arena, errors, discarded, incomplete, _, _, messages) =
         expand_macros_traced_full_configured(
             src,

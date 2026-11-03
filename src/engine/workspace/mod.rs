@@ -384,6 +384,13 @@ struct SplicedSource {
     work_used: usize,
 }
 
+struct PendingMacroTrace {
+    root: String,
+    owner: Weak<SplicedSource>,
+    limit: MacroWorkLimit,
+    trace: crate::engine::language::macro_expand::CompletedMacroTrace,
+}
+
 /// Immutable written origins for a batch of locations in one analyzed input.
 /// Acquiring the map resolves the root once; projecting spans does no file IO.
 pub(crate) struct EffectiveOrigins(Arc<SplicedSource>);
@@ -609,6 +616,7 @@ pub struct Workspace {
     effective: HashMap<String, Arc<Model>>,
     spliced: HashMap<String, Arc<SplicedSource>>,
     expand: HashMap<String, Arc<ExpandReport>>,
+    macro_trace: Option<PendingMacroTrace>,
     records: HashMap<String, IncludeRecords>,
     companions: HashMap<String, Vec<CompanionRecord>>,
     /// When set, document text and `@#include` targets come only from overlays.
@@ -1397,6 +1405,13 @@ impl Workspace {
     /// Bound heavyweight editor caches without dropping input provenance.
     /// Open overlay documents are always retained.
     pub(crate) fn retain_analysis_roots(&mut self, roots: &HashSet<String>) {
+        if self
+            .macro_trace
+            .as_ref()
+            .is_some_and(|pending| !roots.contains(&pending.root))
+        {
+            self.macro_trace = None;
+        }
         self.effective.retain(|root, _| roots.contains(root));
         self.spliced.retain(|root, _| roots.contains(root));
         self.expand.retain(|root, _| roots.contains(root));
@@ -1618,6 +1633,7 @@ impl Workspace {
         );
         self.effective.clear();
         self.spliced.clear();
+        self.macro_trace = None;
         self.expand.clear();
         self.records.clear();
         self.companions.clear();
@@ -1775,6 +1791,7 @@ impl Workspace {
         }
         self.effective.clear();
         self.spliced.clear();
+        self.macro_trace = None;
         self.expand.clear();
         self.records.clear();
         self.companions.clear();
@@ -1802,6 +1819,13 @@ impl Workspace {
         self.invalidate_read(Some(key));
         self.effective.remove(key);
         self.spliced.remove(key);
+        if self
+            .macro_trace
+            .as_ref()
+            .is_some_and(|pending| pending.root == key)
+        {
+            self.macro_trace = None;
+        }
         self.expand.remove(key);
         self.records.remove(key);
         self.companions.remove(key);
@@ -1894,6 +1918,7 @@ impl Workspace {
         self.docs.extend(changed);
         self.effective.clear();
         self.spliced.clear();
+        self.macro_trace = None;
         self.expand.clear();
         self.records.clear();
         self.companions.clear();
@@ -2537,6 +2562,7 @@ impl Workspace {
             // A one-segment unchanged root already has the same parser input,
             // original lines and macro evaluation context. Reuse its facts.
             let mut parsing_budget = self.macro_budget(&key);
+            let mut trace = None;
             let mut model = if let Some(model) = same_root {
                 model.as_ref().clone()
             } else {
@@ -2552,15 +2578,30 @@ impl Workspace {
                         .as_ref()
                         .is_some_and(|inputs| inputs.analysis.selection.preview),
                 );
-                crate::engine::language::parser::parse_configured_with_budget(
+                let capture = (fatal.is_none()
+                    && spliced.limit.is_none()
+                    && spliced.refusal.is_none()
+                    && spliced.macro_source.is_some()
+                    && !self.expand.contains_key(&key))
+                .then_some(&mut trace);
+                crate::engine::language::parser::parse_configured_capturing(
                     &spliced.text,
                     &lines,
                     &evaluations,
                     &mut parsing_budget,
                     spliced.execution_inputs.clone(),
                     spliced.macro_source.clone(),
+                    capture,
                 )
             };
+            if let Some(trace) = trace {
+                self.macro_trace = Some(PendingMacroTrace {
+                    root: key.clone(),
+                    owner: Arc::downgrade(&spliced),
+                    limit: parsing_budget.work_limit(),
+                    trace,
+                });
+            }
             if let Some(span) = fatal {
                 model.macro_incomplete_span.get_or_insert(span);
             }
@@ -2700,6 +2741,22 @@ impl Workspace {
                 self.get_effective_model(uri)?;
             }
             let spliced = self.spliced_source(&key);
+            let work_limit = self.root_macro_work_limit(&key);
+            // The joined snapshot owns the source, line map and replay inputs.
+            // The parser completed with the same cap and a smaller starting
+            // allowance. Empty map spans cannot supply a written line.
+            let trace = if self
+                .macro_trace
+                .as_ref()
+                .is_some_and(|pending| pending.root == key)
+            {
+                self.macro_trace.take().and_then(|pending| {
+                    (pending.limit == work_limit && pending.owner.ptr_eq(&Arc::downgrade(&spliced)))
+                        .then_some(pending.trace)
+                })
+            } else {
+                None
+            };
             let incomplete = self
                 .records
                 .get(&key)
@@ -2711,10 +2768,11 @@ impl Workspace {
                     &spliced.segments,
                     Some(&spliced.navigation),
                     self.cancellation.clone(),
-                    self.root_macro_work_limit(&key),
+                    work_limit,
                     self.effective.get(&key).map(Arc::as_ref),
                     spliced.execution_inputs.clone(),
                     spliced.macro_source.clone(),
+                    trace,
                 )
                 .ok()?;
             if spliced.limit.is_some() || spliced.refusal.is_some() {
@@ -5194,6 +5252,7 @@ fn read_text(path: &Path) -> Option<String> {
 mod report_parse_reuse_tests {
     use super::*;
     use crate::engine::language::expand::expand_report_from_spliced_controlled;
+    use crate::engine::language::macro_expand::CONFIGURED_REPORT_RUNS;
     use crate::engine::language::parser::PARSE_EXPANDED_BUILDS;
 
     #[test]
@@ -5240,10 +5299,99 @@ mod report_parse_reuse_tests {
         )
         .unwrap();
         assert!(expected.complete && expected.model_map.complete);
+        assert!(workspace.macro_trace.is_some());
         PARSE_EXPANDED_BUILDS.with(|builds| builds.set(0));
+        CONFIGURED_REPORT_RUNS.with(|runs| runs.set(0));
         let actual = workspace.expand_report(root).unwrap();
         assert_eq!(actual, &expected);
         assert_eq!(PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get), 0);
+        assert_eq!(CONFIGURED_REPORT_RUNS.with(std::cell::Cell::get), 0);
+        assert!(workspace.macro_trace.is_none());
+    }
+
+    #[test]
+    fn pending_macro_trace_expires_with_include_bytes_and_work_limit() {
+        // A pending trace cannot publish an old include or hide a budget stop.
+        let root = "/trace/main.mod";
+        let child = "/trace/body.inc";
+        let mut workspace = Workspace::overlay_documents(&BTreeMap::from([
+            (
+                root.to_owned(),
+                "var y; model;\n@#include \"body.inc\"\nend;".into(),
+            ),
+            (child.to_owned(), "y=1;".into()),
+        ]));
+        workspace.get_effective_model(root).unwrap();
+        assert!(workspace.macro_trace.is_some());
+        workspace.update_document(child, "y=2;");
+        assert!(workspace.macro_trace.is_none());
+        workspace.get_effective_model(root).unwrap();
+        assert!(workspace.macro_trace.is_some());
+        let updated = workspace.expand_report(root).unwrap();
+        assert!(updated.complete);
+        assert!(updated.effective_text.contains("y=2") || updated.effective_text.contains("y = 2"));
+        workspace.update_document(child, "y=3;");
+        workspace.get_effective_model(root).unwrap();
+        assert!(workspace.macro_trace.is_some());
+        workspace.set_root_macro_work_limit(root, MacroWorkLimit::new(1).unwrap());
+        assert!(workspace.macro_trace.is_none());
+        assert!(!workspace.expand_report(root).unwrap().complete);
+    }
+
+    #[test]
+    fn pending_macro_trace_respects_configuration_cancellation_and_eviction() {
+        use crate::engine::analysis_configuration::InitialDefinition;
+
+        // A cancelled report cannot publish the pending trace. A fresh report
+        // must use the selected definition, and eviction must drop its trace.
+        let root = "/trace/main.mod";
+        let files = BTreeMap::from([
+            (
+                root.into(),
+                "var y; model;\n@#include \"body.inc\"\nend;".into(),
+            ),
+            ("/trace/body.inc".into(), "y=@{value};".into()),
+        ]);
+        let configure = |workspace: &mut Workspace, expression: &str| {
+            workspace
+                .set_root_analysis_configuration(
+                    root,
+                    AnalysisConfiguration {
+                        defines: vec![InitialDefinition {
+                            name: "value".into(),
+                            expression: expression.into(),
+                        }],
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        };
+        let mut workspace = Workspace::overlay_documents(&files);
+        configure(&mut workspace, "1");
+        workspace.get_effective_model(root).unwrap();
+        assert!(workspace.macro_trace.is_some());
+        configure(&mut workspace, "2");
+        assert!(workspace.macro_trace.is_none());
+        workspace.get_effective_model(root).unwrap();
+        assert!(workspace.macro_trace.is_some());
+        let cancellation = Arc::new(AtomicBool::new(true));
+        workspace.set_cancellation(Arc::clone(&cancellation));
+        assert!(workspace.expand_report(root).is_none());
+        assert!(!workspace.expand.contains_key(root));
+        cancellation.store(false, Ordering::Relaxed);
+        let mut fresh = Workspace::overlay_documents(&files);
+        configure(&mut fresh, "2");
+        let retried = workspace.expand_report(root).unwrap();
+        assert!(retried.complete);
+        assert_eq!(retried, fresh.expand_report(root).unwrap());
+
+        configure(&mut workspace, "3");
+        workspace.get_effective_model(root).unwrap();
+        assert!(workspace.macro_trace.is_some());
+        let owner = workspace.spliced_source(root);
+        workspace.retain_analysis_roots(&HashSet::new());
+        assert!(workspace.macro_trace.is_none());
+        assert!(!owner.text.is_empty());
     }
 }
 

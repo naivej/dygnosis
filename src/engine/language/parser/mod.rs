@@ -95,6 +95,26 @@ pub(crate) fn parse_configured_with_budget(
     context: Option<Arc<crate::engine::analysis_configuration::MacroExecutionInputs>>,
     cached_source: Option<Arc<crate::engine::language::macro_source::MacroSource>>,
 ) -> Model {
+    parse_configured_capturing(
+        text,
+        line_segments,
+        evaluations,
+        budget,
+        context,
+        cached_source,
+        None,
+    )
+}
+
+pub(crate) fn parse_configured_capturing(
+    text: &str,
+    line_segments: &[(Span, u32)],
+    evaluations: &[crate::engine::language::macro_expand::MacroReplay],
+    budget: &mut crate::engine::language::macro_expr::MacroBudget,
+    context: Option<Arc<crate::engine::analysis_configuration::MacroExecutionInputs>>,
+    cached_source: Option<Arc<crate::engine::language::macro_source::MacroSource>>,
+    capture: Option<&mut Option<crate::engine::language::macro_expand::CompletedMacroTrace>>,
+) -> Model {
     // Reserve source work before normalization, raw token allocation, or the
     // independent written-macro scan. A refused guard copies no source text.
     if let Err(crate::engine::language::macro_expand::MacroEvalError::Limit(limit)) =
@@ -159,12 +179,12 @@ pub(crate) fn parse_configured_with_budget(
     let (tokens, macro_type_errors, macro_incomplete_span, incomplete_reasons, discarded) =
         crate::engine::language::macro_expand::expand_macros_with_status_configured(
             source,
-            Vec::new(),
             line_segments,
             evaluations,
             budget,
             context.clone(),
             Some(&macro_source),
+            capture,
         );
     let (mut model, _ranges) = parse_expanded_context_controlled(
         source,

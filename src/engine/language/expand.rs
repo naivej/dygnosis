@@ -303,6 +303,7 @@ pub(crate) fn expand_report_from_spliced_model_controlled(
         parsed_model,
         None,
         None,
+        None,
     )
 }
 
@@ -317,6 +318,7 @@ pub(crate) fn expand_report_from_spliced_configured(
     parsed_model: Option<&crate::engine::language::model::Model>,
     inputs: Option<Arc<crate::engine::analysis_configuration::MacroExecutionInputs>>,
     cached: Option<Arc<crate::engine::language::macro_source::MacroSource>>,
+    trace: Option<crate::engine::language::macro_expand::CompletedMacroTrace>,
 ) -> Result<ExpandReport, crate::engine::control::Cancelled> {
     crate::engine::control::run(cancellation.clone(), || {
         expand_spliced(
@@ -328,6 +330,7 @@ pub(crate) fn expand_report_from_spliced_configured(
             parsed_model,
             inputs,
             cached,
+            trace,
         )
     })
 }
@@ -342,32 +345,36 @@ fn expand_spliced(
     parsed_model: Option<&crate::engine::language::model::Model>,
     inputs: Option<Arc<crate::engine::analysis_configuration::MacroExecutionInputs>>,
     cached: Option<Arc<crate::engine::language::macro_source::MacroSource>>,
+    trace: Option<crate::engine::language::macro_expand::CompletedMacroTrace>,
 ) -> ExpandReport {
     let source = normalize_newlines(spliced);
-    let raw = tokenize(&source);
-    let line_segments: Vec<(Span, u32)> = map
-        .iter()
-        .filter(|segment| !segment.spliced.is_empty())
-        .map(|segment| (segment.spliced, segment.line))
-        .collect();
     let retain_overrides = inputs
         .as_ref()
         .is_some_and(|inputs| inputs.analysis.selection.preview);
-    let evaluations = splice_evaluations_configured(map, retain_overrides);
     let mut expansion_budget = crate::engine::language::macro_expr::MacroBudget::with_limit(
         work_limit,
         cancellation.clone(),
     );
-    let (tokens, traces, arena, incomplete, macro_navigation_complete, messages, discarded) =
-        crate::engine::language::macro_expand::expand_macros_traced_configured(
-            &source,
-            raw,
-            &line_segments,
-            &evaluations,
-            &mut expansion_budget,
-            inputs.clone(),
-            cached.as_deref(),
-        );
+    let (tokens, traces, arena, incomplete, macro_navigation_complete, messages, discarded) = trace
+        .and_then(|trace| trace.replay(&mut expansion_budget))
+        .unwrap_or_else(|| {
+            let raw = tokenize(&source);
+            let line_segments: Vec<(Span, u32)> = map
+                .iter()
+                .filter(|segment| !segment.spliced.is_empty())
+                .map(|segment| (segment.spliced, segment.line))
+                .collect();
+            let evaluations = splice_evaluations_configured(map, retain_overrides);
+            crate::engine::language::macro_expand::expand_macros_traced_configured(
+                &source,
+                raw,
+                &line_segments,
+                &evaluations,
+                &mut expansion_budget,
+                inputs.clone(),
+                cached.as_deref(),
+            )
+        });
     if crate::engine::control::cancelled() {
         return ExpandReport::default();
     }

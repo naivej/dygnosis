@@ -109,6 +109,10 @@ impl MacroBudget {
         self.work_left
     }
 
+    pub(crate) fn remaining_output(&self) -> usize {
+        self.output_left
+    }
+
     pub(crate) fn cancellation(&self) -> Option<Arc<AtomicBool>> {
         self.cancellation.clone()
     }

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.11.46
+
+- Large models with includes can respond sooner when opening or editing a
+  file. Dygnosis reuses completed macro expansion work for editor and MCP
+  results when the inputs match.
+
 ## v0.11.45
 
 - Hover explains PAC component kinds and inverse-gamma prior types, including
