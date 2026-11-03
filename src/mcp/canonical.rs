@@ -147,6 +147,8 @@ struct Params {
     context: Option<String>,
     /// Owning construct for an option or block instruction.
     parent: Option<String>,
+    /// Owning option for fixed-value lookup; requires parent.
+    option: Option<String>,
     code: Option<String>,
     severity: Option<String>,
     file: Option<String>,
@@ -207,7 +209,7 @@ fn fields(tool: &str) -> Vec<&'static str> {
         ]);
     }
     fields.extend_from_slice(match tool {
-        "dynare_syntax" => &["name", "search", "kind", "context", "parent"],
+        "dynare_syntax" => &["name", "search", "kind", "context", "parent", "option"],
         "dynare_diagnostic_info" => &["code", "kind", "severity", "search"],
         "dynare_diagnose" => &[
             "batch",
@@ -306,7 +308,7 @@ pub(super) fn input_schema(tool: &str) -> Arc<serde_json::Map<String, Value>> {
 pub(super) fn advertised_tools(structured: bool) -> Vec<Tool> {
     TOOL_NAMES.iter().map(|&name|{
         let description=match name {
-            "dynare_syntax"=>"Look up pinned Dynare syntax: commands, blocks, instructions, functions, operators, macros and options. Select name or search; kind, context and parent distinguish forms with the same spelling. Exact forms include signatures, value rules and bounded options. Omit filters for a bounded index. No model source is needed.",
+            "dynare_syntax"=>"Look up Dynare commands, blocks, instructions, functions, operators, macros, options and fixed option values. Select name or search; kind, context and parent distinguish forms. For option values, set parent to the command and option to the option name; omit name to list values. Numeric values use strings. Exact forms include signatures, value rules and bounded options. Omit filters for a bounded index. No model source is needed.",
             "dynare_diagnostic_info"=>"Look up diagnostic meaning and correction guidance. An exact code returns its explanation; kind, severity and search return bounded catalog summaries. This catalog does not report problems in a model. No model source is needed.",
             "dynare_diagnose"=>"Check one source with optional analysis choices, or an explicit batch. configured_sources.jobs contains source and analysis for each job and permits repeated roots. job:1, job:2 and later identities key expected_revisions; each job spends the finite root-job allowance. Other batches cannot share analysis. Results distinguish jobs from distinct roots, and retain each partial, failed or unfinished cause. An incomplete zero count is not a clean-model claim.",
             "dynare_model_info"=>"Give a configured model overview or inspect written source. Default summary has effective counts and model kind before transformations. Select analysis for explicit choices and override receipts; source_structure returns written items, guarded directive targets and branch IDs, availability and separate source coverage. Optional file selects one source under the same input policy, without making it an executed include. Other sections are structure, declarations, assignments, model_locals, statements, blocks, sources, includes and scope. Written source-item counts are not effective equation counts.",
@@ -632,7 +634,11 @@ fn reference_result(
     let options = output(params);
     let mut pages = match Pages::new(
         &format!("v3:{tool}"),
-        env!("CARGO_PKG_VERSION"),
+        if tool == "dynare_syntax" {
+            syntax_revision()
+        } else {
+            env!("CARGO_PKG_VERSION")
+        },
         arguments,
         &options,
     ) {
@@ -643,58 +649,165 @@ fn reference_result(
         Err(message) => return Err(invalid(message)),
     };
     pages.share_budget();
-    page_collections("", &mut result.data, &mut pages, true);
+    let complete = !result
+        .outcome
+        .reasons
+        .iter()
+        .any(|reason| reason.code == "VALUE_REFERENCE_INCOMPLETE");
+    page_collections("", &mut result.data, &mut pages, complete);
     result.selection = pages.finish(&options);
     Ok(result.wire())
 }
 
+fn syntax_revision() -> &'static str {
+    concat!(
+        "syntax-sources-v1:",
+        env!("CARGO_PKG_VERSION"),
+        ":",
+        env!("DYGNOSIS_SYNTAX_REVISION")
+    )
+}
+
 fn syntax(params: &Params, arguments: &Value) -> Result<CallToolResult, rmcp::ErrorData> {
-    let query = crate::engine::catalog::syntax::SyntaxQuery {
+    use crate::engine::catalog::syntax::{self, SyntaxQuery};
+    if params.option.is_some() && params.parent.is_none() {
+        return Err(invalid(
+            "The option filter requires a command in parent. No values were returned. Set parent to the command and try again.",
+        ));
+    }
+    if params.option.is_some()
+        && params
+            .kind
+            .as_deref()
+            .is_some_and(|kind| kind != "option_value")
+    {
+        return Err(invalid(
+            "The option filter selects option values, but kind selects another syntax form. No values were returned. Omit kind or set it to option_value.",
+        ));
+    }
+    let owner = params.option.as_ref().and_then(|option| {
+        syntax::option_record(params.parent.as_deref().unwrap_or_default(), option)
+    });
+    let query = SyntaxQuery {
         name: params.name.clone(),
         search: params.search.clone(),
         kind: params.kind.clone(),
         context: params.context.clone(),
         parent: params.parent.clone(),
+        option: params.option.clone(),
     };
-    let found = crate::engine::catalog::syntax::query(&query);
+    let found = syntax::query(&query);
+    let exact_option =
+        params.name.is_some() && found.records.len() == 1 && found.records[0].kind == "option";
+    let mut missing = Vec::new();
+    let mut unresolved = Vec::new();
+    for row in &found.records {
+        if let Some(value) = &row.value
+            && value.description.is_empty()
+        {
+            missing.push(format!(
+                "{}.{}={}",
+                row.parent.as_deref().unwrap_or_default(),
+                row.option.as_deref().unwrap_or_default(),
+                row.name
+            ));
+        }
+        if exact_option && let Some(domain) = &row.value_domain {
+            if !domain.complete {
+                unresolved.push(format!(
+                    "{}.{}: {}",
+                    row.parent.as_deref().unwrap_or_default(),
+                    row.name,
+                    domain.gaps.join("; ")
+                ));
+            }
+            for value in &domain.choices {
+                if value.description.is_empty() {
+                    missing.push(format!(
+                        "{}.{}={}",
+                        row.parent.as_deref().unwrap_or_default(),
+                        row.name,
+                        value.value
+                    ));
+                }
+            }
+        }
+    }
+    if params.name.is_none()
+        && let Some(row) = owner
+        && let Some(domain) = &row.value_domain
+        && !domain.complete
+    {
+        unresolved.push(format!(
+            "{}.{}: {}",
+            row.parent.as_deref().unwrap_or_default(),
+            row.name,
+            domain.gaps.join("; ")
+        ));
+    }
     let mut result = ToolResult::new(
         json!({"forms":found.records,"available_contexts":found.available_contexts}),
     );
-    if result.data["forms"].as_array().is_none_or(Vec::is_empty) && params.name.is_some() {
-        let name = params.name.as_deref().unwrap_or_default();
-        let message = if found.known_name {
-            format!(
-                "No form of '{name}' matches kind={}, context={}, parent={}. Valid contexts: {}. Remove an incompatible filter.",
-                params.kind.as_deref().unwrap_or("any"),
-                params.context.as_deref().unwrap_or("any"),
-                params.parent.as_deref().unwrap_or("any"),
-                result.data["available_contexts"]
-                    .as_array()
-                    .map(|rows| rows
-                        .iter()
-                        .take(4)
-                        .map(Value::to_string)
-                        .collect::<Vec<_>>()
-                        .join(", "))
-                    .unwrap_or_default()
-            )
-        } else {
-            format!(
-                "'{name}' is not in the pinned Dynare syntax records. Search or omit name to inspect the index."
-            )
-        };
-        result.cause(
-            "refused",
-            if found.known_name {
-                "WRONG_CONTEXT"
-            } else {
-                "UNKNOWN_SYNTAX"
-            },
-            message,
-        );
+    if let Some(row) = owner {
+        result.data["option_domain"] = domain_summary(row);
     }
-    // An index returns useful form summaries. Option detail has its own exact
-    // parent lookup; an exact form keeps its identity while paging its options.
+    let empty = result.data["forms"].as_array().is_none_or(Vec::is_empty);
+    if params.option.is_some() && owner.is_none() {
+        let command = params.parent.as_deref().unwrap_or_default();
+        let option = params.option.as_deref().unwrap_or_default();
+        let known_command = syntax::records().iter().any(|row| {
+            row.name.eq_ignore_ascii_case(command)
+                && matches!(row.kind.as_str(), "command" | "block" | "declaration")
+        });
+        let known_option = syntax::records()
+            .iter()
+            .any(|row| row.kind == "option" && row.name.eq_ignore_ascii_case(option));
+        result.cause("refused", if known_command && known_option {"WRONG_CONTEXT"} else {"UNKNOWN_SYNTAX"},
+            format!("No reference entry was found for option '{option}' under '{command}'. No values were returned. Check the command and option, or omit option to inspect the command."));
+    } else if empty && params.name.is_some() {
+        let name = params.name.as_deref().unwrap_or_default();
+        result.cause("refused", if found.known_name {"WRONG_CONTEXT"} else {"UNKNOWN_SYNTAX"}, format!(
+            "No reference form of '{name}' matches kind={}, context={}, parent={}, option={}. No value facts were returned. Check these selectors, or omit name to list available forms. A missing reference entry does not establish that Dynare rejects the source.",
+            params.kind.as_deref().unwrap_or("any"),params.context.as_deref().unwrap_or("any"),params.parent.as_deref().unwrap_or("any"),params.option.as_deref().unwrap_or("any")));
+    } else if empty
+        && owner.is_some()
+        && params
+            .context
+            .as_deref()
+            .is_some_and(|context| context != "option_value")
+    {
+        result.cause("refused", "WRONG_CONTEXT", "The option filter selects value forms in context=option_value. No values were returned. Omit context or select option_value.");
+    } else {
+        if !missing.is_empty() {
+            result.cause("partial", "VALUE_MEANING_UNAVAILABLE", format!("Returned the available syntax facts. Meanings are unavailable in the bundled reference for: {}.", missing.join(", ")));
+        }
+        if !unresolved.is_empty() {
+            result.cause("partial", "VALUE_REFERENCE_INCOMPLETE", format!("Returned the known value rules and choices. Fixed-choice coverage is unresolved for: {}.", unresolved.join(", ")));
+        }
+        if empty && let Some(row) = owner {
+            result.data["note"] = json!(if row
+                .value_rules
+                .iter()
+                .all(|rule| rule.starts_with("Flag;"))
+            {
+                "This option is a flag; no value follows the key."
+            } else if row
+                .value_domain
+                .as_ref()
+                .is_some_and(|domain| !domain.choices.is_empty())
+            {
+                "No fixed choices match the selected filters. Omit search or context to list the available choices."
+            } else if row
+                .value_domain
+                .as_ref()
+                .is_some_and(|domain| !domain.complete)
+            {
+                "Returned the known open value rules. Fixed-choice coverage is unresolved."
+            } else {
+                "Returned the open value rules. The reference lists no fixed choices for this option."
+            });
+        }
+    }
     if result.data["forms"]
         .as_array()
         .is_some_and(|forms| forms.len() > 1)
@@ -703,9 +816,30 @@ fn syntax(params: &Params, arguments: &Value) -> Result<CallToolResult, rmcp::Er
             if let Some(options) = form.as_object_mut().unwrap().remove("options") {
                 form["option_count"] = json!(options.as_array().map_or(0, Vec::len));
             }
+            if let Some(domain) = form.get_mut("value_domain").and_then(Value::as_object_mut)
+                && let Some(choices) = domain.remove("choices")
+            {
+                domain.insert(
+                    "choice_count".into(),
+                    json!(choices.as_array().map_or(0, Vec::len)),
+                );
+            }
         }
     }
     reference_result("dynare_syntax", params, arguments, result)
+}
+
+fn domain_summary(row: &crate::engine::catalog::syntax::SyntaxRecord) -> Value {
+    let mut domain = serde_json::to_value(&row.value_domain).expect("value domain");
+    if let Some(object) = domain.as_object_mut()
+        && let Some(choices) = object.remove("choices")
+    {
+        object.insert(
+            "choice_count".into(),
+            json!(choices.as_array().map_or(0, Vec::len)),
+        );
+    }
+    domain
 }
 
 fn diagnostic_info(params: &Params, arguments: &Value) -> Result<CallToolResult, rmcp::ErrorData> {
@@ -764,7 +898,7 @@ pub(super) fn page_collections(path: &str, value: &mut Value, pages: &mut Pages,
             let collection = if path.is_empty() { "rows" } else { path };
             let container = path == "roots"
                 || path == "heterogeneous_equations"
-                || (path == "forms" && rows.len() == 1);
+                || (path == "forms" && rows.len() == 1 && rows[0]["kind"] != "option_value");
             if container {
                 for (index, row) in rows.iter_mut().enumerate() {
                     if path == "heterogeneous_equations" {
@@ -814,6 +948,10 @@ pub(super) fn page_collections(path: &str, value: &mut Value, pages: &mut Pages,
                     "aliases",
                     "contexts",
                     "grammar_sources",
+                    "manual_sources",
+                    "open_rules",
+                    "gaps",
+                    "value_rules",
                     "available_contexts",
                     "segments",
                     "origin_frames",
@@ -825,6 +963,8 @@ pub(super) fn page_collections(path: &str, value: &mut Value, pages: &mut Pages,
                     "source_coverage",
                 ]
                 .contains(&key.as_str())
+                    || key == "forms"
+                        && (path.ends_with("value_domain") || path.ends_with("option_domain"))
                 {
                     continue;
                 }
@@ -844,6 +984,184 @@ pub(super) fn page_collections(path: &str, value: &mut Value, pages: &mut Pages,
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+    #[test]
+    fn option_value_queries_keep_the_option_owner_and_meaning() {
+        // Guards dropped values and sharing a same-spelling value across options.
+        let dl = call(
+            "dynare_syntax",
+            json!({"name":"dl","parent":"pac_model","option":"kind"}),
+        );
+        assert_eq!(dl["outcome"]["status"], "ok", "{dl}");
+        assert_eq!(dl["data"]["forms"][0]["option"], "kind");
+        assert!(
+            dl["data"]["forms"][0]["summary"]
+                .as_str()
+                .unwrap()
+                .contains("levels")
+        );
+        for option in ["dr", "lyapunov"] {
+            let found = call(
+                "dynare_syntax",
+                json!({"name":"default","parent":"estimation","option":option}),
+            );
+            assert_eq!(found["data"]["forms"][0]["option"], option, "{found}");
+        }
+    }
+
+    #[test]
+    fn option_value_pages_preserve_selected_missing_meanings() {
+        // Guards paged-out missing descriptions being mistaken for complete reference coverage.
+        let mut args = json!({"parent":"pac_model","option":"kind","page_size":1});
+        let mut values = BTreeSet::new();
+        loop {
+            let page = call("dynare_syntax", args.clone());
+            assert_eq!(page["outcome"]["status"], "partial", "{page}");
+            let rows = page["data"]["forms"].as_array().unwrap();
+            assert!(rows.len() <= 1);
+            for row in rows {
+                assert!(values.insert(row["name"].as_str().unwrap().to_owned()));
+            }
+            let Some(next) = page["selection"]["continuation"].as_str() else {
+                break;
+            };
+            args["continuation"] = json!(next);
+        }
+        assert_eq!(
+            values,
+            BTreeSet::from(["dd".into(), "dl".into(), "ll".into()])
+        );
+        let exact = call(
+            "dynare_syntax",
+            json!({"name":"dl","parent":"pac_model","option":"kind"}),
+        );
+        assert_eq!(exact["outcome"]["status"], "ok");
+    }
+
+    #[test]
+    fn option_value_empty_queries_explain_filters_and_open_domains() {
+        // Guards reporting an empty filtered page as an option with no fixed choices.
+        let filtered = call(
+            "dynare_syntax",
+            json!({"parent":"pac_model","option":"kind","search":"no_such_choice"}),
+        );
+        assert_eq!(filtered["outcome"]["status"], "ok");
+        assert!(
+            filtered["data"]["note"]
+                .as_str()
+                .unwrap()
+                .contains("filters")
+        );
+        assert_eq!(filtered["data"]["option_domain"]["kind"], "closed");
+        let open = call(
+            "dynare_syntax",
+            json!({"parent":"stoch_simul","option":"irf"}),
+        );
+        assert_eq!(open["outcome"]["status"], "ok", "{open}");
+        assert_eq!(open["data"]["option_domain"]["kind"], "open");
+        assert!(open["data"]["forms"].as_array().unwrap().is_empty());
+        let unknown = call(
+            "dynare_syntax",
+            json!({"parent":"no_such_command","option":"kind"}),
+        );
+        assert_eq!(unknown["outcome"]["reasons"][0]["code"], "UNKNOWN_SYNTAX");
+        assert!(
+            dispatch(
+                "dynare_syntax",
+                json!({"option":"kind"}),
+                RequestControl::default()
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn standalone_boolean_meanings_do_not_leak_from_nested_settings() {
+        // Guards unexplained boolean choices and nested key/value payloads exposed as outer values.
+        for value in ["true", "false"] {
+            let result = call(
+                "dynare_syntax",
+                json!({"parent":"estimation","option":"use_pct","name":value}),
+            );
+            assert_eq!(result["outcome"]["status"], "ok", "{result}");
+            assert!(
+                result["data"]["forms"][0]["summary"]
+                    .as_str()
+                    .is_some_and(|text| !text.is_empty())
+            );
+        }
+        for option in [
+            "optim",
+            "posterior_sampler_options",
+            "particle_filter_options",
+        ] {
+            let result = call(
+                "dynare_syntax",
+                json!({"parent":"estimation","option":option}),
+            );
+            assert_eq!(result["outcome"]["status"], "ok", "{result}");
+            assert!(
+                result["data"]["forms"].as_array().unwrap().is_empty(),
+                "{result}"
+            );
+        }
+    }
+
+    #[test]
+    fn option_value_gaps_and_changed_selector_have_distinct_outcomes() {
+        // Guards a known reference gap becoming a clean empty result, or a continuation changing its owner.
+        let gap = call(
+            "dynare_syntax",
+            json!({"parent":"estimation","option":"additional_optimizer_steps","page_size":1}),
+        );
+        assert_eq!(gap["outcome"]["status"], "partial", "{gap}");
+        assert_eq!(
+            gap["outcome"]["reasons"][0]["code"],
+            "VALUE_REFERENCE_INCOMPLETE"
+        );
+        assert!(
+            gap["outcome"]["reasons"][0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("optimizer IDs")
+        );
+        assert!(
+            gap["data"]["option_domain"]["gaps"]
+                .as_array()
+                .is_some_and(|gaps| !gaps.is_empty())
+        );
+        let first = call(
+            "dynare_syntax",
+            json!({"parent":"pac_model","option":"kind","page_size":1}),
+        );
+        let changed = call(
+            "dynare_syntax",
+            json!({"parent":"estimation","option":"dr","page_size":1,"continuation":first["selection"]["continuation"]}),
+        );
+        assert_eq!(changed["outcome"]["reasons"][0]["code"], "INPUT_CHANGED");
+    }
+
+    #[test]
+    fn exact_option_choices_use_the_shared_page_budget() {
+        // Guards exact-option containers returning all choices outside the row allowance.
+        let mut args = json!({"name":"kind","kind":"option","parent":"pac_model","page_size":1});
+        let mut values = BTreeSet::new();
+        loop {
+            let page = call("dynare_syntax", args.clone());
+            let rows = page["data"]["forms"][0]["value_domain"]["choices"]
+                .as_array()
+                .unwrap();
+            assert!(rows.len() <= 1);
+            for row in rows {
+                assert!(values.insert(row["value"].as_str().unwrap().to_owned()));
+            }
+            let Some(next) = page["selection"]["continuation"].as_str() else {
+                break;
+            };
+            args["continuation"] = json!(next);
+        }
+        assert!(values.contains("dl") && values.contains("dd") && values.contains("ll"));
+    }
+
     #[test]
     fn unreached_override_reasons_keep_their_captured_target_and_branch_label() {
         // Guards associating two identical application causes with the wrong choice.

@@ -22,7 +22,7 @@ this model with `HEAD~1`.”
 
 | Tool | What it provides |
 |---|---|
-| [dynare_syntax](tool:dynare_syntax) | Reference for Dynare commands, blocks, options, functions, operators and macro directives. |
+| [dynare_syntax](tool:dynare_syntax) | Reference for Dynare commands, blocks, options and their values, functions, operators and macro directives. |
 | [dynare_rename](tool:dynare_rename) | Proposed edits to rename a symbol safely across the model and its includes. |
 | [dynare_actions](tool:dynare_actions) | Available source refactorings (such as shock templates or bulk naming) and diagnostic quick fixes. |
 | [dynare_format](tool:dynare_format) | Indented, formatted model text for a file or selected line range. |

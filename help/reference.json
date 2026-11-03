@@ -1,9 +1,9 @@
 {
-  "version": "0.11.43",
+  "version": "0.11.44",
   "tools": [
     {
       "name": "dynare_syntax",
-      "description": "Look up pinned Dynare syntax: commands, blocks, instructions, functions, operators, macros and options. Select name or search; kind, context and parent distinguish forms with the same spelling. Exact forms include signatures, value rules and bounded options. Omit filters for a bounded index. No model source is needed. Read outcome and coverage beside data. Default 25 rows share one response allowance; selection reports counts and continuation. Changed inputs or filters require a new first page. No tool writes files or executes MATLAB/Octave.",
+      "description": "Look up Dynare commands, blocks, instructions, functions, operators, macros, options and fixed option values. Select name or search; kind, context and parent distinguish forms. For option values, set parent to the command and option to the option name; omit name to list values. Numeric values use strings. Exact forms include signatures, value rules and bounded options. Omit filters for a bounded index. No model source is needed. Read outcome and coverage beside data. Default 25 rows share one response allowance; selection reports counts and continuation. Changed inputs or filters require a new first page. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -48,6 +48,13 @@
             ]
           },
           "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "option": {
+            "description": "Owning option for fixed-value lookup; requires parent.",
             "type": [
               "string",
               "null"

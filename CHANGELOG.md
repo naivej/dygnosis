@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.11.44
+
+- Hover and completion explain fixed option values in their command context,
+  including in inactive macro branches.
+- MCP `dynare_syntax` can look up option values by command and option, and
+  returns their available meanings and written forms.
+
 ## v0.11.43
 
 - MCP equation pages retain all matching equations in repeated heterogeneity

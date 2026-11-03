@@ -9,8 +9,8 @@ you type.
 Completion and hover show each declared symbol's kind, timing class, evaluated
 parameter value, `long_name` and TeX label (configured in [Read labels, hints
 and colors](appearance.md)). Inside command or block parentheses, parameter
-hints describe recognized Dynare options; see the [option
-reference](reference.md) for the full list.
+hints describe options, and completion and hover explain values such as
+`pac_model(kind=dl)`. See the [Dynare manual](https://www.dynare.org/manual/).
 
 Use **Quick Fix...** (`Ctrl+.`) or **Refactor...** on declarations and blocks
 to automate repetitive model setup:

@@ -16,9 +16,9 @@ async function checkSyntax(service, workspaceRoot, evidence, helpers) {
   await currentSnapshot(service, document, () => service.modelInfo(document.uri), "syntax owner snapshot", info => info.complete);
   const symbols = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", document.uri);
   const flat = rows => rows.flatMap(row => [row, ...flat(row.children ?? [])]);
-  for (const name of ["twice", "vm", "ve", "pm"]) {
-    const row = flat(symbols).find(row => row.name === name);
-    assert.ok(row, `native Outline includes ${name}`);
+  for (const [label, name] of [["twice", "twice"], ["var_model(vm)", "vm"], ["var_expectation_model(ve)", "ve"], ["pac_model(pm)", "pm"]]) {
+    const row = flat(symbols).find(row => row.name === label);
+    assert.ok(row, `native Outline includes ${label}`);
     assert.equal(document.getText(row.selectionRange), name, `native Outline selects ${name}`);
   }
   for (const word of ["var_model", "pac_model"]) {
@@ -40,6 +40,31 @@ async function checkSyntax(service, workspaceRoot, evidence, helpers) {
   const tokens = await vscode.commands.executeCommand("vscode.provideDocumentSemanticTokens", document.uri);
   assert.ok(tokens?.data?.length, "native editor receives semantic names");
   evidence.checks.push("native syntax help, include completion/signature/definition, typed references, semantic names and exact macro/model Outline targets");
+
+  // Guards value help being lost by the real editor's hover/completion adapters.
+  const valuesSource = "var y; model; y=0; end;\npac_model(kind=dl);\n@#if 0\npac_model(kind=dl);\n@#endif\nstoch_simul(graph_format=(eps,pdf));\nsteady(solve_algo=1);\nestimation(posterior_sampling_method='random_walk_metropolis_hastings');\n";
+  const valuesFile = path.join(workspaceRoot, "syntax-values.mod");
+  await writeObservedInput(service, valuesFile, valuesSource);
+  const valuesDocument = await vscode.workspace.openTextDocument(valuesFile);
+  await vscode.window.showTextDocument(valuesDocument);
+  const nativeText = hovers => (hovers ?? []).flatMap(hover => hover.contents).map(value => typeof value === "string" ? value : value.value ?? "").join("\n");
+  for (const [offset, meaning] of [
+    [valuesSource.indexOf("dl"), "levels"], [valuesSource.lastIndexOf("dl"), "levels"],
+    [valuesSource.indexOf("pdf"), "PDF"], [valuesSource.indexOf("solve_algo=1") + "solve_algo=".length, "line search"],
+    [valuesSource.indexOf("random_walk"), "Metropolis"],
+  ]) {
+    await waitFor(async () => {
+      const result = await vscode.commands.executeCommand("vscode.executeHoverProvider", valuesDocument.uri, valuesDocument.positionAt(offset));
+      return nativeText(result).includes(meaning);
+    }, `native option value hover: ${meaning}`);
+  }
+  const valueItems = await vscode.commands.executeCommand("vscode.executeCompletionItemProvider", valuesDocument.uri, valuesDocument.positionAt(valuesSource.indexOf("dl")));
+  const dl = valueItems.items.find(item => (typeof item.label === "string" ? item.label : item.label.label) === "dl");
+  assert.ok(dl && String(dl.documentation?.value ?? dl.documentation).includes("levels"), "native value completion carries its meaning");
+  const quotedItems = await vscode.commands.executeCommand("vscode.executeCompletionItemProvider", valuesDocument.uri, valuesDocument.positionAt(valuesSource.indexOf("random_walk") + 6));
+  assert.ok(quotedItems.items.some(item => (typeof item.label === "string" ? item.label : item.label.label) === "random_walk_metropolis_hastings"), "native quoted value completion is retained");
+  assert.equal(valuesDocument.getText(), valuesSource, "value provider requests preserve source text");
+  evidence.checks.push("native fixed-value hover in active/inactive source, numeric/list/quoted values and documented completion");
 
   await vscode.window.showTextDocument(document);
   const configuration = vscode.workspace.getConfiguration("editor", document.uri);

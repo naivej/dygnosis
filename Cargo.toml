@@ -2,7 +2,7 @@
 name = "dygnosis"
 description = "Dynare analysis core"
 # Product version source. After editing, run: node scripts/version.cjs --sync
-version = "0.11.43"
+version = "0.11.44"
 edition = "2024"
 default-run = "dygnosis"
 license = "GPL-3.0-or-later"
@@ -41,6 +41,9 @@ tower-lsp = "0.20"
 tower = { version = "0.4", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[build-dependencies]
+sha2 = "0.10"
 
 # Line numbers for backtraces. Full symbols made each test program about 270 MB.
 # Incremental compilation stays on (the dev default).

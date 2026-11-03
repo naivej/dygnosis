@@ -16,6 +16,7 @@ mod analysis_configuration;
 mod comparison_inputs;
 mod document_analysis;
 mod document_context;
+mod option_values;
 mod source_activity;
 mod source_intelligence;
 mod source_projection;
@@ -1396,6 +1397,10 @@ impl Backend {
         let inventory = inner
             .workspace
             .source_inventory(pos.text_document.uri.as_str())?;
+        let fixed_values = option_values::completions(&inventory, &text, byte, &index);
+        if fixed_values.as_ref().is_some_and(|(closed, _)| *closed) {
+            return Some(CompletionResponse::Array(fixed_values.unwrap().1));
+        }
         let semantic_source =
             inner.semantic_completion_source(&pos.text_document.uri, byte, &inventory);
         if semantic_source
@@ -1412,7 +1417,9 @@ impl Backend {
             semantic_source,
         );
         let Some(mut syntax_context) = syntax_context.take() else {
-            return Some(CompletionResponse::Array(Vec::new()));
+            return Some(CompletionResponse::Array(
+                fixed_values.map_or_else(Vec::new, |(_, items)| items),
+            ));
         };
         if syntax_context.language == "macro_expression" {
             let mut items = syntax_intel::completions(&syntax_context);
@@ -1433,17 +1440,21 @@ impl Backend {
         // Option-value completion can change the display context below. Typed
         // names keep the original source context resolved for this request.
         let source_context = syntax_context.clone();
+        let value_context = fixed_values.is_some();
+        let value_items = fixed_values.map_or_else(Vec::new, |(_, items)| items);
         if semantic_source
-            && let Some(items) =
+            && let Some(mut items) =
                 typed_names::completions(&mut inner, &pos.text_document.uri, byte, &source_context)
         {
+            items.extend(value_items);
             return Some(CompletionResponse::Array(items));
         }
-        let mut value_items = Vec::new();
-        if let Some((cmd, option)) = crate::lsp::signature_help::option_context(&text, byte) {
-            if let Some(option) = option {
+        if value_context {
+            syntax_context.language = "expression";
+        } else if let Some((cmd, option)) = crate::lsp::signature_help::option_context(&text, byte)
+        {
+            if option.is_some() {
                 syntax_context.language = "expression";
-                value_items = syntax_intel::option_values(&cmd, &option);
             } else {
                 let items = syntax_intel::options(&cmd)
                     .map(|option| {

@@ -149,3 +149,34 @@ test("finite option, body and function records are reachable in their grammar co
     }
   }
 });
+
+test("typed option values stay in their owning scalar or list route", async () => {
+  const rows = await tokenize([
+    "pac_model(kind=dl);",
+    "model;",
+    "x=dl+1;",
+    'label="dl";',
+    "end;",
+    "stoch_simul(graph_format=(eps,pdf));",
+    "method_of_moments(weighting_matrix=['OPTIMAL','DIAGONAL']);",
+    "markov_switching(chain=1,duration=[1,inf,-inf,+inf],number_of_regimes=3,restrictions=[[1,2,0]]);",
+    "markov_switching(chain=2,duration=inf,number_of_regimes=2);",
+    "model;",
+    "x=OPTIMAL+5;",
+    "label='OPTIMAL';",
+    "x=inf+1;",
+    "end;",
+  ].join("\n"));
+
+  has(rows, 0, "dl", "constant.language.option.dynare");
+  for (const value of ["eps", "pdf"]) has(rows, 5, value, "constant.language.option.dynare");
+  for (const value of ["OPTIMAL", "DIAGONAL"]) has(rows, 6, value, "constant.language.option.dynare");
+  for (const value of ["inf", "-inf", "+inf"]) has(rows, 7, value, "constant.language.option.dynare");
+
+  for (const [line, value] of [[2, "dl"], [3, "dl"], [8, "inf"], [10, "OPTIMAL"], [11, "OPTIMAL"], [12, "inf"]]) {
+    assert.ok(!scopes(rows, line, value).includes("constant.language.option.dynare"), `${value} outside a matching value form`);
+  }
+  has(rows, 2, "1", "constant.numeric.dynare");
+  has(rows, 3, "dl", "string.quoted.double.dynare");
+  has(rows, 11, "OPTIMAL", "string.quoted.single.dynare");
+});

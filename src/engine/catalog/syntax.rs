@@ -8,6 +8,97 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+const SYNTAX_DATA: &str = include_str!("syntax_data.json");
+
+/// A documented choice is distinct from the grammar domain that accepts it.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SyntaxValue {
+    pub value: String,
+    pub token_kind: String,
+    pub insert_text: String,
+    pub case_sensitive: bool,
+    #[serde(default)]
+    pub forms: Vec<String>,
+    #[serde(default)]
+    pub signed: bool,
+    pub description: String,
+    pub status: String,
+    pub applicability: String,
+    pub grammar_sources: Vec<String>,
+    pub manual_sources: Vec<String>,
+    #[serde(default)]
+    pub default: bool,
+}
+
+impl SyntaxValue {
+    pub(crate) fn matches_literal(&self, text: &str) -> bool {
+        if self.token_kind == "integer" && !self.signed && text.starts_with(['+', '-']) {
+            return false;
+        }
+        let value = match self.token_kind.as_str() {
+            "quoted" => {
+                let quote = text.as_bytes().first().copied();
+                if quote != Some(b'\'')
+                    || text.len() < 2
+                    || text.as_bytes().last().copied() != quote
+                {
+                    return false;
+                }
+                &text[1..text.len() - 1]
+            }
+            "integer"
+                if !text.is_empty()
+                    && text.bytes().enumerate().all(|(at, byte)| {
+                        byte.is_ascii_digit() || at == 0 && matches!(byte, b'+' | b'-')
+                    }) =>
+            {
+                text
+            }
+            "bare" => text,
+            _ => return false,
+        };
+        if self.token_kind == "integer" {
+            let Ok(number) = value.parse::<i64>() else {
+                return false;
+            };
+            return self.value.parse::<i64>() == Ok(number);
+        }
+        if self.case_sensitive {
+            value == self.value
+        } else {
+            value.eq_ignore_ascii_case(&self.value)
+        }
+    }
+
+    pub(crate) fn help(&self) -> String {
+        let mut help = if self.description.is_empty() {
+            "This value is listed for this option. Its meaning is unavailable in the bundled reference.".to_owned()
+        } else {
+            self.description.clone()
+        };
+        if self.default {
+            help.push_str(" Default.");
+        }
+        if !self.applicability.is_empty() {
+            help.push_str("\n\n");
+            help.push_str(&self.applicability);
+        }
+        help
+    }
+}
+
+/// Finite grammar alternatives and documented choices in open domains.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SyntaxValueDomain {
+    pub kind: String,
+    pub open_rules: Vec<String>,
+    pub forms: Vec<String>,
+    pub choices: Vec<SyntaxValue>,
+    pub complete: bool,
+    #[serde(default)]
+    pub gaps: Vec<String>,
+}
+
 /// One written option, or an open per-symbol partition-key slot.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SyntaxOption {
@@ -19,6 +110,8 @@ pub struct SyntaxOption {
     #[serde(default)]
     pub description: String,
     pub grammar_sources: Vec<String>,
+    #[serde(default)]
+    pub value_count: usize,
 }
 
 /// One syntax spelling in one accepted role and context.
@@ -36,6 +129,12 @@ pub struct SyntaxRecord {
     pub aliases: Vec<String>,
     pub options: Vec<SyntaxOption>,
     pub grammar_sources: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<SyntaxValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_domain: Option<SyntaxValueDomain>,
 }
 
 /// Exact name and independent narrowing filters. Search is a literal substring.
@@ -46,6 +145,7 @@ pub struct SyntaxQuery {
     pub kind: Option<String>,
     pub context: Option<String>,
     pub parent: Option<String>,
+    pub option: Option<String>,
 }
 
 /// Deterministic results before transport paging.
@@ -61,10 +161,12 @@ pub struct SyntaxQueryResult {
 pub fn records() -> &'static [SyntaxRecord] {
     static RECORDS: OnceLock<Vec<SyntaxRecord>> = OnceLock::new();
     RECORDS.get_or_init(|| {
-        let mut rows: Vec<SyntaxRecord> = serde_json::from_str(include_str!("syntax_data.json"))
+        let mut rows: Vec<SyntaxRecord> = serde_json::from_str(SYNTAX_DATA)
             .expect("bundled pinned syntax records must deserialize");
         for row in &mut rows {
-            if let Some(help) = super::family_help(&row.name) {
+            if row.kind != "option_value"
+                && let Some(help) = super::family_help(&row.name)
+            {
                 row.summary = help.to_owned();
             }
             for option in &mut row.options {
@@ -141,6 +243,13 @@ pub fn query(query: &SyntaxQuery) -> SyntaxQueryResult {
                         .as_ref()
                         .is_some_and(|p| p.eq_ignore_ascii_case(parent))
                 })
+                && query.option.as_ref().is_none_or(|option| {
+                    row.kind == "option_value"
+                        && row
+                            .option
+                            .as_ref()
+                            .is_some_and(|owner| owner.eq_ignore_ascii_case(option))
+                })
                 && search.as_ref().is_none_or(|search| {
                     row.name.to_ascii_lowercase().contains(search)
                         || row.summary.to_ascii_lowercase().contains(search)
@@ -157,6 +266,17 @@ pub fn query(query: &SyntaxQuery) -> SyntaxQueryResult {
         known_name,
         available_contexts,
     }
+}
+
+/// Option facts are shared by written-source consumers and source-free lookup.
+pub(crate) fn option_record(command: &str, option: &str) -> Option<&'static SyntaxRecord> {
+    in_context("command_option", Some("option"), Some(command))
+        .chain(in_context(
+            "declaration_metadata",
+            Some("option"),
+            Some(command),
+        ))
+        .find(|row| row.name.eq_ignore_ascii_case(option))
 }
 
 /// Block spelling and aliases from the same records used by syntax lookup.

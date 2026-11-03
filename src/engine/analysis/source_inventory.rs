@@ -64,6 +64,8 @@ pub(crate) struct SourceItem {
     /// End of the block opener or equation-tag prefix (empty when no tags).
     pub header_end: u32,
     pub function: bool,
+    /// Literal prior/options keyword after a qualified statement head.
+    pub option_keyword: Option<Span>,
 }
 
 #[derive(Clone, Debug)]
@@ -90,6 +92,14 @@ pub(crate) struct SourceFold {
 pub(crate) struct SourceContext {
     pub language: &'static str,
     pub parent: Option<String>,
+}
+
+/// A written assignment in one literal option header, without binding claims.
+pub(crate) struct SourceOptionValue<'a> {
+    pub command: &'a str,
+    pub option: &'a str,
+    pub tokens: &'a [Token],
+    pub start: u32,
 }
 
 /// Parser-completed literal name role; it is not an accepted binding.
@@ -162,6 +172,122 @@ struct MacroFrame<'a> {
 }
 
 impl SourceInventory {
+    /// Inspect retained tokens only. The fixed bound also covers malformed tails.
+    pub(crate) fn option_value_at<'a>(
+        &'a self,
+        text: &'a str,
+        byte: u32,
+    ) -> Option<SourceOptionValue<'a>> {
+        if !self.structure_complete || crate::engine::control::cancelled() {
+            return None;
+        }
+        let after = self.items.partition_point(|item| item.span.start <= byte);
+        let item = self.items[..after]
+            .iter()
+            .rev()
+            .take(64)
+            .filter(|item| {
+                matches!(
+                    item.kind,
+                    SourceItemKind::Command
+                        | SourceItemKind::Declaration
+                        | SourceItemKind::Block
+                        | SourceItemKind::Fragment
+                ) && byte <= item.span.end
+                    && (item.kind != SourceItemKind::Block || byte < item.header_end)
+            })
+            .min_by_key(|item| item.span.end - item.span.start)?;
+        let keyword = item.option_keyword.unwrap_or(item.selection);
+        let command = if item.option_keyword.is_some() {
+            text.get(keyword.start as usize..keyword.end as usize)?
+        } else {
+            item.name.as_deref()?
+        };
+        let all = &self.lexical_tokens;
+        let head = all.partition_point(|token| token.span.start < keyword.start);
+        let opener = head + 1;
+        if all.get(opener)?.kind != TokenKind::LParen {
+            return None;
+        }
+        if all[head..opener]
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::Semi | TokenKind::Eq))
+        {
+            return None;
+        }
+        let mut stack = vec![TokenKind::LParen];
+        let mut start = opener + 1;
+        for (count, at) in (opener + 1..all.len()).enumerate() {
+            if count >= 8192 || count % 128 == 0 && crate::engine::control::cancelled() {
+                return None;
+            }
+            let token = &all[at];
+            if token.span.start > item.span.end {
+                return None;
+            }
+            let boundary = stack.len() == 1
+                && matches!(token.kind, TokenKind::Comma | TokenKind::RParen)
+                || matches!(token.kind, TokenKind::Eof | TokenKind::Semi);
+            if boundary {
+                if token.span.start >= byte {
+                    let key = all.get(start)?;
+                    let equal = all.get(start + 1)?;
+                    if key.kind != TokenKind::Ident
+                        || equal.kind != TokenKind::Eq
+                        || byte < equal.span.end
+                    {
+                        return None;
+                    }
+                    let end = all[start..at]
+                        .last()
+                        .map_or(byte, |token| token.span.end.max(byte));
+                    let anchor = Span {
+                        start: item.selection.start,
+                        end,
+                    };
+                    if !self.literal_anchor_on_path(
+                        anchor,
+                        byte.saturating_sub(1).max(item.selection.start),
+                    ) || intersects(&self.opaque, anchor)
+                    {
+                        return None;
+                    }
+                    return Some(SourceOptionValue {
+                        command,
+                        option: key.text(text),
+                        tokens: &all[start + 2..at],
+                        start: equal.span.end,
+                    });
+                }
+                if token.kind != TokenKind::Comma {
+                    return None;
+                }
+                start = at + 1;
+                continue;
+            }
+            match token.kind {
+                TokenKind::LParen | TokenKind::LBrack => {
+                    if stack.len() >= 32 {
+                        return None;
+                    }
+                    stack.push(token.kind);
+                }
+                TokenKind::RParen | TokenKind::RBrack => {
+                    let expected = if token.kind == TokenKind::RParen {
+                        TokenKind::LParen
+                    } else {
+                        TokenKind::LBrack
+                    };
+                    if stack.pop() != Some(expected) {
+                        return None;
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
     /// Conservative retained payload for the bounded source-only hover cache.
     pub(crate) fn retained_bytes(&self) -> usize {
         use std::mem::size_of;
@@ -466,6 +592,7 @@ impl SourceInventory {
             template: intersects(&self.interpolations, span),
             header_end: selection.end,
             function: false,
+            option_keyword: None,
         }
     }
 
@@ -641,6 +768,7 @@ impl SourceInventory {
         let mut proven = HashSet::new();
         let mut literal_dimensions = HashSet::new();
         let mut item_by_statement: Vec<Option<usize>> = vec![None; model.statements.len()];
+        let mut dotted = model.dotted_statements.iter().peekable();
         self.opaque
             .extend(model.execution_steps.iter().filter_map(|step| {
                 if let ExecutionStep::Opaque(span) = step {
@@ -650,6 +778,16 @@ impl SourceInventory {
                 }
             }));
         for statement in &model.statements {
+            while dotted
+                .peek()
+                .is_some_and(|row| row.span.start < statement.span.start)
+            {
+                dotted.next();
+            }
+            let option_keyword = dotted
+                .peek()
+                .filter(|row| row.has_body && row.span.start == statement.span.start)
+                .map(|row| row.keyword_span);
             if !self.reserve(
                 budget,
                 std::mem::size_of::<SourceItem>() + self.path_at(statement.span.start).len(),
@@ -693,6 +831,7 @@ impl SourceInventory {
             );
             row.written_kind = Some(statement.name.clone());
             row.header_end = header.end;
+            row.option_keyword = option_keyword;
             if complete {
                 proven.insert(statement.id);
             }
@@ -1674,6 +1813,7 @@ impl SourceInventory {
             template: false,
             path: self.path_at(site.span.start).to_vec(),
             function: site.kind == "external_function",
+            option_keyword: None,
         })
     }
 
@@ -1910,6 +2050,40 @@ mod tests {
             .expect("test source macro scan should succeed");
         SourceInventory::build_from_macro_source(source, Default::default(), None)
             .expect("test inventory should not be canceled")
+    }
+
+    #[test]
+    fn option_headers_require_acquired_facts_and_bound_the_token_walk() {
+        // Guards bypassing source-work stops or scanning an arbitrarily large header.
+        let small = "pac_model(kind=dl);";
+        let source =
+            MacroSource::build(Arc::new(small.to_owned()), &mut MacroBudget::new()).unwrap();
+        let stopped =
+            SourceInventory::build_from_macro_source(source, MacroWorkLimit::new(1).unwrap(), None)
+                .unwrap();
+        assert!(!stopped.structure_complete());
+        assert!(
+            stopped
+                .option_value_at(small, small.find("dl").unwrap() as u32)
+                .is_none()
+        );
+        let large = format!(
+            "stoch_simul({},graph_format=pdf);",
+            vec!["irf=5"; 3000].join(",")
+        );
+        let parsed = inventory(&large);
+        assert!(parsed.structure_complete());
+        assert!(
+            parsed
+                .option_value_at(&large, large.rfind("pdf").unwrap() as u32)
+                .is_none()
+        );
+        let complete = inventory(small);
+        assert!(
+            complete
+                .option_value_at(small, small.find("dl").unwrap() as u32)
+                .is_some()
+        );
     }
 
     #[test]

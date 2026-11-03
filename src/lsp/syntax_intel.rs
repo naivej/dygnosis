@@ -567,37 +567,6 @@ pub(crate) fn completions(context: &Context) -> Vec<CompletionItem> {
         .collect()
 }
 
-pub(crate) fn option_values(command: &str, name: &str) -> Vec<CompletionItem> {
-    let mut values: Vec<_> = syntax::records()
-        .iter()
-        .filter(|record| {
-            record.kind == "option"
-                && record
-                    .parent
-                    .as_deref()
-                    .is_some_and(|parent| parent.eq_ignore_ascii_case(command))
-                && record.name.eq_ignore_ascii_case(name)
-        })
-        .flat_map(|record| &record.value_rules)
-        .flat_map(|rule| rule.split(" | "))
-        .filter(|value| {
-            !value.is_empty() && value.chars().all(|ch| ch.is_ascii_lowercase() || ch == '_')
-        })
-        .map(str::to_owned)
-        .collect();
-    values.sort();
-    values.dedup();
-    values
-        .into_iter()
-        .map(|value| CompletionItem {
-            label: value,
-            kind: Some(CompletionItemKind::ENUM_MEMBER),
-            detail: Some(format!("{command} {name} value")),
-            ..CompletionItem::default()
-        })
-        .collect()
-}
-
 /// Literal written macro targets are useful even in inactive source branches.
 /// This supplies source navigation/completion, not an executed macro binding.
 pub(crate) fn macro_definitions(text: &str) -> Vec<(String, Span, Span, bool)> {

@@ -9,6 +9,9 @@ pub(super) fn hover(source: &SourceDocument, position: Position) -> Option<Optio
     let index = source.source_index();
     let byte = index.offset_utf16(text, span_pos(position));
     let inventory = source.inventory()?;
+    if let Some(hover) = option_values::hover(&inventory, text, byte, &index) {
+        return Some(Some(hover));
+    }
     if !syntax_intel::hover_may_need_model(&inventory, text, byte) {
         return Some(None);
     }
