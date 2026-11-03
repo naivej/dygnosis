@@ -402,18 +402,25 @@ fn configured_jobs_keep_repeated_roots_and_page_by_job_identity() {
 #[test]
 fn configured_coverage_keeps_text_partial_and_failed_job_associations() {
     // Coverage must not derive job identity from an absent or repeated filename.
+    let missing_root = std::env::temp_dir().join(format!(
+        "dygnosis-missing-coverage-{}-{}.mod",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    assert!(!missing_root.exists());
+    let missing_root = missing_root.to_str().unwrap();
     let result = call(
         "dynare_diagnose",
         json!({"batch":{"kind":"configured_sources","jobs":[
             {"source":{"kind":"text","text":"var y;model;y=0;end;"},"analysis":{}},
             {"source":{"kind":"text","text":"var y;model;y=;end;"},"analysis":{}},
-            {"source":{"kind":"disk","root":"C:/__dygnosis_missing_coverage__.mod"},"analysis":{}}
+            {"source":{"kind":"disk","root":missing_root},"analysis":{}}
         ]}}),
     );
-    for (index, root) in ["input:1", "input:2", "C:/__dygnosis_missing_coverage__.mod"]
-        .iter()
-        .enumerate()
-    {
+    for (index, root) in ["input:1", "input:2", missing_root].iter().enumerate() {
         let job = format!("job:{}", index + 1);
         assert_eq!(result["data"]["roots"][index]["job_id"], job);
         assert_eq!(result["coverage"]["roots"][index]["job_id"], job);
