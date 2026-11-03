@@ -22,6 +22,7 @@ mod source_intelligence;
 mod source_projection;
 mod workspace_checks;
 mod written_requests;
+mod written_values;
 
 mod ordering;
 mod parameter_hints;
@@ -1397,7 +1398,10 @@ impl Backend {
         let inventory = inner
             .workspace
             .source_inventory(pos.text_document.uri.as_str())?;
-        let fixed_values = option_values::completions(&inventory, &text, byte, &index);
+        let value_source = inventory.option_value_at(&text, byte);
+        let fixed_values =
+            written_values::completions(&inventory, value_source.as_ref(), &text, byte, &index)
+                .or_else(|| option_values::completions(value_source.as_ref(), &text, byte, &index));
         if fixed_values.as_ref().is_some_and(|(closed, _)| *closed) {
             return Some(CompletionResponse::Array(fixed_values.unwrap().1));
         }
@@ -1406,7 +1410,9 @@ impl Backend {
         if semantic_source
             && let Some(item) = metadata_completion_item(&mut inner, &pos.text_document.uri, byte)
         {
-            return Some(CompletionResponse::Array(vec![item]));
+            let mut items = vec![item];
+            items.extend(fixed_values.map_or_else(Vec::new, |(_, values)| values));
+            return Some(CompletionResponse::Array(items));
         }
         let mut syntax_context = inner.syntax_context_with_source(
             &pos.text_document.uri,
@@ -1423,6 +1429,7 @@ impl Backend {
         };
         if syntax_context.language == "macro_expression" {
             let mut items = syntax_intel::completions(&syntax_context);
+            items.extend(fixed_values.map_or_else(Vec::new, |(_, items)| items));
             items.extend(syntax_intel::macro_definitions(&text).into_iter().map(
                 |(name, _, _, function)| CompletionItem {
                     label: name,

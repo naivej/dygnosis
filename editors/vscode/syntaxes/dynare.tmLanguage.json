@@ -3449,6 +3449,30 @@
         },
         {
           "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(cova_compute))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(cova_compute))([ \\t]*=[ \\t]*)(1)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
           "match": "(?<![\\w.])(?i:(cpf_weights))([ \\t]*=[ \\t]*)(?i:(amisanotristani))(?=[ \\t]*(?:,|\\)|\\]|;|$))",
           "captures": {
             "1": {
@@ -4038,6 +4062,18 @@
         {
           "name": "meta.option.value.dynare",
           "match": "(?<![\\w.])(?i:(mcmc_jumping_covariance))([ \\t]*=[ \\t]*)(?i:(prior_variance))(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(mh_replic))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
           "captures": {
             "1": {
               "name": "variable.parameter.option.dynare"
@@ -4949,6 +4985,90 @@
         },
         {
           "name": "meta.option.value.list.dynare",
+          "begin": "(?<![\\w.])(?i:(additional_optimizer_steps))([ \\t]*=[ \\t]*)(\\[)",
+          "end": "\\]",
+          "beginCaptures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "punctuation.section.brackets.dynare"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.brackets.dynare"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])1(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])10(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])101(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])102(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])12(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])2(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])3(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])4(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])5(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])6(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])7(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])8(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])9(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#macro"
+            },
+            {
+              "include": "#interpolation"
+            }
+          ]
+        },
+        {
+          "name": "meta.option.value.list.dynare",
           "begin": "(?<![\\w.])(?i:(graph_format))([ \\t]*=[ \\t]*)(\\()",
           "end": "\\)",
           "beginCaptures": {
@@ -5194,6 +5314,18 @@
         {
           "name": "meta.option.value.dynare",
           "match": "(?<![\\w.])(?i:(integration))([ \\t]*=[ \\t]*)(?i:(unscented))(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(order))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
           "captures": {
             "1": {
               "name": "variable.parameter.option.dynare"
@@ -5676,6 +5808,114 @@
           "include": "#interpolation"
         },
         {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(calibration_verbosity))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(calibration_verbosity))([ \\t]*=[ \\t]*)(1)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(calibration_verbosity))([ \\t]*=[ \\t]*)(2)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(forward_verbosity))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(forward_verbosity))([ \\t]*=[ \\t]*)(1)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(forward_verbosity))([ \\t]*=[ \\t]*)(2)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(time_iteration_early_stopping))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(time_iteration_verbosity))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(time_iteration_verbosity))([ \\t]*=[ \\t]*)(2)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
           "name": "variable.parameter.option.dynare",
           "match": "(?i)\\b(?:calibration_max_iter|calibration_target_equations|calibration_tolf|calibration_verbosity|filename|forward_check_every|forward_max_iter|forward_tol|forward_verbosity|time_iteration_early_stopping|time_iteration_learning_rate|time_iteration_max_iter|time_iteration_solver_factor|time_iteration_solver_max_iter|time_iteration_solver_stop_on_error|time_iteration_solver_tolf|time_iteration_solver_tolx|time_iteration_tol|time_iteration_verbosity|variable)\\b(?=[ \\t]*(?:=|,|\\)|;|$))"
         },
@@ -5920,6 +6160,18 @@
         {
           "name": "meta.option.value.dynare",
           "match": "(?<![\\w.])(?i:(graph_format))([ \\t]*=[ \\t]*)(?i:(pdf))(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(periods))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
           "captures": {
             "1": {
               "name": "variable.parameter.option.dynare"
@@ -6785,6 +7037,18 @@
         {
           "name": "meta.option.value.dynare",
           "match": "(?<![\\w.])(?i:(load_ident_files))([ \\t]*=[ \\t]*)(1)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(normalize_jacobians))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
           "captures": {
             "1": {
               "name": "variable.parameter.option.dynare"
@@ -8062,6 +8326,30 @@
         },
         {
           "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(cova_compute))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(cova_compute))([ \\t]*=[ \\t]*)(1)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
           "match": "(?<![\\w.])(?i:(dr))([ \\t]*=[ \\t]*)(?i:(aim))(?=[ \\t]*(?:,|\\)|\\]|;|$))",
           "captures": {
             "1": {
@@ -8231,6 +8519,18 @@
         {
           "name": "meta.option.value.dynare",
           "match": "(?<![\\w.])(?i:(mcmc_jumping_covariance))([ \\t]*=[ \\t]*)(?i:(prior_variance))(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(mh_replic))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
           "captures": {
             "1": {
               "name": "variable.parameter.option.dynare"
@@ -8707,6 +9007,98 @@
               "name": "constant.language.option.dynare"
             }
           }
+        },
+        {
+          "name": "meta.option.value.list.dynare",
+          "begin": "(?<![\\w.])(?i:(additional_optimizer_steps))([ \\t]*=[ \\t]*)(\\[)",
+          "end": "\\]",
+          "beginCaptures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "punctuation.section.brackets.dynare"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.brackets.dynare"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])0(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])1(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])10(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])101(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])102(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])12(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])13(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])2(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])3(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])4(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])5(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])6(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])7(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])8(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "name": "constant.language.option.dynare",
+              "match": "(?<![\\w.])9(?=[ \\t]*(?:,|\\]))"
+            },
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#macro"
+            },
+            {
+              "include": "#interpolation"
+            }
+          ]
         },
         {
           "name": "meta.option.value.list.dynare",
@@ -13891,6 +14283,18 @@
           }
         },
         {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(vintage))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
           "name": "meta.option.value.list.dynare",
           "begin": "(?<![\\w.])(?i:(graph_format))([ \\t]*=[ \\t]*)(\\()",
           "end": "\\)",
@@ -18352,6 +18756,30 @@
         },
         {
           "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(irf))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
+          "match": "(?<![\\w.])(?i:(periods))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.option.dynare"
+            },
+            "3": {
+              "name": "constant.language.option.dynare"
+            }
+          }
+        },
+        {
+          "name": "meta.option.value.dynare",
           "match": "(?<![\\w.])(?i:(solve_algo))([ \\t]*=[ \\t]*)(0)(?=[ \\t]*(?:,|\\)|\\]|;|$))",
           "captures": {
             "1": {
@@ -19054,18 +19482,6 @@
         },
         {
           "include": "#interpolation"
-        },
-        {
-          "name": "meta.option.value.dynare",
-          "match": "(?<![\\w.])(?i:(horizon))([ \\t]*=[ \\t]*)(?i:(inf))(?=[ \\t]*(?:,|\\)|\\]|;|$))",
-          "captures": {
-            "1": {
-              "name": "variable.parameter.option.dynare"
-            },
-            "3": {
-              "name": "constant.language.option.dynare"
-            }
-          }
         },
         {
           "name": "variable.parameter.option.dynare",

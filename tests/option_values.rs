@@ -82,6 +82,36 @@ fn markdown(hover: Hover) -> String {
 }
 
 #[tokio::test]
+async fn block_values_explain_their_written_choice_in_inactive_source() {
+    // Guards value positions falling through to availability-only hover.
+    for (statement, meaning) in [
+        ("kind d|d", "first differences"),
+        ("kind d|l", "appears in levels"),
+        ("kind l|l", "stationary component in levels"),
+        ("k|ind dl", "dd, dl or ll"),
+    ] {
+        let block = format!(
+            "pac_target_info(pac);\ntarget y;\ncomponent x;\n{statement};\nauxname xaux;\nend;"
+        );
+        for source in [block.clone(), format!("@#if 0\n{block}\n@#endif\n")] {
+            let result = markdown(hover(&source).await.unwrap());
+            assert!(result.contains(meaning), "{source}: {result}");
+        }
+    }
+    for block in ["estimated_params", "priors"] {
+        for (shape, meaning) in [
+            ("inv_gamma_|pdf", "equivalent to `inv_gamma1_pdf`"),
+            ("inv_gamma1_|pdf", "equivalent to `inv_gamma_pdf`"),
+            ("inv_gamma2_|pdf", "Type 2 inverse-gamma"),
+        ] {
+            let source = format!("@#if 0\n{block};\nalpha, {shape}, 1, 0.2;\nend;\n@#endif\n");
+            let result = markdown(hover(&source).await.unwrap());
+            assert!(result.contains(meaning), "{source}: {result}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn fixed_literals_keep_explanations_without_executed_model_facts() {
     // Guards incorrect fallback help and a hover range that includes the option key.
     for (source, meaning) in [

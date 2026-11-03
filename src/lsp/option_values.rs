@@ -1,6 +1,6 @@
 //! Fixed value help from retained written tokens and the shared reference.
 use super::*;
-use crate::engine::analysis::source_inventory::SourceInventory;
+use crate::engine::analysis::source_inventory::SourceOptionValue;
 use crate::engine::catalog::syntax::{self, SyntaxValueDomain};
 use crate::engine::language::lexer::Token;
 use std::borrow::Cow;
@@ -15,19 +15,33 @@ struct ValueSite<'a> {
 }
 
 fn site<'a>(
-    inventory: &'a SourceInventory,
+    source: &SourceOptionValue<'a>,
     text: &'a str,
     byte: u32,
     completion: bool,
 ) -> Option<ValueSite<'a>> {
-    let source = inventory.option_value_at(text, byte)?;
     let domain = syntax::option_record(source.command, source.option)?
         .value_domain
         .as_ref()?;
     let mut tokens = source.tokens;
     let mut start = source.start;
     let mut position = "scalar";
-    if tokens
+    if domain.forms.iter().any(|form| form == "range_end")
+        && let Some(lower) = tokens.first()
+        && lower.kind == TokenKind::Number
+        && lower.text(text).bytes().all(|byte| byte.is_ascii_digit())
+    {
+        // The retained lexer skips ':'. Its exact bounded gap proves this
+        // separator without rescanning or changing the expression lexer.
+        let end = tokens.get(1).map_or(byte, |token| token.span.start);
+        let gap = text.get(lower.span.end as usize..end as usize)?;
+        if gap.len() > 256 || gap.trim() != ":" || byte < end {
+            return None;
+        }
+        start = end;
+        tokens = &tokens[1..];
+        position = "range_end";
+    } else if tokens
         .first()
         .is_some_and(|token| matches!(token.kind, TokenKind::LParen | TokenKind::LBrack))
     {
@@ -214,12 +228,12 @@ fn literal_token(token: &Token) -> bool {
 }
 
 pub(super) fn hover(
-    inventory: &SourceInventory,
+    source: Option<&SourceOptionValue<'_>>,
     text: &str,
     byte: u32,
     index: &LineIndex,
 ) -> Option<Hover> {
-    let site = site(inventory, text, byte, false)?;
+    let site = site(source?, text, byte, false)?;
     let choice = site.domain.choices.iter().find(|value| {
         value.forms.iter().any(|form| form == site.form) && value.matches_literal(&site.literal)
     })?;
@@ -237,12 +251,12 @@ pub(super) fn hover(
 
 /// Closed domains return only their choices. Open domains retain symbol providers.
 pub(super) fn completions(
-    inventory: &SourceInventory,
+    source: Option<&SourceOptionValue<'_>>,
     text: &str,
     byte: u32,
     index: &LineIndex,
 ) -> Option<(bool, Vec<CompletionItem>)> {
-    let site = site(inventory, text, byte, true)?;
+    let site = site(source?, text, byte, true)?;
     let quoted = site.literal.starts_with('\'');
     let items = site
         .domain
@@ -250,7 +264,10 @@ pub(super) fn completions(
         .iter()
         .filter(|choice| {
             !choice.description.is_empty()
-                && !matches!(choice.status.as_str(), "unused" | "undocumented")
+                && !matches!(
+                    choice.status.as_str(),
+                    "unused" | "undocumented" | "unavailable"
+                )
                 && choice.forms.iter().any(|form| form == site.form)
                 && (!quoted || choice.token_kind == "quoted")
         })

@@ -149,6 +149,8 @@ struct Params {
     parent: Option<String>,
     /// Owning option for fixed-value lookup; requires parent.
     option: Option<String>,
+    /// Written position for a fixed choice. Use with parent and without option. Omit kind or use syntax_value. For boolean_literal, use context=macro_expression and omit parent.
+    slot: Option<String>,
     code: Option<String>,
     severity: Option<String>,
     file: Option<String>,
@@ -209,7 +211,9 @@ fn fields(tool: &str) -> Vec<&'static str> {
         ]);
     }
     fields.extend_from_slice(match tool {
-        "dynare_syntax" => &["name", "search", "kind", "context", "parent", "option"],
+        "dynare_syntax" => &[
+            "name", "search", "kind", "context", "parent", "option", "slot",
+        ],
         "dynare_diagnostic_info" => &["code", "kind", "severity", "search"],
         "dynare_diagnose" => &[
             "batch",
@@ -301,6 +305,41 @@ pub(super) fn input_schema(tool: &str) -> Arc<serde_json::Map<String, Value>> {
     if tool == "dynare_symbol_info" {
         schema.insert("allOf".into(),json!([{"if":{"required":["view"],"properties":{"view":{"const":"source"}}},"then":{"properties":{"sections":{"maxItems":0}},"not":{"anyOf":[{"required":["occurrences"]},{"required":["include_declaration"]},{"properties":{"symbol":{"required":["binding_id"]}},"required":["symbol"]}]}}}]));
     }
+    if tool == "dynare_syntax" {
+        schema.insert(
+            "allOf".into(),
+            json!([{
+                "if": {"required": ["slot"], "properties": {"slot": {"type": "string"}}},
+                "then": {
+                    "properties": {
+                        "option": {"type": "null"},
+                        "kind": {"enum": [null, "syntax_value"]}
+                    },
+                    "if": {"properties": {"slot": {"const": "boolean_literal"}}},
+                    "then": {
+                        "required": ["context"],
+                        "properties": {
+                            "context": {"const": "macro_expression"},
+                            "parent": {"type": "null"}
+                        }
+                    },
+                    "else": {
+                        "required": ["parent"],
+                        "properties": {"parent": {"type": "string"}}
+                    }
+                }
+            }, {
+                "if": {"required": ["option"], "properties": {"option": {"type": "string"}}},
+                "then": {
+                    "required": ["parent"],
+                    "properties": {
+                        "parent": {"type": "string"},
+                        "kind": {"enum": [null, "option_value"]}
+                    }
+                }
+            }]),
+        );
+    }
     super::request::prune_definitions(&mut schema);
     Arc::new(schema)
 }
@@ -308,7 +347,7 @@ pub(super) fn input_schema(tool: &str) -> Arc<serde_json::Map<String, Value>> {
 pub(super) fn advertised_tools(structured: bool) -> Vec<Tool> {
     TOOL_NAMES.iter().map(|&name|{
         let description=match name {
-            "dynare_syntax"=>"Look up Dynare commands, blocks, instructions, functions, operators, macros, options and fixed option values. Select name or search; kind, context and parent distinguish forms. For option values, set parent to the command and option to the option name; omit name to list values. Numeric values use strings. Exact forms include signatures, value rules and bounded options. Omit filters for a bounded index. No model source is needed.",
+            "dynare_syntax"=>"Look up Dynare syntax and fixed choices. Use name or search to find forms. Use kind, context and parent to narrow results. For a command option, set parent to the command and option to the option name. For another written position, use parent and slot, such as change_type and target_type. Use either option or slot. With slot, omit kind or set it to syntax_value. For macro booleans, use context=macro_expression and slot=boolean_literal and omit parent. Omit name to list choices. Write numeric names as strings. No model source is needed.",
             "dynare_diagnostic_info"=>"Look up diagnostic meaning and correction guidance. An exact code returns its explanation; kind, severity and search return bounded catalog summaries. This catalog does not report problems in a model. No model source is needed.",
             "dynare_diagnose"=>"Check one source with optional analysis choices, or an explicit batch. configured_sources.jobs contains source and analysis for each job and permits repeated roots. job:1, job:2 and later identities key expected_revisions; each job spends the finite root-job allowance. Other batches cannot share analysis. Results distinguish jobs from distinct roots, and retain each partial, failed or unfinished cause. An incomplete zero count is not a clean-model claim.",
             "dynare_model_info"=>"Give a configured model overview or inspect written source. Default summary has effective counts and model kind before transformations. Select analysis for explicit choices and override receipts; source_structure returns written items, guarded directive targets and branch IDs, availability and separate source coverage. Optional file selects one source under the same input policy, without making it an executed include. Other sections are structure, declarations, assignments, model_locals, statements, blocks, sources, includes and scope. Written source-item counts are not effective equation counts.",
@@ -670,6 +709,33 @@ fn syntax_revision() -> &'static str {
 
 fn syntax(params: &Params, arguments: &Value) -> Result<CallToolResult, rmcp::ErrorData> {
     use crate::engine::catalog::syntax::{self, SyntaxQuery};
+    if let Some(slot) = params.slot.as_deref() {
+        if params.option.is_some() {
+            return Err(invalid(
+                "The slot and option filters select different positions. Use one filter to look up its choices.",
+            ));
+        }
+        if params
+            .kind
+            .as_deref()
+            .is_some_and(|kind| kind != "syntax_value")
+        {
+            return Err(invalid(
+                "The slot filter selects written choices. Omit kind or set it to syntax_value.",
+            ));
+        }
+        if slot == "boolean_literal" {
+            if params.parent.is_some() || params.context.as_deref() != Some("macro_expression") {
+                return Err(invalid(
+                    "Macro booleans require context=macro_expression and no parent.",
+                ));
+            }
+        } else if params.parent.is_none() {
+            return Err(invalid(
+                "The slot filter requires its owning construct in parent. Set parent and try again.",
+            ));
+        }
+    }
     if params.option.is_some() && params.parent.is_none() {
         return Err(invalid(
             "The option filter requires a command in parent. No values were returned. Set parent to the command and try again.",
@@ -695,6 +761,7 @@ fn syntax(params: &Params, arguments: &Value) -> Result<CallToolResult, rmcp::Er
         context: params.context.clone(),
         parent: params.parent.clone(),
         option: params.option.clone(),
+        slot: params.slot.clone(),
     };
     let found = syntax::query(&query);
     let exact_option =
@@ -764,11 +831,47 @@ fn syntax(params: &Params, arguments: &Value) -> Result<CallToolResult, rmcp::Er
             .any(|row| row.kind == "option" && row.name.eq_ignore_ascii_case(option));
         result.cause("refused", if known_command && known_option {"WRONG_CONTEXT"} else {"UNKNOWN_SYNTAX"},
             format!("No reference entry was found for option '{option}' under '{command}'. No values were returned. Check the command and option, or omit option to inspect the command."));
+    } else if empty
+        && let Some(slot) = params.slot.as_deref()
+        && syntax::slot_values(params.parent.as_deref(), slot)
+            .next()
+            .is_none()
+    {
+        let known_slot = syntax::records()
+            .iter()
+            .any(|row| row.slot.as_deref() == Some(slot));
+        let known_parent = params.parent.as_deref().is_none_or(|parent| {
+            syntax::records().iter().any(|row| {
+                row.name.eq_ignore_ascii_case(parent)
+                    && matches!(row.kind.as_str(), "command" | "block" | "declaration")
+            })
+        });
+        result.cause(
+            "refused",
+            if known_slot && known_parent { "WRONG_CONTEXT" } else { "UNKNOWN_SYNTAX" },
+            format!("No written choice was found for slot '{slot}' in the selected construct. Check parent and slot, or omit slot to inspect the construct."),
+        );
     } else if empty && params.name.is_some() {
         let name = params.name.as_deref().unwrap_or_default();
         result.cause("refused", if found.known_name {"WRONG_CONTEXT"} else {"UNKNOWN_SYNTAX"}, format!(
-            "No reference form of '{name}' matches kind={}, context={}, parent={}, option={}. No value facts were returned. Check these selectors, or omit name to list available forms. A missing reference entry does not establish that Dynare rejects the source.",
-            params.kind.as_deref().unwrap_or("any"),params.context.as_deref().unwrap_or("any"),params.parent.as_deref().unwrap_or("any"),params.option.as_deref().unwrap_or("any")));
+            "No reference form of '{name}' matches kind={}, context={}, parent={}, option={}, slot={}. No value facts were returned. Check these selectors, or omit name to list available forms. A missing reference entry does not establish that Dynare rejects the source.",
+            params.kind.as_deref().unwrap_or("any"),params.context.as_deref().unwrap_or("any"),params.parent.as_deref().unwrap_or("any"),params.option.as_deref().unwrap_or("any"),params.slot.as_deref().unwrap_or("any")));
+    } else if empty && let Some(slot) = params.slot.as_deref() {
+        if let Some(context) = params.context.as_deref()
+            && !syntax::slot_values(params.parent.as_deref(), slot).any(|row| {
+                row.contexts
+                    .iter()
+                    .any(|known| known.eq_ignore_ascii_case(context))
+            })
+        {
+            result.cause("refused", "WRONG_CONTEXT", format!(
+                "Slot '{slot}' has no choices in context '{context}'. Omit context or select the context of the written slot."
+            ));
+        } else {
+            result.data["note"] = json!(
+                "No choices match the selected search. Omit search to list choices for this slot."
+            );
+        }
     } else if empty
         && owner.is_some()
         && params
@@ -898,7 +1001,12 @@ pub(super) fn page_collections(path: &str, value: &mut Value, pages: &mut Pages,
             let collection = if path.is_empty() { "rows" } else { path };
             let container = path == "roots"
                 || path == "heterogeneous_equations"
-                || (path == "forms" && rows.len() == 1 && rows[0]["kind"] != "option_value");
+                || (path == "forms"
+                    && rows.len() == 1
+                    && !matches!(
+                        rows[0]["kind"].as_str(),
+                        Some("option_value" | "syntax_value")
+                    ));
             if container {
                 for (index, row) in rows.iter_mut().enumerate() {
                     if path == "heterogeneous_equations" {
@@ -1006,35 +1114,112 @@ mod tests {
             );
             assert_eq!(found["data"]["forms"][0]["option"], option, "{found}");
         }
+        let osr = call(
+            "dynare_syntax",
+            json!({"name":"13","parent":"osr","option":"opt_algo"}),
+        );
+        assert_eq!(osr["outcome"]["status"], "ok", "{osr}");
+        assert_eq!(osr["data"]["forms"][0]["value"]["status"], "unavailable");
+        assert!(
+            osr["data"]["forms"][0]["value"]["applicability"]
+                .as_str()
+                .is_some_and(|text| text.contains("Unavailable in OSR"))
+        );
     }
 
     #[test]
-    fn option_value_pages_preserve_selected_missing_meanings() {
-        // Guards paged-out missing descriptions being mistaken for complete reference coverage.
-        let mut args = json!({"parent":"pac_model","option":"kind","page_size":1});
+    fn written_choice_pages_keep_the_slot_and_shared_budget() {
+        // Guards positional rows bypassing the page allowance or losing their owning role.
+        let mut args = json!({"parent":"change_type","slot":"target_type","page_size":1});
         let mut values = BTreeSet::new();
         loop {
             let page = call("dynare_syntax", args.clone());
-            assert_eq!(page["outcome"]["status"], "partial", "{page}");
+            assert_eq!(page["outcome"]["status"], "ok", "{page}");
             let rows = page["data"]["forms"].as_array().unwrap();
-            assert!(rows.len() <= 1);
+            assert_eq!(rows.len(), 1);
             for row in rows {
+                assert_eq!(row["slot"], "target_type");
+                assert_eq!(row["kind"], "syntax_value");
                 assert!(values.insert(row["name"].as_str().unwrap().to_owned()));
             }
             let Some(next) = page["selection"]["continuation"].as_str() else {
                 break;
             };
+            if args.get("continuation").is_none() {
+                let changed = call(
+                    "dynare_syntax",
+                    json!({
+                        "parent":"change_type","slot":"interval","page_size":1,"continuation":next
+                    }),
+                );
+                assert_eq!(changed["outcome"]["reasons"][0]["code"], "INPUT_CHANGED");
+            }
             args["continuation"] = json!(next);
         }
         assert_eq!(
             values,
-            BTreeSet::from(["dd".into(), "dl".into(), "ll".into()])
+            BTreeSet::from([
+                "var".into(),
+                "varexo".into(),
+                "varexo_det".into(),
+                "parameters".into()
+            ])
         );
+    }
+
+    #[test]
+    fn scoped_choices_preserve_legacy_senses_and_validate_selectors() {
+        // Guards a scoped sign replacing its generic operator or a slot leaking another owner.
+        let legacy = call(
+            "dynare_syntax",
+            json!({"parent":"moment_calibration","kind":"operator","name":"+"}),
+        );
+        assert_eq!(legacy["data"]["forms"][0]["kind"], "operator");
         let exact = call(
             "dynare_syntax",
-            json!({"name":"dl","parent":"pac_model","option":"kind"}),
+            json!({"parent":"moment_calibration","slot":"interval","name":"+"}),
         );
-        assert_eq!(exact["outcome"]["status"], "ok");
+        assert!(
+            exact["data"]["forms"][0]["summary"]
+                .as_str()
+                .unwrap()
+                .contains("[0, Inf]")
+        );
+        let nested = call(
+            "dynare_syntax",
+            json!({"parent":"estimation","slot":"optim.NumgradAlgorithm","name":"2"}),
+        );
+        assert_eq!(
+            nested["data"]["forms"][0]["selector"],
+            json!({"option":"mode_compute","value":"4"})
+        );
+        let macro_value = call(
+            "dynare_syntax",
+            json!({"context":"macro_expression","slot":"boolean_literal","name":"true"}),
+        );
+        assert_eq!(
+            macro_value["data"]["forms"][0]["value"]["insert_text"],
+            "true"
+        );
+        for args in [
+            json!({"parent":"estimation","slot":"target_type","option":"order"}),
+            json!({"parent":"change_type","slot":"target_type","kind":"command"}),
+            json!({"slot":"target_type"}),
+            json!({"slot":"boolean_literal"}),
+            json!({"parent":"model","context":"macro_expression","slot":"boolean_literal"}),
+        ] {
+            assert!(dispatch("dynare_syntax", args, RequestControl::default()).is_err());
+        }
+        let wrong = call(
+            "dynare_syntax",
+            json!({"parent":"model","slot":"target_type"}),
+        );
+        assert_eq!(wrong["outcome"]["reasons"][0]["code"], "WRONG_CONTEXT");
+        let unknown = call(
+            "dynare_syntax",
+            json!({"parent":"model","slot":"unknown_slot"}),
+        );
+        assert_eq!(unknown["outcome"]["reasons"][0]["code"], "UNKNOWN_SYNTAX");
     }
 
     #[test]
@@ -1054,7 +1239,7 @@ mod tests {
         assert_eq!(filtered["data"]["option_domain"]["kind"], "closed");
         let open = call(
             "dynare_syntax",
-            json!({"parent":"stoch_simul","option":"irf"}),
+            json!({"parent":"stoch_simul","option":"dr_cycle_reduction_maxiter"}),
         );
         assert_eq!(open["outcome"]["status"], "ok", "{open}");
         assert_eq!(open["data"]["option_domain"]["kind"], "open");
@@ -1111,7 +1296,7 @@ mod tests {
         // Guards a known reference gap becoming a clean empty result, or a continuation changing its owner.
         let gap = call(
             "dynare_syntax",
-            json!({"parent":"estimation","option":"additional_optimizer_steps","page_size":1}),
+            json!({"parent":"occbin_setup","option":"simul_max_check_ahead_periods","page_size":1}),
         );
         assert_eq!(gap["outcome"]["status"], "partial", "{gap}");
         assert_eq!(
@@ -1122,7 +1307,7 @@ mod tests {
             gap["outcome"]["reasons"][0]["message"]
                 .as_str()
                 .unwrap()
-                .contains("optimizer IDs")
+                .contains("INT_NUMBER")
         );
         assert!(
             gap["data"]["option_domain"]["gaps"]

@@ -424,7 +424,7 @@ pub(crate) fn written_syntax_help(
         return None;
     }
     let macro_expression = context.language == "macro_expression";
-    let (call, body_start, after_comma) = if macro_expression {
+    let (call, body_start, body_value) = if macro_expression {
         let item = inventory
             .items
             .iter()
@@ -469,19 +469,41 @@ pub(crate) fn written_syntax_help(
         {
             return None;
         }
-        let previous = at
-            .checked_sub(1)
-            .and_then(|index| tokens.get(index))
-            .map(|token| token.kind);
-        if previous == Some(TokenKind::Dot) {
+        let previous = tokens[..at].last();
+        let previous_kind = previous.map(|token| token.kind);
+        if previous_kind == Some(TokenKind::Dot) {
             return None;
         }
+        let next_kind = tokens.get(at + 1).map(|token| token.kind);
+        let body_value = match context.parent.as_deref() {
+            Some("pac_target_info") => {
+                ["dd", "dl", "ll"]
+                    .iter()
+                    .any(|kind| word.eq_ignore_ascii_case(kind))
+                    && next_kind == Some(TokenKind::Semi)
+                    && matches!(&tokens[..at], [.., boundary, key]
+                        if boundary.kind == TokenKind::Semi
+                            && key.kind == TokenKind::Ident
+                            && key.text(text).eq_ignore_ascii_case("kind"))
+            }
+            Some("estimated_params" | "priors") => {
+                previous_kind == Some(TokenKind::Comma)
+                    && matches!(next_kind, Some(TokenKind::Comma | TokenKind::Semi))
+            }
+            _ => false,
+        } && previous.is_some_and(|token| {
+            inventory.literal_anchor_on_path(
+                Span {
+                    start: token.span.start,
+                    end: span.end,
+                },
+                byte,
+            )
+        });
         (
-            tokens
-                .get(at + 1)
-                .is_some_and(|token| token.kind == TokenKind::LParen),
-            previous == Some(TokenKind::Semi),
-            previous == Some(TokenKind::Comma),
+            next_kind == Some(TokenKind::LParen),
+            previous_kind == Some(TokenKind::Semi),
+            body_value,
         )
     };
     let docs: Vec<_> = records(context)
@@ -494,7 +516,9 @@ pub(crate) fn written_syntax_help(
                     .any(|alias| alias.eq_ignore_ascii_case(word)))
                 && ((record.kind == "body_keyword"
                     && (body_start
-                        || after_comma && context.parent.as_deref() == Some("estimated_params")))
+                        || body_value
+                            && (context.parent.as_deref() == Some("pac_target_info")
+                                || record.name.ends_with("_pdf"))))
                     || matches!(
                         record.kind.as_str(),
                         "function" | "operator" | "macro_function"

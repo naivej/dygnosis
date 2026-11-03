@@ -100,6 +100,10 @@ pub(crate) struct SourceOptionValue<'a> {
     pub option: &'a str,
     pub tokens: &'a [Token],
     pub start: u32,
+    /// Retained owner header for selector-dependent nested value help. The
+    /// consumer must prove the selector's literal path separately.
+    pub header: &'a [Token],
+    pub anchor_start: u32,
 }
 
 /// Parser-completed literal name role; it is not an accepted binding.
@@ -172,6 +176,15 @@ struct MacroFrame<'a> {
 }
 
 impl SourceInventory {
+    /// Source-only value roles require complete literal structure and must not
+    /// obtain a Dynare meaning from native or opaque text.
+    pub(crate) fn literal_value_anchor(&self, anchor: Span, byte: u32) -> bool {
+        self.structure_complete
+            && !crate::engine::control::cancelled()
+            && self.literal_anchor_on_path(anchor, byte)
+            && !intersects(&self.opaque, anchor)
+    }
+
     /// Inspect retained tokens only. The fixed bound also covers malformed tails.
     pub(crate) fn option_value_at<'a>(
         &'a self,
@@ -257,6 +270,9 @@ impl SourceInventory {
                         option: key.text(text),
                         tokens: &all[start + 2..at],
                         start: equal.span.end,
+                        header: &all[opener + 1
+                            ..all.partition_point(|token| token.span.start < item.span.end)],
+                        anchor_start: item.selection.start,
                     });
                 }
                 if token.kind != TokenKind::Comma {

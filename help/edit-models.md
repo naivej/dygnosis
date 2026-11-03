@@ -10,7 +10,8 @@ Completion and hover show each declared symbol's kind, timing class, evaluated
 parameter value, `long_name` and TeX label (configured in [Read labels, hints
 and colors](appearance.md)). Inside command or block parentheses, parameter
 hints describe options, and completion and hover explain values such as
-`pac_model(kind=dl)`. See the [Dynare manual](https://www.dynare.org/manual/).
+`pac_model(kind=dl)` and other fixed syntax. See the
+[Dynare manual](https://www.dynare.org/manual/).
 
 Use **Quick Fix...** (`Ctrl+.`) or **Refactor...** on declarations and blocks
 to automate repetitive model setup:

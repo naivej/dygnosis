@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.11.45
+
+- Hover explains PAC component kinds and inverse-gamma prior types, including
+  in inactive macro branches.
+- Hover and completion explain more Dynare values in their written context,
+  including equation tags, calibration intervals and selected nested options.
+- MCP `dynare_syntax` can look up these values by their command and position.
+
 ## v0.11.44
 
 - Hover and completion explain fixed option values in their command context,

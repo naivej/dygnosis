@@ -72,7 +72,8 @@ impl SyntaxValue {
 
     pub(crate) fn help(&self) -> String {
         let mut help = if self.description.is_empty() {
-            "This value is listed for this option. Its meaning is unavailable in the bundled reference.".to_owned()
+            "This value is listed here. Its meaning is unavailable in the bundled reference."
+                .to_owned()
         } else {
             self.description.clone()
         };
@@ -135,6 +136,17 @@ pub struct SyntaxRecord {
     pub value: Option<SyntaxValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_domain: Option<SyntaxValueDomain>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<SyntaxSelector>,
+}
+
+/// A controlling option required for a documented nested choice.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SyntaxSelector {
+    pub option: String,
+    pub value: String,
 }
 
 /// Exact name and independent narrowing filters. Search is a literal substring.
@@ -146,6 +158,7 @@ pub struct SyntaxQuery {
     pub context: Option<String>,
     pub parent: Option<String>,
     pub option: Option<String>,
+    pub slot: Option<String>,
 }
 
 /// Deterministic results before transport paging.
@@ -164,7 +177,7 @@ pub fn records() -> &'static [SyntaxRecord] {
         let mut rows: Vec<SyntaxRecord> = serde_json::from_str(SYNTAX_DATA)
             .expect("bundled pinned syntax records must deserialize");
         for row in &mut rows {
-            if row.kind != "option_value"
+            if !matches!(row.kind.as_str(), "option_value" | "syntax_value")
                 && let Some(help) = super::family_help(&row.name)
             {
                 row.summary = help.to_owned();
@@ -250,6 +263,9 @@ pub fn query(query: &SyntaxQuery) -> SyntaxQueryResult {
                             .as_ref()
                             .is_some_and(|owner| owner.eq_ignore_ascii_case(option))
                 })
+                && query.slot.as_deref().is_none_or(|slot| {
+                    row.kind == "syntax_value" && row.slot.as_deref() == Some(slot)
+                })
                 && search.as_ref().is_none_or(|search| {
                     row.name.to_ascii_lowercase().contains(search)
                         || row.summary.to_ascii_lowercase().contains(search)
@@ -277,6 +293,22 @@ pub(crate) fn option_record(command: &str, option: &str) -> Option<&'static Synt
             Some(command),
         ))
         .find(|row| row.name.eq_ignore_ascii_case(option))
+}
+
+/// Choices belonging to a proven written position.
+pub(crate) fn slot_values<'a>(
+    parent: Option<&'a str>,
+    slot: &'a str,
+) -> impl Iterator<Item = &'static SyntaxRecord> + 'a {
+    records().iter().filter(move |row| {
+        row.kind == "syntax_value"
+            && row.slot.as_deref() == Some(slot)
+            && match (row.parent.as_deref(), parent) {
+                (Some(known), Some(written)) => known.eq_ignore_ascii_case(written),
+                (None, None) => true,
+                _ => false,
+            }
+    })
 }
 
 /// Block spelling and aliases from the same records used by syntax lookup.

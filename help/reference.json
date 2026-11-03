@@ -1,12 +1,97 @@
 {
-  "version": "0.11.44",
+  "version": "0.11.45",
   "tools": [
     {
       "name": "dynare_syntax",
-      "description": "Look up Dynare commands, blocks, instructions, functions, operators, macros, options and fixed option values. Select name or search; kind, context and parent distinguish forms. For option values, set parent to the command and option to the option name; omit name to list values. Numeric values use strings. Exact forms include signatures, value rules and bounded options. Omit filters for a bounded index. No model source is needed. Read outcome and coverage beside data. Default 25 rows share one response allowance; selection reports counts and continuation. Changed inputs or filters require a new first page. No tool writes files or executes MATLAB/Octave.",
+      "description": "Look up Dynare syntax and fixed choices. Use name or search to find forms. Use kind, context and parent to narrow results. For a command option, set parent to the command and option to the option name. For another written position, use parent and slot, such as change_type and target_type. Use either option or slot. With slot, omit kind or set it to syntax_value. For macro booleans, use context=macro_expression and slot=boolean_literal and omit parent. Omit name to list choices. Write numeric names as strings. No model source is needed. Read outcome and coverage beside data. Default 25 rows share one response allowance; selection reports counts and continuation. Changed inputs or filters require a new first page. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "slot": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "slot"
+              ]
+            },
+            "then": {
+              "else": {
+                "properties": {
+                  "parent": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "parent"
+                ]
+              },
+              "if": {
+                "properties": {
+                  "slot": {
+                    "const": "boolean_literal"
+                  }
+                }
+              },
+              "properties": {
+                "kind": {
+                  "enum": [
+                    null,
+                    "syntax_value"
+                  ]
+                },
+                "option": {
+                  "type": "null"
+                }
+              },
+              "then": {
+                "properties": {
+                  "context": {
+                    "const": "macro_expression"
+                  },
+                  "parent": {
+                    "type": "null"
+                  }
+                },
+                "required": [
+                  "context"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "option": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "option"
+              ]
+            },
+            "then": {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    null,
+                    "option_value"
+                  ]
+                },
+                "parent": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "parent"
+              ]
+            }
+          }
+        ],
         "definitions": {
           "Detail": {
             "enum": [
@@ -78,6 +163,13 @@
             ]
           },
           "search": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "slot": {
+            "description": "Written position for a fixed choice. Use with parent and without option. Omit kind or use syntax_value. For boolean_literal, use context=macro_expression and omit parent.",
             "type": [
               "string",
               "null"

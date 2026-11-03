@@ -7362,6 +7362,84 @@
     "value_rules": []
   },
   {
+    "id": "syntax_value:irf_calibration:interval:+:block_body",
+    "name": "+",
+    "kind": "syntax_value",
+    "contexts": [
+      "block_body"
+    ],
+    "parent": "irf_calibration",
+    "slot": "interval",
+    "signatures": [
+      "+"
+    ],
+    "summary": "Require a nonnegative value in the interval `[0, Inf]`.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:3778"
+    ],
+    "value": {
+      "value": "+",
+      "token_kind": "bare",
+      "insert_text": "+",
+      "case_sensitive": false,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Require a nonnegative value in the interval `[0, Inf]`.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:3778"
+      ],
+      "manual_sources": [],
+      "default": false
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:moment_calibration:interval:+:block_body",
+    "name": "+",
+    "kind": "syntax_value",
+    "contexts": [
+      "block_body"
+    ],
+    "parent": "moment_calibration",
+    "slot": "interval",
+    "signatures": [
+      "+"
+    ],
+    "summary": "Require a nonnegative value in the interval `[0, Inf]`.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:3778"
+    ],
+    "value": {
+      "value": "+",
+      "token_kind": "bare",
+      "insert_text": "+",
+      "case_sensitive": false,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Require a nonnegative value in the interval `[0, Inf]`.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:3778"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:14209"
+      ],
+      "default": false
+    },
+    "value_rules": []
+  },
+  {
     "id": "operator:endval:+=:block_body",
     "name": "+=",
     "kind": "operator",
@@ -7393,7 +7471,7 @@
       "mode_check_neighbourhood_size = +inf"
     ],
     "value_rules": [],
-    "summary": "Positive infinity.",
+    "summary": "Plot the entire parameter domain around the mode.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -7410,7 +7488,7 @@
         "scalar"
       ],
       "signed": true,
-      "description": "Positive infinity.",
+      "description": "Plot the entire parameter domain around the mode.",
       "status": "documented",
       "applicability": "",
       "grammar_sources": [
@@ -7419,8 +7497,7 @@
         "src/DynareBison.yy:4341"
       ],
       "manual_sources": [
-        "doc/manual/source/the-model-file.rst:570",
-        "doc/manual/source/the-model-file.rst:77"
+        "doc/manual/source/the-model-file.rst:8177"
       ],
       "default": false
     }
@@ -7483,7 +7560,7 @@
       "mode_check_neighbourhood_size = +inf"
     ],
     "value_rules": [],
-    "summary": "Positive infinity.",
+    "summary": "Plot the entire parameter domain around the mode.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -7500,7 +7577,7 @@
         "scalar"
       ],
       "signed": true,
-      "description": "Positive infinity.",
+      "description": "Plot the entire parameter domain around the mode.",
       "status": "documented",
       "applicability": "",
       "grammar_sources": [
@@ -7509,8 +7586,7 @@
         "src/DynareBison.yy:4341"
       ],
       "manual_sources": [
-        "doc/manual/source/the-model-file.rst:570",
-        "doc/manual/source/the-model-file.rst:77"
+        "doc/manual/source/the-model-file.rst:11448"
       ],
       "default": false
     }
@@ -7573,7 +7649,7 @@
       "threshold_redform = +inf"
     ],
     "value_rules": [],
-    "summary": "Positive infinity.",
+    "summary": "With the lower endpoint set to `-inf`, this pair selects decile splitting for all analysed variables.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -7590,17 +7666,16 @@
         "bracket_list"
       ],
       "signed": true,
-      "description": "Positive infinity.",
+      "description": "With the lower endpoint set to `-inf`, this pair selects decile splitting for all analysed variables.",
       "status": "documented",
-      "applicability": "",
+      "applicability": "The effect applies to the complete `[-Inf Inf]` pair, not to this endpoint alone.",
       "grammar_sources": [
         "src/DynareBison.yy:2092",
         "src/DynareBison.yy:2100",
         "src/DynareBison.yy:4535"
       ],
       "manual_sources": [
-        "doc/manual/source/the-model-file.rst:570",
-        "doc/manual/source/the-model-file.rst:77"
+        "doc/manual/source/the-model-file.rst:14690"
       ],
       "default": false
     }
@@ -11422,6 +11497,84 @@
     "value_rules": []
   },
   {
+    "id": "syntax_value:irf_calibration:interval:-:block_body",
+    "name": "-",
+    "kind": "syntax_value",
+    "contexts": [
+      "block_body"
+    ],
+    "parent": "irf_calibration",
+    "slot": "interval",
+    "signatures": [
+      "-"
+    ],
+    "summary": "Require a nonpositive value in the interval `[-Inf, 0]`.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:3780"
+    ],
+    "value": {
+      "value": "-",
+      "token_kind": "bare",
+      "insert_text": "-",
+      "case_sensitive": false,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Require a nonpositive value in the interval `[-Inf, 0]`.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:3780"
+      ],
+      "manual_sources": [],
+      "default": false
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:moment_calibration:interval:-:block_body",
+    "name": "-",
+    "kind": "syntax_value",
+    "contexts": [
+      "block_body"
+    ],
+    "parent": "moment_calibration",
+    "slot": "interval",
+    "signatures": [
+      "-"
+    ],
+    "summary": "Require a nonpositive value in the interval `[-Inf, 0]`.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:3780"
+    ],
+    "value": {
+      "value": "-",
+      "token_kind": "bare",
+      "insert_text": "-",
+      "case_sensitive": false,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Require a nonpositive value in the interval `[-Inf, 0]`.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:3780"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:14209"
+      ],
+      "default": false
+    },
+    "value_rules": []
+  },
+  {
     "id": "option_value:identification:analytic_derivation_mode:-1:option_value",
     "name": "-1",
     "kind": "option_value",
@@ -11854,7 +12007,7 @@
       "threshold_redform = -inf"
     ],
     "value_rules": [],
-    "summary": "Negative infinity.",
+    "summary": "With the upper endpoint set to `inf`, this pair selects decile splitting for all analysed variables.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -11871,17 +12024,16 @@
         "bracket_list"
       ],
       "signed": true,
-      "description": "Negative infinity.",
+      "description": "With the upper endpoint set to `inf`, this pair selects decile splitting for all analysed variables.",
       "status": "documented",
-      "applicability": "",
+      "applicability": "The effect applies to the complete `[-Inf Inf]` pair, not to this endpoint alone.",
       "grammar_sources": [
         "src/DynareBison.yy:2094",
         "src/DynareBison.yy:2100",
         "src/DynareBison.yy:4535"
       ],
       "manual_sources": [
-        "doc/manual/source/the-model-file.rst:570",
-        "doc/manual/source/the-model-file.rst:77"
+        "doc/manual/source/the-model-file.rst:14690"
       ],
       "default": false
     }
@@ -12484,6 +12636,46 @@
     }
   },
   {
+    "id": "option_value:estimation:cova_compute:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "cova_compute",
+    "signatures": [
+      "cova_compute = 0"
+    ],
+    "value_rules": [],
+    "summary": "Skip covariance computation after mode finding.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4738"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Skip covariance computation after mode finding.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4738"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:8134"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:estimation:kalman_algo:0:option_value",
     "name": "0",
     "kind": "option_value",
@@ -12521,6 +12713,46 @@
         "doc/manual/source/the-model-file.rst:8272"
       ],
       "default": true
+    }
+  },
+  {
+    "id": "option_value:estimation:mh_replic:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "mh_replic",
+    "signatures": [
+      "mh_replic = 0"
+    ],
+    "value_rules": [],
+    "summary": "Generate no new MCMC draws. Previously saved draws can still be loaded when requested.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4321"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Generate no new MCMC draws. Previously saved draws can still be loaded when requested.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4321"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:9199"
+      ],
+      "default": false
     }
   },
   {
@@ -12761,6 +12993,246 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:8424"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:extended_path:order:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "extended_path",
+    "option": "order",
+    "signatures": [
+      "order = 0"
+    ],
+    "value_rules": [],
+    "summary": "Use ordinary extended path without stochastic integration.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4107"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Use ordinary extended path without stochastic integration.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4107"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:6187"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:heterogeneity_compute_steady_state:calibration_verbosity:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "heterogeneity_compute_steady_state",
+    "option": "calibration_verbosity",
+    "signatures": [
+      "calibration_verbosity = 0"
+    ],
+    "value_rules": [],
+    "summary": "Print no calibration output.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4194"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Print no calibration output.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4194"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:16138"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:heterogeneity_compute_steady_state:forward_verbosity:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "heterogeneity_compute_steady_state",
+    "option": "forward_verbosity",
+    "signatures": [
+      "forward_verbosity = 0"
+    ],
+    "value_rules": [],
+    "summary": "Print no distribution-computation output.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4181"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Print no distribution-computation output.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4181"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:16207"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:heterogeneity_compute_steady_state:time_iteration_early_stopping:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "heterogeneity_compute_steady_state",
+    "option": "time_iteration_early_stopping",
+    "signatures": [
+      "time_iteration_early_stopping = 0"
+    ],
+    "value_rules": [],
+    "summary": "Disable early stopping after consecutive increases in residuals.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4191"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Disable early stopping after consecutive increases in residuals.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4191"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:16158"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:heterogeneity_compute_steady_state:time_iteration_verbosity:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "heterogeneity_compute_steady_state",
+    "option": "time_iteration_verbosity",
+    "signatures": [
+      "time_iteration_verbosity = 0"
+    ],
+    "value_rules": [],
+    "summary": "Print no time-iteration output.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4185"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Print no time-iteration output.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4185"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:16163"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:heterogeneity_simulate:periods:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "heterogeneity_simulate",
+    "option": "periods",
+    "signatures": [
+      "periods = 0"
+    ],
+    "value_rules": [],
+    "summary": "Compute impulse responses only; do not run stochastic simulation paths.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4105"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Compute impulse responses only; do not run stochastic simulation paths.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4105"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:16452"
       ],
       "default": false
     }
@@ -13008,6 +13480,46 @@
     }
   },
   {
+    "id": "option_value:identification:normalize_jacobians:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "identification",
+    "option": "normalize_jacobians",
+    "signatures": [
+      "normalize_jacobians = 0"
+    ],
+    "value_rules": [],
+    "summary": "Keep Jacobian and Gram matrices unnormalized.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4895"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Keep Jacobian and Gram matrices unnormalized.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4895"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:14357"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:identification:prior_range:0:option_value",
     "name": "0",
     "kind": "option_value",
@@ -13125,6 +13637,124 @@
         "doc/manual/source/the-model-file.rst:14417"
       ],
       "default": true
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [0]"
+    ],
+    "value_rules": [],
+    "summary": "Evaluate the objective at the current values without minimization.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Evaluate the objective at the current values without minimization.",
+      "status": "source_verified",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:cova_compute:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "cova_compute",
+    "signatures": [
+      "cova_compute = 0"
+    ],
+    "value_rules": [],
+    "summary": "Skip covariance computation after mode finding.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4738"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Skip covariance computation after mode finding.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4738"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:11172"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:mh_replic:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "mh_replic",
+    "signatures": [
+      "mh_replic = 0"
+    ],
+    "value_rules": [],
+    "summary": "Generate no new MCMC draws. Previously saved draws can still be loaded when requested.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4321"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Generate no new MCMC draws. Previously saved draws can still be loaded when requested.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4321"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:11182"
+      ],
+      "default": false
     }
   },
   {
@@ -13811,6 +14441,46 @@
         "doc/manual/source/the-model-file.rst:12313"
       ],
       "default": true
+    }
+  },
+  {
+    "id": "option_value:plot_shock_decomposition:vintage:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "plot_shock_decomposition",
+    "option": "vintage",
+    "signatures": [
+      "vintage = 0"
+    ],
+    "value_rules": [],
+    "summary": "Use pooled results for real-time plots.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4483"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Use pooled results for real-time plots.",
+      "status": "documented",
+      "applicability": "Has no effect for standard historical plots.",
+      "grammar_sources": [
+        "src/DynareBison.yy:4483"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:12328"
+      ],
+      "default": false
     }
   },
   {
@@ -15055,6 +15725,86 @@
     }
   },
   {
+    "id": "option_value:stoch_simul:irf:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "stoch_simul",
+    "option": "irf",
+    "signatures": [
+      "irf = 0"
+    ],
+    "value_rules": [],
+    "summary": "Do not plot impulse response functions.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4100"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Do not plot impulse response functions.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4100"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:5345"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:stoch_simul:periods:0:option_value",
+    "name": "0",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "stoch_simul",
+    "option": "periods",
+    "signatures": [
+      "periods = 0"
+    ],
+    "value_rules": [],
+    "summary": "Compute theoretical moments instead of empirical moments.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4105"
+    ],
+    "value": {
+      "value": "0",
+      "token_kind": "integer",
+      "insert_text": "0",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Compute theoretical moments instead of empirical moments.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4105"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:5465"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:stoch_simul:solve_algo:0:option_value",
     "name": "0",
     "kind": "option_value",
@@ -15495,6 +16245,86 @@
     }
   },
   {
+    "id": "option_value:estimation:additional_optimizer_steps:1:option_value",
+    "name": "1",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [1]"
+    ],
+    "value_rules": [],
+    "summary": "Use fmincon for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "1",
+      "token_kind": "integer",
+      "insert_text": "1",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use fmincon for this optimization step.",
+      "status": "documented",
+      "applicability": "Requires the MATLAB Optimization Toolbox or Octave optim package.",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:estimation:cova_compute:1:option_value",
+    "name": "1",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "cova_compute",
+    "signatures": [
+      "cova_compute = 1"
+    ],
+    "value_rules": [],
+    "summary": "Compute the covariance matrix after mode finding.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4738"
+    ],
+    "value": {
+      "value": "1",
+      "token_kind": "integer",
+      "insert_text": "1",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Compute the covariance matrix after mode finding.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4738"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:8134"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:estimation:kalman_algo:1:option_value",
     "name": "1",
     "kind": "option_value",
@@ -15857,6 +16687,86 @@
     }
   },
   {
+    "id": "option_value:heterogeneity_compute_steady_state:calibration_verbosity:1:option_value",
+    "name": "1",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "heterogeneity_compute_steady_state",
+    "option": "calibration_verbosity",
+    "signatures": [
+      "calibration_verbosity = 1"
+    ],
+    "value_rules": [],
+    "summary": "Print a calibration summary.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4194"
+    ],
+    "value": {
+      "value": "1",
+      "token_kind": "integer",
+      "insert_text": "1",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Print a calibration summary.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4194"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:16138"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:heterogeneity_compute_steady_state:forward_verbosity:1:option_value",
+    "name": "1",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "heterogeneity_compute_steady_state",
+    "option": "forward_verbosity",
+    "signatures": [
+      "forward_verbosity = 1"
+    ],
+    "value_rules": [],
+    "summary": "Print only non-convergence warnings during distribution computation.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4181"
+    ],
+    "value": {
+      "value": "1",
+      "token_kind": "integer",
+      "insert_text": "1",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Print only non-convergence warnings during distribution computation.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4181"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:16207"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:identification:advanced:1:option_value",
     "name": "1",
     "kind": "option_value",
@@ -16175,7 +17085,7 @@
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:14357"
       ],
-      "default": true
+      "default": false
     }
   },
   {
@@ -16294,6 +17204,86 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:14417"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:1:option_value",
+    "name": "1",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [1]"
+    ],
+    "value_rules": [],
+    "summary": "Use fmincon for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "1",
+      "token_kind": "integer",
+      "insert_text": "1",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use fmincon for this optimization step.",
+      "status": "documented",
+      "applicability": "Requires the MATLAB Optimization Toolbox or Octave optim package.",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:cova_compute:1:option_value",
+    "name": "1",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "cova_compute",
+    "signatures": [
+      "cova_compute = 1"
+    ],
+    "value_rules": [],
+    "summary": "Compute the covariance matrix after mode finding.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4738"
+    ],
+    "value": {
+      "value": "1",
+      "token_kind": "integer",
+      "insert_text": "1",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Compute the covariance matrix after mode finding.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4738"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:11172"
       ],
       "default": false
     }
@@ -18509,6 +19499,46 @@
     }
   },
   {
+    "id": "option_value:estimation:additional_optimizer_steps:10:option_value",
+    "name": "10",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [10]"
+    ],
+    "value_rules": [],
+    "summary": "Use the simpsa algorithm for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "10",
+      "token_kind": "integer",
+      "insert_text": "10",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use the simpsa algorithm for this optimization step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:estimation:mode_compute:10:option_value",
     "name": "10",
     "kind": "option_value",
@@ -18586,6 +19616,46 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:2965"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:10:option_value",
+    "name": "10",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [10]"
+    ],
+    "value_rules": [],
+    "summary": "Use the simpsa algorithm for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "10",
+      "token_kind": "integer",
+      "insert_text": "10",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use the simpsa algorithm for this optimization step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
       ],
       "default": false
     }
@@ -19156,6 +20226,46 @@
     }
   },
   {
+    "id": "option_value:estimation:additional_optimizer_steps:101:option_value",
+    "name": "101",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [101]"
+    ],
+    "value_rules": [],
+    "summary": "Use SolveOpt for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "101",
+      "token_kind": "integer",
+      "insert_text": "101",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use SolveOpt for this optimization step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:estimation:mode_compute:101:option_value",
     "name": "101",
     "kind": "option_value",
@@ -19190,6 +20300,46 @@
       "grammar_sources": [
         "src/DynareBison.yy:4338",
         "src/DynareBison.yy:4339"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:101:option_value",
+    "name": "101",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [101]"
+    ],
+    "value_rules": [],
+    "summary": "Use SolveOpt for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "101",
+      "token_kind": "integer",
+      "insert_text": "101",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use SolveOpt for this optimization step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:7600"
@@ -19283,6 +20433,46 @@
     }
   },
   {
+    "id": "option_value:estimation:additional_optimizer_steps:102:option_value",
+    "name": "102",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [102]"
+    ],
+    "value_rules": [],
+    "summary": "Use simulannealbnd for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "102",
+      "token_kind": "integer",
+      "insert_text": "102",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use simulannealbnd for this optimization step.",
+      "status": "documented",
+      "applicability": "Requires the MATLAB Global Optimization Toolbox; unavailable under Octave.",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:estimation:mode_compute:102:option_value",
     "name": "102",
     "kind": "option_value",
@@ -19317,6 +20507,46 @@
       "grammar_sources": [
         "src/DynareBison.yy:4338",
         "src/DynareBison.yy:4339"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:102:option_value",
+    "name": "102",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [102]"
+    ],
+    "value_rules": [],
+    "summary": "Use simulannealbnd for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "102",
+      "token_kind": "integer",
+      "insert_text": "102",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use simulannealbnd for this optimization step.",
+      "status": "documented",
+      "applicability": "Requires the MATLAB Global Optimization Toolbox; unavailable under Octave.",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:7600"
@@ -20140,6 +21370,46 @@
     }
   },
   {
+    "id": "option_value:estimation:additional_optimizer_steps:12:option_value",
+    "name": "12",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [12]"
+    ],
+    "value_rules": [],
+    "summary": "Use particleswarm for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "12",
+      "token_kind": "integer",
+      "insert_text": "12",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use particleswarm for this optimization step.",
+      "status": "documented",
+      "applicability": "Requires the MATLAB Global Optimization Toolbox; unavailable under Octave.",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:estimation:mode_compute:12:option_value",
     "name": "12",
     "kind": "option_value",
@@ -20217,6 +21487,46 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:2965"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:12:option_value",
+    "name": "12",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [12]"
+    ],
+    "value_rules": [],
+    "summary": "Use particleswarm for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "12",
+      "token_kind": "integer",
+      "insert_text": "12",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use particleswarm for this optimization step.",
+      "status": "documented",
+      "applicability": "Requires the MATLAB Global Optimization Toolbox; unavailable under Octave.",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
       ],
       "default": false
     }
@@ -20752,6 +22062,46 @@
     }
   },
   {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:13:option_value",
+    "name": "13",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [13]"
+    ],
+    "value_rules": [],
+    "summary": "Use lsqnonlin for this method-of-moments optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "13",
+      "token_kind": "integer",
+      "insert_text": "13",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use lsqnonlin for this method-of-moments optimization step.",
+      "status": "documented",
+      "applicability": "Supported only for method_of_moments; requires the MATLAB Optimization Toolbox or Octave optim package.",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:method_of_moments:mode_compute:13:option_value",
     "name": "13",
     "kind": "option_value",
@@ -20807,7 +22157,7 @@
       "opt_algo = 13"
     ],
     "value_rules": [],
-    "summary": "Accepted value for osr.opt_algo.",
+    "summary": "Select the nonlinear least-squares optimizer.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -20823,9 +22173,9 @@
         "scalar"
       ],
       "signed": false,
-      "description": "",
-      "status": "undocumented",
-      "applicability": "The manual refers to mode_compute values for opt_algo, but says value 13 is supported only for method_of_moments.",
+      "description": "Select the nonlinear least-squares optimizer.",
+      "status": "unavailable",
+      "applicability": "Unavailable in OSR. This code is only supported by method_of_moments.",
       "grammar_sources": [
         "src/DynareBison.yy:4147",
         "src/DynareBison.yy:4148"
@@ -20836,6 +22186,144 @@
       ],
       "default": false
     }
+  },
+  {
+    "id": "syntax_value:estimation:optim.NumgradAlgorithm:13:nested_option_value",
+    "name": "13",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "estimation",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "13"
+    ],
+    "summary": "Use the experimental three-point formula to compute the gradient. Set a gradient component to zero when perturbations on both sides increase the objective.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "13",
+      "token_kind": "integer",
+      "insert_text": "13",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the experimental three-point formula to compute the gradient. Set a gradient component to zero when perturbations on both sides increase the objective.",
+      "status": "documented",
+      "applicability": "Applies when `mode_compute=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": false
+    },
+    "selector": {
+      "option": "mode_compute",
+      "value": "4"
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:method_of_moments:optim.NumgradAlgorithm:13:nested_option_value",
+    "name": "13",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "method_of_moments",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "13"
+    ],
+    "summary": "Use the experimental three-point formula to compute the gradient. Set a gradient component to zero when perturbations on both sides increase the objective.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "13",
+      "token_kind": "integer",
+      "insert_text": "13",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the experimental three-point formula to compute the gradient. Set a gradient component to zero when perturbations on both sides increase the objective.",
+      "status": "documented",
+      "applicability": "Applies when `mode_compute=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": false
+    },
+    "selector": {
+      "option": "mode_compute",
+      "value": "4"
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:osr:optim.NumgradAlgorithm:13:nested_option_value",
+    "name": "13",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "osr",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "13"
+    ],
+    "summary": "Use the experimental three-point formula to compute the gradient. Set a gradient component to zero when perturbations on both sides increase the objective.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "13",
+      "token_kind": "integer",
+      "insert_text": "13",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the experimental three-point formula to compute the gradient. Set a gradient component to zero when perturbations on both sides increase the objective.",
+      "status": "documented",
+      "applicability": "Applies when `opt_algo=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": false
+    },
+    "selector": {
+      "option": "opt_algo",
+      "value": "4"
+    },
+    "value_rules": []
   },
   {
     "id": "option_value:check:solve_algo:14:option_value",
@@ -21361,6 +22849,144 @@
     }
   },
   {
+    "id": "syntax_value:estimation:optim.NumgradAlgorithm:15:nested_option_value",
+    "name": "15",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "estimation",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "15"
+    ],
+    "summary": "Use the experimental five-point formula to compute the gradient. Set a gradient component to zero when perturbations on both sides increase the objective.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "15",
+      "token_kind": "integer",
+      "insert_text": "15",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the experimental five-point formula to compute the gradient. Set a gradient component to zero when perturbations on both sides increase the objective.",
+      "status": "documented",
+      "applicability": "Applies when `mode_compute=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": false
+    },
+    "selector": {
+      "option": "mode_compute",
+      "value": "4"
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:method_of_moments:optim.NumgradAlgorithm:15:nested_option_value",
+    "name": "15",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "method_of_moments",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "15"
+    ],
+    "summary": "Use the experimental five-point formula to compute the gradient. Set a gradient component to zero when perturbations on both sides increase the objective.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "15",
+      "token_kind": "integer",
+      "insert_text": "15",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the experimental five-point formula to compute the gradient. Set a gradient component to zero when perturbations on both sides increase the objective.",
+      "status": "documented",
+      "applicability": "Applies when `mode_compute=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": false
+    },
+    "selector": {
+      "option": "mode_compute",
+      "value": "4"
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:osr:optim.NumgradAlgorithm:15:nested_option_value",
+    "name": "15",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "osr",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "15"
+    ],
+    "summary": "Use the experimental five-point formula to compute the gradient. Set a gradient component to zero when perturbations on both sides increase the objective.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "15",
+      "token_kind": "integer",
+      "insert_text": "15",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the experimental five-point formula to compute the gradient. Set a gradient component to zero when perturbations on both sides increase the objective.",
+      "status": "documented",
+      "applicability": "Applies when `opt_algo=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": false
+    },
+    "selector": {
+      "option": "opt_algo",
+      "value": "4"
+    },
+    "value_rules": []
+  },
+  {
     "id": "option_value:calib_smoother:kalman_algo:2:option_value",
     "name": "2",
     "kind": "option_value",
@@ -21556,6 +23182,46 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:2965"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:estimation:additional_optimizer_steps:2:option_value",
+    "name": "2",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [2]"
+    ],
+    "value_rules": [],
+    "summary": "Use continuous simulated annealing for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "2",
+      "token_kind": "integer",
+      "insert_text": "2",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use continuous simulated annealing for this optimization step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
       ],
       "default": false
     }
@@ -21763,6 +23429,126 @@
     }
   },
   {
+    "id": "option_value:heterogeneity_compute_steady_state:calibration_verbosity:2:option_value",
+    "name": "2",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "heterogeneity_compute_steady_state",
+    "option": "calibration_verbosity",
+    "signatures": [
+      "calibration_verbosity = 2"
+    ],
+    "value_rules": [],
+    "summary": "Print calibration iteration details.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4194"
+    ],
+    "value": {
+      "value": "2",
+      "token_kind": "integer",
+      "insert_text": "2",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Print calibration iteration details.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4194"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:16138"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:heterogeneity_compute_steady_state:forward_verbosity:2:option_value",
+    "name": "2",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "heterogeneity_compute_steady_state",
+    "option": "forward_verbosity",
+    "signatures": [
+      "forward_verbosity = 2"
+    ],
+    "value_rules": [],
+    "summary": "Print distribution-computation iteration details.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4181"
+    ],
+    "value": {
+      "value": "2",
+      "token_kind": "integer",
+      "insert_text": "2",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Print distribution-computation iteration details.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4181"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:16207"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:heterogeneity_compute_steady_state:time_iteration_verbosity:2:option_value",
+    "name": "2",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "heterogeneity_compute_steady_state",
+    "option": "time_iteration_verbosity",
+    "signatures": [
+      "time_iteration_verbosity = 2"
+    ],
+    "value_rules": [],
+    "summary": "Print time-iteration details.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4185"
+    ],
+    "value": {
+      "value": "2",
+      "token_kind": "integer",
+      "insert_text": "2",
+      "case_sensitive": true,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Print time-iteration details.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4185"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:16163"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:identification:gsa_sample_file:2:option_value",
     "name": "2",
     "kind": "option_value",
@@ -21880,6 +23666,46 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:8214"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:2:option_value",
+    "name": "2",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [2]"
+    ],
+    "value_rules": [],
+    "summary": "Use continuous simulated annealing for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "2",
+      "token_kind": "integer",
+      "insert_text": "2",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use continuous simulated annealing for this optimization step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
       ],
       "default": false
     }
@@ -22975,6 +24801,144 @@
     }
   },
   {
+    "id": "syntax_value:estimation:optim.NumgradAlgorithm:2:nested_option_value",
+    "name": "2",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "estimation",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "2"
+    ],
+    "summary": "Use the two-point formula to compute the gradient.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "2",
+      "token_kind": "integer",
+      "insert_text": "2",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the two-point formula to compute the gradient.",
+      "status": "documented",
+      "applicability": "Applies when `mode_compute=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": true
+    },
+    "selector": {
+      "option": "mode_compute",
+      "value": "4"
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:method_of_moments:optim.NumgradAlgorithm:2:nested_option_value",
+    "name": "2",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "method_of_moments",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "2"
+    ],
+    "summary": "Use the two-point formula to compute the gradient.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "2",
+      "token_kind": "integer",
+      "insert_text": "2",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the two-point formula to compute the gradient.",
+      "status": "documented",
+      "applicability": "Applies when `mode_compute=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": true
+    },
+    "selector": {
+      "option": "mode_compute",
+      "value": "4"
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:osr:optim.NumgradAlgorithm:2:nested_option_value",
+    "name": "2",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "osr",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "2"
+    ],
+    "summary": "Use the two-point formula to compute the gradient.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "2",
+      "token_kind": "integer",
+      "insert_text": "2",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the two-point formula to compute the gradient.",
+      "status": "documented",
+      "applicability": "Applies when `opt_algo=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": true
+    },
+    "selector": {
+      "option": "opt_algo",
+      "value": "4"
+    },
+    "value_rules": []
+  },
+  {
     "id": "option_value:calib_smoother:kalman_algo:3:option_value",
     "name": "3",
     "kind": "option_value",
@@ -23170,6 +25134,46 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:2965"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:estimation:additional_optimizer_steps:3:option_value",
+    "name": "3",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [3]"
+    ],
+    "value_rules": [],
+    "summary": "Use fminunc for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "3",
+      "token_kind": "integer",
+      "insert_text": "3",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use fminunc for this optimization step.",
+      "status": "documented",
+      "applicability": "Requires the MATLAB Optimization Toolbox or Octave optim package.",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
       ],
       "default": false
     }
@@ -23452,6 +25456,46 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:8214"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:3:option_value",
+    "name": "3",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [3]"
+    ],
+    "value_rules": [],
+    "summary": "Use fminunc for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "3",
+      "token_kind": "integer",
+      "insert_text": "3",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use fminunc for this optimization step.",
+      "status": "documented",
+      "applicability": "Requires the MATLAB Optimization Toolbox or Octave optim package.",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
       ],
       "default": false
     }
@@ -24507,6 +26551,144 @@
     }
   },
   {
+    "id": "syntax_value:estimation:optim.NumgradAlgorithm:3:nested_option_value",
+    "name": "3",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "estimation",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "3"
+    ],
+    "summary": "Use the three-point formula to compute the gradient.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "3",
+      "token_kind": "integer",
+      "insert_text": "3",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the three-point formula to compute the gradient.",
+      "status": "documented",
+      "applicability": "Applies when `mode_compute=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": false
+    },
+    "selector": {
+      "option": "mode_compute",
+      "value": "4"
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:method_of_moments:optim.NumgradAlgorithm:3:nested_option_value",
+    "name": "3",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "method_of_moments",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "3"
+    ],
+    "summary": "Use the three-point formula to compute the gradient.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "3",
+      "token_kind": "integer",
+      "insert_text": "3",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the three-point formula to compute the gradient.",
+      "status": "documented",
+      "applicability": "Applies when `mode_compute=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": false
+    },
+    "selector": {
+      "option": "mode_compute",
+      "value": "4"
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:osr:optim.NumgradAlgorithm:3:nested_option_value",
+    "name": "3",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "osr",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "3"
+    ],
+    "summary": "Use the three-point formula to compute the gradient.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "3",
+      "token_kind": "integer",
+      "insert_text": "3",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the three-point formula to compute the gradient.",
+      "status": "documented",
+      "applicability": "Applies when `opt_algo=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": false
+    },
+    "selector": {
+      "option": "opt_algo",
+      "value": "4"
+    },
+    "value_rules": []
+  },
+  {
     "id": "option_value:calib_smoother:kalman_algo:4:option_value",
     "name": "4",
     "kind": "option_value",
@@ -24662,6 +26844,46 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:2965"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:estimation:additional_optimizer_steps:4:option_value",
+    "name": "4",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [4]"
+    ],
+    "value_rules": [],
+    "summary": "Use csminwel for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "4",
+      "token_kind": "integer",
+      "insert_text": "4",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use csminwel for this optimization step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
       ],
       "default": false
     }
@@ -24904,6 +27126,46 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:8214"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:4:option_value",
+    "name": "4",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [4]"
+    ],
+    "value_rules": [],
+    "summary": "Use csminwel for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "4",
+      "token_kind": "integer",
+      "insert_text": "4",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use csminwel for this optimization step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
       ],
       "default": false
     }
@@ -25877,6 +28139,46 @@
     }
   },
   {
+    "id": "option_value:estimation:additional_optimizer_steps:5:option_value",
+    "name": "5",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [5]"
+    ],
+    "value_rules": [],
+    "summary": "Use the newrat slice optimizer for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "5",
+      "token_kind": "integer",
+      "insert_text": "5",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use the newrat slice optimizer for this optimization step.",
+      "status": "documented",
+      "applicability": "Not compatible with nonlinear filters or DSGE-VAR models.",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:estimation:kalman_algo:5:option_value",
     "name": "5",
     "kind": "option_value",
@@ -26114,6 +28416,46 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:8214"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:5:option_value",
+    "name": "5",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [5]"
+    ],
+    "value_rules": [],
+    "summary": "Use the newrat slice optimizer for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "5",
+      "token_kind": "integer",
+      "insert_text": "5",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use the newrat slice optimizer for this optimization step.",
+      "status": "documented",
+      "applicability": "Not compatible with nonlinear filters or DSGE-VAR models.",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
       ],
       "default": false
     }
@@ -26885,6 +29227,144 @@
     }
   },
   {
+    "id": "syntax_value:estimation:optim.NumgradAlgorithm:5:nested_option_value",
+    "name": "5",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "estimation",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "5"
+    ],
+    "summary": "Use the five-point formula to compute the gradient.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "5",
+      "token_kind": "integer",
+      "insert_text": "5",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the five-point formula to compute the gradient.",
+      "status": "documented",
+      "applicability": "Applies when `mode_compute=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": false
+    },
+    "selector": {
+      "option": "mode_compute",
+      "value": "4"
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:method_of_moments:optim.NumgradAlgorithm:5:nested_option_value",
+    "name": "5",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "method_of_moments",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "5"
+    ],
+    "summary": "Use the five-point formula to compute the gradient.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "5",
+      "token_kind": "integer",
+      "insert_text": "5",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the five-point formula to compute the gradient.",
+      "status": "documented",
+      "applicability": "Applies when `mode_compute=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": false
+    },
+    "selector": {
+      "option": "mode_compute",
+      "value": "4"
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:osr:optim.NumgradAlgorithm:5:nested_option_value",
+    "name": "5",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "osr",
+    "slot": "optim.NumgradAlgorithm",
+    "signatures": [
+      "5"
+    ],
+    "summary": "Use the five-point formula to compute the gradient.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4329"
+    ],
+    "value": {
+      "value": "5",
+      "token_kind": "integer",
+      "insert_text": "5",
+      "case_sensitive": false,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": true,
+      "description": "Use the five-point formula to compute the gradient.",
+      "status": "documented",
+      "applicability": "Applies when `opt_algo=4`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4329"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7823"
+      ],
+      "default": false
+    },
+    "selector": {
+      "option": "opt_algo",
+      "value": "4"
+    },
+    "value_rules": []
+  },
+  {
     "id": "option_value:check:solve_algo:6:option_value",
     "name": "6",
     "kind": "option_value",
@@ -26960,6 +29440,46 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:2965"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:estimation:additional_optimizer_steps:6:option_value",
+    "name": "6",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [6]"
+    ],
+    "value_rules": [],
+    "summary": "Use the Monte Carlo optimization routine for this step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "6",
+      "token_kind": "integer",
+      "insert_text": "6",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use the Monte Carlo optimization routine for this step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
       ],
       "default": false
     }
@@ -27042,6 +29562,46 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:2965"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:6:option_value",
+    "name": "6",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [6]"
+    ],
+    "value_rules": [],
+    "summary": "Use the Monte Carlo optimization routine for this step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "6",
+      "token_kind": "integer",
+      "insert_text": "6",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use the Monte Carlo optimization routine for this step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
       ],
       "default": false
     }
@@ -27692,6 +30252,46 @@
     }
   },
   {
+    "id": "option_value:estimation:additional_optimizer_steps:7:option_value",
+    "name": "7",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [7]"
+    ],
+    "value_rules": [],
+    "summary": "Use fminsearch for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "7",
+      "token_kind": "integer",
+      "insert_text": "7",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use fminsearch for this optimization step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:estimation:mode_compute:7:option_value",
     "name": "7",
     "kind": "option_value",
@@ -27769,6 +30369,46 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:2965"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:7:option_value",
+    "name": "7",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [7]"
+    ],
+    "value_rules": [],
+    "summary": "Use fminsearch for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "7",
+      "token_kind": "integer",
+      "insert_text": "7",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use fminsearch for this optimization step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
       ],
       "default": false
     }
@@ -28462,6 +31102,46 @@
     }
   },
   {
+    "id": "option_value:estimation:additional_optimizer_steps:8:option_value",
+    "name": "8",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [8]"
+    ],
+    "value_rules": [],
+    "summary": "Use Dynare's Nelder-Mead implementation for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "8",
+      "token_kind": "integer",
+      "insert_text": "8",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use Dynare's Nelder-Mead implementation for this optimization step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:estimation:mode_compute:8:option_value",
     "name": "8",
     "kind": "option_value",
@@ -28539,6 +31219,46 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:2965"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:8:option_value",
+    "name": "8",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [8]"
+    ],
+    "value_rules": [],
+    "summary": "Use Dynare's Nelder-Mead implementation for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "8",
+      "token_kind": "integer",
+      "insert_text": "8",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use Dynare's Nelder-Mead implementation for this optimization step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
       ],
       "default": false
     }
@@ -29232,6 +31952,46 @@
     }
   },
   {
+    "id": "option_value:estimation:additional_optimizer_steps:9:option_value",
+    "name": "9",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "estimation",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [9]"
+    ],
+    "value_rules": [],
+    "summary": "Use the CMA-ES algorithm for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "9",
+      "token_kind": "integer",
+      "insert_text": "9",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use the CMA-ES algorithm for this optimization step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
+      ],
+      "default": false
+    }
+  },
+  {
     "id": "option_value:estimation:mode_compute:9:option_value",
     "name": "9",
     "kind": "option_value",
@@ -29309,6 +32069,46 @@
       ],
       "manual_sources": [
         "doc/manual/source/the-model-file.rst:2965"
+      ],
+      "default": false
+    }
+  },
+  {
+    "id": "option_value:method_of_moments:additional_optimizer_steps:9:option_value",
+    "name": "9",
+    "kind": "option_value",
+    "contexts": [
+      "option_value"
+    ],
+    "parent": "method_of_moments",
+    "option": "additional_optimizer_steps",
+    "signatures": [
+      "additional_optimizer_steps = [9]"
+    ],
+    "value_rules": [],
+    "summary": "Use the CMA-ES algorithm for this optimization step.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:4876"
+    ],
+    "value": {
+      "value": "9",
+      "token_kind": "integer",
+      "insert_text": "9",
+      "case_sensitive": true,
+      "forms": [
+        "bracket_list"
+      ],
+      "signed": false,
+      "description": "Use the CMA-ES algorithm for this optimization step.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:4876"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:7600"
       ],
       "default": false
     }
@@ -40840,10 +43640,271 @@
       "forms": [
         "bracket_list"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "1",
+          "token_kind": "integer",
+          "insert_text": "1",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use fmincon for this optimization step.",
+          "status": "documented",
+          "applicability": "Requires the MATLAB Optimization Toolbox or Octave optim package.",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "10",
+          "token_kind": "integer",
+          "insert_text": "10",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use the simpsa algorithm for this optimization step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "101",
+          "token_kind": "integer",
+          "insert_text": "101",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use SolveOpt for this optimization step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "102",
+          "token_kind": "integer",
+          "insert_text": "102",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use simulannealbnd for this optimization step.",
+          "status": "documented",
+          "applicability": "Requires the MATLAB Global Optimization Toolbox; unavailable under Octave.",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "12",
+          "token_kind": "integer",
+          "insert_text": "12",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use particleswarm for this optimization step.",
+          "status": "documented",
+          "applicability": "Requires the MATLAB Global Optimization Toolbox; unavailable under Octave.",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "2",
+          "token_kind": "integer",
+          "insert_text": "2",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use continuous simulated annealing for this optimization step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "3",
+          "token_kind": "integer",
+          "insert_text": "3",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use fminunc for this optimization step.",
+          "status": "documented",
+          "applicability": "Requires the MATLAB Optimization Toolbox or Octave optim package.",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "4",
+          "token_kind": "integer",
+          "insert_text": "4",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use csminwel for this optimization step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "5",
+          "token_kind": "integer",
+          "insert_text": "5",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use the newrat slice optimizer for this optimization step.",
+          "status": "documented",
+          "applicability": "Not compatible with nonlinear filters or DSGE-VAR models.",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "6",
+          "token_kind": "integer",
+          "insert_text": "6",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use the Monte Carlo optimization routine for this step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "7",
+          "token_kind": "integer",
+          "insert_text": "7",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use fminsearch for this optimization step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "8",
+          "token_kind": "integer",
+          "insert_text": "8",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use Dynare's Nelder-Mead implementation for this optimization step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "9",
+          "token_kind": "integer",
+          "insert_text": "9",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use the CMA-ES algorithm for this optimization step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        }
+      ],
       "complete": false,
       "gaps": [
-        "Manual identifies an INTEGER vector of additional minimization algorithms but gives no finite code list or explicit cross-reference; the allowed optimizer IDs remain unknown."
+        "Manual defines an integer vector of additional minimization algorithms but does not enumerate that vector. The pinned dispatcher establishes the listed numeric methods; the integer grammar remains open and other numeric inputs are not certified."
       ]
     },
     "value_rules": [
@@ -40875,10 +43936,309 @@
       "forms": [
         "bracket_list"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Evaluate the objective at the current values without minimization.",
+          "status": "source_verified",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [],
+          "default": false
+        },
+        {
+          "value": "1",
+          "token_kind": "integer",
+          "insert_text": "1",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use fmincon for this optimization step.",
+          "status": "documented",
+          "applicability": "Requires the MATLAB Optimization Toolbox or Octave optim package.",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "10",
+          "token_kind": "integer",
+          "insert_text": "10",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use the simpsa algorithm for this optimization step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "101",
+          "token_kind": "integer",
+          "insert_text": "101",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use SolveOpt for this optimization step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "102",
+          "token_kind": "integer",
+          "insert_text": "102",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use simulannealbnd for this optimization step.",
+          "status": "documented",
+          "applicability": "Requires the MATLAB Global Optimization Toolbox; unavailable under Octave.",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "12",
+          "token_kind": "integer",
+          "insert_text": "12",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use particleswarm for this optimization step.",
+          "status": "documented",
+          "applicability": "Requires the MATLAB Global Optimization Toolbox; unavailable under Octave.",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "13",
+          "token_kind": "integer",
+          "insert_text": "13",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use lsqnonlin for this method-of-moments optimization step.",
+          "status": "documented",
+          "applicability": "Supported only for method_of_moments; requires the MATLAB Optimization Toolbox or Octave optim package.",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "2",
+          "token_kind": "integer",
+          "insert_text": "2",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use continuous simulated annealing for this optimization step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "3",
+          "token_kind": "integer",
+          "insert_text": "3",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use fminunc for this optimization step.",
+          "status": "documented",
+          "applicability": "Requires the MATLAB Optimization Toolbox or Octave optim package.",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "4",
+          "token_kind": "integer",
+          "insert_text": "4",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use csminwel for this optimization step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "5",
+          "token_kind": "integer",
+          "insert_text": "5",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use the newrat slice optimizer for this optimization step.",
+          "status": "documented",
+          "applicability": "Not compatible with nonlinear filters or DSGE-VAR models.",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "6",
+          "token_kind": "integer",
+          "insert_text": "6",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use the Monte Carlo optimization routine for this step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "7",
+          "token_kind": "integer",
+          "insert_text": "7",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use fminsearch for this optimization step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "8",
+          "token_kind": "integer",
+          "insert_text": "8",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use Dynare's Nelder-Mead implementation for this optimization step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        },
+        {
+          "value": "9",
+          "token_kind": "integer",
+          "insert_text": "9",
+          "case_sensitive": true,
+          "forms": [
+            "bracket_list"
+          ],
+          "signed": false,
+          "description": "Use the CMA-ES algorithm for this optimization step.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4876"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:7600"
+          ],
+          "default": false
+        }
+      ],
       "complete": false,
       "gaps": [
-        "Manual identifies an INTEGER vector of additional minimization algorithms but gives no finite code list or explicit cross-reference; the allowed optimizer IDs remain unknown."
+        "Manual defines an integer vector of additional minimization algorithms but does not enumerate that vector. The pinned dispatcher establishes the listed numeric methods; the integer grammar remains open and other numeric inputs are not certified."
       ]
     },
     "value_rules": [
@@ -41893,14 +45253,16 @@
             "scalar"
           ],
           "signed": false,
-          "description": "Disable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+          "description": "Do not use analytic derivatives in the identification analysis.",
           "status": "source_verified",
           "applicability": "",
           "grammar_sources": [
             "src/DynareBison.yy:2105",
             "src/DynareBison.yy:4801"
           ],
-          "manual_sources": [],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:13520"
+          ],
           "default": false
         },
         {
@@ -41912,14 +45274,16 @@
             "scalar"
           ],
           "signed": false,
-          "description": "Enable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+          "description": "Use analytic derivatives in the identification analysis.",
           "status": "source_verified",
           "applicability": "",
           "grammar_sources": [
             "src/DynareBison.yy:2104",
             "src/DynareBison.yy:4801"
           ],
-          "manual_sources": [],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:13520"
+          ],
           "default": false
         }
       ],
@@ -41966,14 +45330,16 @@
             "scalar"
           ],
           "signed": false,
-          "description": "Disable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+          "description": "Do not use analytic derivatives in the optimal simple rules.",
           "status": "source_verified",
           "applicability": "",
           "grammar_sources": [
             "src/DynareBison.yy:2105",
             "src/DynareBison.yy:4801"
           ],
-          "manual_sources": [],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:13644"
+          ],
           "default": false
         },
         {
@@ -41985,14 +45351,16 @@
             "scalar"
           ],
           "signed": false,
-          "description": "Enable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+          "description": "Use analytic derivatives in the optimal simple rules.",
           "status": "source_verified",
           "applicability": "",
           "grammar_sources": [
             "src/DynareBison.yy:2104",
             "src/DynareBison.yy:4801"
           ],
-          "manual_sources": [],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:13644"
+          ],
           "default": false
         }
       ],
@@ -42039,14 +45407,16 @@
             "scalar"
           ],
           "signed": false,
-          "description": "Disable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+          "description": "Do not use analytic derivatives in the sensitivity analysis.",
           "status": "source_verified",
           "applicability": "",
           "grammar_sources": [
             "src/DynareBison.yy:2105",
             "src/DynareBison.yy:4801"
           ],
-          "manual_sources": [],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:14247"
+          ],
           "default": false
         },
         {
@@ -42058,14 +45428,16 @@
             "scalar"
           ],
           "signed": false,
-          "description": "Enable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+          "description": "Use analytic derivatives in the sensitivity analysis.",
           "status": "source_verified",
           "applicability": "",
           "grammar_sources": [
             "src/DynareBison.yy:2104",
             "src/DynareBison.yy:4801"
           ],
-          "manual_sources": [],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:14247"
+          ],
           "default": false
         }
       ],
@@ -46528,7 +49900,68 @@
       "forms": [
         "scalar"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Print no calibration output.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4194"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:16138"
+          ],
+          "default": false
+        },
+        {
+          "value": "1",
+          "token_kind": "integer",
+          "insert_text": "1",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Print a calibration summary.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4194"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:16138"
+          ],
+          "default": false
+        },
+        {
+          "value": "2",
+          "token_kind": "integer",
+          "insert_text": "2",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Print calibration iteration details.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4194"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:16138"
+          ],
+          "default": false
+        }
+      ],
       "complete": true,
       "gaps": []
     },
@@ -48909,7 +52342,48 @@
       "forms": [
         "scalar"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Skip covariance computation after mode finding.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4738"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:8134"
+          ],
+          "default": false
+        },
+        {
+          "value": "1",
+          "token_kind": "integer",
+          "insert_text": "1",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Compute the covariance matrix after mode finding.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4738"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:8134"
+          ],
+          "default": false
+        }
+      ],
       "complete": true,
       "gaps": []
     },
@@ -48942,7 +52416,48 @@
       "forms": [
         "scalar"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Skip covariance computation after mode finding.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4738"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:11172"
+          ],
+          "default": false
+        },
+        {
+          "value": "1",
+          "token_kind": "integer",
+          "insert_text": "1",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Compute the covariance matrix after mode finding.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4738"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:11172"
+          ],
+          "default": false
+        }
+      ],
       "complete": true,
       "gaps": []
     },
@@ -50195,7 +53710,7 @@
     "signatures": [
       "dd"
     ],
-    "summary": "Difference/difference PAC target component.",
+    "summary": "Use for a nonstationary component that appears in first differences in the auxiliary model.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -52568,7 +56083,7 @@
     "signatures": [
       "dl"
     ],
-    "summary": "Difference/level PAC target component.",
+    "summary": "Use for a nonstationary component that appears in levels in the auxiliary model.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -54762,7 +58277,7 @@
             "scalar"
           ],
           "signed": false,
-          "description": "Set the DSGE prior weight to infinity.",
+          "description": "Use the DSGE-implied coefficients and covariance in the likelihood.",
           "status": "source_verified",
           "applicability": "",
           "grammar_sources": [
@@ -55034,6 +58549,46 @@
       "NONNEGATIVE_NUMBER",
       "[NUMBER_OR_INF, ...]"
     ]
+  },
+  {
+    "id": "syntax_value:model:equation_tag:dynamic:equation_tag",
+    "name": "dynamic",
+    "kind": "syntax_value",
+    "contexts": [
+      "equation_tag"
+    ],
+    "parent": "model",
+    "slot": "equation_tag",
+    "signatures": [
+      "dynamic"
+    ],
+    "summary": "Use this equation for the dynamic model and other computations.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:1152"
+    ],
+    "value": {
+      "value": "dynamic",
+      "token_kind": "bare",
+      "insert_text": "dynamic",
+      "case_sensitive": false,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Use this equation for the dynamic model and other computations.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:1152"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:3411"
+      ],
+      "default": false
+    },
+    "value_rules": []
   },
   {
     "id": "command::dynasave:top_level",
@@ -57285,7 +60840,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4876"
         ],
-        "value_count": 0,
+        "value_count": 13,
         "value_rules": [
           "[INTEGER, ...]"
         ]
@@ -57516,7 +61071,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4738"
         ],
-        "value_count": 0,
+        "value_count": 2,
         "value_rules": [
           "NONNEGATIVE_INTEGER"
         ]
@@ -58512,7 +62067,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4321"
         ],
-        "value_count": 0,
+        "value_count": 1,
         "value_rules": [
           "NONNEGATIVE_INTEGER"
         ]
@@ -59837,7 +63392,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4107"
         ],
-        "value_count": 0,
+        "value_count": 1,
         "value_rules": [
           "NONNEGATIVE_INTEGER"
         ]
@@ -60091,7 +63646,7 @@
       "filtered_vars = false"
     ],
     "value_rules": [],
-    "summary": "Disable the `filtered_vars` option.\n\nWhen enabled: Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e. E_{t}{y_{t+1}}.",
+    "summary": "Do not compute filtered variables for the calibrated smoother.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -60107,14 +63662,16 @@
         "scalar"
       ],
       "signed": false,
-      "description": "Disable the `filtered_vars` option.\n\nWhen enabled: Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e. E_{t}{y_{t+1}}.",
+      "description": "Do not compute filtered variables for the calibrated smoother.",
       "status": "source_verified",
       "applicability": "",
       "grammar_sources": [
         "src/DynareBison.yy:2105",
         "src/DynareBison.yy:4369"
       ],
-      "manual_sources": [],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:12587"
+      ],
       "default": false
     }
   },
@@ -60771,7 +64328,7 @@
       "analytic_derivation = false"
     ],
     "value_rules": [],
-    "summary": "Disable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+    "summary": "Do not use analytic derivatives in the identification analysis.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -60787,14 +64344,16 @@
         "scalar"
       ],
       "signed": false,
-      "description": "Disable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+      "description": "Do not use analytic derivatives in the identification analysis.",
       "status": "source_verified",
       "applicability": "",
       "grammar_sources": [
         "src/DynareBison.yy:2105",
         "src/DynareBison.yy:4801"
       ],
-      "manual_sources": [],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:13520"
+      ],
       "default": false
     }
   },
@@ -61451,7 +65010,7 @@
       "analytic_derivation = false"
     ],
     "value_rules": [],
-    "summary": "Disable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+    "summary": "Do not use analytic derivatives in the optimal simple rules.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -61467,14 +65026,16 @@
         "scalar"
       ],
       "signed": false,
-      "description": "Disable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+      "description": "Do not use analytic derivatives in the optimal simple rules.",
       "status": "source_verified",
       "applicability": "",
       "grammar_sources": [
         "src/DynareBison.yy:2105",
         "src/DynareBison.yy:4801"
       ],
-      "manual_sources": [],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:13644"
+      ],
       "default": false
     }
   },
@@ -61531,7 +65092,7 @@
       "analytic_derivation = false"
     ],
     "value_rules": [],
-    "summary": "Disable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+    "summary": "Do not use analytic derivatives in the sensitivity analysis.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -61547,14 +65108,16 @@
         "scalar"
       ],
       "signed": false,
-      "description": "Disable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+      "description": "Do not use analytic derivatives in the sensitivity analysis.",
       "status": "source_verified",
       "applicability": "",
       "grammar_sources": [
         "src/DynareBison.yy:2105",
         "src/DynareBison.yy:4801"
       ],
-      "manual_sources": [],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:14247"
+      ],
       "default": false
     }
   },
@@ -62037,6 +65600,46 @@
       "manual_sources": [],
       "default": false
     }
+  },
+  {
+    "id": "syntax_value::boolean_literal:false:macro_expression",
+    "name": "false",
+    "kind": "syntax_value",
+    "contexts": [
+      "macro_expression"
+    ],
+    "parent": null,
+    "slot": "boolean_literal",
+    "signatures": [
+      "false"
+    ],
+    "summary": "Boolean value `false`.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/macro/Parser.yy:349"
+    ],
+    "value": {
+      "value": "false",
+      "token_kind": "bare",
+      "insert_text": "false",
+      "case_sensitive": false,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Boolean value `false`.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/macro/Parser.yy:349"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:17543"
+      ],
+      "default": false
+    },
+    "value_rules": []
   },
   {
     "id": "option:estimation:fast_kalman_filter:command_option",
@@ -64995,14 +68598,16 @@
             "scalar"
           ],
           "signed": false,
-          "description": "Disable the `filtered_vars` option.\n\nWhen enabled: Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e. E_{t}{y_{t+1}}.",
+          "description": "Do not compute filtered variables for the calibrated smoother.",
           "status": "source_verified",
           "applicability": "",
           "grammar_sources": [
             "src/DynareBison.yy:2105",
             "src/DynareBison.yy:4369"
           ],
-          "manual_sources": [],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:12587"
+          ],
           "default": false
         },
         {
@@ -65014,14 +68619,16 @@
             "scalar"
           ],
           "signed": false,
-          "description": "Enable the `filtered_vars` option.\n\nWhen enabled: Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e. E_{t}{y_{t+1}}.",
-          "status": "source_verified",
+          "description": "Compute filtered variables and one-step-ahead forecasts for the calibrated smoother.",
+          "status": "documented",
           "applicability": "",
           "grammar_sources": [
             "src/DynareBison.yy:2104",
             "src/DynareBison.yy:4369"
           ],
-          "manual_sources": [],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:12587"
+          ],
           "default": false
         }
       ],
@@ -66615,7 +70222,68 @@
       "forms": [
         "scalar"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Print no distribution-computation output.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4181"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:16207"
+          ],
+          "default": false
+        },
+        {
+          "value": "1",
+          "token_kind": "integer",
+          "insert_text": "1",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Print only non-convergence warnings during distribution computation.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4181"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:16207"
+          ],
+          "default": false
+        },
+        {
+          "value": "2",
+          "token_kind": "integer",
+          "insert_text": "2",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Print distribution-computation iteration details.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4181"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:16207"
+          ],
+          "default": false
+        }
+      ],
       "complete": true,
       "gaps": []
     },
@@ -70256,7 +73924,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4194"
         ],
-        "value_count": 0,
+        "value_count": 3,
         "value_rules": [
           "NONNEGATIVE_INTEGER"
         ]
@@ -70331,7 +73999,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4181"
         ],
-        "value_count": 0,
+        "value_count": 3,
         "value_rules": [
           "NONNEGATIVE_INTEGER"
         ]
@@ -70346,7 +74014,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4191"
         ],
-        "value_count": 0,
+        "value_count": 1,
         "value_rules": [
           "NONNEGATIVE_INTEGER"
         ]
@@ -70481,7 +74149,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4185"
         ],
-        "value_count": 0,
+        "value_count": 2,
         "value_rules": [
           "NONNEGATIVE_INTEGER"
         ]
@@ -70759,7 +74427,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4105"
         ],
-        "value_count": 0,
+        "value_count": 1,
         "value_rules": [
           "NONNEGATIVE_INTEGER"
         ]
@@ -72712,7 +76380,8 @@
         "INT_NUMBER"
       ],
       "forms": [
-        "scalar"
+        "scalar",
+        "range_end"
       ],
       "choices": [
         {
@@ -72721,19 +76390,18 @@
           "insert_text": "inf",
           "case_sensitive": false,
           "forms": [
-            "scalar"
+            "range_end"
           ],
           "signed": false,
-          "description": "Positive infinity.",
+          "description": "Use an unbounded upper horizon for the expected discounted sum.",
           "status": "documented",
-          "applicability": "",
+          "applicability": "Only valid as the upper endpoint of an integer range; not valid as a scalar horizon.",
           "grammar_sources": [
             "src/DynareBison.yy:5053",
             "src/DynareBison.yy:652"
           ],
           "manual_sources": [
-            "doc/manual/source/the-model-file.rst:570",
-            "doc/manual/source/the-model-file.rst:77"
+            "doc/manual/source/the-model-file.rst:16835"
           ],
           "default": false
         }
@@ -73538,7 +77206,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4895"
         ],
-        "value_count": 1,
+        "value_count": 2,
         "value_rules": [
           "NONNEGATIVE_INTEGER"
         ]
@@ -74663,7 +78331,7 @@
       "dsge_var = inf"
     ],
     "value_rules": [],
-    "summary": "Set the DSGE prior weight to infinity.",
+    "summary": "Use the DSGE-implied coefficients and covariance in the likelihood.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -74678,7 +78346,7 @@
         "scalar"
       ],
       "signed": false,
-      "description": "Set the DSGE prior weight to infinity.",
+      "description": "Use the DSGE-implied coefficients and covariance in the likelihood.",
       "status": "source_verified",
       "applicability": "",
       "grammar_sources": [
@@ -74701,7 +78369,7 @@
       "mode_check_neighbourhood_size = inf"
     ],
     "value_rules": [],
-    "summary": "Positive infinity.",
+    "summary": "Plot the entire parameter domain around the mode.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -74718,7 +78386,7 @@
         "scalar"
       ],
       "signed": false,
-      "description": "Positive infinity.",
+      "description": "Plot the entire parameter domain around the mode.",
       "status": "documented",
       "applicability": "",
       "grammar_sources": [
@@ -74727,8 +78395,7 @@
         "src/DynareBison.yy:4341"
       ],
       "manual_sources": [
-        "doc/manual/source/the-model-file.rst:570",
-        "doc/manual/source/the-model-file.rst:77"
+        "doc/manual/source/the-model-file.rst:8177"
       ],
       "default": false
     }
@@ -74791,7 +78458,7 @@
       "mode_check_neighbourhood_size = inf"
     ],
     "value_rules": [],
-    "summary": "Positive infinity.",
+    "summary": "Plot the entire parameter domain around the mode.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -74808,7 +78475,7 @@
         "scalar"
       ],
       "signed": false,
-      "description": "Positive infinity.",
+      "description": "Plot the entire parameter domain around the mode.",
       "status": "documented",
       "applicability": "",
       "grammar_sources": [
@@ -74817,8 +78484,7 @@
         "src/DynareBison.yy:4341"
       ],
       "manual_sources": [
-        "doc/manual/source/the-model-file.rst:570",
-        "doc/manual/source/the-model-file.rst:77"
+        "doc/manual/source/the-model-file.rst:11448"
       ],
       "default": false
     }
@@ -74881,7 +78547,7 @@
       "threshold_redform = inf"
     ],
     "value_rules": [],
-    "summary": "Positive infinity.",
+    "summary": "With the lower endpoint set to `-inf`, this pair selects decile splitting for all analysed variables.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -74898,17 +78564,16 @@
         "bracket_list"
       ],
       "signed": false,
-      "description": "Positive infinity.",
+      "description": "With the lower endpoint set to `-inf`, this pair selects decile splitting for all analysed variables.",
       "status": "documented",
-      "applicability": "",
+      "applicability": "The effect applies to the complete `[-Inf Inf]` pair, not to this endpoint alone.",
       "grammar_sources": [
         "src/DynareBison.yy:2096",
         "src/DynareBison.yy:2100",
         "src/DynareBison.yy:4535"
       ],
       "manual_sources": [
-        "doc/manual/source/the-model-file.rst:570",
-        "doc/manual/source/the-model-file.rst:77"
+        "doc/manual/source/the-model-file.rst:14690"
       ],
       "default": false
     }
@@ -74923,10 +78588,10 @@
     "parent": "var_expectation_model",
     "option": "horizon",
     "signatures": [
-      "horizon = inf"
+      "horizon = INTEGER:inf"
     ],
     "value_rules": [],
-    "summary": "Positive infinity.",
+    "summary": "Use an unbounded upper horizon for the expected discounted sum.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -74939,19 +78604,18 @@
       "insert_text": "inf",
       "case_sensitive": false,
       "forms": [
-        "scalar"
+        "range_end"
       ],
       "signed": false,
-      "description": "Positive infinity.",
+      "description": "Use an unbounded upper horizon for the expected discounted sum.",
       "status": "documented",
-      "applicability": "",
+      "applicability": "Only valid as the upper endpoint of an integer range; not valid as a scalar horizon.",
       "grammar_sources": [
         "src/DynareBison.yy:5053",
         "src/DynareBison.yy:652"
       ],
       "manual_sources": [
-        "doc/manual/source/the-model-file.rst:570",
-        "doc/manual/source/the-model-file.rst:77"
+        "doc/manual/source/the-model-file.rst:16835"
       ],
       "default": false
     }
@@ -75961,7 +79625,7 @@
       "shape = inv_gamma"
     ],
     "value_rules": [],
-    "summary": "Use an inverse gamma prior distribution.",
+    "summary": "Before any shift, this is an alias for `inv_gamma1` (type 1), whose distribution is the square root of type 2.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -75977,7 +79641,7 @@
         "scalar"
       ],
       "signed": false,
-      "description": "Use an inverse gamma prior distribution.",
+      "description": "Before any shift, this is an alias for `inv_gamma1` (type 1), whose distribution is the square root of type 2.",
       "status": "source_verified",
       "applicability": "",
       "grammar_sources": [
@@ -76001,7 +79665,7 @@
       "shape = inv_gamma1"
     ],
     "value_rules": [],
-    "summary": "Use the first inverse gamma prior distribution.",
+    "summary": "Before any shift, type 1 inverse gamma is an alias for `inv_gamma`; it is the square root of type 2.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -76017,7 +79681,7 @@
         "scalar"
       ],
       "signed": false,
-      "description": "Use the first inverse gamma prior distribution.",
+      "description": "Before any shift, type 1 inverse gamma is an alias for `inv_gamma`; it is the square root of type 2.",
       "status": "source_verified",
       "applicability": "",
       "grammar_sources": [
@@ -76039,7 +79703,7 @@
     "signatures": [
       "inv_gamma1_pdf"
     ],
-    "summary": "Inv gamma1 prior distribution.",
+    "summary": "Type 1 inverse-gamma prior, equivalent to `inv_gamma_pdf`. The unshifted type 1 distribution is the square root of type 2.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -76058,7 +79722,7 @@
     "signatures": [
       "inv_gamma1_pdf"
     ],
-    "summary": "Inv gamma1 prior distribution.",
+    "summary": "Type 1 inverse-gamma prior, equivalent to `inv_gamma_pdf`. The unshifted type 1 distribution is the square root of type 2.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -76079,7 +79743,7 @@
       "shape = inv_gamma2"
     ],
     "value_rules": [],
-    "summary": "Use the second inverse gamma prior distribution.",
+    "summary": "Before any shift, type 2 inverse gamma is the distribution whose square root is type 1.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -76095,7 +79759,7 @@
         "scalar"
       ],
       "signed": false,
-      "description": "Use the second inverse gamma prior distribution.",
+      "description": "Before any shift, type 2 inverse gamma is the distribution whose square root is type 1.",
       "status": "source_verified",
       "applicability": "",
       "grammar_sources": [
@@ -76117,7 +79781,7 @@
     "signatures": [
       "inv_gamma2_pdf"
     ],
-    "summary": "Inv gamma2 prior distribution.",
+    "summary": "Type 2 inverse-gamma prior. The unshifted type 1 distribution is the square root of type 2.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -76136,7 +79800,7 @@
     "signatures": [
       "inv_gamma2_pdf"
     ],
-    "summary": "Inv gamma2 prior distribution.",
+    "summary": "Type 2 inverse-gamma prior. The unshifted type 1 distribution is the square root of type 2.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -76155,7 +79819,7 @@
     "signatures": [
       "inv_gamma_pdf"
     ],
-    "summary": "Inv gamma prior distribution.",
+    "summary": "Type 1 inverse-gamma prior, equivalent to `inv_gamma1_pdf`. The unshifted type 1 distribution is the square root of type 2.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -76174,7 +79838,7 @@
     "signatures": [
       "inv_gamma_pdf"
     ],
-    "summary": "Inv gamma prior distribution.",
+    "summary": "Type 1 inverse-gamma prior, equivalent to `inv_gamma1_pdf`. The unshifted type 1 distribution is the square root of type 2.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -76405,7 +80069,28 @@
       "forms": [
         "scalar"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Do not plot impulse response functions.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4100"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:5345"
+          ],
+          "default": false
+        }
+      ],
       "complete": true,
       "gaps": []
     },
@@ -78616,16 +82301,14 @@
             "scalar"
           ],
           "signed": false,
-          "description": "",
-          "status": "undocumented",
-          "applicability": "",
+          "description": "Use level-level treatment for the target in the PAC auxiliary model.",
+          "status": "source_verified",
+          "applicability": "Selected for a stationary single target; unavailable with MCE or `pac_target_info`.",
           "grammar_sources": [
             "src/DynareBison.yy:1072",
             "src/DynareBison.yy:4169"
           ],
-          "manual_sources": [
-            "doc/manual/source/the-model-file.rst:17012"
-          ],
+          "manual_sources": [],
           "default": false
         }
       ],
@@ -80425,7 +84108,7 @@
     "signatures": [
       "ll"
     ],
-    "summary": "Level/level PAC target component.",
+    "summary": "For a stationary component in levels in the auxiliary model and PAC expectations.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -80446,7 +84129,7 @@
       "kind = ll"
     ],
     "value_rules": [],
-    "summary": "Accepted value for pac_model.kind.",
+    "summary": "Use level-level treatment for the target in the PAC auxiliary model.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -80462,16 +84145,14 @@
         "scalar"
       ],
       "signed": false,
-      "description": "",
-      "status": "undocumented",
-      "applicability": "",
+      "description": "Use level-level treatment for the target in the PAC auxiliary model.",
+      "status": "source_verified",
+      "applicability": "Selected for a stationary single target; unavailable with MCE or `pac_target_info`.",
       "grammar_sources": [
         "src/DynareBison.yy:1072",
         "src/DynareBison.yy:4169"
       ],
-      "manual_sources": [
-        "doc/manual/source/the-model-file.rst:17012"
-      ],
+      "manual_sources": [],
       "default": false
     }
   },
@@ -83933,7 +87614,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4876"
         ],
-        "value_count": 0,
+        "value_count": 15,
         "value_rules": [
           "[INTEGER, ...]"
         ]
@@ -84071,7 +87752,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4738"
         ],
-        "value_count": 0,
+        "value_count": 2,
         "value_rules": [
           "NONNEGATIVE_INTEGER"
         ]
@@ -84641,7 +88322,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4321"
         ],
-        "value_count": 0,
+        "value_count": 1,
         "value_rules": [
           "NONNEGATIVE_INTEGER"
         ]
@@ -86400,7 +90081,28 @@
       "forms": [
         "scalar"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Generate no new MCMC draws. Previously saved draws can still be loaded when requested.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4321"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:9199"
+          ],
+          "default": false
+        }
+      ],
       "complete": true,
       "gaps": []
     },
@@ -86433,7 +90135,28 @@
       "forms": [
         "scalar"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Generate no new MCMC draws. Previously saved draws can still be loaded when requested.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4321"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:11182"
+          ],
+          "default": false
+        }
+      ],
       "complete": true,
       "gaps": []
     },
@@ -87113,7 +90836,7 @@
             "scalar"
           ],
           "signed": true,
-          "description": "Positive infinity.",
+          "description": "Plot the entire parameter domain around the mode.",
           "status": "documented",
           "applicability": "",
           "grammar_sources": [
@@ -87122,8 +90845,7 @@
             "src/DynareBison.yy:4341"
           ],
           "manual_sources": [
-            "doc/manual/source/the-model-file.rst:570",
-            "doc/manual/source/the-model-file.rst:77"
+            "doc/manual/source/the-model-file.rst:8177"
           ],
           "default": false
         },
@@ -87159,7 +90881,7 @@
             "scalar"
           ],
           "signed": false,
-          "description": "Positive infinity.",
+          "description": "Plot the entire parameter domain around the mode.",
           "status": "documented",
           "applicability": "",
           "grammar_sources": [
@@ -87168,8 +90890,7 @@
             "src/DynareBison.yy:4341"
           ],
           "manual_sources": [
-            "doc/manual/source/the-model-file.rst:570",
-            "doc/manual/source/the-model-file.rst:77"
+            "doc/manual/source/the-model-file.rst:8177"
           ],
           "default": false
         }
@@ -87216,7 +90937,7 @@
             "scalar"
           ],
           "signed": true,
-          "description": "Positive infinity.",
+          "description": "Plot the entire parameter domain around the mode.",
           "status": "documented",
           "applicability": "",
           "grammar_sources": [
@@ -87225,8 +90946,7 @@
             "src/DynareBison.yy:4341"
           ],
           "manual_sources": [
-            "doc/manual/source/the-model-file.rst:570",
-            "doc/manual/source/the-model-file.rst:77"
+            "doc/manual/source/the-model-file.rst:11448"
           ],
           "default": false
         },
@@ -87262,7 +90982,7 @@
             "scalar"
           ],
           "signed": false,
-          "description": "Positive infinity.",
+          "description": "Plot the entire parameter domain around the mode.",
           "status": "documented",
           "applicability": "",
           "grammar_sources": [
@@ -87271,8 +90991,7 @@
             "src/DynareBison.yy:4341"
           ],
           "manual_sources": [
-            "doc/manual/source/the-model-file.rst:570",
-            "doc/manual/source/the-model-file.rst:77"
+            "doc/manual/source/the-model-file.rst:11448"
           ],
           "default": false
         }
@@ -95545,6 +99264,26 @@
       ],
       "choices": [
         {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Keep Jacobian and Gram matrices unnormalized.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4895"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:14357"
+          ],
+          "default": false
+        },
+        {
           "value": "1",
           "token_kind": "integer",
           "insert_text": "1",
@@ -95562,7 +99301,7 @@
           "manual_sources": [
             "doc/manual/source/the-model-file.rst:14357"
           ],
-          "default": true
+          "default": false
         }
       ],
       "complete": true,
@@ -97550,9 +101289,9 @@
             "scalar"
           ],
           "signed": false,
-          "description": "",
-          "status": "undocumented",
-          "applicability": "The manual refers to mode_compute values for opt_algo, but says value 13 is supported only for method_of_moments.",
+          "description": "Select the nonlinear least-squares optimizer.",
+          "status": "unavailable",
+          "applicability": "Unavailable in OSR. This code is only supported by method_of_moments.",
           "grammar_sources": [
             "src/DynareBison.yy:4147",
             "src/DynareBison.yy:4148"
@@ -97972,7 +101711,28 @@
       "forms": [
         "scalar"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Use ordinary extended path without stochastic integration.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4107"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:6187"
+          ],
+          "default": false
+        }
+      ],
       "complete": true,
       "gaps": []
     },
@@ -101032,6 +104792,46 @@
     ]
   },
   {
+    "id": "syntax_value:change_type:target_type:parameters:command_argument",
+    "name": "parameters",
+    "kind": "syntax_value",
+    "contexts": [
+      "command_argument"
+    ],
+    "parent": "change_type",
+    "slot": "target_type",
+    "signatures": [
+      "parameters"
+    ],
+    "summary": "Change the listed names to parameters.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:690"
+    ],
+    "value": {
+      "value": "parameters",
+      "token_kind": "bare",
+      "insert_text": "parameters",
+      "case_sensitive": false,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Change the listed names to parameters.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:690"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:341"
+      ],
+      "default": false
+    },
+    "value_rules": []
+  },
+  {
     "id": "option:discretionary_policy:partial_information:command_option",
     "name": "partial_information",
     "kind": "option",
@@ -103634,7 +107434,28 @@
       "forms": [
         "scalar"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Compute impulse responses only; do not run stochastic simulation paths.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4105"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:16452"
+          ],
+          "default": false
+        }
+      ],
       "complete": true,
       "gaps": []
     },
@@ -103935,7 +107756,28 @@
       "forms": [
         "scalar"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Compute theoretical moments instead of empirical moments.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4105"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:5465"
+          ],
+          "default": false
+        }
+      ],
       "complete": true,
       "gaps": []
     },
@@ -104935,7 +108777,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4483"
         ],
-        "value_count": 0,
+        "value_count": 1,
         "value_rules": [
           "NONNEGATIVE_INTEGER"
         ]
@@ -110961,6 +114803,190 @@
     "value_rules": []
   },
   {
+    "id": "syntax_value:estimation:posterior_sampler_options.proposal_distribution:rand_multivariate_normal:nested_option_value",
+    "name": "rand_multivariate_normal",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "estimation",
+    "slot": "posterior_sampler_options.proposal_distribution",
+    "signatures": [
+      "'rand_multivariate_normal'"
+    ],
+    "summary": "Use a multivariate normal proposal distribution.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4330"
+    ],
+    "value": {
+      "value": "rand_multivariate_normal",
+      "token_kind": "quoted",
+      "insert_text": "'rand_multivariate_normal'",
+      "case_sensitive": true,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": false,
+      "description": "Use a multivariate normal proposal distribution.",
+      "status": "documented",
+      "applicability": "Applies when `posterior_sampling_method='random_walk_metropolis_hastings'`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4330"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:8849"
+      ],
+      "default": true
+    },
+    "selector": {
+      "option": "posterior_sampling_method",
+      "value": "random_walk_metropolis_hastings"
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:method_of_moments:posterior_sampler_options.proposal_distribution:rand_multivariate_normal:nested_option_value",
+    "name": "rand_multivariate_normal",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "method_of_moments",
+    "slot": "posterior_sampler_options.proposal_distribution",
+    "signatures": [
+      "'rand_multivariate_normal'"
+    ],
+    "summary": "Use a multivariate normal proposal distribution.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4330"
+    ],
+    "value": {
+      "value": "rand_multivariate_normal",
+      "token_kind": "quoted",
+      "insert_text": "'rand_multivariate_normal'",
+      "case_sensitive": true,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": false,
+      "description": "Use a multivariate normal proposal distribution.",
+      "status": "documented",
+      "applicability": "Applies when `posterior_sampling_method='random_walk_metropolis_hastings'`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4330"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:8849"
+      ],
+      "default": true
+    },
+    "selector": {
+      "option": "posterior_sampling_method",
+      "value": "random_walk_metropolis_hastings"
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:estimation:posterior_sampler_options.proposal_distribution:rand_multivariate_student:nested_option_value",
+    "name": "rand_multivariate_student",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "estimation",
+    "slot": "posterior_sampler_options.proposal_distribution",
+    "signatures": [
+      "'rand_multivariate_student'"
+    ],
+    "summary": "Use a multivariate Student proposal distribution.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4330"
+    ],
+    "value": {
+      "value": "rand_multivariate_student",
+      "token_kind": "quoted",
+      "insert_text": "'rand_multivariate_student'",
+      "case_sensitive": true,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": false,
+      "description": "Use a multivariate Student proposal distribution.",
+      "status": "documented",
+      "applicability": "Applies when `posterior_sampling_method='random_walk_metropolis_hastings'`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4330"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:8849"
+      ],
+      "default": false
+    },
+    "selector": {
+      "option": "posterior_sampling_method",
+      "value": "random_walk_metropolis_hastings"
+    },
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:method_of_moments:posterior_sampler_options.proposal_distribution:rand_multivariate_student:nested_option_value",
+    "name": "rand_multivariate_student",
+    "kind": "syntax_value",
+    "contexts": [
+      "nested_option_value"
+    ],
+    "parent": "method_of_moments",
+    "slot": "posterior_sampler_options.proposal_distribution",
+    "signatures": [
+      "'rand_multivariate_student'"
+    ],
+    "summary": "Use a multivariate Student proposal distribution.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:2671",
+      "src/DynareBison.yy:4330"
+    ],
+    "value": {
+      "value": "rand_multivariate_student",
+      "token_kind": "quoted",
+      "insert_text": "'rand_multivariate_student'",
+      "case_sensitive": true,
+      "forms": [
+        "paren_list"
+      ],
+      "signed": false,
+      "description": "Use a multivariate Student proposal distribution.",
+      "status": "documented",
+      "applicability": "Applies when `posterior_sampling_method='random_walk_metropolis_hastings'`.",
+      "grammar_sources": [
+        "src/DynareBison.yy:2671",
+        "src/DynareBison.yy:4330"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:8849"
+      ],
+      "default": false
+    },
+    "selector": {
+      "option": "posterior_sampling_method",
+      "value": "random_walk_metropolis_hastings"
+    },
+    "value_rules": []
+  },
+  {
     "id": "option:ms_estimation:random_function_convergence_criterion:command_option",
     "name": "random_function_convergence_criterion",
     "kind": "option",
@@ -115385,7 +119411,7 @@
             "scalar"
           ],
           "signed": false,
-          "description": "Use an inverse gamma prior distribution.",
+          "description": "Before any shift, this is an alias for `inv_gamma1` (type 1), whose distribution is the square root of type 2.",
           "status": "source_verified",
           "applicability": "",
           "grammar_sources": [
@@ -115404,7 +119430,7 @@
             "scalar"
           ],
           "signed": false,
-          "description": "Use the first inverse gamma prior distribution.",
+          "description": "Before any shift, type 1 inverse gamma is an alias for `inv_gamma`; it is the square root of type 2.",
           "status": "source_verified",
           "applicability": "",
           "grammar_sources": [
@@ -115423,7 +119449,7 @@
             "scalar"
           ],
           "signed": false,
-          "description": "Use the second inverse gamma prior distribution.",
+          "description": "Before any shift, type 2 inverse gamma is the distribution whose square root is type 1.",
           "status": "source_verified",
           "applicability": "",
           "grammar_sources": [
@@ -125191,6 +129217,46 @@
     ]
   },
   {
+    "id": "syntax_value:model:equation_tag:static:equation_tag",
+    "name": "static",
+    "kind": "syntax_value",
+    "contexts": [
+      "equation_tag"
+    ],
+    "parent": "model",
+    "slot": "equation_tag",
+    "signatures": [
+      "static"
+    ],
+    "summary": "Use this equation for the static model and steady-state computation.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:1152"
+    ],
+    "value": {
+      "value": "static",
+      "token_kind": "bare",
+      "insert_text": "static",
+      "case_sensitive": false,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Use this equation for the static model and steady-state computation.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:1152"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:3411"
+      ],
+      "default": false
+    },
+    "value_rules": []
+  },
+  {
     "id": "option:model:static_mfs:command_option",
     "name": "static_mfs",
     "kind": "option",
@@ -127833,7 +131899,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4100"
         ],
-        "value_count": 0,
+        "value_count": 1,
         "value_rules": [
           "NONNEGATIVE_INTEGER"
         ]
@@ -128088,7 +132154,7 @@
         "grammar_sources": [
           "src/DynareBison.yy:4105"
         ],
-        "value_count": 0,
+        "value_count": 1,
         "value_rules": [
           "NONNEGATIVE_INTEGER"
         ]
@@ -129567,17 +133633,16 @@
             "bracket_list"
           ],
           "signed": true,
-          "description": "Positive infinity.",
+          "description": "With the lower endpoint set to `-inf`, this pair selects decile splitting for all analysed variables.",
           "status": "documented",
-          "applicability": "",
+          "applicability": "The effect applies to the complete `[-Inf Inf]` pair, not to this endpoint alone.",
           "grammar_sources": [
             "src/DynareBison.yy:2092",
             "src/DynareBison.yy:2100",
             "src/DynareBison.yy:4535"
           ],
           "manual_sources": [
-            "doc/manual/source/the-model-file.rst:570",
-            "doc/manual/source/the-model-file.rst:77"
+            "doc/manual/source/the-model-file.rst:14690"
           ],
           "default": false
         },
@@ -129590,17 +133655,16 @@
             "bracket_list"
           ],
           "signed": true,
-          "description": "Negative infinity.",
+          "description": "With the upper endpoint set to `inf`, this pair selects decile splitting for all analysed variables.",
           "status": "documented",
-          "applicability": "",
+          "applicability": "The effect applies to the complete `[-Inf Inf]` pair, not to this endpoint alone.",
           "grammar_sources": [
             "src/DynareBison.yy:2094",
             "src/DynareBison.yy:2100",
             "src/DynareBison.yy:4535"
           ],
           "manual_sources": [
-            "doc/manual/source/the-model-file.rst:570",
-            "doc/manual/source/the-model-file.rst:77"
+            "doc/manual/source/the-model-file.rst:14690"
           ],
           "default": false
         },
@@ -129613,17 +133677,16 @@
             "bracket_list"
           ],
           "signed": false,
-          "description": "Positive infinity.",
+          "description": "With the lower endpoint set to `-inf`, this pair selects decile splitting for all analysed variables.",
           "status": "documented",
-          "applicability": "",
+          "applicability": "The effect applies to the complete `[-Inf Inf]` pair, not to this endpoint alone.",
           "grammar_sources": [
             "src/DynareBison.yy:2096",
             "src/DynareBison.yy:2100",
             "src/DynareBison.yy:4535"
           ],
           "manual_sources": [
-            "doc/manual/source/the-model-file.rst:570",
-            "doc/manual/source/the-model-file.rst:77"
+            "doc/manual/source/the-model-file.rst:14690"
           ],
           "default": false
         }
@@ -129660,7 +133723,28 @@
       "forms": [
         "scalar"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Disable early stopping after consecutive increases in residuals.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4191"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:16158"
+          ],
+          "default": false
+        }
+      ],
       "complete": true,
       "gaps": []
     },
@@ -129953,7 +134037,48 @@
       "forms": [
         "scalar"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Print no time-iteration output.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4185"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:16163"
+          ],
+          "default": false
+        },
+        {
+          "value": "2",
+          "token_kind": "integer",
+          "insert_text": "2",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Print time-iteration details.",
+          "status": "documented",
+          "applicability": "",
+          "grammar_sources": [
+            "src/DynareBison.yy:4185"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:16163"
+          ],
+          "default": false
+        }
+      ],
       "complete": true,
       "gaps": []
     },
@@ -130823,7 +134948,7 @@
       "filtered_vars = true"
     ],
     "value_rules": [],
-    "summary": "Enable the `filtered_vars` option.\n\nWhen enabled: Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e. E_{t}{y_{t+1}}.",
+    "summary": "Compute filtered variables and one-step-ahead forecasts for the calibrated smoother.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -130839,14 +134964,16 @@
         "scalar"
       ],
       "signed": false,
-      "description": "Enable the `filtered_vars` option.\n\nWhen enabled: Triggers the computation of the posterior distribution of filtered endogenous variables/one-step ahead forecasts, i.e. E_{t}{y_{t+1}}.",
-      "status": "source_verified",
+      "description": "Compute filtered variables and one-step-ahead forecasts for the calibrated smoother.",
+      "status": "documented",
       "applicability": "",
       "grammar_sources": [
         "src/DynareBison.yy:2104",
         "src/DynareBison.yy:4369"
       ],
-      "manual_sources": [],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:12587"
+      ],
       "default": false
     }
   },
@@ -131503,7 +135630,7 @@
       "analytic_derivation = true"
     ],
     "value_rules": [],
-    "summary": "Enable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+    "summary": "Use analytic derivatives in the identification analysis.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -131519,14 +135646,16 @@
         "scalar"
       ],
       "signed": false,
-      "description": "Enable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+      "description": "Use analytic derivatives in the identification analysis.",
       "status": "source_verified",
       "applicability": "",
       "grammar_sources": [
         "src/DynareBison.yy:2104",
         "src/DynareBison.yy:4801"
       ],
-      "manual_sources": [],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:13520"
+      ],
       "default": false
     }
   },
@@ -132183,7 +136312,7 @@
       "analytic_derivation = true"
     ],
     "value_rules": [],
-    "summary": "Enable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+    "summary": "Use analytic derivatives in the optimal simple rules.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -132199,14 +136328,16 @@
         "scalar"
       ],
       "signed": false,
-      "description": "Enable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+      "description": "Use analytic derivatives in the optimal simple rules.",
       "status": "source_verified",
       "applicability": "",
       "grammar_sources": [
         "src/DynareBison.yy:2104",
         "src/DynareBison.yy:4801"
       ],
-      "manual_sources": [],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:13644"
+      ],
       "default": false
     }
   },
@@ -132263,7 +136394,7 @@
       "analytic_derivation = true"
     ],
     "value_rules": [],
-    "summary": "Enable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+    "summary": "Use analytic derivatives in the sensitivity analysis.",
     "aliases": [],
     "options": [],
     "grammar_sources": [
@@ -132279,14 +136410,16 @@
         "scalar"
       ],
       "signed": false,
-      "description": "Enable the `analytic_derivation` option.\n\nWhen enabled: Triggers estimation with analytic gradient at order=1.",
+      "description": "Use analytic derivatives in the sensitivity analysis.",
       "status": "source_verified",
       "applicability": "",
       "grammar_sources": [
         "src/DynareBison.yy:2104",
         "src/DynareBison.yy:4801"
       ],
-      "manual_sources": [],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:14247"
+      ],
       "default": false
     }
   },
@@ -132769,6 +136902,46 @@
       "manual_sources": [],
       "default": false
     }
+  },
+  {
+    "id": "syntax_value::boolean_literal:true:macro_expression",
+    "name": "true",
+    "kind": "syntax_value",
+    "contexts": [
+      "macro_expression"
+    ],
+    "parent": null,
+    "slot": "boolean_literal",
+    "signatures": [
+      "true"
+    ],
+    "summary": "Boolean value `true`.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/macro/Parser.yy:347"
+    ],
+    "value": {
+      "value": "true",
+      "token_kind": "bare",
+      "insert_text": "true",
+      "case_sensitive": false,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Boolean value `true`.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/macro/Parser.yy:347"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:17543"
+      ],
+      "default": false
+    },
+    "value_rules": []
   },
   {
     "id": "macro_function::trunc:macro_expression",
@@ -135051,6 +139224,46 @@
     "value_rules": []
   },
   {
+    "id": "syntax_value:change_type:target_type:var:command_argument",
+    "name": "var",
+    "kind": "syntax_value",
+    "contexts": [
+      "command_argument"
+    ],
+    "parent": "change_type",
+    "slot": "target_type",
+    "signatures": [
+      "var"
+    ],
+    "summary": "Change the listed names to endogenous variables.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:692"
+    ],
+    "value": {
+      "value": "var",
+      "token_kind": "bare",
+      "insert_text": "var",
+      "case_sensitive": false,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Change the listed names to endogenous variables.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:692"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:341"
+      ],
+      "default": false
+    },
+    "value_rules": []
+  },
+  {
     "id": "operator::var_expectation:model_expression",
     "name": "var_expectation",
     "kind": "operator",
@@ -135400,6 +139613,46 @@
     "value_rules": []
   },
   {
+    "id": "syntax_value:change_type:target_type:varexo:command_argument",
+    "name": "varexo",
+    "kind": "syntax_value",
+    "contexts": [
+      "command_argument"
+    ],
+    "parent": "change_type",
+    "slot": "target_type",
+    "signatures": [
+      "varexo"
+    ],
+    "summary": "Change the listed names to exogenous variables.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:694"
+    ],
+    "value": {
+      "value": "varexo",
+      "token_kind": "bare",
+      "insert_text": "varexo",
+      "case_sensitive": false,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Change the listed names to exogenous variables.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:694"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:341"
+      ],
+      "default": false
+    },
+    "value_rules": []
+  },
+  {
     "id": "declaration::varexo_det:top_level",
     "name": "varexo_det",
     "kind": "declaration",
@@ -135446,6 +139699,46 @@
     "grammar_sources": [
       "src/DynareBison.yy:668"
     ],
+    "value_rules": []
+  },
+  {
+    "id": "syntax_value:change_type:target_type:varexo_det:command_argument",
+    "name": "varexo_det",
+    "kind": "syntax_value",
+    "contexts": [
+      "command_argument"
+    ],
+    "parent": "change_type",
+    "slot": "target_type",
+    "signatures": [
+      "varexo_det"
+    ],
+    "summary": "Change the listed names to deterministic exogenous variables.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:696"
+    ],
+    "value": {
+      "value": "varexo_det",
+      "token_kind": "bare",
+      "insert_text": "varexo_det",
+      "case_sensitive": false,
+      "forms": [
+        "scalar"
+      ],
+      "signed": false,
+      "description": "Change the listed names to deterministic exogenous variables.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:696"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:341"
+      ],
+      "default": false
+    },
     "value_rules": []
   },
   {
@@ -135725,7 +140018,28 @@
       "forms": [
         "scalar"
       ],
-      "choices": [],
+      "choices": [
+        {
+          "value": "0",
+          "token_kind": "integer",
+          "insert_text": "0",
+          "case_sensitive": true,
+          "forms": [
+            "scalar"
+          ],
+          "signed": false,
+          "description": "Use pooled results for real-time plots.",
+          "status": "documented",
+          "applicability": "Has no effect for standard historical plots.",
+          "grammar_sources": [
+            "src/DynareBison.yy:4483"
+          ],
+          "manual_sources": [
+            "doc/manual/source/the-model-file.rst:12328"
+          ],
+          "default": false
+        }
+      ],
       "complete": true,
       "gaps": []
     },

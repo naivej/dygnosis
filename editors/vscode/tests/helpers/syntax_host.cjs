@@ -66,6 +66,33 @@ async function checkSyntax(service, workspaceRoot, evidence, helpers) {
   assert.equal(valuesDocument.getText(), valuesSource, "value provider requests preserve source text");
   evidence.checks.push("native fixed-value hover in active/inactive source, numeric/list/quoted values and documented completion");
 
+  // Guards the editor adapters losing the value range or selecting a same-spelling sense.
+  const written = "parameters p;\nvar y z;\nchange_type(var) p;\nmodel;\n[static] y=0;\n[dynamic] y=0;\nz=0;\nend;\nmoment_calibration;\ny, z, +;\nend;\n@#define FLAG = true\nvar_expectation_model(horizon=1:Inf);\npac_target_info(pm);\ntarget y;\ncomponent z;\nkind dl;\nauxname zaux;\nend;\n";
+  const inactive = written + "@#if 0\n";
+  const roleSource = inactive + written + "@#endif\n";
+  const roleFile = path.join(workspaceRoot, "syntax-written-choices.mod");
+  await writeObservedInput(service, roleFile, roleSource);
+  const roleDocument = await vscode.workspace.openTextDocument(roleFile);
+  await vscode.window.showTextDocument(roleDocument);
+  for (const [prefix, value, meaning] of [
+    ["change_type(", "var", "endogenous variables"],
+    ["[", "static", "steady-state"],
+    ["y, z, ", "+", "[0, Inf]"],
+    ["@#define FLAG = ", "true", "Boolean"],
+    ["horizon=1:", "Inf", "upper"],
+    ["kind ", "dl", "levels"],
+  ]) {
+    const start = written.indexOf(prefix + value) + prefix.length;
+    assert.ok(start >= prefix.length);
+    for (const offset of [start, inactive.length + start]) {
+      await waitFor(async () => {
+        const hovers = await vscode.commands.executeCommand("vscode.executeHoverProvider", roleDocument.uri, roleDocument.positionAt(offset));
+        return hovers?.some(hover => hover.range && roleDocument.getText(hover.range) === value && nativeText([hover]).includes(meaning));
+      }, `native written choice ${prefix}${value} at ${offset}`);
+    }
+  }
+  evidence.checks.push("native written value roles and exact hover ranges in active and inactive source");
+
   await vscode.window.showTextDocument(document);
   const configuration = vscode.workspace.getConfiguration("editor", document.uri);
   const oldSemantic = configuration.inspect("semanticHighlighting.enabled")?.workspaceFolderValue;
