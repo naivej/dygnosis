@@ -347,7 +347,7 @@ pub(super) fn input_schema(tool: &str) -> Arc<serde_json::Map<String, Value>> {
 pub(super) fn advertised_tools(structured: bool) -> Vec<Tool> {
     TOOL_NAMES.iter().map(|&name|{
         let description=match name {
-            "dynare_syntax"=>"Look up Dynare syntax and fixed choices. Use name or search to find forms. Use kind, context and parent to narrow results. For a command option, set parent to the command and option to the option name. For another written position, use parent and slot, such as change_type and target_type. Use either option or slot. With slot, omit kind or set it to syntax_value. For macro booleans, use context=macro_expression and slot=boolean_literal and omit parent. Omit name to list choices. Write numeric names as strings. No model source is needed.",
+            "dynare_syntax"=>"Look up Dynare syntax and fixed choices. Use name or search to find forms. Use kind, context and parent to narrow results. For a command option, set parent to the command and option to the option name. For another written position, use parent and slot, such as change_type and target_type. Search with kind=nested_setting to find nested paths. Use a case-sensitive path as slot, such as optim.NumgradAlgorithm, to get its value rules and selector conditions. Use either option or slot. With slot, omit kind or set it to syntax_value. For macro booleans, use context=macro_expression and slot=boolean_literal and omit parent. Omit name to list choices. Write numeric names as strings. No model source is needed.",
             "dynare_diagnostic_info"=>"Look up diagnostic meaning and correction guidance. An exact code returns its explanation; kind, severity and search return bounded catalog summaries. This catalog does not report problems in a model. No model source is needed.",
             "dynare_diagnose"=>"Check one source with optional analysis choices, or an explicit batch. configured_sources.jobs contains source and analysis for each job and permits repeated roots. job:1, job:2 and later identities key expected_revisions; each job spends the finite root-job allowance. Other batches cannot share analysis. Results distinguish jobs from distinct roots, and retain each partial, failed or unfinished cause. An incomplete zero count is not a clean-model claim.",
             "dynare_model_info"=>"Give a configured model overview or inspect written source. Default summary has effective counts and model kind before transformations. Select analysis for explicit choices and override receipts; source_structure returns written items, guarded directive targets and branch IDs, availability and separate source coverage. Optional file selects one source under the same input policy, without making it an executed include. Other sections are structure, declarations, assignments, model_locals, statements, blocks, sources, includes and scope. Written source-item counts are not effective equation counts.",
@@ -754,6 +754,21 @@ fn syntax(params: &Params, arguments: &Value) -> Result<CallToolResult, rmcp::Er
     let owner = params.option.as_ref().and_then(|option| {
         syntax::option_record(params.parent.as_deref().unwrap_or_default(), option)
     });
+    let written_slot = params
+        .slot
+        .as_deref()
+        .and_then(|slot| syntax::written_slot(params.parent.as_deref(), slot));
+    let slot_settings: Vec<_> = written_slot
+        .into_iter()
+        .flat_map(|slot| slot.settings.iter().copied())
+        .filter(|row| {
+            params.context.as_ref().is_none_or(|context| {
+                row.contexts
+                    .iter()
+                    .any(|known| known.eq_ignore_ascii_case(context))
+            })
+        })
+        .collect();
     let query = SyntaxQuery {
         name: params.name.clone(),
         search: params.search.clone(),
@@ -812,11 +827,30 @@ fn syntax(params: &Params, arguments: &Value) -> Result<CallToolResult, rmcp::Er
             domain.gaps.join("; ")
         ));
     }
+    if params.name.is_none() || found.records.is_empty() {
+        for row in &slot_settings {
+            if let Some(domain) = &row.value_domain
+                && !domain.complete
+            {
+                unresolved.push(format!(
+                    "{}.{}: {}",
+                    row.parent.as_deref().unwrap_or_default(),
+                    row.slot.as_deref().unwrap_or_default(),
+                    domain.gaps.join("; ")
+                ));
+            }
+        }
+        unresolved.sort_unstable();
+        unresolved.dedup();
+    }
     let mut result = ToolResult::new(
         json!({"forms":found.records,"available_contexts":found.available_contexts}),
     );
     if let Some(row) = owner {
         result.data["option_domain"] = domain_summary(row);
+    }
+    if !slot_settings.is_empty() {
+        result.data["slot_domains"] = json!(slot_settings);
     }
     let empty = result.data["forms"].as_array().is_none_or(Vec::is_empty);
     if params.option.is_some() && owner.is_none() {
@@ -833,9 +867,7 @@ fn syntax(params: &Params, arguments: &Value) -> Result<CallToolResult, rmcp::Er
             format!("No reference entry was found for option '{option}' under '{command}'. No values were returned. Check the command and option, or omit option to inspect the command."));
     } else if empty
         && let Some(slot) = params.slot.as_deref()
-        && syntax::slot_values(params.parent.as_deref(), slot)
-            .next()
-            .is_none()
+        && written_slot.is_none()
     {
         let known_slot = syntax::records()
             .iter()
@@ -851,11 +883,28 @@ fn syntax(params: &Params, arguments: &Value) -> Result<CallToolResult, rmcp::Er
             if known_slot && known_parent { "WRONG_CONTEXT" } else { "UNKNOWN_SYNTAX" },
             format!("No written choice was found for slot '{slot}' in the selected construct. Check parent and slot, or omit slot to inspect the construct."),
         );
+    } else if empty && !slot_settings.is_empty() && !unresolved.is_empty() {
+        result.cause(
+            "partial",
+            "VALUE_REFERENCE_INCOMPLETE",
+            format!(
+                "Returned the known value rules. Fixed-choice coverage is unresolved for {}.",
+                unresolved.join(", ")
+            ),
+        );
     } else if empty && params.name.is_some() {
         let name = params.name.as_deref().unwrap_or_default();
+        let details = if slot_settings.is_empty() {
+            "No value facts were returned."
+        } else {
+            "Returned the written slot rules. No matching fixed value was returned."
+        };
         result.cause("refused", if found.known_name {"WRONG_CONTEXT"} else {"UNKNOWN_SYNTAX"}, format!(
-            "No reference form of '{name}' matches kind={}, context={}, parent={}, option={}, slot={}. No value facts were returned. Check these selectors, or omit name to list available forms. A missing reference entry does not establish that Dynare rejects the source.",
+            "No reference form of '{name}' matches kind={}, context={}, parent={}, option={}, slot={}. {details} Check these selectors, or omit name to list available forms. A missing reference entry does not establish that Dynare rejects the source.",
             params.kind.as_deref().unwrap_or("any"),params.context.as_deref().unwrap_or("any"),params.parent.as_deref().unwrap_or("any"),params.option.as_deref().unwrap_or("any"),params.slot.as_deref().unwrap_or("any")));
+    } else if empty && !slot_settings.is_empty() {
+        result.data["note"] =
+            json!("Returned the written slot rules. No fixed choices match this query.");
     } else if empty && let Some(slot) = params.slot.as_deref() {
         if let Some(context) = params.context.as_deref()
             && !syntax::slot_values(params.parent.as_deref(), slot).any(|row| {
@@ -1057,6 +1106,8 @@ pub(super) fn page_collections(path: &str, value: &mut Value, pages: &mut Pages,
                     "contexts",
                     "grammar_sources",
                     "manual_sources",
+                    "runtime_sources",
+                    "applicability",
                     "open_rules",
                     "gaps",
                     "value_rules",
@@ -1223,6 +1274,70 @@ mod tests {
     }
 
     #[test]
+    fn nested_paths_expose_scoped_conditions_and_open_rules() {
+        let path = "posterior_sampler_options.optim.NumgradAlgorithm";
+        let tarb = call(
+            "dynare_syntax",
+            json!({"parent":"estimation","slot":path,"name":"3"}),
+        );
+        assert_eq!(tarb["outcome"]["status"], "ok");
+        let conditions = &tarb["data"]["forms"][0]["applicability"][0];
+        assert_eq!(conditions[0]["option"], "posterior_sampling_method");
+        assert_eq!(
+            conditions[1],
+            json!({"option":"mode_compute","value":"4","scope":"posterior_sampler_options"})
+        );
+        let proposal = call(
+            "dynare_syntax",
+            json!({"parent":"estimation","slot":"posterior_sampler_options.proposal_distribution","name":"rand_multivariate_student"}),
+        );
+        assert_eq!(
+            proposal["data"]["forms"][0]["applicability"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        for parent in ["steady", "check"] {
+            let open = call(
+                "dynare_syntax",
+                json!({"parent":parent,"slot":"fsolve_options"}),
+            );
+            assert_eq!(open["outcome"]["status"], "ok", "{open}");
+            assert_eq!(open["data"]["forms"], json!([]));
+            assert_eq!(
+                open["data"]["slot_domains"][0]["value_domain"]["kind"],
+                "open"
+            );
+        }
+        let partial = call(
+            "dynare_syntax",
+            json!({"parent":"estimation","slot":"particle_filter_options.posterior_sampler"}),
+        );
+        let unknown = call(
+            "dynare_syntax",
+            json!({"parent":"steady","slot":"fsolve_options","name":"unlisted_value"}),
+        );
+        assert_eq!(unknown["outcome"]["status"], "refused");
+        assert!(
+            unknown["outcome"]["reasons"][0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Returned the written slot rules.")
+        );
+        assert_eq!(
+            unknown["data"]["slot_domains"][0]["value_domain"]["kind"],
+            "open"
+        );
+        assert_eq!(
+            partial["outcome"]["reasons"][0]["code"],
+            "VALUE_REFERENCE_INCOMPLETE"
+        );
+        let wrong = call("dynare_syntax", json!({"parent":"osr","slot":path}));
+        assert_eq!(wrong["outcome"]["reasons"][0]["code"], "WRONG_CONTEXT");
+    }
+
+    #[test]
     fn option_value_empty_queries_explain_filters_and_open_domains() {
         // Guards reporting an empty filtered page as an option with no fixed choices.
         let filtered = call(
@@ -1292,28 +1407,32 @@ mod tests {
     }
 
     #[test]
-    fn option_value_gaps_and_changed_selector_have_distinct_outcomes() {
-        // Guards a known reference gap becoming a clean empty result, or a continuation changing its owner.
-        let gap = call(
-            "dynare_syntax",
-            json!({"parent":"occbin_setup","option":"simul_max_check_ahead_periods","page_size":1}),
-        );
-        assert_eq!(gap["outcome"]["status"], "partial", "{gap}");
-        assert_eq!(
-            gap["outcome"]["reasons"][0]["code"],
-            "VALUE_REFERENCE_INCOMPLETE"
-        );
-        assert!(
-            gap["outcome"]["reasons"][0]["message"]
-                .as_str()
-                .unwrap()
-                .contains("INT_NUMBER")
-        );
-        assert!(
-            gap["data"]["option_domain"]["gaps"]
-                .as_array()
-                .is_some_and(|gaps| !gaps.is_empty())
-        );
+    fn occbin_limits_are_open_and_continuations_keep_their_selector() {
+        // Guards publishing the runtime default as a written choice or a reference gap.
+        for (parent, option) in [
+            ("occbin_setup", "simul_max_check_ahead_periods"),
+            ("occbin_solver", "simul_max_check_ahead_periods"),
+            ("occbin_setup", "smoother_max_check_ahead_periods"),
+            ("occbin_setup", "likelihood_max_check_ahead_periods"),
+        ] {
+            let result = call("dynare_syntax", json!({"parent":parent,"option":option}));
+            assert_eq!(result["outcome"]["status"], "ok", "{result}");
+            assert_eq!(result["data"]["option_domain"]["kind"], "open");
+            assert!(
+                result["data"]["forms"].as_array().unwrap().is_empty(),
+                "{result}"
+            );
+            let description = call(
+                "dynare_syntax",
+                json!({"parent":parent,"name":option,"kind":"option"}),
+            );
+            let summary = description["data"]["forms"][0]["summary"].as_str().unwrap();
+            assert!(
+                summary.contains("Inf") && summary.contains("integer"),
+                "{description}"
+            );
+        }
+        // A continuation cannot change its owner.
         let first = call(
             "dynare_syntax",
             json!({"parent":"pac_model","option":"kind","page_size":1}),

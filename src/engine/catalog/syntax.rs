@@ -4,7 +4,7 @@
 //! without exposing a second enum inventory. The generated records retain
 //! spelling roles separately: `log` in a model and `var(log)` are not one form.
 
-use std::sync::OnceLock;
+use std::{collections::BTreeMap, sync::OnceLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -132,6 +132,10 @@ pub struct SyntaxRecord {
     pub grammar_sources: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub option: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_sources: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub manual_sources: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<SyntaxValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -140,6 +144,11 @@ pub struct SyntaxRecord {
     pub slot: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selector: Option<SyntaxSelector>,
+    /// Alternatives of jointly required conditions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applicability: Vec<Vec<SyntaxSelector>>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub applicability_text: String,
 }
 
 /// A controlling option required for a documented nested choice.
@@ -147,6 +156,9 @@ pub struct SyntaxRecord {
 pub struct SyntaxSelector {
     pub option: String,
     pub value: String,
+    /// Written path of the containing pair list, or the command when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
 /// Exact name and independent narrowing filters. Search is a literal substring.
@@ -177,8 +189,10 @@ pub fn records() -> &'static [SyntaxRecord] {
         let mut rows: Vec<SyntaxRecord> = serde_json::from_str(SYNTAX_DATA)
             .expect("bundled pinned syntax records must deserialize");
         for row in &mut rows {
-            if !matches!(row.kind.as_str(), "option_value" | "syntax_value")
-                && let Some(help) = super::family_help(&row.name)
+            if !matches!(
+                row.kind.as_str(),
+                "option_value" | "syntax_value" | "nested_setting"
+            ) && let Some(help) = super::family_help(&row.name)
             {
                 row.summary = help.to_owned();
             }
@@ -296,19 +310,49 @@ pub(crate) fn option_record(command: &str, option: &str) -> Option<&'static Synt
 }
 
 /// Choices belonging to a proven written position.
-pub(crate) fn slot_values<'a>(
-    parent: Option<&'a str>,
-    slot: &'a str,
-) -> impl Iterator<Item = &'static SyntaxRecord> + 'a {
-    records().iter().filter(move |row| {
-        row.kind == "syntax_value"
-            && row.slot.as_deref() == Some(slot)
-            && match (row.parent.as_deref(), parent) {
-                (Some(known), Some(written)) => known.eq_ignore_ascii_case(written),
-                (None, None) => true,
-                _ => false,
+pub(crate) fn slot_values(
+    parent: Option<&str>,
+    slot: &str,
+) -> impl Iterator<Item = &'static SyntaxRecord> {
+    written_slot(parent, slot)
+        .into_iter()
+        .flat_map(|entry| entry.values.iter().copied())
+}
+
+#[derive(Default)]
+pub(crate) struct WrittenSlot {
+    pub settings: Vec<&'static SyntaxRecord>,
+    values: Vec<&'static SyntaxRecord>,
+}
+
+/// Index the bundled paths once. Nested keys retain their case.
+pub(crate) fn written_slot(parent: Option<&str>, slot: &str) -> Option<&'static WrittenSlot> {
+    type Paths = BTreeMap<&'static str, WrittenSlot>;
+    static SLOTS: OnceLock<BTreeMap<&'static str, Paths>> = OnceLock::new();
+    let slots = SLOTS.get_or_init(|| {
+        let mut slots = BTreeMap::<_, Paths>::new();
+        for row in records() {
+            let Some(slot) = row.slot.as_deref() else {
+                continue;
+            };
+            let entry = slots
+                .entry(row.parent.as_deref().unwrap_or_default())
+                .or_default()
+                .entry(slot)
+                .or_default();
+            match row.kind.as_str() {
+                "syntax_value" => entry.values.push(row),
+                "nested_setting" => entry.settings.push(row),
+                _ => {}
             }
-    })
+        }
+        slots
+    });
+    let parent = parent.unwrap_or_default();
+    slots
+        .get(parent)
+        .or_else(|| slots.get(parent.to_ascii_lowercase().as_str()))?
+        .get(slot)
 }
 
 /// Block spelling and aliases from the same records used by syntax lookup.
@@ -367,31 +411,40 @@ mod tests {
     }
 
     #[test]
-    fn occbin_check_ahead_limits_name_the_matching_mode() {
-        // Guards copying the smoother description onto the simulation option.
+    fn occbin_check_ahead_limits_explain_runtime_defaults() {
+        // Guards confusing the runtime default with an accepted written value.
         for (name, target, parents) in [
             (
                 "simul_max_check_ahead_periods",
-                "simul_check_ahead_periods",
+                "simulation",
                 &["occbin_setup", "occbin_solver"][..],
             ),
             (
                 "smoother_max_check_ahead_periods",
-                "smoother_check_ahead_periods",
+                "smoother",
+                &["occbin_setup"][..],
+            ),
+            (
+                "likelihood_max_check_ahead_periods",
+                "likelihood",
                 &["occbin_setup"][..],
             ),
         ] {
-            assert!(super::super::option_doc(name).contains(target), "{name}");
             for parent in parents {
                 let rows = query(&SyntaxQuery {
                     name: Some(name.into()),
                     parent: Some((*parent).into()),
                     ..Default::default()
                 });
+                let summary = &rows.records.first().expect(name).summary;
+                assert!(summary.contains(target), "{parent}/{name}: {summary}");
                 assert!(
-                    rows.records.first().expect(name).summary.contains(target),
-                    "{parent}/{name}"
+                    summary.contains("Inf") && summary.contains("integer"),
+                    "{parent}/{name}: {summary}"
                 );
+                if *parent == "occbin_solver" {
+                    assert!(summary.contains("occbin_setup"), "{summary}");
+                }
             }
         }
     }

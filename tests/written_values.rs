@@ -220,3 +220,205 @@ async fn nested_values_require_their_own_written_selector_for_completion() {
             .any(|item| item.kind == Some(CompletionItemKind::ENUM_MEMBER))
     );
 }
+
+#[tokio::test]
+async fn tarb_optimizer_uses_the_sampler_pair_selector() {
+    // The command's optimizer does not control the nested TaRB optimizer.
+    let source = "estimation(mode_compute=5,posterior_sampling_method='tailored_random_block_metropolis_hastings',posterior_sampler_options=('optim',('NumgradAlgorithm',|3),'mode_compute',4));";
+    for source in [source.to_owned(), format!("@#if 0\n{source}\n@#endif\n")] {
+        let (hover, items) = answers(&source).await;
+        assert!(
+            markdown(&hover.unwrap()).contains("posterior_sampler_options.optim.NumgradAlgorithm")
+        );
+        let item = items
+            .iter()
+            .find(|item| item.label == "3" && item.kind == Some(CompletionItemKind::ENUM_MEMBER))
+            .unwrap();
+        let Some(CompletionTextEdit::Edit(edit)) = &item.text_edit else {
+            panic!("Expected a literal replacement")
+        };
+        assert_eq!(edit.new_text, "3");
+        assert_eq!(edit.range.end.character - edit.range.start.character, 1);
+    }
+    let (_, items) = answers("estimation(mode_compute=4,posterior_sampling_method='tailored_random_block_metropolis_hastings',posterior_sampler_options=('mode_compute',5,'optim',('NumgradAlgorithm',|3)));").await;
+    assert!(
+        !items
+            .iter()
+            .any(|item| item.kind == Some(CompletionItemKind::ENUM_MEMBER))
+    );
+}
+
+#[tokio::test]
+async fn nested_reference_distinguishes_optimizer_sequences_and_inheritance() {
+    // The initial estimation zero suppresses later steps. The moments zero does not.
+    for (source, expected) in [
+        (
+            "estimation(mode_compute=2,additional_optimizer_steps=[3:5],optim=('NumgradAlgorithm',|3));",
+            true,
+        ),
+        (
+            "estimation(mode_compute=0,additional_optimizer_steps=[4],optim=('NumgradAlgorithm',|3));",
+            false,
+        ),
+        (
+            "estimation(mode_compute=2,additional_optimizer_steps=[4],mh_posterior_mode_estimation,optim=('NumgradAlgorithm',|3));",
+            false,
+        ),
+        (
+            "method_of_moments(mode_compute=0,additional_optimizer_steps=[4],optim=('NumgradAlgorithm',|3));",
+            true,
+        ),
+        (
+            "estimation(mode_compute=5,posterior_sampling_method='tailored_random_block_metropolis_hastings',posterior_sampler_options=('mode_compute',4),optim=('NumgradAlgorithm',|3));",
+            true,
+        ),
+        (
+            "estimation(mode_compute=5,posterior_sampling_method='tailored_random_block_metropolis_hastings',posterior_sampler_options=('mode_compute',4,'optim',('TolFun',1e-6)),optim=('NumgradAlgorithm',|3));",
+            false,
+        ),
+    ] {
+        let (_, items) = answers(source).await;
+        assert_eq!(items.iter().any(|item| item.label == "3" && item.kind == Some(CompletionItemKind::ENUM_MEMBER)), expected, "{source}");
+    }
+}
+
+#[tokio::test]
+async fn nested_completion_proves_selector_spelling_and_written_form() {
+    // Guards false applicability from skipped punctuation, case, and flag syntax.
+    for (source, label, expected) in [
+        (
+            "estimation(mode_compute=2,additional_optimizer_steps=[3 /* bound */ : 5],optim=('NumgradAlgorithm',|3));",
+            "3",
+            true,
+        ),
+        (
+            "estimation(mode_compute=2,additional_optimizer_steps=[4:],optim=('NumgradAlgorithm',|3));",
+            "3",
+            false,
+        ),
+        (
+            "estimation(mode_compute=2,additional_optimizer_steps=[:4],optim=('NumgradAlgorithm',|3));",
+            "3",
+            false,
+        ),
+        (
+            "estimation(mode_compute=2,additional_optimizer_steps=[3::5],optim=('NumgradAlgorithm',|3));",
+            "3",
+            false,
+        ),
+        (
+            "estimation(mode_compute=+4,optim=('NumgradAlgorithm',|3));",
+            "3",
+            false,
+        ),
+        (
+            "estimation(mode_compute=2,additional_optimizer_steps=[,:4],optim=('NumgradAlgorithm',|3));",
+            "3",
+            false,
+        ),
+        (
+            "estimation(mode_compute:=4,optim=('NumgradAlgorithm',|3));",
+            "3",
+            false,
+        ),
+        (
+            "estimation(mode_compute=4,optim=:('NumgradAlgorithm',|3));",
+            "3",
+            false,
+        ),
+        (
+            "estimation(posterior_sampling_method='slice',load_mh_file:,posterior_sampler_options=('use_mh_covariance_matrix',|1));",
+            "1",
+            false,
+        ),
+        (
+            "estimation(posterior_sampling_method='tailored_random_block_metropolis_hastings',posterior_sampler_options=('mode_compute',+:4,'optim',('NumgradAlgorithm',|3)));",
+            "3",
+            false,
+        ),
+        (
+            "estimation(posterior_sampling_method='SLICE',posterior_sampler_options=('rotated',|1));",
+            "1",
+            false,
+        ),
+        (
+            "estimation(posterior_sampling_method='slice',load_mh_file=true,posterior_sampler_options=('use_mh_covariance_matrix',|1));",
+            "1",
+            false,
+        ),
+        (
+            "estimation(posterior_sampling_method='slice',load_mh_file,posterior_sampler_options=('use_mh_covariance_matrix',|1));",
+            "1",
+            true,
+        ),
+        (
+            "estimation(posterior_sampling_method='tailored_random_block_metropolis_hastings',posterior_sampler_options=('mode_compute',4,'optim',:('NumgradAlgorithm',|3)));",
+            "3",
+            false,
+        ),
+        (
+            "estimation(posterior_sampling_method='tailored_random_block_metropolis_hastings',posterior_sampler_options=('mode_compute',4.0,'optim',('NumgradAlgorithm',|3)));",
+            "3",
+            true,
+        ),
+    ] {
+        let (_, items) = answers(source).await;
+        assert_eq!(
+            items
+                .iter()
+                .any(|item| item.label == label
+                    && item.kind == Some(CompletionItemKind::ENUM_MEMBER)),
+            expected,
+            "{source}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn sampler_and_particle_values_respect_their_written_pair() {
+    // Quoted strings and string vectors cannot shift the subsequent pair roles.
+    for (source, expected) in [
+        (
+            "estimation(posterior_sampling_method='independent_metropolis_hastings',posterior_sampler_options=('opaque',['x','y'],'proposal_distribution','rand_multivariate_st|udent'));",
+            Some("rand_multivariate_student"),
+        ),
+        (
+            "estimation(filter_algorithm=sis,particle_filter_options=('pruning',tr|ue));",
+            Some("true"),
+        ),
+        (
+            "estimation(filter_algorithm=gf,particle_filter_options=('pruning',tr|ue));",
+            None,
+        ),
+        (
+            "estimation(filter_algorithm=sis,particle_filter_options=('Pruning',tr|ue));",
+            None,
+        ),
+        (
+            "estimation(mode_compute=4,optim=('NumgradAlgorithm',:|3));",
+            None,
+        ),
+        (
+            "estimation(posterior_sampling_method='tailored_random_block_metropolis_hastings',posterior_sampler_options=('mode_compute',4,'mode_compute',5,'optim',('NumgradAlgorithm',|3)));",
+            None,
+        ),
+        (
+            "estimation(mode_compute=4,optim=('NumgradAlgorithm',@{x}3|));",
+            None,
+        ),
+    ] {
+        let (_, items) = answers(source).await;
+        let choices: Vec<_> = items
+            .iter()
+            .filter(|item| item.kind == Some(CompletionItemKind::ENUM_MEMBER))
+            .collect();
+        if let Some(expected) = expected {
+            assert!(
+                choices.iter().any(|item| item.label == expected),
+                "{source}"
+            );
+        } else {
+            assert!(choices.is_empty(), "{source}");
+        }
+    }
+}

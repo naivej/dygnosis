@@ -7,6 +7,9 @@
 - Hover and completion explain more Dynare values in their written context,
   including equation tags, calibration intervals and selected nested options.
 - MCP `dynare_syntax` can look up these values by their command and position.
+- Hover, completion and MCP explain more values in nested optimizer, sampler
+  and particle filter settings. MCP also describes the open `fsolve_options`
+  list. OccBin look-ahead options show their runtime defaults and integer limits.
 - E434 recognizes equivalent VAR left-hand sides with redundant parentheses
   and unary wrappers. Macro-generated `diff()` expressions with distinct
   arguments no longer cause a false duplicate error.

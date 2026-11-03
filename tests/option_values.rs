@@ -82,6 +82,58 @@ fn markdown(hover: Hover) -> String {
 }
 
 #[tokio::test]
+async fn occbin_limits_show_default_without_suggesting_it_as_a_value() {
+    // Guards hiding the runtime default or offering Inf in an integer-only slot.
+    for (command, option, mode) in [
+        (
+            "occbin_setup",
+            "simul_max_check_ahead_periods",
+            "simulation",
+        ),
+        (
+            "occbin_solver",
+            "simul_max_check_ahead_periods",
+            "simulation",
+        ),
+        (
+            "occbin_setup",
+            "smoother_max_check_ahead_periods",
+            "smoother",
+        ),
+        (
+            "occbin_setup",
+            "likelihood_max_check_ahead_periods",
+            "likelihood",
+        ),
+    ] {
+        let (left, right) = option.split_at(option.len() - 3);
+        let key = format!("{command}({left}|{right}=10);");
+        for text in [key.clone(), format!("@#if 0\n{key}\n@#endif\n")] {
+            let help = markdown(
+                hover(&text)
+                    .await
+                    .unwrap_or_else(|| panic!("No hover: {text}")),
+            );
+            assert!(
+                help.contains("Inf") && help.contains("integer") && help.contains(mode),
+                "{text}: {help}"
+            );
+            if command == "occbin_solver" {
+                assert!(help.contains("occbin_setup"), "{help}");
+            }
+        }
+        let value = format!("{command}({option}=|);");
+        assert!(
+            !complete(&value)
+                .await
+                .iter()
+                .any(|item| item.label.eq_ignore_ascii_case("inf")),
+            "{value}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn block_values_explain_their_written_choice_in_inactive_source() {
     // Guards value positions falling through to availability-only hover.
     for (statement, meaning) in [

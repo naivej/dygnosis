@@ -2317,7 +2317,10 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
                 "likelihood_inversion_filter",
                 "Employ the inversion filter of CubaBorda (2019) when estimating the model.",
             ),
-            ("likelihood_max_check_ahead_periods", ""),
+            (
+                "likelihood_max_check_ahead_periods",
+                "The initial runtime default is Inf. Set an integer to cap likelihood look-ahead periods.",
+            ),
             (
                 "likelihood_max_kalman_iterations",
                 "Maximum number of iterations of the outer loop for the piecewise Kalman filter.",
@@ -2377,7 +2380,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "simul_max_check_ahead_periods",
-                "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing simul_check_ahead_periods ever further.",
+                "The initial runtime default is Inf. Set an integer to cap simulation look-ahead periods.",
             ),
             (
                 "simul_maxit",
@@ -2423,7 +2426,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "smoother_max_check_ahead_periods",
-                "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing smoother_check_ahead_periods ever further.",
+                "The initial runtime default is Inf. Set an integer to cap smoother look-ahead periods.",
             ),
             (
                 "smoother_max_number_of_iterations",
@@ -2468,7 +2471,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             (
                 "simul_max_check_ahead_periods",
-                "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing simul_check_ahead_periods ever further.",
+                "The initial runtime default is Inf. Set an integer to cap simulation look-ahead periods. If omitted, the solver can use the limit supplied by occbin_setup.",
             ),
             (
                 "simul_maxit",

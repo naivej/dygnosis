@@ -3,7 +3,7 @@
   "tools": [
     {
       "name": "dynare_syntax",
-      "description": "Look up Dynare syntax and fixed choices. Use name or search to find forms. Use kind, context and parent to narrow results. For a command option, set parent to the command and option to the option name. For another written position, use parent and slot, such as change_type and target_type. Use either option or slot. With slot, omit kind or set it to syntax_value. For macro booleans, use context=macro_expression and slot=boolean_literal and omit parent. Omit name to list choices. Write numeric names as strings. No model source is needed. Read outcome and coverage beside data. Default 25 rows share one response allowance; selection reports counts and continuation. Changed inputs or filters require a new first page. No tool writes files or executes MATLAB/Octave.",
+      "description": "Look up Dynare syntax and fixed choices. Use name or search to find forms. Use kind, context and parent to narrow results. For a command option, set parent to the command and option to the option name. For another written position, use parent and slot, such as change_type and target_type. Search with kind=nested_setting to find nested paths. Use a case-sensitive path as slot, such as optim.NumgradAlgorithm, to get its value rules and selector conditions. Use either option or slot. With slot, omit kind or set it to syntax_value. For macro booleans, use context=macro_expression and slot=boolean_literal and omit parent. Omit name to list choices. Write numeric names as strings. No model source is needed. Read outcome and coverage beside data. Default 25 rows share one response allowance; selection reports counts and continuation. Changed inputs or filters require a new first page. No tool writes files or executes MATLAB/Octave.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -11712,7 +11712,7 @@
         },
         {
           "name": "likelihood_max_check_ahead_periods",
-          "description": "Accepted value: NONNEGATIVE_INTEGER"
+          "description": "The initial runtime default is Inf. Set an integer to cap likelihood look-ahead periods."
         },
         {
           "name": "likelihood_max_kalman_iterations",
@@ -11776,7 +11776,7 @@
         },
         {
           "name": "simul_max_check_ahead_periods",
-          "description": "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing simul_check_ahead_periods ever further."
+          "description": "The initial runtime default is Inf. Set an integer to cap simulation look-ahead periods."
         },
         {
           "name": "simul_maxit",
@@ -11828,7 +11828,7 @@
         },
         {
           "name": "smoother_max_check_ahead_periods",
-          "description": "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing smoother_check_ahead_periods ever further."
+          "description": "The initial runtime default is Inf. Set an integer to cap smoother look-ahead periods."
         },
         {
           "name": "smoother_max_number_of_iterations",
@@ -11875,7 +11875,7 @@
         },
         {
           "name": "simul_max_check_ahead_periods",
-          "description": "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing simul_check_ahead_periods ever further."
+          "description": "The initial runtime default is Inf. Set an integer to cap simulation look-ahead periods. If omitted, the solver can use the limit supplied by occbin_setup."
         },
         {
           "name": "simul_maxit",

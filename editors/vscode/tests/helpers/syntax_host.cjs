@@ -67,7 +67,9 @@ async function checkSyntax(service, workspaceRoot, evidence, helpers) {
   evidence.checks.push("native fixed-value hover in active/inactive source, numeric/list/quoted values and documented completion");
 
   // Guards the editor adapters losing the value range or selecting a same-spelling sense.
-  const written = "parameters p;\nvar y z;\nchange_type(var) p;\nmodel;\n[static] y=0;\n[dynamic] y=0;\nz=0;\nend;\nmoment_calibration;\ny, z, +;\nend;\n@#define FLAG = true\nvar_expectation_model(horizon=1:Inf);\npac_target_info(pm);\ntarget y;\ncomponent z;\nkind dl;\nauxname zaux;\nend;\n";
+  const written = "parameters p;\nvar y z;\nchange_type(var) p;\nmodel;\n[static] y=0;\n[dynamic] y=0;\nz=0;\nend;\nmoment_calibration;\ny, z, +;\nend;\n@#define FLAG = true\nvar_expectation_model(horizon=1:Inf);\npac_target_info(pm);\ntarget y;\ncomponent z;\nkind dl;\nauxname zaux;\nend;\n"
+    + "estimation(mode_compute=5,posterior_sampling_method='tailored_random_block_metropolis_hastings',posterior_sampler_options=('mode_compute',4,'optim',('NumgradAlgorithm',3)));\n"
+    + "occbin_setup(likelihood_max_check_ahead_periods=10);\n";
   const inactive = written + "@#if 0\n";
   const roleSource = inactive + written + "@#endif\n";
   const roleFile = path.join(workspaceRoot, "syntax-written-choices.mod");
@@ -81,6 +83,8 @@ async function checkSyntax(service, workspaceRoot, evidence, helpers) {
     ["@#define FLAG = ", "true", "Boolean"],
     ["horizon=1:", "Inf", "upper"],
     ["kind ", "dl", "levels"],
+    ["'NumgradAlgorithm',", "3", "three-point formula"],
+    ["occbin_setup(", "likelihood_max_check_ahead_periods", "runtime default is Inf"],
   ]) {
     const start = written.indexOf(prefix + value) + prefix.length;
     assert.ok(start >= prefix.length);
@@ -90,6 +94,11 @@ async function checkSyntax(service, workspaceRoot, evidence, helpers) {
         return hovers?.some(hover => hover.range && roleDocument.getText(hover.range) === value && nativeText([hover]).includes(meaning));
       }, `native written choice ${prefix}${value} at ${offset}`);
     }
+  }
+  const nestedOffset = written.indexOf("'NumgradAlgorithm',3") + "'NumgradAlgorithm',".length;
+  for (const offset of [nestedOffset, inactive.length + nestedOffset]) {
+    const completion = await vscode.commands.executeCommand("vscode.executeCompletionItemProvider", roleDocument.uri, roleDocument.positionAt(offset));
+    assert.ok(completion.items.some(item => (typeof item.label === "string" ? item.label : item.label.label) === "3" && String(item.documentation?.value ?? item.documentation).includes("three-point formula")));
   }
   evidence.checks.push("native written value roles and exact hover ranges in active and inactive source");
 

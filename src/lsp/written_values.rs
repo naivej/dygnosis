@@ -7,12 +7,14 @@ use crate::engine::catalog::syntax::{self, SyntaxRecord};
 use crate::engine::language::lexer::Token;
 use std::borrow::Cow;
 
+mod nested;
+
 struct Site<'a> {
     parent: Option<&'a str>,
     slot: &'static str,
     span: Span,
     literal: Cow<'a, str>,
-    selector: Option<&'a str>,
+    nested: Option<nested::Context<'a>>,
     closed: bool,
 }
 
@@ -93,7 +95,7 @@ fn site<'a>(
         return Some(site);
     }
     if let Some(source) = source
-        && let Some(site) = nested_site(inventory, text, byte, completion, source)
+        && let Some(site) = nested::site(inventory, text, byte, completion, source)
     {
         return Some(site);
     }
@@ -139,7 +141,7 @@ fn site<'a>(
             slot: "target_type",
             span,
             literal: text.get(span.start as usize..span.end as usize)?.into(),
-            selector: None,
+            nested: None,
             closed: true,
         });
     }
@@ -193,7 +195,7 @@ fn site<'a>(
             slot: "equation_tag",
             span,
             literal: text.get(span.start as usize..span.end as usize)?.into(),
-            selector: None,
+            nested: None,
             closed: false,
         });
     }
@@ -265,7 +267,7 @@ fn site<'a>(
         slot: "interval",
         span,
         literal: text.get(span.start as usize..span.end as usize)?.into(),
-        selector: None,
+        nested: None,
         closed: false,
     })
 }
@@ -365,192 +367,8 @@ fn macro_site<'a>(
         slot: "boolean_literal",
         span,
         literal: (&text[start..end]).into(),
-        selector: None,
+        nested: None,
         closed: false,
-    })
-}
-
-fn nested_site<'a>(
-    inventory: &SourceInventory,
-    text: &'a str,
-    byte: u32,
-    completion: bool,
-    source: &SourceOptionValue<'a>,
-) -> Option<Site<'a>> {
-    let (slot, key) = match source.option.to_ascii_lowercase().as_str() {
-        "optim" => ("optim.NumgradAlgorithm", "NumgradAlgorithm"),
-        "posterior_sampler_options" => (
-            "posterior_sampler_options.proposal_distribution",
-            "proposal_distribution",
-        ),
-        _ => return None,
-    };
-    let selector = &syntax::slot_values(Some(source.command), slot)
-        .next()?
-        .selector
-        .as_ref()?
-        .option;
-    if source.tokens.len() > 8192 {
-        return None;
-    }
-    let mut tokens = source.tokens;
-    if tokens.first()?.kind != TokenKind::LParen {
-        return None;
-    }
-    tokens = &tokens[1..];
-    if tokens
-        .last()
-        .is_some_and(|token| token.kind == TokenKind::RParen)
-    {
-        tokens = &tokens[..tokens.len() - 1];
-    }
-    let mut begin = 0;
-    let mut depth = 0;
-    let mut pair_key = None;
-    let mut value_start = 0;
-    for at in 0..=tokens.len() {
-        if at % 128 == 0 && crate::engine::control::cancelled() {
-            return None;
-        }
-        if at < tokens.len() {
-            match tokens[at].kind {
-                TokenKind::LParen | TokenKind::LBrack => {
-                    depth += 1;
-                    if depth > 32 {
-                        return None;
-                    }
-                }
-                TokenKind::RParen | TokenKind::RBrack => {
-                    if depth == 0 {
-                        return None;
-                    }
-                    depth -= 1;
-                }
-                _ => {}
-            }
-        }
-        if at == tokens.len() || depth == 0 && tokens[at].kind == TokenKind::Comma {
-            let element = &tokens[begin..at];
-            if let Some(pair_key) = pair_key.take() {
-                if pair_key == key
-                    && let Some(span) = literal_span(element, text, value_start, byte, completion)
-                {
-                    let literal = if let [sign, number] = element
-                        && matches!(sign.kind, TokenKind::Plus | TokenKind::Minus)
-                    {
-                        Cow::Owned(format!("{}{}", sign.text(text), number.text(text)))
-                    } else {
-                        Cow::Borrowed(text.get(span.start as usize..span.end as usize)?)
-                    };
-                    return Some(Site {
-                        parent: Some(source.command),
-                        slot,
-                        span,
-                        literal,
-                        selector: selector_literal(inventory, text, byte, source, selector),
-                        closed: false,
-                    });
-                }
-            } else {
-                let [token] = element else {
-                    return None;
-                };
-                if token.kind != TokenKind::String {
-                    return None;
-                }
-                pair_key = Some(token.text(text).strip_prefix('\'')?.strip_suffix('\'')?);
-                value_start = tokens
-                    .get(at)
-                    .map_or(token.span.end, |token| token.span.end);
-            }
-            begin = at + 1;
-        }
-    }
-    None
-}
-
-fn selector_literal<'a>(
-    inventory: &SourceInventory,
-    text: &'a str,
-    byte: u32,
-    source: &SourceOptionValue<'a>,
-    selector: &str,
-) -> Option<&'a str> {
-    let tokens = source.header;
-    if tokens.len() > 8192 {
-        return None;
-    }
-    let mut depth = 0usize;
-    let mut begin = 0;
-    let mut found = None;
-    for (at, token) in tokens.iter().enumerate() {
-        if at % 128 == 0 && crate::engine::control::cancelled() {
-            return None;
-        }
-        if depth == 0
-            && matches!(
-                token.kind,
-                TokenKind::Comma | TokenKind::RParen | TokenKind::Semi | TokenKind::Eof
-            )
-        {
-            if tokens
-                .get(begin)
-                .is_some_and(|key| key.text(text).eq_ignore_ascii_case(selector))
-            {
-                let [_, equal, value] = &tokens[begin..at] else {
-                    return None;
-                };
-                if found.is_some()
-                    || !matches!(
-                        value.kind,
-                        TokenKind::Ident | TokenKind::Number | TokenKind::String
-                    )
-                    || equal.kind != TokenKind::Eq
-                    || !inventory.literal_value_anchor(
-                        Span {
-                            start: source.anchor_start,
-                            end: value.span.end.max(byte),
-                        },
-                        byte,
-                    )
-                {
-                    return None;
-                }
-                found = Some(value.text(text));
-            }
-            if token.kind != TokenKind::Comma {
-                break;
-            }
-            begin = at + 1;
-            continue;
-        }
-        match token.kind {
-            TokenKind::LParen | TokenKind::LBrack => {
-                depth += 1;
-                if depth > 32 {
-                    return None;
-                }
-            }
-            TokenKind::RParen | TokenKind::RBrack => {
-                depth = depth.checked_sub(1)?;
-            }
-            _ => {}
-        }
-    }
-    found
-}
-
-fn selector_matches(record: &SyntaxRecord, site: &Site<'_>) -> bool {
-    record.selector.as_ref().is_none_or(|selector| {
-        site.selector.is_some_and(|literal| {
-            syntax::option_record(site.parent.unwrap_or_default(), &selector.option)
-                .and_then(|record| record.value_domain.as_ref())
-                .is_some_and(|domain| {
-                    domain.choices.iter().any(|value| {
-                        value.value == selector.value && value.matches_literal(literal)
-                    })
-                })
-        })
     })
 }
 
@@ -562,39 +380,73 @@ pub(super) fn hover(
     index: &LineIndex,
 ) -> Option<Option<Hover>> {
     let site = site(inventory, source, text, byte, false)?;
-    let record = syntax::slot_values(site.parent, site.slot).find(|record| {
-        record
-            .value
-            .as_ref()
-            .is_some_and(|value| value.matches_literal(&site.literal))
-    });
-    if let Some(record) = record {
-        let value = record.value.as_ref()?;
-        let mut help = value.help();
-        if let Some(selector) = &record.selector
-            && !selector_matches(record, &site)
-        {
-            if let Some(actual) = site.selector {
-                help.push_str(&format!(
-                    "\n\nThis command sets `{}={actual}`, so the condition above is not met.",
-                    selector.option
-                ));
-            } else {
-                help.push_str(&format!("\n\nThe written command does not establish one literal `{}` value, so the condition above is not established.", selector.option));
-            }
-        }
-        return Some(Some(markdown_hover(
-            format!(
-                "**`{}: {} = {}`**\n\n{}",
-                site.parent.unwrap_or("macro"),
-                site.slot,
-                value.insert_text,
-                help
-            ),
-            Some(span_range(index, text, site.span)),
-        )));
+    let mut records: Vec<_> = syntax::slot_values(site.parent, site.slot)
+        .filter(|record| {
+            record
+                .value
+                .as_ref()
+                .is_some_and(|value| value.matches_literal(&site.literal))
+        })
+        .collect();
+    if let Some(context) = &site.nested
+        && (records.is_empty() || context.key_site())
+    {
+        records = syntax::written_slot(site.parent, site.slot)?
+            .settings
+            .clone();
     }
-    site.closed.then_some(None)
+    let Some(first) = records.first() else {
+        return site.closed.then_some(None);
+    };
+    let applicable = |record: &&SyntaxRecord| {
+        site.nested
+            .as_ref()
+            .is_none_or(|context| context.applies(record))
+    };
+    let proved = records.iter().any(applicable);
+    let mut descriptions = Vec::new();
+    for record in records
+        .iter()
+        .filter(|record| !proved || applicable(record))
+    {
+        let description = if let Some(value) = &record.value {
+            value.help()
+        } else {
+            nested::setting_help(record)
+        };
+        if !descriptions.contains(&description) {
+            descriptions.push(description);
+        }
+    }
+    if !proved {
+        let status = if let Some(selector) = &first.selector
+            && let Some(actual) = site
+                .nested
+                .as_ref()
+                .and_then(|context| context.written_selector(selector))
+        {
+            format!(
+                "This command sets `{}={actual}`. The written settings do not establish the applicability above.",
+                selector.option
+            )
+        } else {
+            "This command does not establish the selector conditions above.".to_owned()
+        };
+        descriptions.push(status);
+    }
+    let suffix = first
+        .value
+        .as_ref()
+        .map_or_else(String::new, |value| format!(" = {}", value.insert_text));
+    Some(Some(markdown_hover(
+        format!(
+            "**`{}: {}{suffix}`**\n\n{}",
+            site.parent.unwrap_or("macro"),
+            site.slot,
+            descriptions.join("\n\n")
+        ),
+        Some(span_range(index, text, site.span)),
+    )))
 }
 
 pub(super) fn completions(
@@ -611,23 +463,37 @@ pub(super) fn completions(
     {
         return None;
     }
-    // An owner/slot has one controlling selector; resolve it once per request.
-    let mut records = syntax::slot_values(site.parent, site.slot).peekable();
-    if !selector_matches(records.peek()?, &site) {
-        return Some((site.closed, Vec::new()));
-    }
-    let items = records
-        .filter_map(|record| {
-            let value = record.value.as_ref()?;
-            if value.description.is_empty()
-                || matches!(
-                    value.status.as_str(),
-                    "unused" | "undocumented" | "unavailable"
-                )
-            {
-                return None;
+    let mut choices: Vec<(&str, CompletionItem)> = Vec::new();
+    for record in syntax::slot_values(site.parent, site.slot) {
+        let Some(value) = record.value.as_ref() else {
+            continue;
+        };
+        if value.description.is_empty()
+            || matches!(
+                value.status.as_str(),
+                "unused" | "undocumented" | "unavailable"
+            )
+            || site
+                .nested
+                .as_ref()
+                .is_some_and(|context| !context.applies(record))
+        {
+            continue;
+        }
+        let help = value.help();
+        if let Some((_, item)) = choices
+            .iter_mut()
+            .find(|(text, _)| *text == value.insert_text)
+        {
+            if let Some(Documentation::MarkupContent(doc)) = &mut item.documentation {
+                doc.value.push_str("\n\n");
+                doc.value.push_str(&help);
             }
-            Some(CompletionItem {
+            continue;
+        }
+        choices.push((
+            &value.insert_text,
+            CompletionItem {
                 label: value.value.clone(),
                 kind: Some(CompletionItemKind::ENUM_MEMBER),
                 detail: Some(format!(
@@ -637,7 +503,7 @@ pub(super) fn completions(
                 )),
                 documentation: Some(Documentation::MarkupContent(MarkupContent {
                     kind: MarkupKind::Markdown,
-                    value: value.help(),
+                    value: help,
                 })),
                 filter_text: Some(value.insert_text.clone()),
                 text_edit: Some(CompletionTextEdit::Edit(TextEdit {
@@ -645,8 +511,11 @@ pub(super) fn completions(
                     new_text: value.insert_text.clone(),
                 })),
                 ..Default::default()
-            })
-        })
-        .collect();
-    Some((site.closed, items))
+            },
+        ));
+    }
+    Some((
+        site.closed,
+        choices.into_iter().map(|(_, item)| item).collect(),
+    ))
 }

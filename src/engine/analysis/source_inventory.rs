@@ -100,9 +100,11 @@ pub(crate) struct SourceOptionValue<'a> {
     pub option: &'a str,
     pub tokens: &'a [Token],
     pub start: u32,
+    pub key_to_equal: Span,
     /// Retained owner header for selector-dependent nested value help. The
     /// consumer must prove the selector's literal path separately.
     pub header: &'a [Token],
+    pub header_start: u32,
     pub anchor_start: u32,
 }
 
@@ -270,9 +272,14 @@ impl SourceInventory {
                         option: key.text(text),
                         tokens: &all[start + 2..at],
                         start: equal.span.end,
+                        key_to_equal: Span {
+                            start: key.span.end,
+                            end: equal.span.start,
+                        },
                         header: &all[opener + 1
                             ..all.partition_point(|token| token.span.start < item.span.end)],
                         anchor_start: item.selection.start,
+                        header_start: all[opener].span.end,
                     });
                 }
                 if token.kind != TokenKind::Comma {
