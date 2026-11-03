@@ -810,6 +810,169 @@ fn accepted_neighbours() {
 }
 
 #[test]
+fn var_diff_lhs_uses_expanded_equations_for_uniqueness() {
+    // Guards distinct diff calls at one macro source span and real duplicates
+    // with distinct equation tags and source spans.
+    let generated = r#"
+var x y;
+varexo ux uy;
+var_model(model_name=example, eqtags=['aux_x','aux_y']);
+@#define DRIVERS = ["x", "y"]
+model;
+@#for driver in DRIVERS
+    [name='aux_@{driver}']
+    diff(@{driver}) = 0.7*diff(@{driver}(-1))+u@{driver};
+@#endfor
+end;
+"#;
+    let explicit = r#"
+var x y;
+varexo ux uy;
+var_model(model_name=example, eqtags=['aux_x','aux_y']);
+model;
+    [name='aux_x'] diff(x) = 0.7*diff(x(-1))+ux;
+    [name='aux_y'] diff(y) = 0.7*diff(y(-1))+uy;
+end;
+"#;
+    let duplicate = explicit.replace("diff(y) =", "diff(x) =");
+    let wrapped_duplicate = explicit.replace("diff(y) =", "-(diff(x)) =");
+    let binary = pinned_binary();
+    for (source, unique) in [
+        (generated, true),
+        (explicit, true),
+        (&duplicate, false),
+        (&wrapped_duplicate, false),
+    ] {
+        let model = parse(source);
+        let diagnostics = analyze(&model);
+        let duplicate_lhs = "The LHS variables of the VAR model are not unique";
+        assert_eq!(
+            diagnostics
+                .iter()
+                .any(|diag| diag.code == "E434" && diag.message == duplicate_lhs),
+            !unique,
+            "{source}\n{diagnostics:?}"
+        );
+        if unique {
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|diag| diag.severity != Severity::Error),
+                "{source}\n{diagnostics:?}"
+            );
+        }
+        if let Some(binary) = binary.as_deref() {
+            let result = run_preprocessor(
+                source,
+                binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Transform,
+            );
+            let report = format!("{} {}", result.raw_stdout, result.raw_stderr);
+            assert_eq!(result.success, unique, "{source}\n{report}");
+            if !unique {
+                assert!(report.contains(duplicate_lhs), "{report}");
+            }
+        }
+    }
+}
+
+#[test]
+fn var_lhs_uses_constructed_identity() {
+    let binary = pinned_binary();
+    let message = "The LHS variables of the VAR model are not unique";
+    for (lhs, other_lhs, duplicate) in [
+        ("log(x)", "x", true),
+        ("x", "ln(x)", true),
+        ("log(diff(x))", "diff(x)", true),
+        ("log(x)", "diff(x)", false),
+        ("diff((x))", "diff(x)", true),
+        ("diff(+x)", "DIFF(x(0))", true),
+        ("diff(x + 0)", "diff(x)", true),
+        ("diff(x + 0*y(+1))", "diff(x)", true),
+        ("diff(x + 2)", "diff(2 + x)", true),
+        ("diff(log(x))", "diff(ln(x))", true),
+        ("diff(-x)", "diff(x)", false),
+        ("log10(x)", "sin(x)", true),
+        ("sqrt(diff(x))", "diff(x)", true),
+        ("x + 0", "x", true),
+    ] {
+        let source = format!(
+            "var x y; varexo u v;\n\
+             var_model(model_name=example, eqtags=['a','b']);\n\
+             model;\n\
+             [name='a'] {lhs} = 0.7*x(-1)+u;\n\
+             [name='b'] {other_lhs} = 0.7*y(-1)+v;\n\
+             end;"
+        );
+        let diagnostics = analyze(&parse(&source));
+        assert_eq!(
+            diagnostics
+                .iter()
+                .any(|diag| diag.code == "E434" && diag.message == message),
+            duplicate,
+            "{source}\n{diagnostics:?}"
+        );
+        let lsp = dygnosis::server::diagnostics_for("file:///var.mod", &source);
+        let mcp = dynare_diagnose(&source, None, None);
+        assert_eq!(
+            lsp.iter().any(
+                |diag| matches!(&diag.code, Some(NumberOrString::String(code)) if code == "E434")
+                    && diag.message == message
+            ),
+            duplicate,
+            "{source}"
+        );
+        assert_eq!(
+            mcp.iter()
+                .any(|diag| diag.code == "E434" && diag.message == message),
+            duplicate,
+            "{source}"
+        );
+        if let Some(binary) = binary.as_deref() {
+            let result = run_preprocessor(
+                &source,
+                binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Transform,
+            );
+            let report = format!("{} {}", result.raw_stdout, result.raw_stderr);
+            assert_eq!(report.contains(message), duplicate, "{source}\n{report}");
+        }
+    }
+}
+
+#[test]
+fn var_lhs_model_local_is_not_an_endogenous_variable() {
+    let source = "var x y; varexo u v;
+        var_model(model_name=example,eqtags=['a','b']);
+        model;
+        # alias = x;
+        [name='a'] alias = 0.7*x(-1)+u;
+        [name='b'] x = 0.7*y(-1)+v;
+        end;";
+    let message = "you can only have endogenous variables or unary ops on LHS of VAR";
+    assert!(
+        analyze(&parse(source))
+            .iter()
+            .any(|diag| diag.code == "E434" && diag.message == message)
+    );
+    if let Some(binary) = pinned_binary() {
+        let result = run_preprocessor(
+            source,
+            &binary,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Transform,
+        );
+        let report = format!("{} {}", result.raw_stdout, result.raw_stderr);
+        assert!(!result.success && report.contains(message), "{report}");
+    }
+}
+
+#[test]
 fn target_rhs_rewrite_remainder_stays_quiet() {
     let nonlinear = fixture("e193_pac_target_nonlinear_rhs.mod");
     let with_diff = nonlinear.replace("[name='V'] v=x*y;", "[name='V'] v=x*y+diff(z);");

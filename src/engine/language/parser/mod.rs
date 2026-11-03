@@ -10761,6 +10761,13 @@ impl Parser<'_> {
             && eq.tag_twice.is_empty()
             && self.model.parse_issues.len() == issues_before
         {
+            if (!eq.name.is_empty() || eq.tag_map.contains_key("name"))
+                && let Some(lhs) = lhs_expr
+                && let Some(&id) = self.constructed.get(&lhs)
+                && let Some(facts) = self.constructors.var_lhs(id)
+            {
+                self.model.var_lhs.insert(lhs, facts);
+            }
             if let Some((name, span, token)) = endogenous_tag {
                 self.apply_endogenous_tag(name, span, token, stmt_i);
             }

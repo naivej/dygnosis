@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::engine::diagnostics::{Diagnostic, Severity};
+use crate::engine::language::constructor::VarLhs;
 use crate::engine::language::expr::{BinOp, ExprId, ExprKind, UnOp};
 use crate::engine::language::intern::Name;
 use crate::engine::language::model::{
@@ -2035,15 +2036,41 @@ fn check_selected_shape(model: &Model, command: &SemiStructuralCommand) -> Optio
             return Default::default();
         }
         let lhs = equation.lhs_expr?;
-        let lhs_refs = resolved_refs(model, lhs);
+        let facts = model.var_lhs.get(&lhs);
+        let written_refs;
+        let lhs_refs = match facts {
+            Some(VarLhs::Variable(_, reference)) => std::slice::from_ref(reference),
+            Some(VarLhs::Diff(_, references)) => references,
+            _ => {
+                written_refs = resolved_refs(model, lhs)
+                    .into_iter()
+                    .map(|reference| (reference.name, reference.timing))
+                    .collect::<Vec<_>>();
+                &written_refs
+            }
+        };
+        if lhs_refs.iter().any(|&(name, _)| {
+            model.final_kind_or_written_if_excluded(name) == Some("model_local_variable")
+        }) {
+            if matches!(facts, Some(VarLhs::Variable(..))) {
+                return Some(error(
+                    equation.span,
+                    "E434",
+                    "you can only have endogenous variables or unary ops on LHS of VAR",
+                ));
+            }
+            // The original VAR table cannot establish a diff identity through
+            // an unsubstituted model-local variable.
+            return None;
+        }
         let endos: HashSet<_> = lhs_refs
             .iter()
-            .filter(|r| is_endogenous(model, r.name))
-            .map(|r| (r.name, r.timing))
+            .copied()
+            .filter(|&(name, _)| is_endogenous(model, name))
             .collect();
-        let other = lhs_refs.iter().any(|r| {
-            is_exogenous(model, r.name)
-                || model.final_kind_or_written_if_excluded(r.name) == Some("parameters")
+        let other = lhs_refs.iter().any(|&(name, _)| {
+            is_exogenous(model, name)
+                || model.final_kind_or_written_if_excluded(name) == Some("parameters")
         });
         if endos.len() != 1 || other {
             let text = if var {
@@ -2069,7 +2096,7 @@ fn check_selected_shape(model: &Model, command: &SemiStructuralCommand) -> Optio
                 format!("in Equation {tag}. {text}"),
             ));
         }
-        if matches!(model.exprs.get(lhs).kind, ExprKind::Binary { .. }) {
+        if matches!(facts, Some(VarLhs::InvalidShape)) {
             return Some(error(
                 equation.span,
                 "E434",
@@ -2132,10 +2159,11 @@ fn check_selected_shape(model: &Model, command: &SemiStructuralCommand) -> Optio
         if crate::engine::control::cancelled() {
             return Default::default();
         }
-        let Some(id) = equation.lhs_expr else {
+        let Some(VarLhs::Variable(key, _) | VarLhs::Diff(key, _)) =
+            equation.lhs_expr.and_then(|id| model.var_lhs.get(&id))
+        else {
             continue;
         };
-        let key = lhs_identity(model, id);
         if !lhs.insert(key) {
             let text = if var {
                 "The LHS variables of the VAR model are not unique"
@@ -2146,20 +2174,6 @@ fn check_selected_shape(model: &Model, command: &SemiStructuralCommand) -> Optio
         }
     }
     None
-}
-
-fn lhs_identity(model: &Model, id: ExprId) -> String {
-    let node = model.exprs.get(id);
-    match &node.kind {
-        ExprKind::Unary { arg, .. } => lhs_identity(model, *arg),
-        ExprKind::Ident { name, .. } => format!("variable:{}", model.name(*name)),
-        // A transformed diff/log LHS denotes an auxiliary variable. Preserve
-        // the call, while stripping an outer plus/minus like Dynare does.
-        _ => model.source[node.span.start as usize..node.span.end as usize]
-            .chars()
-            .filter(|ch| !ch.is_whitespace())
-            .collect(),
-    }
 }
 
 fn var_expectation_expression_reason(

@@ -6,6 +6,13 @@ use crate::engine::language::intern::Name;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) type NodeId = usize;
+
+#[derive(Clone, Debug)]
+pub(crate) enum VarLhs {
+    Variable(NodeId, (Name, i32)),
+    Diff(NodeId, Box<[(Name, i32)]>),
+    InvalidShape,
+}
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ComplementarityMatch {
     Triple(Name),
@@ -112,6 +119,52 @@ impl Default for ConstructorTree {
 }
 
 impl ConstructorTree {
+    /// Dynare follows unary operations to the operand, except that a diff
+    /// node denotes an auxiliary of its own.
+    pub(crate) fn var_lhs(&self, mut id: NodeId) -> Option<VarLhs> {
+        loop {
+            match &self.nodes[id] {
+                Node::Ident(name, timing, _) => {
+                    return Some(VarLhs::Variable(id, (*name, *timing)));
+                }
+                Node::Builtin("diff", args) => {
+                    return Some(VarLhs::Diff(id, self.var_lhs_diff_refs(args)?));
+                }
+                Node::Neg(arg) | Node::SteadyState(arg) | Node::Expectation(_, arg) => id = *arg,
+                Node::Builtin(_, args) if args.len() == 1 => id = args[0],
+                Node::Opaque(_) | Node::PathNamespace(_) => return None,
+                _ => return Some(VarLhs::InvalidShape),
+            }
+        }
+    }
+
+    fn var_lhs_diff_refs(&self, args: &[NodeId]) -> Option<Box<[(Name, i32)]>> {
+        let mut pending = args.to_vec();
+        let mut seen = HashSet::new();
+        let mut refs = HashSet::new();
+        while let Some(id) = pending.pop() {
+            if crate::engine::control::cancelled() {
+                return None;
+            }
+            if !seen.insert(id) {
+                continue;
+            }
+            match &self.nodes[id] {
+                Node::Ident(name, timing, _) => {
+                    refs.insert((*name, *timing));
+                }
+                Node::Neg(arg) | Node::SteadyState(arg) | Node::Expectation(_, arg) => {
+                    pending.push(*arg)
+                }
+                Node::Binary(_, lhs, rhs) => pending.extend([*lhs, *rhs]),
+                Node::Builtin(_, args) | Node::Call(_, args) => pending.extend(args),
+                Node::Number(_) => {}
+                Node::Opaque(_) | Node::PathNamespace(_) => return None,
+            }
+        }
+        Some(refs.into_iter().collect())
+    }
+
     pub(crate) fn variable(&self, id: NodeId) -> Option<(Name, i32)> {
         match self.nodes[id] {
             Node::Ident(name, timing, _) => Some((name, timing)),

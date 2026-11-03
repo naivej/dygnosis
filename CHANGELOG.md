@@ -7,6 +7,9 @@
 - Hover and completion explain more Dynare values in their written context,
   including equation tags, calibration intervals and selected nested options.
 - MCP `dynare_syntax` can look up these values by their command and position.
+- E434 recognizes equivalent VAR left-hand sides with redundant parentheses
+  and unary wrappers. Macro-generated `diff()` expressions with distinct
+  arguments no longer cause a false duplicate error.
 
 ## v0.11.44
 

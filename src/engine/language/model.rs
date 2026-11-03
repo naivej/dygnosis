@@ -1275,6 +1275,8 @@ pub struct Model {
     pub execution_steps: Vec<ExecutionStep>,
     pub assignment_syntax: HashMap<ExprId, AssignmentSyntax>,
     pub numeric_literals: HashMap<ExprId, f64>,
+    /// Constructed VAR/trend-component LHS facts for named equations.
+    pub(crate) var_lhs: HashMap<ExprId, crate::engine::language::constructor::VarLhs>,
     /// Exact Parse constant spelling, including macro-produced numeric tokens.
     pub(crate) numeric_literal_texts: HashMap<ExprId, String>,
     pub opaque_tokens: HashMap<usize, Vec<crate::engine::language::lexer::Token>>,
