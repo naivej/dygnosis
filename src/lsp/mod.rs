@@ -2807,11 +2807,12 @@ impl Backend {
                 Some(index),
             ) = (&layout, source_navigation_inputs, &display_index)
             {
-                result["source_navigation"] =
-                    crate::engine::preview::source_navigation::source_navigation_json(
+                let (navigation, macro_ranges) =
+                    crate::engine::preview::source_navigation::source_projection_json(
                         &preview.text,
                         &preview.fragments,
                         &cuts,
+                        &include_spans,
                         ordering::check_preview_cancellation,
                         |span| {
                             let segments = origins.as_ref()?.map_segments(span);
@@ -2822,16 +2823,8 @@ impl Backend {
                         },
                         |span| json!(span_range(index, effective_text, span)),
                     )?;
-                ordering::check_preview_cancellation()?;
-                result["macro_ranges"] =
-                    crate::engine::preview::source_navigation::macro_ranges_json(
-                        &preview.text,
-                        &preview.fragments,
-                        &cuts,
-                        &include_spans,
-                        ordering::check_preview_cancellation,
-                        |span| json!(span_range(index, effective_text, span)),
-                    )?;
+                result["source_navigation"] = navigation;
+                result["macro_ranges"] = macro_ranges;
             } else {
                 result["source_navigation"] = json!([]);
                 result["macro_ranges"] = json!([]);

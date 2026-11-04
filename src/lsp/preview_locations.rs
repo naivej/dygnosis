@@ -244,7 +244,41 @@ impl<'a> PreviewLocations<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::preview::source_navigation::take_work;
     use crate::lsp::{model_map::written_range, new_service};
+
+    #[tokio::test]
+    async fn source_preview_shares_preparation_and_skips_unrelated_covers() {
+        let (service, _socket) = new_service();
+        let server = service.inner();
+        let root = Url::parse("untitled:preview-work.mod").unwrap();
+        let text = "@#for i in 1:64\nvar y_@{i};\n@#endfor\nmodel;\n@#for i in 1:64\ny_@{i} = 0;\n@#endfor\nend;\n";
+        server.upsert(root.clone(), text.into(), 1);
+        let args = [json!({"root_uri": root, "layout": "source"})];
+
+        take_work();
+        let result = server.execute("dynare/showEffectiveModel", &args).unwrap();
+        let work = take_work();
+        assert_eq!(result["complete"], true, "{result}");
+        let regions = result["source_navigation"].as_array().unwrap();
+        assert_eq!(
+            regions
+                .iter()
+                .filter(|row| row["kind"] == "identifier")
+                .count(),
+            128
+        );
+        assert!(!result["macro_ranges"].as_array().unwrap().is_empty());
+        assert_eq!((work.split_passes, work.identifier_passes), (1, 1));
+        assert_eq!(work.identifiers, 128);
+        // Each fragment can check one cover without advancing. All other
+        // checks advance the cursor, so a full scan per fragment fails here.
+        assert!(work.gap_cover_checks > 0);
+        assert!(
+            work.gap_cover_checks <= work.fragments + work.identifiers,
+            "{work:?}"
+        );
+    }
 
     #[tokio::test]
     async fn preview_reuses_written_work_and_uses_the_edited_source() {

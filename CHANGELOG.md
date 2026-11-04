@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.11.47
+
+- The Source preview opens and refreshes faster on large models with many
+  macro-generated names.
+
 ## v0.11.46
 
 - Large models with includes can respond sooner when opening or editing a
