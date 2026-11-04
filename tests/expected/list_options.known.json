@@ -2862,7 +2862,7 @@
         "name": "likelihood_inversion_filter"
       },
       {
-        "description": "",
+        "description": "The initial runtime default is Inf. Set an integer to cap likelihood look-ahead periods.",
         "name": "likelihood_max_check_ahead_periods"
       },
       {
@@ -2926,7 +2926,7 @@
         "name": "simul_debug"
       },
       {
-        "description": "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing simul_check_ahead_periods ever further.",
+        "description": "The initial runtime default is Inf. Set an integer to cap simulation look-ahead periods.",
         "name": "simul_max_check_ahead_periods"
       },
       {
@@ -2978,7 +2978,7 @@
         "name": "smoother_inversion_filter"
       },
       {
-        "description": "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing smoother_check_ahead_periods ever further.",
+        "description": "The initial runtime default is Inf. Set an integer to cap smoother look-ahead periods.",
         "name": "smoother_max_check_ahead_periods"
       },
       {
@@ -3025,7 +3025,7 @@
         "name": "simul_debug"
       },
       {
-        "description": "If set to a finite number, it enforces the OccBin algorithm to check ahead only for the maximum number of periods (i.e. when we want agents to be myopic beyond some future period) instead of potentially endogenously increasing simul_check_ahead_periods ever further.",
+        "description": "The initial runtime default is Inf. Set an integer to cap simulation look-ahead periods. If omitted, the solver can use the limit supplied by occbin_setup.",
         "name": "simul_max_check_ahead_periods"
       },
       {
