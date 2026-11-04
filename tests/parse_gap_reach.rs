@@ -1100,16 +1100,28 @@ fn reach_is_honest_at_parse_check_transform_and_write() {
             ));
         }
     }
+    let rows = local_rows();
     for base in [
         BASE.to_string(),
         BASE.replacen("model;", "model_local_variable x; model;", 1),
     ] {
-        for row in local_rows() {
-            let quiet = run_preprocessor(&base, &pp, None, Duration::from_secs(30), row.stage);
-            if !quiet.success || has_code(&base, row.code) {
+        let quiet_diagnostics = analyze(&parse(&base));
+        let mut checked_stages = Vec::new();
+        for row in &rows {
+            if !checked_stages.contains(&row.stage) {
+                checked_stages.push(row.stage);
+                let quiet = run_preprocessor(&base, &pp, None, Duration::from_secs(30), row.stage);
+                if !quiet.success {
+                    failures.push(format!(
+                        "local quiet {:?}: {base}: {}{}",
+                        row.stage, quiet.raw_stdout, quiet.raw_stderr
+                    ));
+                }
+            }
+            if quiet_diagnostics.iter().any(|diag| diag.code == row.code) {
                 failures.push(format!(
-                    "local quiet {}: {}{}",
-                    row.code, quiet.raw_stdout, quiet.raw_stderr
+                    "local quiet {}: {base}: {quiet_diagnostics:?}",
+                    row.code
                 ));
             }
             let source = format!("{base}{}\n", row.tail);

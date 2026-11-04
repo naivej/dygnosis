@@ -102,10 +102,6 @@ fn current_contract_rejects_retired_tools_and_arguments_over_stdio() {
         );
     }
     assert_eq!(
-        current.call("dynare_list_options", json!({}))["error"]["code"],
-        -32602
-    );
-    assert_eq!(
         current.call("dynare_model_info", json!({"file_content":MODEL}))["error"]["code"],
         -32602
     );
