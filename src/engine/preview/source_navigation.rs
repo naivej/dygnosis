@@ -37,29 +37,30 @@ struct Region {
 ///
 /// `location` maps a spliced written span to one verified written_location JSON
 /// value, or `None` when the span is empty, crosses files, or cannot be proven.
-pub(crate) fn source_navigation_json(
+pub(crate) fn source_navigation_json<E>(
     display: &str,
     fragments: &[SourceFragment],
     file_cuts: &[u32],
+    check_cancellation: impl Fn() -> Result<(), E>,
     mut location: impl FnMut(Span) -> Option<Value>,
     mut effective_range: impl FnMut(Span) -> Value,
-) -> Value {
-    let regions = build_regions(display, fragments, file_cuts);
-    Value::Array(
-        regions
-            .into_iter()
-            .enumerate()
-            .filter_map(|(index, region)| {
-                let written_location = location(region.written)?;
-                Some(json!({
-                    "id": format!("r{index}"),
-                    "effective_range": effective_range(region.display),
-                    "written_location": written_location,
-                    "kind": region.kind.as_str(),
-                }))
-            })
-            .collect(),
-    )
+) -> Result<Value, E> {
+    let mut rows = Vec::new();
+    for (index, region) in build_regions(display, fragments, file_cuts, &check_cancellation)?
+        .into_iter()
+        .enumerate()
+    {
+        check_cancellation()?;
+        if let Some(written_location) = location(region.written) {
+            rows.push(json!({
+                "id": format!("r{index}"),
+                "effective_range": effective_range(region.display),
+                "written_location": written_location,
+                "kind": region.kind.as_str(),
+            }));
+        }
+    }
+    Ok(Value::Array(rows))
 }
 
 /// Sorted, non-overlapping display spans for macro-expanded text tinting.
@@ -69,14 +70,15 @@ pub(crate) fn source_navigation_json(
 /// splice segment. Synthetic fragments (`written: None`) are never shaded. A
 /// macro-built identifier is shaded across its whole display span when any of
 /// its fragments is shaded.
-pub(crate) fn macro_display_ranges(
+fn macro_display_ranges<E>(
     display: &str,
     fragments: &[SourceFragment],
     file_cuts: &[u32],
     include_spans: &[Span],
-) -> Vec<Span> {
-    let split = split_copies_at_files(display, fragments, file_cuts);
-    let identifiers = identifier_covers(display, &split, file_cuts);
+    check_cancellation: &impl Fn() -> Result<(), E>,
+) -> Result<Vec<Span>, E> {
+    let split = split_copies_at_files(display, fragments, file_cuts, check_cancellation)?;
+    let identifiers = identifier_covers(display, &split, file_cuts, check_cancellation)?;
     let shaded_fragment = |fragment: &SourceFragment| -> bool {
         let Some(written) = fragment.written else {
             return false;
@@ -92,6 +94,7 @@ pub(crate) fn macro_display_ranges(
     };
     let mut shaded = Vec::new();
     for (id_display, _) in &identifiers {
+        check_cancellation()?;
         let any = split.iter().any(|fragment| {
             let start = fragment.display.start.max(id_display.start);
             let end = fragment.display.end.min(id_display.end);
@@ -102,6 +105,7 @@ pub(crate) fn macro_display_ranges(
         }
     }
     for fragment in &split {
+        check_cancellation()?;
         if !shaded_fragment(fragment) {
             continue;
         }
@@ -111,22 +115,30 @@ pub(crate) fn macro_display_ranges(
             }
         }
     }
-    merge_shaded_ranges(shaded)
+    Ok(merge_shaded_ranges(shaded))
 }
 
-pub(crate) fn macro_ranges_json(
+pub(crate) fn macro_ranges_json<E>(
     display: &str,
     fragments: &[SourceFragment],
     file_cuts: &[u32],
     include_spans: &[Span],
-    effective_range: impl FnMut(Span) -> Value,
-) -> Value {
-    Value::Array(
-        macro_display_ranges(display, fragments, file_cuts, include_spans)
-            .into_iter()
-            .map(effective_range)
-            .collect(),
-    )
+    check_cancellation: impl Fn() -> Result<(), E>,
+    mut effective_range: impl FnMut(Span) -> Value,
+) -> Result<Value, E> {
+    let ranges = macro_display_ranges(
+        display,
+        fragments,
+        file_cuts,
+        include_spans,
+        &check_cancellation,
+    )?;
+    let mut rows = Vec::with_capacity(ranges.len());
+    for span in ranges {
+        check_cancellation()?;
+        rows.push(effective_range(span));
+    }
+    Ok(Value::Array(rows))
 }
 
 fn merge_shaded_ranges(mut ranges: Vec<Span>) -> Vec<Span> {
@@ -145,11 +157,17 @@ fn merge_shaded_ranges(mut ranges: Vec<Span>) -> Vec<Span> {
     out
 }
 
-fn build_regions(display: &str, fragments: &[SourceFragment], file_cuts: &[u32]) -> Vec<Region> {
-    let split = split_copies_at_files(display, fragments, file_cuts);
-    let identifiers = identifier_covers(display, &split, file_cuts);
+fn build_regions<E>(
+    display: &str,
+    fragments: &[SourceFragment],
+    file_cuts: &[u32],
+    check_cancellation: &impl Fn() -> Result<(), E>,
+) -> Result<Vec<Region>, E> {
+    let split = split_copies_at_files(display, fragments, file_cuts, check_cancellation)?;
+    let identifiers = identifier_covers(display, &split, file_cuts, check_cancellation)?;
     let mut leftovers = Vec::new();
     for fragment in &split {
+        check_cancellation()?;
         let Some(written) = fragment.written else {
             continue;
         };
@@ -181,16 +199,18 @@ fn build_regions(display: &str, fragments: &[SourceFragment], file_cuts: &[u32])
         });
     }
     coalesced.sort_by_key(|region| region.display.start);
-    coalesced
+    Ok(coalesced)
 }
 
-fn split_copies_at_files(
+fn split_copies_at_files<E>(
     display: &str,
     fragments: &[SourceFragment],
     file_cuts: &[u32],
-) -> Vec<SourceFragment> {
+    check_cancellation: &impl Fn() -> Result<(), E>,
+) -> Result<Vec<SourceFragment>, E> {
     let mut out = Vec::new();
     for fragment in fragments {
+        check_cancellation()?;
         let Some(written) = fragment.written else {
             out.push(fragment.clone());
             continue;
@@ -246,16 +266,18 @@ fn split_copies_at_files(
             });
         }
     }
-    out
+    Ok(out)
 }
 
-fn identifier_covers(
+fn identifier_covers<E>(
     display: &str,
     fragments: &[SourceFragment],
     file_cuts: &[u32],
-) -> Vec<(Span, Span)> {
+    check_cancellation: &impl Fn() -> Result<(), E>,
+) -> Result<Vec<(Span, Span)>, E> {
     let mut covers = Vec::new();
     for token in tokenize(display) {
+        check_cancellation()?;
         if token.kind != TokenKind::Ident || token.span.is_empty() {
             continue;
         }
@@ -326,7 +348,7 @@ fn identifier_covers(
         }
     }
     covers.sort_by_key(|(display, _)| display.start);
-    covers
+    Ok(covers)
 }
 
 fn subtract_spans(span: Span, covers: &[(Span, Span)]) -> Vec<Span> {
@@ -412,11 +434,15 @@ mod tests {
     use crate::engine::preview::preview_source::source;
     use crate::engine::workspace::Workspace;
 
+    fn active() -> Result<(), ()> {
+        Ok(())
+    }
+
     fn regions(text: &str) -> (String, Vec<Region>) {
         let report = expand_report(text);
         let model = parse(text);
         let layout = source(&report, &model, &[], &[]).expect("source layout");
-        let built = build_regions(&layout.text, &layout.fragments, &[]);
+        let built = build_regions(&layout.text, &layout.fragments, &[], &active).unwrap();
         (layout.text, built)
     }
 
@@ -424,7 +450,8 @@ mod tests {
         let report = expand_report(text);
         let model = parse(text);
         let layout = source(&report, &model, &[], &[]).expect("source layout");
-        let ranges = macro_display_ranges(&layout.text, &layout.fragments, &[], &[]);
+        let ranges =
+            macro_display_ranges(&layout.text, &layout.fragments, &[], &[], &active).unwrap();
         (layout.text, ranges)
     }
 
@@ -444,7 +471,9 @@ mod tests {
         let cuts = ws.source_file_cuts(root);
         let includes = ws.source_include_spans(root);
         let layout = source(&report, &model, &gaps, &[]).expect("source layout");
-        let ranges = macro_display_ranges(&layout.text, &layout.fragments, &cuts, &includes);
+        let ranges =
+            macro_display_ranges(&layout.text, &layout.fragments, &cuts, &includes, &active)
+                .unwrap();
         (layout.text, ranges, includes)
     }
 
@@ -472,6 +501,42 @@ mod tests {
         ranges
             .iter()
             .any(|range| range.start <= span.start && span.end <= range.end)
+    }
+
+    #[test]
+    fn cancelled_source_preparation_stops_before_projecting_locations_or_tint() {
+        let display = "beta_1";
+        let fragments = [SourceFragment {
+            display: Span::new(0, display.len()),
+            written: Some(Span::new(0, display.len())),
+            kind: SourceFragmentKind::Copy,
+            macro_active: true,
+        }];
+        let checks = std::cell::Cell::new(0);
+        let cancel_during_identifiers = || {
+            let count = checks.get() + 1;
+            checks.set(count);
+            (count < 2).then_some(()).ok_or("cancelled")
+        };
+        let locations = source_navigation_json(
+            display,
+            &fragments,
+            &[],
+            cancel_during_identifiers,
+            |_| panic!("cancelled source region reached written projection"),
+            |_| panic!("cancelled source region reached display projection"),
+        );
+        assert_eq!(locations, Err("cancelled"));
+        checks.set(0);
+        let ranges = macro_ranges_json(
+            display,
+            &fragments,
+            &[],
+            &[],
+            cancel_during_identifiers,
+            |_| panic!("cancelled tint reached display projection"),
+        );
+        assert_eq!(ranges, Err("cancelled"));
     }
 
     #[test]

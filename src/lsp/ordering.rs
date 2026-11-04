@@ -1,14 +1,16 @@
 //! Receive-order fences for input commits, without serializing independent reads.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use tokio::sync::watch;
 use tower::Service;
-use tower_lsp::jsonrpc::Request;
+use tower_lsp::jsonrpc::{Error, Id, Request};
+use tower_lsp::lsp_types::{CancelParams, NumberOrString};
 
 #[derive(Default)]
 struct Progress {
@@ -16,6 +18,7 @@ struct Progress {
     last_input: u64,
     completed: u64,
     finished: BTreeSet<u64>,
+    previews: HashMap<Id, Arc<AtomicBool>>,
 }
 
 struct Admission {
@@ -32,7 +35,7 @@ impl Admission {
         }
     }
 
-    fn enter(self: &Arc<Self>, input: bool) -> InputContext {
+    fn enter(self: &Arc<Self>, input: bool, preview: Option<Id>) -> InputContext {
         let mut progress = self.progress.lock().unwrap();
         let prior = if input {
             progress.issued
@@ -47,11 +50,28 @@ impl Admission {
         if input {
             progress.last_input = ticket;
         }
+        let preview = preview.and_then(|id| {
+            let std::collections::hash_map::Entry::Vacant(entry) =
+                progress.previews.entry(id.clone())
+            else {
+                return None;
+            };
+            let cancellation = Arc::new(AtomicBool::new(false));
+            entry.insert(Arc::clone(&cancellation));
+            Some((id, cancellation))
+        });
         InputContext {
             admission: Arc::clone(self),
             prior,
             ticket,
             input,
+            preview,
+        }
+    }
+
+    fn cancel_preview(&self, id: &Id) {
+        if let Some(flag) = self.progress.lock().unwrap().previews.get(id) {
+            flag.store(true, Ordering::Relaxed);
         }
     }
 
@@ -83,10 +103,14 @@ struct InputContext {
     prior: u64,
     ticket: u64,
     input: bool,
+    preview: Option<(Id, Arc<AtomicBool>)>,
 }
 
 impl Drop for InputContext {
     fn drop(&mut self) {
+        if let Some((id, _)) = &self.preview {
+            self.admission.progress.lock().unwrap().previews.remove(id);
+        }
         // Includes invalid parameters, cancellation, and futures dropped by transport.
         self.admission.finish(self.ticket);
     }
@@ -102,6 +126,22 @@ pub(super) async fn ready() {
     if let Ok((admission, prior)) = context {
         admission.wait(prior).await;
     }
+}
+
+/// Stop synchronous preview projection when the transport receives a cancel.
+pub(super) fn check_preview_cancellation() -> Result<(), Error> {
+    let cancelled = INPUT
+        .try_with(|input| {
+            input
+                .preview
+                .as_ref()
+                .is_some_and(|(_, flag)| flag.load(Ordering::Relaxed))
+        })
+        .unwrap_or(false);
+    if cancelled {
+        return Err(Error::request_cancelled());
+    }
+    Ok(())
 }
 
 /// A mutation's state is now visible; outgoing publication need not block reads.
@@ -181,12 +221,17 @@ where
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
-        let cancellation = request.method() == "$/cancelRequest"
+        if request.method() == "$/cancelRequest"
             && request.id().is_none()
-            && request.params().is_some_and(|params| {
-                serde_json::from_value::<tower_lsp::lsp_types::CancelParams>(params.clone()).is_ok()
-            });
-        if cancellation {
+            && let Some(params) = request
+                .params()
+                .and_then(|params| serde_json::from_value::<CancelParams>(params.clone()).ok())
+        {
+            let id = match params.id {
+                NumberOrString::Number(number) => Id::Number(i64::from(number)),
+                NumberOrString::String(text) => Id::String(text),
+            };
+            self.admission.cancel_preview(&id);
             // Registration of prior requests happens synchronously in service.call.
             // Only a valid cancellation notification may bypass saturated handler slots.
             // The returned future owns the task, including if transport drops it unpolled.
@@ -201,7 +246,14 @@ where
             return Box::pin(self.service.call(request));
         }
         // call runs in frame receive order, before handler futures are polled.
-        let input = self.admission.enter(changes_input(&request));
+        let preview = (request.method() == "workspace/executeCommand"
+            && request
+                .params()
+                .and_then(|params| params["command"].as_str())
+                == Some("dynare/showEffectiveModel"))
+        .then(|| request.id().cloned())
+        .flatten();
+        let input = self.admission.enter(changes_input(&request), preview);
         let future = self.service.call(request);
         Box::pin(async move {
             // buffer_unordered admits concurrent futures but polls them in one

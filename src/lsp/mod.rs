@@ -17,6 +17,7 @@ mod comparison_inputs;
 mod document_analysis;
 mod document_context;
 mod option_values;
+mod preview_locations;
 mod source_activity;
 mod source_intelligence;
 mod source_projection;
@@ -63,7 +64,6 @@ use crate::engine::editing::format::{
 use crate::engine::editing::refs::{
     enclosing_paren_has_ident, ident_at, is_legal_ident, option_command_at, option_owner_at,
 };
-use crate::engine::language::expand::{EquationOrigin, OriginFrame};
 use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::language::model::{Decl, Equation, Model};
 use crate::engine::language::span::{LineIndex, Span};
@@ -2191,7 +2191,7 @@ impl Backend {
         )]))
     }
 
-    fn execute(&self, command: &str, arguments: &[Value]) -> Value {
+    fn execute(&self, command: &str, arguments: &[Value]) -> Result<Value> {
         if let Some(root) = arguments
             .first()
             .and_then(|value| value.get("root_uri"))
@@ -2202,21 +2202,28 @@ impl Backend {
             self.lock_inner().workspace_checks.active = Some(root);
             self.workspace_wake.notify_one();
         }
-        let result = match command {
-            "dynare/explainDiagnostic" => explain_command(arguments),
-            "dynare/compareModelSnapshots" => self.compare_snapshot_command(arguments),
-            "dynare/validateComparisonInputs" => {
-                comparison_inputs::validate(&self.lock_inner(), arguments)
-            }
-            "dynare/showEffectiveModel" => self.show_effective_model_command(arguments),
-            "dynare/captureRename" => rename::capture_command(&mut self.lock_inner(), arguments)
-                .unwrap_or_else(rename::refusal_json),
-            "dynare/modelInfo" => self.model_info_command(arguments),
-            "dynare/analysisContext" => self.analysis_context_command(arguments),
-            "dynare/sourceCandidates" => {
-                source_intelligence::candidates(&mut self.lock_inner(), arguments)
-            }
-            _ => json!({"error": format!("unknown command {command}"), "code": "UNKNOWN_COMMAND"}),
+        let result = if command == "dynare/showEffectiveModel" {
+            self.show_effective_model_command(arguments)
+        } else {
+            Ok(match command {
+                "dynare/explainDiagnostic" => explain_command(arguments),
+                "dynare/compareModelSnapshots" => self.compare_snapshot_command(arguments),
+                "dynare/validateComparisonInputs" => {
+                    comparison_inputs::validate(&self.lock_inner(), arguments)
+                }
+                "dynare/captureRename" => {
+                    rename::capture_command(&mut self.lock_inner(), arguments)
+                        .unwrap_or_else(rename::refusal_json)
+                }
+                "dynare/modelInfo" => self.model_info_command(arguments),
+                "dynare/analysisContext" => self.analysis_context_command(arguments),
+                "dynare/sourceCandidates" => {
+                    source_intelligence::candidates(&mut self.lock_inner(), arguments)
+                }
+                _ => {
+                    json!({"error": format!("unknown command {command}"), "code": "UNKNOWN_COMMAND"})
+                }
+            })
         };
         self.lock_inner().bound_workspace_cache();
         result
@@ -2618,7 +2625,7 @@ impl Backend {
         }
     }
 
-    fn show_effective_model_command(&self, arguments: &[Value]) -> Value {
+    fn show_effective_model_command(&self, arguments: &[Value]) -> Result<Value> {
         let Some(uri) = arguments
             .first()
             .and_then(|arg| arg.get("root_uri"))
@@ -2626,20 +2633,25 @@ impl Backend {
             .and_then(|uri| Url::parse(uri).ok())
             .or_else(|| extract_command_uri(arguments))
         else {
-            return json!({"success": false, "message": "Missing or invalid URI argument"});
+            return Ok(json!({"success": false, "message": "Missing or invalid URI argument"}));
         };
         let mut inner = self.lock_inner();
+        ordering::check_preview_cancellation()?;
         if !is_model_root(&uri) {
-            return json!({"success": false, "code":"ROOT_REQUIRED", "message":"Choose a .mod or .dyn owner root for the effective model", "owner_roots":inner.known_owner_roots(&uri)});
+            return Ok(
+                json!({"success": false, "code":"ROOT_REQUIRED", "message":"Choose a .mod or .dyn owner root for the effective model", "owner_roots":inner.known_owner_roots(&uri)}),
+            );
         }
         let Some(revision) = inner.root_revision(&uri) else {
             let analysis = analysis_configuration::metadata(&mut inner, &uri);
-            return json!({"success": false, "code":analysis["cause"]["code"].as_str().unwrap_or("ROOT_NOT_FOUND"),
-                "message":analysis["cause"]["message"].as_str().unwrap_or("The model root is unavailable. Open the root before expanding it."), "analysis":analysis});
+            return Ok(
+                json!({"success": false, "code":analysis["cause"]["code"].as_str().unwrap_or("ROOT_NOT_FOUND"),
+                "message":analysis["cause"]["message"].as_str().unwrap_or("The model root is unavailable. Open the root before expanding it."), "analysis":analysis}),
+            );
         };
         let analysis = analysis_configuration::metadata(&mut inner, &uri);
         let Some(report) = inner.workspace.expand_report_snapshot(uri.as_str()) else {
-            return json!({"success": false, "message": "Document not available"});
+            return Ok(json!({"success": false, "message": "Document not available"}));
         };
         let requested = arguments
             .first()
@@ -2721,12 +2733,25 @@ impl Backend {
                     .unwrap_or_default()
             })
             .unwrap_or_default();
+        let source_navigation_inputs = if complete && requested == Some("source") {
+            Some((
+                inner.workspace.effective_origins(uri.as_str()),
+                inner.workspace.source_file_cuts(uri.as_str()),
+                inner.workspace.source_include_spans(uri.as_str()),
+            ))
+        } else {
+            None
+        };
+        let mut locations = preview_locations::PreviewLocations::new(&inner, &uri);
         let has_heterogeneous = !report.heterogeneous_origins.is_empty();
-        let origins: Vec<Value> = report
+        let origins = report
             .origins
             .iter()
-            .map(|origin| equation_origin_json(&inner.workspace, origin, has_heterogeneous))
-            .collect();
+            .map(|origin| {
+                ordering::check_preview_cancellation()?;
+                Ok(locations.equation_origin(origin, has_heterogeneous))
+            })
+            .collect::<Result<Vec<_>>>()?;
         let mut result = json!({
             "uri": uri.as_str(),
             "root_uri": uri,
@@ -2744,71 +2769,76 @@ impl Backend {
         if matches!(requested, Some("source") | Some("readable")) {
             result["document_symbols"] = json!(document_symbols);
         }
-        result["navigation"] = if complete {
-            let index = LineIndex::new(effective_text);
-            let mut rows = 0;
-            crate::engine::preview::preview_navigation::navigation_json(
-                &report,
-                |span| {
-                    let display_span = match &layout {
-                        // Source clears proven when ranges are short; complete then skips this index.
-                        Some(DisplayLayout::Readable(preview)) => preview.ranges[rows],
-                        Some(DisplayLayout::Source(preview)) => preview.ranges[rows],
-                        None => span,
-                    };
-                    rows += 1;
-                    json!(span_range(&index, effective_text, display_span))
-                },
-                |segment| preview_written_location(&inner, &uri, segment),
-            )
+        let display_index = complete.then(|| LineIndex::new(effective_text));
+        result["navigation"] = if let Some(index) = &display_index {
+            let rows = report
+                .navigation
+                .iter()
+                .enumerate()
+                .map(|(row, occurrence)| {
+                    ordering::check_preview_cancellation()?;
+                    Ok(
+                        crate::engine::preview::preview_navigation::navigation_row_json(
+                            occurrence,
+                            |span| {
+                                let display_span = match &layout {
+                                    // Source clears proven when display ranges are incomplete.
+                                    Some(DisplayLayout::Readable(preview)) => preview.ranges[row],
+                                    Some(DisplayLayout::Source(preview)) => preview.ranges[row],
+                                    None => span,
+                                };
+                                json!(span_range(index, effective_text, display_span))
+                            },
+                            |segment| locations.navigation(segment),
+                        ),
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Value::Array(rows)
         } else {
             json!([])
         };
         if matches!(requested, Some("source")) {
             result["source_navigation_schema_version"] =
                 json!(crate::engine::preview::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION);
-            result["source_navigation"] = if complete {
-                if let Some(DisplayLayout::Source(preview)) = &layout {
-                    let index = LineIndex::new(effective_text);
-                    let file_cuts = inner.workspace.source_file_cuts(uri.as_str());
+            if let (
+                Some(DisplayLayout::Source(preview)),
+                Some((origins, cuts, include_spans)),
+                Some(index),
+            ) = (&layout, source_navigation_inputs, &display_index)
+            {
+                result["source_navigation"] =
                     crate::engine::preview::source_navigation::source_navigation_json(
                         &preview.text,
                         &preview.fragments,
-                        &file_cuts,
+                        &cuts,
+                        ordering::check_preview_cancellation,
                         |span| {
-                            let segments =
-                                inner.workspace.map_effective_segments(uri.as_str(), span);
-                            (segments.len() == 1)
-                                .then(|| preview_written_location(&inner, &uri, &segments[0]))
-                                .flatten()
+                            let segments = origins.as_ref()?.map_segments(span);
+                            match segments.as_slice() {
+                                [segment] => locations.navigation(segment),
+                                _ => None,
+                            }
                         },
-                        |span| json!(span_range(&index, effective_text, span)),
-                    )
-                } else {
-                    json!([])
-                }
-            } else {
-                json!([])
-            };
-            result["macro_ranges"] = if complete {
-                if let Some(DisplayLayout::Source(preview)) = &layout {
-                    let index = LineIndex::new(effective_text);
-                    let file_cuts = inner.workspace.source_file_cuts(uri.as_str());
-                    let include_spans = inner.workspace.source_include_spans(uri.as_str());
+                        |span| json!(span_range(index, effective_text, span)),
+                    )?;
+                ordering::check_preview_cancellation()?;
+                result["macro_ranges"] =
                     crate::engine::preview::source_navigation::macro_ranges_json(
                         &preview.text,
                         &preview.fragments,
-                        &file_cuts,
+                        &cuts,
                         &include_spans,
-                        |span| json!(span_range(&index, effective_text, span)),
-                    )
-                } else {
-                    json!([])
-                }
+                        ordering::check_preview_cancellation,
+                        |span| json!(span_range(index, effective_text, span)),
+                    )?;
             } else {
-                json!([])
-            };
+                result["source_navigation"] = json!([]);
+                result["macro_ranges"] = json!([]);
+            }
         }
+        drop(locations);
+        ordering::check_preview_cancellation()?;
         if !complete {
             result["status"] = json!("incomplete");
             let mut info = self.model_info_reasons(&mut inner, &uri);
@@ -2864,10 +2894,14 @@ impl Backend {
                 "Expansion is partial; unresolved includes, parsing, or macro expansion prevent complete counts and source navigation.".to_owned()
             });
         }
-        if !inner.workspace.input_snapshot_is_current(uri.as_str()) {
-            return json!({"success":false,"code":"INPUT_CHANGED","message":"The model inputs changed; refresh the effective model"});
+        let input_current = inner.workspace.input_snapshot_is_current(uri.as_str());
+        ordering::check_preview_cancellation()?;
+        if !input_current {
+            return Ok(
+                json!({"success":false,"code":"INPUT_CHANGED","message":"The model inputs changed; refresh the effective model"}),
+            );
         }
-        result
+        Ok(result)
     }
 
     fn model_info_reasons(&self, inner: &mut Inner, root: &Url) -> Value {
@@ -3625,7 +3659,7 @@ impl LanguageServer for Backend {
             .and_then(Value::as_str)
             .and_then(|uri| Url::parse(uri).ok());
         self.wait_document_analysis(requested_root.as_ref()).await;
-        Ok(Some(self.execute(&params.command, &params.arguments)))
+        self.execute(&params.command, &params.arguments).map(Some)
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
@@ -4339,40 +4373,6 @@ fn file_url_from_path_key(path_key: &str) -> Option<Url> {
     Url::from_file_path(path).ok()
 }
 
-fn origin_lsp_range(workspace: &Workspace, origin_uri: Option<&str>, span: Span) -> Range {
-    let text = origin_uri
-        .and_then(|u| workspace.get_source(u))
-        .unwrap_or("");
-    let index = LineIndex::new(text);
-    span_range(&index, text, span)
-}
-
-fn preview_written_location(
-    inner: &Inner,
-    root: &Url,
-    segment: &crate::engine::workspace::model_map::WrittenSegment,
-) -> Option<Value> {
-    let key = segment.file.as_deref()?;
-    let text = inner.workspace.get_source(key)?;
-    if segment.span.is_empty() {
-        return None;
-    }
-    let range = crate::lsp::model_map::written_range(text, segment.span)?;
-    let uri = inner
-        .docs
-        .keys()
-        .chain(std::iter::once(root))
-        .find(|uri| crate::engine::workspace::include_resolver::normalize_uri(uri.as_str()) == key)
-        .cloned()
-        .or_else(|| file_url_from_path_key(key))?;
-    if !["file", "untitled"].contains(&uri.scheme()) {
-        return None;
-    }
-    Some(
-        json!({"uri":uri,"range":range,"document_version":inner.document(&uri).map(|doc|doc.version)}),
-    )
-}
-
 fn source_preview_stop_message(
     reason: &crate::engine::language::macro_expand::IncompleteReason,
 ) -> String {
@@ -4434,74 +4434,6 @@ fn incomplete_written_location(
         "range": range,
         "document_version": inner.document(&uri).map(|doc| doc.version),
     })
-}
-
-fn origin_uri_json(path_key: Option<&str>) -> Option<String> {
-    path_key
-        .and_then(file_url_from_path_key)
-        .map(|u| u.to_string())
-}
-
-fn equation_origin_json(
-    workspace: &Workspace,
-    origin: &EquationOrigin,
-    has_heterogeneous: bool,
-) -> Value {
-    let mut obj = serde_json::Map::new();
-    obj.insert("index".into(), json!(origin.index));
-    if has_heterogeneous {
-        obj.insert("scope_index".into(), json!(origin.scope_index));
-        if let Some(dimension) = &origin.dimension {
-            obj.insert("scope".into(), json!("heterogeneous"));
-            obj.insert("dimension".into(), json!(dimension));
-            obj.insert("block_index".into(), json!(origin.block_index));
-        } else {
-            obj.insert("scope".into(), json!("aggregate"));
-        }
-    }
-    if let Some(uri) = origin_uri_json(origin.origin_uri.as_deref()) {
-        obj.insert("origin_uri".into(), json!(uri));
-    }
-    obj.insert(
-        "range".into(),
-        json!(origin_lsp_range(
-            workspace,
-            origin.origin_uri.as_deref(),
-            origin.origin_span,
-        )),
-    );
-    if !origin.origin_frames.is_empty() {
-        let frames: Vec<Value> = origin
-            .origin_frames
-            .iter()
-            .map(|frame| origin_frame_json(workspace, frame))
-            .collect();
-        obj.insert("origin_frames".into(), Value::Array(frames));
-    }
-    Value::Object(obj)
-}
-
-fn origin_frame_json(workspace: &Workspace, frame: &OriginFrame) -> Value {
-    let mut obj = serde_json::Map::new();
-    obj.insert("kind".into(), json!(frame.kind));
-    if let Some(variable) = &frame.variable {
-        obj.insert("variable".into(), json!(variable));
-    }
-    if let Some(value) = &frame.value {
-        obj.insert("value".into(), json!(value));
-    }
-    if let Some(uri) = origin_uri_json(frame.origin_uri.as_deref()) {
-        obj.insert("origin_uri".into(), json!(uri));
-    }
-    obj.insert(
-        "range".into(),
-        json!(origin_lsp_range(
-            workspace,
-            frame.origin_uri.as_deref(),
-            frame.origin_span,
-        )),
-    );
-    Value::Object(obj)
 }
 
 fn shocks_overwrite_doc(

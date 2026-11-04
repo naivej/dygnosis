@@ -1536,7 +1536,12 @@ mod tests {
         let hover = server.hover_at(&pos).unwrap();
         let value = serde_json::to_value(hover).unwrap().to_string();
         assert!(value.contains("Analysis: Alternative (preview)"), "{value}");
-        let response=server.execute("dynare/captureRename",&[json!({"textDocument":{"uri":root},"position":{"line":5,"character":3},"newName":"persistence"})]);
+        let response = server
+            .execute(
+                "dynare/captureRename",
+                &[json!({"textDocument":{"uri":root},"position":{"line":5,"character":3},"newName":"persistence"})],
+            )
+            .unwrap();
         assert_eq!(response["code"], "ANALYSIS_PREVIEW_EDIT_UNSUPPORTED");
         assert!(response.get("edit").is_none());
     }

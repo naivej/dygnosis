@@ -5,6 +5,8 @@
 - Large models with includes can respond sooner when opening or editing a
   file. Dygnosis reuses completed macro expansion work for editor and MCP
   results when the inputs match.
+- **Expand macros** and **Refresh macro expansion** respond faster in large
+  models with macro loops or repeated includes.
 
 ## v0.11.45
 

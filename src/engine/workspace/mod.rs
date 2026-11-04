@@ -396,6 +396,13 @@ struct PendingMacroTrace {
 pub(crate) struct EffectiveOrigins(Arc<SplicedSource>);
 
 impl EffectiveOrigins {
+    pub(crate) fn map_segments(
+        &self,
+        span: Span,
+    ) -> Vec<crate::engine::workspace::model_map::WrittenSegment> {
+        crate::engine::language::expand::map_written_segments(&self.0.segments, span)
+    }
+
     pub(crate) fn map(&self, span: Span) -> Option<(String, Span)> {
         let segments = &self.0.segments;
         // Splicing appends ordered, non-overlapping ranges. Empty evaluation
@@ -2468,6 +2475,18 @@ impl Workspace {
         self.docs.get(key).map(|document| document.source.as_str())
     }
 
+    /// Borrow acquired bytes and any normalized-newline index built for them.
+    pub(crate) fn source_with_cached_index(
+        &self,
+        key: &str,
+    ) -> Option<(&str, Option<&crate::engine::language::span::LineIndex>)> {
+        let document = self.docs.get(key)?;
+        Some((
+            document.source.as_str(),
+            document.source_index.get().map(Arc::as_ref),
+        ))
+    }
+
     /// Whether this workspace represents only caller-supplied map entries.
     pub(crate) fn is_overlay_only(&self) -> bool {
         self.overlay_only
@@ -2817,11 +2836,9 @@ impl Workspace {
         uri: &str,
         span: Span,
     ) -> Vec<crate::engine::workspace::model_map::WrittenSegment> {
-        let Some(key) = self.ensure_loaded(uri) else {
-            return Vec::new();
-        };
-        let spliced = self.spliced_source(&key);
-        crate::engine::language::expand::map_written_segments(&spliced.segments, span)
+        self.effective_origins(uri)
+            .map(|origins| origins.map_segments(span))
+            .unwrap_or_default()
     }
 
     /// Transitively included files (root excluded).

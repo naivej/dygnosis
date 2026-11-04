@@ -47,6 +47,10 @@ impl LineIndex {
         Self { starts }
     }
 
+    pub(crate) fn allocation_bytes(&self) -> usize {
+        self.starts.capacity() * size_of::<u32>()
+    }
+
     pub fn position(&self, src: &str, byte: u32) -> Position {
         let idx = self
             .starts

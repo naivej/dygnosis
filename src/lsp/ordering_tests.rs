@@ -267,6 +267,80 @@ fn symbols(id: i64, uri: &str) -> Value {
     json!({"jsonrpc":"2.0", "id":id, "method":"textDocument/documentSymbol", "params":{"textDocument":{"uri":uri}}})
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancellation_reaches_a_running_preview_checkpoint() {
+    use tower::Service;
+    use tower_lsp::jsonrpc::Request;
+
+    // The inner service provides no cancellation. The admission layer must
+    // signal a preview that is already running and has not yielded.
+    let (entered, started) = tokio::sync::oneshot::channel();
+    let (resume, blocked) = std::sync::mpsc::channel();
+    let mut checkpoint = Some((entered, blocked));
+    let mut service = ordering::OrderedService::new(tower::service_fn(move |request: Request| {
+        let running =
+            (request.method() == "workspace/executeCommand").then(|| checkpoint.take().unwrap());
+        async move {
+            if let Some((entered, blocked)) = running {
+                entered.send(()).unwrap();
+                blocked.recv_timeout(Duration::from_secs(2)).unwrap();
+                return Ok::<_, std::convert::Infallible>(ordering::check_preview_cancellation());
+            }
+            Ok(Ok(()))
+        }
+    }));
+    let preview = Request::build("workspace/executeCommand")
+        .id(2)
+        .params(json!({"command": "dynare/showEffectiveModel"}))
+        .finish();
+    let running = tokio::spawn(service.call(preview));
+    timeout(Duration::from_secs(2), started)
+        .await
+        .unwrap()
+        .unwrap();
+    let cancel = Request::build("$/cancelRequest")
+        .params(json!({"id": 2}))
+        .finish();
+    service.call(cancel).await.unwrap().unwrap();
+    resume.send(()).unwrap();
+    let error = running.await.unwrap().unwrap().unwrap_err();
+    assert_eq!(error, tower_lsp::jsonrpc::Error::request_cancelled());
+}
+
+#[tokio::test]
+async fn cancelled_preview_releases_its_request_id() {
+    // A cancelled preview must return the LSP cancellation error and must
+    // release its cancellation state before the same client reuses the ID.
+    let (mut wire, task, gate) = transport().await;
+    let held = gate.lock().await;
+    let uri = "untitled:cancel-preview.mod";
+    let preview = json!({"jsonrpc":"2.0","id":"preview","method":"workspace/executeCommand",
+        "params":{"command":"dynare/showEffectiveModel","arguments":[{"root_uri":uri}]}});
+    wire.send(&[
+        open(uri, 1, "y"),
+        preview.clone(),
+        json!({"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":"preview"}}),
+    ])
+    .await;
+    let next_preview = async |wire: &mut Wire| loop {
+        let message = wire.next().await;
+        if message["id"] == "preview" && message.get("method").is_none() {
+            break message;
+        }
+    };
+    let cancelled = timeout(Duration::from_secs(2), next_preview(&mut wire))
+        .await
+        .unwrap();
+    assert_eq!(cancelled["error"]["code"], -32800, "{cancelled}");
+    drop(held);
+    wire.send(&[preview]).await;
+    let current = timeout(Duration::from_secs(2), next_preview(&mut wire))
+        .await
+        .unwrap();
+    assert_eq!(current["result"]["complete"], true, "{current}");
+    task.abort();
+}
+
 #[tokio::test]
 async fn cancellation_bypasses_a_dependent_read_wait() {
     let (mut wire, task, gate) = transport().await;
