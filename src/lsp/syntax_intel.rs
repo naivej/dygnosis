@@ -400,12 +400,40 @@ fn head_recovery(text: &str, byte: u32) -> Option<Context> {
         })
 }
 
-pub(crate) fn documentation(record: &SyntaxRecord) -> String {
+pub(crate) fn documentation(record: &SyntaxRecord, hovered: Option<&str>) -> String {
     let mut text = record.summary.clone();
-    if !record.signatures.is_empty() {
+    let mut signatures = record.signatures.iter().filter(|signature| {
+        let signature = signature.trim();
+        let spelling = if record.kind == "macro_directive" {
+            signature.trim_start_matches("@#")
+        } else {
+            signature
+        };
+        hovered != Some(spelling)
+    });
+    if let Some(first) = signatures.next() {
         text.push_str("\n\n```dynare\n");
-        text.push_str(&record.signatures.join("\n"));
+        text.push_str(first);
+        for signature in signatures {
+            text.push('\n');
+            text.push_str(signature);
+        }
         text.push_str("\n```");
+    }
+    text
+}
+
+pub(super) fn value_hover_documentation(
+    owner: &str,
+    slot: &str,
+    literal: &str,
+    reference_form: Option<&str>,
+    description: &str,
+) -> String {
+    let mut text = format!("**`{owner}: {slot}`**\n\n{description}");
+    if let Some(form) = reference_form.filter(|form| *form != literal) {
+        text.push_str("\n\nReference form: ");
+        text.push_str(&super::names::code(form));
     }
     text
 }
@@ -524,7 +552,7 @@ pub(crate) fn written_syntax_help(
                         "function" | "operator" | "macro_function"
                     ) && call)
         })
-        .map(documentation)
+        .map(|record| documentation(record, Some(word)))
         .collect();
     (!docs.is_empty()).then(|| docs.join("\n\n"))
 }
@@ -585,7 +613,7 @@ pub(crate) fn completions(context: &Context) -> Vec<CompletionItem> {
                 },
             ),
             detail: Some(format!("Dynare {}", record.kind.replace('_', " "))),
-            documentation: Some(Documentation::String(documentation(record))),
+            documentation: Some(Documentation::String(documentation(record, None))),
             ..CompletionItem::default()
         })
         .collect()

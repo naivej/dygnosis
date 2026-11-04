@@ -14,7 +14,7 @@ find **Dygnosis**, and choose **Open Help** from its gear or context menu.
 Press `F1` and search for **Dygnosis** to find actions in the **Command
 Palette**. Editor commands depend on the active file. Common actions also
 appear in the editor title bar, the editor context menu, **Outline**,
-**Problems**, and **Dynare workspace checks** in Explorer.
+**Problems**, and **Dynare Workspace** in Explorer.
 
 In **Dygnosis Help**, **Search** finds features, commands, settings and check
 codes; setting links open the matching VS Code Settings entry.
@@ -30,7 +30,7 @@ codes; setting links open the matching VS Code Settings entry.
 | Preview `@#for`, `@#if` and `@#include`, or test `-D` and `exclude_eqs` | **Expand macros**, **Select analysis configuration** | [Inspect macro expansion](effective-model.md) |
 | Catch preprocessor errors and modeling mistakes before MATLAB | **Problems** panel, related locations, **Quick Fix** | [Check the model](diagnostics.md) |
 | Compare model revisions, variants or analysis configurations | **Dygnosis Changes** (**Show model changes**) | [Review model changes](structural-diff.md) |
-| Check all saved `.mod` and `.dyn` models in a project | **Dynare workspace checks** in Explorer | [Check workspace models](workspace-checks.md) |
+| Check all saved `.mod` and `.dyn` models in a project | **Dynare Workspace** in Explorer | [Check workspace models](workspace-checks.md) |
 
 ## Numerical work and agents
 

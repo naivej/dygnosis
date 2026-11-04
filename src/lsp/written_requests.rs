@@ -55,10 +55,12 @@ pub(super) fn hover(source: &SourceDocument, position: Position) -> Option<Optio
                 kind: Some("macro_directive".into()),
                 ..Default::default()
             });
-        return result
-            .records
-            .first()
-            .map(|record| Some(markdown_hover(syntax_intel::documentation(record), range)));
+        return result.records.first().map(|record| {
+            Some(markdown_hover(
+                syntax_intel::documentation(record, Some(word)),
+                range,
+            ))
+        });
     }
     let context = syntax_intel::source_context(&inventory, text, byte, false)?;
     if let Some(description) =
@@ -134,7 +136,7 @@ pub(super) fn hover(source: &SourceDocument, position: Position) -> Option<Optio
                     .iter()
                     .any(|alias| alias.eq_ignore_ascii_case(word))
         })
-        .map(syntax_intel::documentation)
+        .map(|record| syntax_intel::documentation(record, Some(word)))
         .collect();
     (!matches.is_empty()).then(|| Some(markdown_hover(matches.join("\n\n"), range)))
 }

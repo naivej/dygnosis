@@ -1891,7 +1891,7 @@
       "explorer": [
         {
           "id": "dygnosis.workspace",
-          "name": "Dynare workspace checks",
+          "name": "Dynare Workspace",
           "icon": "media/logo_s.png"
         }
       ]

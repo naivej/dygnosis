@@ -12,7 +12,7 @@ Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/item
 - **Read models at a glance**: See `long_name` and TeX labels (`$\beta$`) in hover, completion, and **Outline**, inline evaluated parameter hints (`beta = 1 / 1.04`), semantic highlighting by symbol role and timing (`predetermined` vs. `forward-looking`), and customizable block shading.
 - **Write and refactor faster**: Get context-aware completion and option signature hints across Dynare commands and blocks (including heterogeneous-agent `heterogeneity_dimension`, semi-structural VAR/PAC, OccBin, Ramsey/discretionary policy, and method of moments), format documents, auto-generate commented `shocks` templates, and bulk-fill missing `[name='...']` tags or `long_name` labels.
 - **Compare models structurally**: Diff your working model against Git commits, branches, another `.mod` file, or another analysis configuration in **Dygnosis Changes**—grouped by equations, parameters, priors, and shocks rather than raw line diffs.
-- **Audit workspace models**: Monitor check status across all saved `.mod` and `.dyn` root models in your project from Explorer's **Dynare workspace checks** view.
+- **Audit workspace models**: Monitor check status across all saved `.mod` and `.dyn` root models in your project from Explorer's **Dynare Workspace** view.
 - **Work with AI coding agents**: Connect GitHub Copilot and other MCP clients to Dygnosis's [MCP tools](https://github.com/naivej/dygnosis/blob/main/help/agents.md) and install the [`use-dynare` agent skill](https://github.com/naivej/dygnosis/blob/main/.agents/skills/use-dynare/SKILL.md) via `npx skills add naivej/dygnosis`.
 
 ## Running Models

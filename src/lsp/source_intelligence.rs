@@ -277,8 +277,9 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
         .as_ref()
         .and_then(|lookup| lookup.declaration.as_ref());
     let mut message = if control || overridden.is_some() {
+        let heading = if control { "Macro branch" } else { name };
         format!(
-            "**{name}** · {}",
+            "**{heading}** · {}",
             if state == SourceAvailability::Mixed {
                 "active in some expansions"
             } else {
@@ -1657,17 +1658,14 @@ mod tests {
                 _ => panic!("markdown hover"),
             }));
         }
-        assert!(
-            actual[0]
-                .as_ref()
-                .is_some_and(|text| text.ends_with(" · inactive"))
-                && actual[1]
-                    .as_ref()
-                    .is_some_and(|text| text.ends_with(" · inactive"))
-                && actual[2]
-                    .as_ref()
-                    .is_some_and(|text| text.ends_with(" · active")),
-            "if / else hovers: {actual:?}"
+        assert_eq!(
+            actual.iter().map(Option::as_deref).collect::<Vec<_>>(),
+            [
+                Some("**Macro branch** · inactive"),
+                Some("**Macro branch** · inactive"),
+                Some("**Macro branch** · active"),
+            ],
+            "if / else hovers"
         );
     }
 

@@ -91,7 +91,11 @@ async function checkSyntax(service, workspaceRoot, evidence, helpers) {
     for (const offset of [start, inactive.length + start]) {
       await waitFor(async () => {
         const hovers = await vscode.commands.executeCommand("vscode.executeHoverProvider", roleDocument.uri, roleDocument.positionAt(offset));
-        return hovers?.some(hover => hover.range && roleDocument.getText(hover.range) === value && nativeText([hover]).includes(meaning));
+        return hovers?.some(hover => {
+          const text = nativeText([hover]);
+          return hover.range && roleDocument.getText(hover.range) === value && text.includes(meaning)
+            && !text.includes("\n" + value + "\n```") && !text.includes(" = " + value + "`**");
+        });
       }, `native written choice ${prefix}${value} at ${offset}`);
     }
   }

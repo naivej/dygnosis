@@ -434,16 +434,13 @@ pub(super) fn hover(
         };
         descriptions.push(status);
     }
-    let suffix = first
-        .value
-        .as_ref()
-        .map_or_else(String::new, |value| format!(" = {}", value.insert_text));
     Some(Some(markdown_hover(
-        format!(
-            "**`{}: {}{suffix}`**\n\n{}",
+        syntax_intel::value_hover_documentation(
             site.parent.unwrap_or("macro"),
             site.slot,
-            descriptions.join("\n\n")
+            &site.literal,
+            first.value.as_ref().map(|value| value.insert_text.as_str()),
+            &descriptions.join("\n\n"),
         ),
         Some(span_range(index, text, site.span)),
     )))

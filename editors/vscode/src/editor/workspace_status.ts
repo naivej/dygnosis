@@ -154,8 +154,8 @@ export function workspaceStatusContent(status: WorkspaceStatus): StatusContent {
     tooltip.appendMarkdown(`<table><tbody>${rows.map(([name, count]) => `<tr><td align="left">${name}</td><td align="right">${count}</td></tr>`).join("")}</tbody></table>`);
   }
   for (const note of notes) tooltip.appendMarkdown("\n\n").appendText(note);
-  return { text: `$(${icon}) Dynare workspace: ${label}`, tooltip,
-    accessibilityLabel: [`Dynare workspace: ${label}.`, ...(status.enabled ? rows.map(([name, count]) => `${name}: ${count}.`) : []), ...notes, "Open workspace checks."].join(" ") };
+  return { text: `$(${icon}) Dynare Workspace: ${label}`, tooltip,
+    accessibilityLabel: [`Dynare Workspace: ${label}.`, ...(status.enabled ? rows.map(([name, count]) => `${name}: ${count}.`) : []), ...notes, "Open Dynare Workspace."].join(" ") };
 }
 class WorkspaceItem extends vscode.TreeItem {
   declare label: string;
@@ -269,9 +269,9 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
   const beginBarrier = (): void => { barrier = true; bufferedNotification = undefined; };
   const message = (label: string, icon = "info", detail = label): void => {
     retainedStatus = undefined; affectedRoots.clear();
-    item.text = `$(${icon}) Dynare workspace: ${label}`;
+    item.text = `$(${icon}) Dynare Workspace: ${label}`;
     item.tooltip = new vscode.MarkdownString("**Models in workspace**\n\n").appendText(detail);
-    item.accessibilityInformation = { label: `Dynare workspace: ${label}. Open workspace checks.` };
+    item.accessibilityInformation = { label: `Dynare Workspace: ${label}. Open Dynare Workspace.` };
     item.show(); view.message = detail; view.description = undefined;
     tree.replace([]);
   };
@@ -283,9 +283,9 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
       view.message = undefined; tree.replace([]); return;
     }
     if (!status && retainedStatus) {
-      item.text = "$(sync~spin) Dynare workspace: updating";
+      item.text = "$(sync~spin) Dynare Workspace: updating";
       item.tooltip = new vscode.MarkdownString("**Models in workspace**\n\n").appendText("Updating workspace checks.");
-      item.accessibilityInformation = { label: "Dynare workspace checks are updating. Open workspace checks." };
+      item.accessibilityInformation = { label: "Workspace checks are updating. Open Dynare Workspace." };
       item.show(); view.description = "updating"; view.message = undefined;
       return;
     }
@@ -509,7 +509,7 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
     // Native row actions marshal the item as plain data, without its class prototype.
     if (!record(target) || !record(target.folder) || typeof target.contextValue !== "string" ||
         !["dygnosis.workspaceFolder", "dygnosis.workspaceDirectory"].includes(target.contextValue)) {
-      refuse("Choose a folder in Dynare workspace checks before ignoring it.");
+      refuse("Choose a folder in Dynare Workspace before ignoring it.");
     }
     const filePath = (value: unknown): string | undefined => record(value) && value.scheme === "file" &&
       typeof value.fsPath === "string" && path.isAbsolute(value.fsPath) ? value.fsPath : undefined;

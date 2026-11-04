@@ -135,12 +135,13 @@ async fn occbin_limits_show_default_without_suggesting_it_as_a_value() {
 
 #[tokio::test]
 async fn block_values_explain_their_written_choice_in_inactive_source() {
-    // Guards value positions falling through to availability-only hover.
-    for (statement, meaning) in [
-        ("kind d|d", "first differences"),
-        ("kind d|l", "appears in levels"),
-        ("kind l|l", "stationary component in levels"),
-        ("k|ind dl", "dd, dl or ll"),
+    // Guards bare signature echoes and loss of the expected form on the key.
+    for (statement, meaning, signature) in [
+        ("kind d|d", "first differences", None),
+        ("kind D|D", "first differences", Some("dd")),
+        ("kind d|l", "appears in levels", None),
+        ("kind l|l", "stationary component in levels", None),
+        ("k|ind dl", "dd, dl or ll", Some("kind PAC_TARGET_KIND;")),
     ] {
         let block = format!(
             "pac_target_info(pac);\ntarget y;\ncomponent x;\n{statement};\nauxname xaux;\nend;"
@@ -148,6 +149,14 @@ async fn block_values_explain_their_written_choice_in_inactive_source() {
         for source in [block.clone(), format!("@#if 0\n{block}\n@#endif\n")] {
             let result = markdown(hover(&source).await.unwrap());
             assert!(result.contains(meaning), "{source}: {result}");
+            assert_eq!(
+                result.contains("```dynare"),
+                signature.is_some(),
+                "{result}"
+            );
+            if let Some(signature) = signature {
+                assert!(result.contains(signature), "{result}");
+            }
         }
     }
     for block in ["estimated_params", "priors"] {
@@ -156,9 +165,12 @@ async fn block_values_explain_their_written_choice_in_inactive_source() {
             ("inv_gamma1_|pdf", "equivalent to `inv_gamma_pdf`"),
             ("inv_gamma2_|pdf", "Type 2 inverse-gamma"),
         ] {
-            let source = format!("@#if 0\n{block};\nalpha, {shape}, 1, 0.2;\nend;\n@#endif\n");
-            let result = markdown(hover(&source).await.unwrap());
-            assert!(result.contains(meaning), "{source}: {result}");
+            let source = format!("{block};\nalpha, {shape}, 1, 0.2;\nend;\n");
+            for source in [source.clone(), format!("@#if 0\n{source}@#endif\n")] {
+                let result = markdown(hover(&source).await.unwrap());
+                assert!(result.contains(meaning), "{source}: {result}");
+                assert!(!result.contains("```dynare"), "{result}");
+            }
         }
     }
 }
@@ -191,6 +203,7 @@ async fn fixed_literals_keep_explanations_without_executed_model_facts() {
             }
             let result = markdown(value_hover);
             assert!(result.contains(meaning), "{text}: {result}");
+            assert!(!result.lines().next().unwrap().contains(" = "), "{result}");
             assert!(!result.contains("source is inactive"), "{result}");
         }
     }
@@ -303,7 +316,21 @@ async fn source_ownership_stays_literal_across_branches_comments_and_nested_call
             .await
             .unwrap(),
     );
-    assert!(signed.contains("analytic_derivation_mode = -1"), "{signed}");
+    assert!(
+        signed.contains("identification: analytic_derivation_mode"),
+        "{signed}"
+    );
+    assert!(signed.contains("two-sided finite differences"), "{signed}");
+    assert!(!signed.contains("`-1`"), "{signed}");
+    let alternate = "identification(analytic_derivation_mode=-0|1);";
+    for source in [
+        alternate.to_owned(),
+        format!("@#if 0\n{alternate}\n@#endif\n"),
+    ] {
+        let text = markdown(hover(&source).await.unwrap());
+        assert!(text.contains("two-sided finite differences"), "{text}");
+        assert!(text.contains("Reference form: `-1`"), "{text}");
+    }
     let list = complete("method_of_moments(weighting_matrix=['DI|AGONAL']);").await;
     assert!(
         list.iter()

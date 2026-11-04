@@ -238,12 +238,12 @@ pub(super) fn hover(
         value.forms.iter().any(|form| form == site.form) && value.matches_literal(&site.literal)
     })?;
     Some(markdown_hover(
-        format!(
-            "**`{}: {} = {}`**\n\n{}",
+        syntax_intel::value_hover_documentation(
             site.command,
             site.option,
-            choice.insert_text,
-            choice.help()
+            &site.literal,
+            Some(&choice.insert_text),
+            &choice.help(),
         ),
         Some(span_range(index, text, site.span)),
     ))

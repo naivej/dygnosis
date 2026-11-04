@@ -15,7 +15,7 @@ async function nativeValue(expression) {
 
 const treeRowsExpression = `(() => {
   const panes = [...document.querySelectorAll('.pane')];
-  const pane = panes.find(value => value.textContent.includes('Dynare workspace checks'));
+  const pane = panes.find(value => value.textContent.includes('Dynare Workspace'));
   if (!pane) return [];
   return [...pane.querySelectorAll('.monaco-list-row:not(.monaco-tree-sticky-row)')].filter(row => row.getClientRects().length).map(row => ({
     label: row.querySelector('.label-name')?.textContent.trim() || row.textContent.trim(),
@@ -33,7 +33,7 @@ async function findRows(label) {
 async function rowSelector(label, occurrence = 0) {
   const rows = await findRows(label);
   assert.ok(rows.length > occurrence, `native workspace tree contains ${label} row ${occurrence + 1}; saw ${JSON.stringify(await treeRows())}`);
-  return `(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); const rows=[...pane.querySelectorAll('.monaco-list-row:not(.monaco-tree-sticky-row)')].filter(row=>row.getClientRects().length); return rows.filter(row=>(row.querySelector('.label-name')?.textContent.trim()||row.textContent.trim())===${JSON.stringify(label)})[${occurrence}]; })()`;
+  return `(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare Workspace')); const rows=[...pane.querySelectorAll('.monaco-list-row:not(.monaco-tree-sticky-row)')].filter(row=>row.getClientRects().length); return rows.filter(row=>(row.querySelector('.label-name')?.textContent.trim()||row.textContent.trim())===${JSON.stringify(label)})[${occurrence}]; })()`;
 }
 async function clickRow(label, occurrence = 0, twistie = false) {
   const selector = await rowSelector(label, occurrence);
@@ -41,13 +41,13 @@ async function clickRow(label, occurrence = 0, twistie = false) {
   assert.equal(clicked, true, `native workspace tree can click ${label}`);
 }
 async function scrollWorkspaceTree(deltaY) {
-  const point = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); const list=pane?.querySelector('.monaco-list'); if(!list) return undefined; const box=list.getBoundingClientRect(); return {x:box.x+box.width/2,y:box.y+box.height/2}; })()`);
+  const point = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare Workspace')); const list=pane?.querySelector('.monaco-list'); if(!list) return undefined; const box=list.getBoundingClientRect(); return {x:box.x+box.width/2,y:box.y+box.height/2}; })()`);
   assert.ok(point, "native workspace tree has a scrollable viewport");
   await nativeWorkbench(send => send("Input.dispatchMouseEvent", { type: "mouseWheel", x: point.x, y: point.y, deltaX: 0, deltaY }));
   await new Promise(resolve => setTimeout(resolve, 120));
 }
 async function scrollWorkspaceTreeByViewport(direction = 1) {
-  const height = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); return pane?.querySelector('.monaco-list')?.getBoundingClientRect().height ?? 0; })()`);
+  const height = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare Workspace')); return pane?.querySelector('.monaco-list')?.getBoundingClientRect().height ?? 0; })()`);
   const step = Math.max(1, Math.min(120, Math.floor(height / 2)));
   await scrollWorkspaceTree(step * direction);
 }
@@ -60,7 +60,7 @@ async function revealRow(label, waitFor) {
   }, `native workspace tree scrolls ${label} into view`);
 }
 async function enlargeWorkspaceTreePane() {
-  const layout = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); if(!pane) return undefined; const box=pane.getBoundingClientRect(); const sashes=[...document.querySelectorAll('.monaco-sash')].map(sash=>{const rect=sash.getBoundingClientRect();return {rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},classes:sash.className};}); return {pane:{x:box.x,y:box.y,width:box.width,height:box.height},sashes}; })()`);
+  const layout = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare Workspace')); if(!pane) return undefined; const box=pane.getBoundingClientRect(); const sashes=[...document.querySelectorAll('.monaco-sash')].map(sash=>{const rect=sash.getBoundingClientRect();return {rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},classes:sash.className};}); return {pane:{x:box.x,y:box.y,width:box.width,height:box.height},sashes}; })()`);
   assert.ok(layout?.pane, "native workspace checks pane has a measurable layout");
   const sash = layout.sashes.map(value => ({ ...value, centerY: value.rect.y + value.rect.height / 2 }))
     .filter(value => Math.abs(value.centerY - layout.pane.y) < 24)
@@ -86,7 +86,7 @@ async function scrollWorkspaceTreeToTop(waitFor) {
   // The virtualized list can retain scroll/focus after replacing its rows.
   // A status refresh can temporarily hide it. Native Home reveals its first
   // item after rendering, without changing folder expansion.
-  await waitFor(() => nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); const list=pane?.querySelector('.monaco-list'); if(!list?.getClientRects().length||!list.querySelector('.monaco-list-row')) return false; list.focus(); return list.contains(document.activeElement); })()`),
+  await waitFor(() => nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare Workspace')); const list=pane?.querySelector('.monaco-list'); if(!list?.getClientRects().length||!list.querySelector('.monaco-list-row')) return false; list.focus(); return list.contains(document.activeElement); })()`),
     "native workspace tree becomes visible and receives keyboard focus");
   await nativeWorkbench(async send => {
     await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Home", code: "Home", windowsVirtualKeyCode: 36, nativeVirtualKeyCode: 36 });
@@ -102,8 +102,8 @@ async function scrollWorkspaceTreeToTop(waitFor) {
 async function openExplorer(waitFor) {
   await vscode.commands.executeCommand("workbench.view.explorer");
   await vscode.commands.executeCommand("dygnosis.workspace.focus");
-  await waitFor(async () => (await nativeValue("Boolean([...document.querySelectorAll('.pane')].some(value=>value.textContent.includes('Dynare workspace checks')))")), "workspace checks view is visible in Explorer");
-  const paneState = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); const header=pane?.querySelector('.pane-header'); const box=header?.getBoundingClientRect(); return {expanded:pane?.classList.contains('expanded'),point:box?{x:box.x+box.width/2,y:box.y+box.height/2}:undefined}; })()`);
+  await waitFor(async () => (await nativeValue("Boolean([...document.querySelectorAll('.pane')].some(value=>value.textContent.includes('Dynare Workspace')))")), "workspace checks view is visible in Explorer");
+  const paneState = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare Workspace')); const header=pane?.querySelector('.pane-header'); const box=header?.getBoundingClientRect(); return {expanded:pane?.classList.contains('expanded'),point:box?{x:box.x+box.width/2,y:box.y+box.height/2}:undefined}; })()`);
   if (!paneState.expanded) {
     assert.ok(paneState.point, "collapsed workspace checks pane has a native header");
     await nativeWorkbench(async send => {
@@ -111,7 +111,7 @@ async function openExplorer(waitFor) {
       await send("Input.dispatchMouseEvent", { type: "mousePressed", x: paneState.point.x, y: paneState.point.y, button: "left", clickCount: 1 });
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: paneState.point.x, y: paneState.point.y, button: "left", clickCount: 1 });
     });
-    await waitFor(() => nativeValue(`(() => [...document.querySelectorAll('.pane')].some(value=>value.textContent.includes('Dynare workspace checks')&&value.classList.contains('expanded')))()`),
+    await waitFor(() => nativeValue(`(() => [...document.querySelectorAll('.pane')].some(value=>value.textContent.includes('Dynare Workspace')&&value.classList.contains('expanded')))()`),
       "workspace checks pane expands");
   }
 }
@@ -309,7 +309,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   assert.ok(incompletePolicy, "the incomplete root uses the policy file identity");
   assert.match(incompletePolicy.cause, /policy\.dyn:1.*missing-workspace-check\.inc/);
   const clickFilter = async title => {
-    const clicked = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); const action=[...pane.querySelectorAll('.pane-header .action-label')].find(value=>(value.getAttribute('aria-label')||value.title||'').includes(${JSON.stringify(title)})); if(!action) return false; action.click(); return true; })()`);
+    const clicked = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare Workspace')); const action=[...pane.querySelectorAll('.pane-header .action-label')].find(value=>(value.getAttribute('aria-label')||value.title||'').includes(${JSON.stringify(title)})); if(!action) return false; action.click(); return true; })()`);
     assert.equal(clicked, true, `native workspace toolbar contains ${title}`);
   };
   await clickFilter("Show not fully checked models");
@@ -320,7 +320,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   assert.ok(rowTextIncludes(filteredRows, "models") && rowTextIncludes(filteredRows, "variants"));
   for (const name of ["root.mod", "root.dyn", "same.mod", "shared.inc", "Open Dygnosis Help"])
     assert.ok(!rowTextIncludes(filteredRows, name), `${name} is absent from the affected-model list`);
-  assert.equal(await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks')); return pane.textContent.includes('Coverage is incomplete. Open affected models for details.'); })()`), false);
+  assert.equal(await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare Workspace')); return pane.textContent.includes('Coverage is incomplete. Open affected models for details.'); })()`), false);
   const firstPreview = await vscode.window.showTextDocument(vscode.Uri.file(path.join(workspaceRoot, "root.mod")), { preview: true, viewColumn: vscode.ViewColumn.One });
   assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab.isPreview, true, "first model is a preview tab");
   await currentSnapshot(service, firstPreview.document, () => service.modelInfo(firstPreview.document.uri), "first preview model reaches the language server");
@@ -331,7 +331,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
     for (const tab of event.closed) if (tab.input?.uri) closedPreviews.push(tab.input.uri.fsPath.toLowerCase());
   });
   await nativeValue(`(() => {
-    const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare workspace checks'));
+    const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare Workspace'));
     const trace={removed:false};
     trace.observer=new MutationObserver(()=>{
       const names=[...pane.querySelectorAll('.monaco-list-row .label-name')].map(value=>value.textContent.trim());

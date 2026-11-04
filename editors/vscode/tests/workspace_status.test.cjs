@@ -177,12 +177,12 @@ test("status schema checks required fields, counts and consistency but allows ad
 });
 test("coverage is independent of diagnostics and distinguishes failure, incomplete, pending, cancellation, off and no roots", () => {
   const checked = workspaceStatusContent(parseWorkspaceStatus(facts([root("checked", { errors: 3, warnings: 2 })])));
-  assert.equal(checked.text, "$(check) Dynare workspace: 1/1 checked");
-  assert.equal(checked.accessibilityLabel, "Dynare workspace: 1/1 checked. Checked: 1. Open workspace checks.");
+  assert.equal(checked.text, "$(check) Dynare Workspace: 1/1 checked");
+  assert.equal(checked.accessibilityLabel, "Dynare Workspace: 1/1 checked. Checked: 1. Open Dynare Workspace.");
   assert.match(checked.tooltip.value, /^\*\*Models in workspace\*\*/);
   assert.match(checked.tooltip.value, /<td align="left">Checked<\/td><td align="right">1<\/td>/);
   assert.doesNotMatch(tooltipText(checked.tooltip), /Errors|Warnings|Click|Recheck|unopened|saved|Not fully checked|Excluded|Pending|Checking|discovery failures/);
-  for (const state of ["incomplete", "failed"]) assert.equal(workspaceStatusContent(parseWorkspaceStatus(facts([root(state)]))).text, "$(warning) Dynare workspace: 0/1 checked");
+  for (const state of ["incomplete", "failed"]) assert.equal(workspaceStatusContent(parseWorkspaceStatus(facts([root(state)]))).text, "$(warning) Dynare Workspace: 0/1 checked");
   assert.match(workspaceStatusContent(parseWorkspaceStatus(facts([root("pending")]))).text, /0\/1 finished/);
   assert.match(workspaceStatusContent(parseWorkspaceStatus(facts([root("checking")]))).text, /sync~spin/);
   assert.match(workspaceStatusContent(parseWorkspaceStatus(facts([root("pending")], { cancelled: true }))).text, /cancelled/);
@@ -222,7 +222,7 @@ test("default-on folder-only startup uses native coverage and folder tree withou
   assert.equal(env.service.starts, 1); assert.equal(env.host.editor, undefined);
   assert.equal(env.host.items[0].id, "dygnosis.workspaceCoverage"); assert.equal(env.host.items[0].name, "Dynare workspace coverage");
   assert.equal(env.host.items[0].command, "dygnosis.workspaceStatus"); assert.match(env.host.items[0].text, /1\/1 checked/);
-  assert.match(env.host.items[0].accessibilityInformation.label, /workspace/);
+  assert.match(env.host.items[0].accessibilityInformation.label, /Dynare Workspace/);
   assert.equal(env.host.views[0].id, "dygnosis.workspace");
   assert.equal(rows(env)[0].label, "workspace"); assert.equal(rows(env)[0].contextValue, "dygnosis.workspaceFolder");
   assert.equal(rows(env)[0].children[0].description, "Checked · 0 Errors, 0 Warnings");
@@ -316,7 +316,7 @@ test("folder discovery failure cannot make another folder's successful roots loo
   const env = setup({ folders: [folder(), folder(other, "other")], status: facts([root("checked", { errors: 2 })],
     { coverage_complete: false, discovery_failures: [{ folder_uri: other, failure: "Permission denied" }] }) });
   const registration = registerWorkspaceStatus(env.service); await flush();
-  assert.equal(env.host.items[0].text, "$(warning) Dynare workspace: 1/1 checked"); assert.match(env.host.views[0].message, /discovery failed/);
+  assert.equal(env.host.items[0].text, "$(warning) Dynare Workspace: 1/1 checked"); assert.match(env.host.views[0].message, /discovery failed/);
   assert.equal(rows(env).length, 2); assert.equal(rows(env)[0].children[0].description, "Checked · 2 Errors, 0 Warnings");
   assert.equal(rows(env)[1].children[0].label, "Discovery failed"); assert.equal(rows(env)[1].children[0].tooltip, "Permission denied");
   registration.dispose();

@@ -1087,7 +1087,10 @@ impl Backend {
                 },
             );
             if let Some(record) = result.records.first() {
-                return Some(markdown_hover(syntax_intel::documentation(record), range));
+                return Some(markdown_hover(
+                    syntax_intel::documentation(record, Some(&word)),
+                    range,
+                ));
             }
         }
         if let Some(cmd) = option_command_at(&text, byte)
@@ -1119,7 +1122,7 @@ impl Backend {
                             .iter()
                             .any(|alias| alias.eq_ignore_ascii_case(&word))
                 })
-                .map(syntax_intel::documentation)
+                .map(|record| syntax_intel::documentation(record, Some(&word)))
                 .collect();
             if !matches.is_empty() {
                 return Some(markdown_hover(matches.join("\n\n"), range));

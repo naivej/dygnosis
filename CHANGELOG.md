@@ -4,6 +4,9 @@
 
 - The Source preview opens and refreshes faster on large models with many
   macro-generated names.
+- The Explorer view and status bar use the name **Dynare Workspace**.
+- Hover explains fixed values in active and inactive source without repeating
+  the value under the pointer.
 
 ## v0.11.46
 

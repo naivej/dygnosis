@@ -73,13 +73,18 @@ async fn fixed_roles_have_the_same_meaning_and_range_in_both_activity_states() {
             "@#for x\tin\t[tr|ue,false]\n@#define z=1\n@#endfor\n",
             "true",
         ),
-        ("var_expectation_model(horizon=1:I|nf);", "inf"),
+        ("var_expectation_model(horizon=1:i|nf);", "inf"),
     ] {
         let (active, items) = answers(source).await;
         let active = active.unwrap_or_else(|| panic!("No hover: {source}"));
         let (inactive, _) = answers(&format!("@#if 0\n{source}\n@#endif\n")).await;
         let inactive = inactive.unwrap_or_else(|| panic!("No inactive hover: {source}"));
         assert_eq!(markdown(&active), markdown(&inactive), "{source}");
+        assert!(
+            !markdown(&active).lines().next().unwrap().contains(" = ")
+                && !markdown(&active).contains("Reference form:"),
+            "{source}"
+        );
         let a = active.range.unwrap();
         let b = inactive.range.unwrap();
         assert_eq!(a.start.character, b.start.character, "{source}");
@@ -91,6 +96,34 @@ async fn fixed_roles_have_the_same_meaning_and_range_in_both_activity_states() {
                     && item.kind == Some(CompletionItemKind::ENUM_MEMBER)),
             "Missing {label}: {source}"
         );
+    }
+}
+
+#[tokio::test]
+async fn alternate_written_spellings_keep_the_reference_form() {
+    // Guards losing canonical casing or the documented numeric code.
+    for (source, form, meaning) in [
+        (
+            "var_expectation_model(horizon=1:I|nf);",
+            "inf",
+            "unbounded upper horizon",
+        ),
+        (
+            "estimation(mode_compute=4,optim=('NumgradAlgorithm',0|2));",
+            "2",
+            "two-point formula",
+        ),
+    ] {
+        for source in [source.to_owned(), format!("@#if 0\n{source}\n@#endif\n")] {
+            let (hover, _) = answers(&source).await;
+            let hover = hover.unwrap_or_else(|| panic!("No hover: {source}"));
+            let text = markdown(&hover);
+            assert!(text.contains(meaning), "{text}");
+            assert!(
+                text.contains(&format!("Reference form: `{form}`")),
+                "{text}"
+            );
+        }
     }
 }
 
@@ -139,7 +172,7 @@ async fn roles_reject_other_operands_and_generated_contexts() {
                 .is_none_or(|hover| !markdown(hover).contains("target_type")
                     && !markdown(hover).contains("boolean_literal")
                     && !markdown(hover).contains("interval")
-                    && !markdown(hover).contains("horizon =")),
+                    && !markdown(hover).contains("var_expectation_model: horizon")),
             "{source}: {hover:?}"
         );
         assert!(
@@ -173,6 +206,10 @@ async fn nested_values_require_their_own_written_selector_for_completion() {
         let active = active.unwrap_or_else(|| panic!("No nested hover: {source}"));
         assert!(
             !markdown(&active).contains("does not establish"),
+            "{source}"
+        );
+        assert!(
+            !markdown(&active).lines().next().unwrap().contains(" = "),
             "{source}"
         );
         assert!(
