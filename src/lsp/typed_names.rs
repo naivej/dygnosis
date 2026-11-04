@@ -23,8 +23,18 @@ fn label(kind: &str) -> &'static str {
 
 pub(super) fn root_view(inner: &mut Inner, root: &Url) -> Option<Arc<SemanticModel>> {
     let revision = inner.root_revision(root)?;
+    root_view_at(inner, root, revision, None)
+}
+
+pub(super) fn root_view_at(
+    inner: &mut Inner,
+    root: &Url,
+    revision: String,
+    expected_model: Option<&Model>,
+) -> Option<Arc<SemanticModel>> {
     if let Some(view) = inner.semantic_views.get(root)
         && view.revision == revision
+        && expected_model.is_none_or(|model| std::ptr::eq(model, view.model.as_ref()))
     {
         return Some(Arc::clone(view));
     }
@@ -320,7 +330,7 @@ pub(super) fn sites_in_range(
     })
 }
 
-fn description(binding: &Binding, include_name: bool) -> String {
+pub(super) fn description(binding: &Binding, include_name: bool) -> String {
     let mut text = format!("**{}**", label(&binding.kind));
     if include_name {
         text.push_str(&format!(" {}", names::code(&binding.name)));

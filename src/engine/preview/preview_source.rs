@@ -1,5 +1,6 @@
 //! Source-layout editor display copy. Keeps written spaces and line breaks.
 
+use crate::engine::analysis::source_inventory::SourceInventory;
 use crate::engine::language::expand::ExpandReport;
 use crate::engine::language::lexer::{Token, TokenKind, tokenize};
 use crate::engine::language::macro_expand::{
@@ -15,6 +16,7 @@ pub(crate) struct SourcePreview {
     pub text: String,
     pub ranges: Vec<Span>,
     pub token_spans: Vec<Option<Span>>,
+    pub hover_inventory: Option<Box<SourceInventory>>,
     /// False when active tokens disagree with the stored expansion.
     pub proven: bool,
     /// Contiguous display pieces with written spans in include-spliced source.
@@ -40,6 +42,7 @@ pub(crate) fn source(
         line_segments,
         &[],
         crate::engine::macro_work::MacroWorkLimit::default(),
+        false,
     )
     .ok()
     .flatten()
@@ -52,6 +55,7 @@ pub(crate) fn source_with_evaluations(
     line_segments: &[(Span, u32)],
     evaluations: &[MacroReplay],
     macro_work_limit: crate::engine::macro_work::MacroWorkLimit,
+    hover: bool,
 ) -> Result<Option<SourcePreview>, Vec<IncompleteReason>> {
     let original = &report.effective_text;
     let (tokens, _, _, layout, reasons) = expand_macros_with_source_layout_configured(
@@ -92,12 +96,19 @@ pub(crate) fn source_with_evaluations(
     } else {
         (Vec::new(), Vec::new())
     };
-    let navigation_ok = ranges.len() == report.navigation.len();
+    let proven = proven && ranges.len() == report.navigation.len();
+    let hover_inventory = if proven && hover {
+        SourceInventory::from_expanded_display(&layout.text, proof_model, macro_work_limit)
+            .map(Box::new)
+    } else {
+        None
+    };
     Ok(Some(SourcePreview {
         text: layout.text,
         ranges,
         token_spans,
-        proven: proven && navigation_ok,
+        hover_inventory,
+        proven,
         fragments: layout.fragments,
     }))
 }
@@ -189,6 +200,7 @@ mod tests {
             &[],
             &[],
             crate::engine::macro_work::MacroWorkLimit::new(1).unwrap(),
+            false,
         )
         .unwrap_err();
         assert_eq!(reasons[0].limit_name, Some("iteration work"));
@@ -200,7 +212,8 @@ mod tests {
                 &[],
                 &[],
                 &[],
-                crate::engine::macro_work::MacroWorkLimit::new(10000).unwrap()
+                crate::engine::macro_work::MacroWorkLimit::new(10000).unwrap(),
+                false,
             )
             .unwrap()
             .unwrap()
@@ -226,6 +239,7 @@ mod tests {
             &lines,
             &evaluations,
             crate::engine::macro_work::MacroWorkLimit::default(),
+            false,
         )
         .expect("complete source expansion")
         .expect("source layout")

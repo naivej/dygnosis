@@ -144,6 +144,13 @@ pub(super) fn check_preview_cancellation() -> Result<(), Error> {
     Ok(())
 }
 
+pub(super) fn preview_cancellation() -> Option<Arc<AtomicBool>> {
+    INPUT
+        .try_with(|input| input.preview.as_ref().map(|(_, flag)| Arc::clone(flag)))
+        .ok()
+        .flatten()
+}
+
 /// A mutation's state is now visible; outgoing publication need not block reads.
 pub(super) fn committed() {
     let _ = INPUT.try_with(|input| {
@@ -246,11 +253,12 @@ where
             return Box::pin(self.service.call(request));
         }
         // call runs in frame receive order, before handler futures are polled.
-        let preview = (request.method() == "workspace/executeCommand"
-            && request
-                .params()
-                .and_then(|params| params["command"].as_str())
-                == Some("dynare/showEffectiveModel"))
+        let preview = (request.method() == "dynare/effectivePreviewHover"
+            || request.method() == "workspace/executeCommand"
+                && request
+                    .params()
+                    .and_then(|params| params["command"].as_str())
+                    == Some("dynare/showEffectiveModel"))
         .then(|| request.id().cloned())
         .flatten();
         let input = self.admission.enter(changes_input(&request), preview);

@@ -180,9 +180,14 @@ pub fn assignment_values(model: &Model) -> Vec<AssignmentValue> {
                             known.clear();
                             native_values.clear();
                         }
-                        assignment
-                            .expr
-                            .and_then(|expr| arithmetic_number(model, expr, &known, true))
+                        assignment.expr.and_then(|expr| {
+                            arithmetic_number(
+                                model,
+                                expr,
+                                &known,
+                                crate::engine::analysis::model_info::NumberMode::Strict,
+                            )
+                        })
                     } else {
                         None
                     };

@@ -1714,11 +1714,24 @@ impl Workspace {
     /// Invalidates roots that used this input, including missing-file lookups.
     /// Roots without a proven input snapshot remain conservative.
     pub fn remove_document(&mut self, uri: &str) {
+        self.discard_document(uri, false);
+    }
+
+    /// Invalidate a disk input. An open editor buffer still owns its source,
+    /// and the existing input guards still check its disk identity.
+    pub(crate) fn invalidate_disk_document(&mut self, uri: &str) {
+        self.discard_document(uri, true);
+    }
+
+    fn discard_document(&mut self, uri: &str, keep_overlay: bool) {
         let key = if self.overlay_only {
             uri.to_owned()
         } else {
             normalize_uri(uri)
         };
+        if keep_overlay && self.docs.get(&key).is_some_and(|doc| doc.overlay) {
+            return;
+        }
         self.docs.remove(&key);
         self.invalidate_document_input(&key);
     }
@@ -2689,6 +2702,17 @@ impl Workspace {
             normalize_uri(root)
         };
         self.effective.get(&key).cloned()
+    }
+
+    pub(crate) fn effective_model_is_cached(&self, root: &str, model: &Arc<Model>) -> bool {
+        let key = if self.overlay_only {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
+        self.effective
+            .get(&key)
+            .is_some_and(|cached| Arc::ptr_eq(cached, model))
     }
 
     /// Map one span in the include-spliced model back to the active root file.

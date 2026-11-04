@@ -27,15 +27,23 @@ pub fn format_timing_line(info: &TimingInfo) -> String {
     }
 }
 
-/// Shared arithmetic operations. Strict mode uses retained numeric tokens and
-/// requires finite intermediates; legacy mode retains the written-number reader.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NumberMode {
+    Strict,
+    Hover,
+    Legacy,
+}
+
+/// Strict evaluation uses retained numeric tokens and finite intermediates.
+/// Hover keeps the legacy calculation and can read a generated numeric token.
 pub(crate) fn arithmetic_number(
     model: &Model,
     id: crate::engine::language::expr::ExprId,
     known: &HashMap<Name, f64>,
-    strict: bool,
+    mode: NumberMode,
 ) -> Option<f64> {
     use crate::engine::language::expr::{BinOp, ExprKind, UnOp};
+    let strict = mode == NumberMode::Strict;
     let value = match &model.exprs.get(id).kind {
         ExprKind::Number => {
             if strict {
@@ -46,8 +54,15 @@ pub(crate) fn arithmetic_number(
                     .filter(|value| value.is_finite());
             }
             let span = model.exprs.get(id).span;
-            let raw = model.source.get(span.start as usize..span.end as usize)?;
-            raw.parse().ok()
+            let written = model
+                .source
+                .get(span.start as usize..span.end as usize)
+                .and_then(|raw| raw.parse().ok());
+            if mode == NumberMode::Hover {
+                model.numeric_literals.get(&id).copied().or(written)
+            } else {
+                written
+            }
         }
         ExprKind::Ident {
             name,
@@ -61,15 +76,15 @@ pub(crate) fn arithmetic_number(
             known.get(name).copied()
         }
         ExprKind::Unary { op, arg } => {
-            let v = arithmetic_number(model, *arg, known, strict)?;
+            let v = arithmetic_number(model, *arg, known, mode)?;
             Some(match op {
                 UnOp::Pos => v,
                 UnOp::Neg => -v,
             })
         }
         ExprKind::Binary { op, lhs, rhs } => {
-            let l = arithmetic_number(model, *lhs, known, strict)?;
-            let r = arithmetic_number(model, *rhs, known, strict)?;
+            let l = arithmetic_number(model, *lhs, known, mode)?;
+            let r = arithmetic_number(model, *rhs, known, mode)?;
             match op {
                 BinOp::Add => Some(l + r),
                 BinOp::Sub => Some(l - r),
@@ -92,7 +107,11 @@ pub(crate) fn arithmetic_number(
 /// Final values from the legacy parameter-then-helper walk, not execution traces.
 pub fn assigned_number(model: &Model, name: &str) -> Option<f64> {
     let name = model.intern.lookup(name)?;
-    legacy_assigned_values(model, |_| {}).get(&name).copied()
+    assigned_number_values(model).get(&name).copied()
+}
+
+pub(crate) fn assigned_number_values(model: &Model) -> HashMap<Name, f64> {
+    legacy_assigned_values(model, NumberMode::Hover, |_| {})
 }
 
 #[derive(Default)]
@@ -118,7 +137,7 @@ thread_local! {
 
 pub(crate) fn assigned_numbers(model: &Model) -> AssignedNumbers<'_> {
     let mut assignments = HashMap::new();
-    let values = legacy_assigned_values(model, |assignment| {
+    let values = legacy_assigned_values(model, NumberMode::Legacy, |assignment| {
         assignments.insert(assignment.name, assignment);
     });
     AssignedNumbers {
@@ -131,6 +150,7 @@ pub(crate) fn assigned_numbers(model: &Model) -> AssignedNumbers<'_> {
 // parameter assignment during this same walk, without another source pass.
 fn legacy_assigned_values<'a>(
     model: &'a Model,
+    mode: NumberMode,
     mut parameter: impl FnMut(&'a Assignment),
 ) -> HashMap<Name, f64> {
     #[cfg(test)]
@@ -150,7 +170,7 @@ fn legacy_assigned_values<'a>(
         }
         let value = a
             .expr
-            .and_then(|id| arithmetic_number(model, id, &known, false));
+            .and_then(|id| arithmetic_number(model, id, &known, mode));
         match value {
             Some(v) if v.is_finite() => {
                 known.insert(a.name, v);

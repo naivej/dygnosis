@@ -33,7 +33,8 @@ async function checkBlockTintEditing(service, workspaceRoot, evidence, helpers) 
     get visibleTextEditors() { return vscode.window.visibleTextEditors.map(wrap); },
     createTextEditorDecorationType(options) {
       const type = vscode.window.createTextEditorDecorationType(options);
-      styles.set(type.key, options.backgroundColor.id); return type;
+      styles.set(type.key, options.backgroundColor?.id);
+      return type;
     },
   } };
   const colorPath = compiledModule("color");

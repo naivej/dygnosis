@@ -51,9 +51,11 @@ pub(super) fn label(inner: &Inner, document: &Url, hover: &mut Hover) {
     if roots.len() != 1 {
         return;
     }
-    let choices = inner
-        .workspace
-        .root_analysis_configuration(roots[0].as_str());
+    label_root(inner, &roots[0], hover);
+}
+
+pub(super) fn label_root(inner: &Inner, root: &Url, hover: &mut Hover) {
+    let choices = inner.workspace.root_analysis_configuration(root.as_str());
     let Some(name) = choices.name.as_deref().filter(|name| {
         !matches!(
             *name,

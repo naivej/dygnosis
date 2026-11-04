@@ -17,6 +17,7 @@ mod comparison_inputs;
 mod document_analysis;
 mod document_context;
 mod option_values;
+mod preview_hover;
 mod preview_locations;
 mod source_activity;
 mod source_intelligence;
@@ -184,6 +185,7 @@ struct Inner {
     routed_library: HashMap<Url, Vec<RoutedDiagnostic>>,
     workspace: Workspace,
     semantic_views: HashMap<Url, Arc<crate::engine::analysis::symbols::SemanticModel>>,
+    preview_hovers: preview_hover::Snapshots,
     parameter_hints: HashMap<Url, Arc<parameter_hints::Entry>>,
     source_inspection_notices: HashMap<Url, String>,
     settings: SettingsStore,
@@ -211,6 +213,7 @@ impl Default for Inner {
             routed_library: HashMap::new(),
             workspace: Workspace::new(),
             semantic_views: HashMap::new(),
+            preview_hovers: preview_hover::Snapshots::default(),
             parameter_hints: HashMap::new(),
             source_inspection_notices: HashMap::new(),
             settings: SettingsStore::default(),
@@ -1141,7 +1144,7 @@ impl Backend {
             let views = views?;
             let mut descriptions = views
                 .iter()
-                .map(|view| decl_hover_markdown(&view.model, &word, &preferences));
+                .map(|view| decl_hover_markdown_in_view(view, &word, &preferences));
             let first = descriptions.next()??;
             if !descriptions.all(|description| description.as_ref() == Some(&first)) {
                 return None;
@@ -2206,7 +2209,10 @@ impl Backend {
             self.workspace_wake.notify_one();
         }
         let result = if command == "dynare/showEffectiveModel" {
-            self.show_effective_model_command(arguments)
+            crate::engine::control::run(ordering::preview_cancellation(), || {
+                self.show_effective_model_command(arguments)
+            })
+            .unwrap_or_else(|_| Err(tower_lsp::jsonrpc::Error::request_cancelled()))
         } else {
             Ok(match command {
                 "dynare/explainDiagnostic" => explain_command(arguments),
@@ -2660,6 +2666,11 @@ impl Backend {
             .first()
             .and_then(|arg| arg.get("layout"))
             .and_then(Value::as_str);
+        let hover_requested = arguments
+            .first()
+            .and_then(|arg| arg.get("hover"))
+            .and_then(Value::as_bool)
+            == Some(true);
         let source_gaps = matches!(requested, Some("source"))
             .then(|| inner.workspace.source_layout_gaps(uri.as_str()))
             .unwrap_or_default();
@@ -2672,9 +2683,10 @@ impl Backend {
         let work_limit = inner.workspace.root_macro_work_limit(uri.as_str());
         let preferences = inner.presentation_for(&uri);
         let includes_complete = inner.workspace.includes_complete(uri.as_str());
-        let model = matches!(requested, Some("readable") | Some("source"))
-            .then(|| inner.workspace.get_effective_model(uri.as_str()))
+        let effective_model = matches!(requested, Some("readable") | Some("source"))
+            .then(|| inner.workspace.effective_model_snapshot(uri.as_str()))
             .flatten();
+        let model = effective_model.as_deref();
         enum DisplayLayout {
             Readable(crate::engine::preview::preview_layout::PreviewLayout),
             Source(crate::engine::preview::preview_source::SourcePreview),
@@ -2690,6 +2702,7 @@ impl Backend {
                 &source_lines,
                 &source_evaluations,
                 work_limit,
+                hover_requested && report.navigation_complete && includes_complete,
             )
             .map(|preview| preview.map(DisplayLayout::Source))
             .unwrap_or_else(|reasons| {
@@ -2890,12 +2903,38 @@ impl Backend {
                 "Expansion is partial; unresolved includes, parsing, or macro expansion prevent complete counts and source navigation.".to_owned()
             });
         }
+        let hover_view = match &layout {
+            Some(DisplayLayout::Source(preview))
+                if complete && preview.hover_inventory.is_some() =>
+            {
+                typed_names::root_view_at(&mut inner, &uri, revision, model).filter(|view| {
+                    effective_model
+                        .as_ref()
+                        .is_some_and(|model| Arc::ptr_eq(model, &view.model))
+                })
+            }
+            _ => None,
+        };
         let input_current = inner.workspace.input_snapshot_is_current(uri.as_str());
         ordering::check_preview_cancellation()?;
         if !input_current {
             return Ok(
                 json!({"success":false,"code":"INPUT_CHANGED","message":"The model inputs changed; refresh the effective model"}),
             );
+        }
+        if let (Some(DisplayLayout::Source(preview)), Some(index), Some(view)) =
+            (layout, display_index, hover_view)
+            && let Some(inventory) = preview.hover_inventory
+            && let Some(id) = inner.preview_hovers.insert(
+                uri,
+                &view,
+                preview.text,
+                index,
+                preview.token_spans,
+                *inventory,
+            )
+        {
+            result["hover_snapshot_id"] = json!(id);
         }
         Ok(result)
     }
@@ -3325,7 +3364,7 @@ impl LanguageServer for Backend {
             inner.document_analysis.cancel();
             for event in &params.changes {
                 inner.workspace_changed(&event.uri, event.typ == FileChangeType::DELETED);
-                inner.workspace.remove_document(event.uri.as_str());
+                inner.workspace.invalidate_disk_document(event.uri.as_str());
             }
             let snapshots: Vec<(Url, String, i32)> = inner
                 .docs
@@ -3846,7 +3885,7 @@ pub fn initialize_result() -> InitializeResult {
                 "analysisConfiguration": {"schema_version":1,"context_command":"dynare/analysisContext","set_command":"dynare/setAnalysisConfiguration","source_candidates_command":"dynare/sourceCandidates"},
                 "rename": {"command":"dynare/captureRename", "schema_version":1, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES},
                 "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
-                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::engine::preview::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::engine::preview::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true, "macro_messages":true, "document_symbols":true},
+                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::engine::preview::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::engine::preview::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true, "macro_messages":true, "document_symbols":true, "hover":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
                 ,"workspaceDiagnostics": {"schema_version":workspace_checks::SCHEMA_VERSION,"status_command":"dynare/workspaceStatus","recheck_command":"dynare/recheckWorkspace","cancel_command":"dynare/cancelWorkspace","active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/workspaceStatusChanged","typing_pause_ms":250}
             }})),
@@ -4479,14 +4518,48 @@ fn decl_hover_markdown(
     word: &str,
     preferences: &PresentationSettings,
 ) -> Option<String> {
+    declaration_hover(
+        model,
+        word,
+        preferences,
+        || {
+            classify_variable_timing(model)
+                .get(word)
+                .map(format_timing_line)
+        },
+        || assigned_number(model, word),
+    )
+}
+
+fn decl_hover_markdown_in_view(
+    view: &crate::engine::analysis::symbols::SemanticModel,
+    word: &str,
+    preferences: &PresentationSettings,
+) -> Option<String> {
+    declaration_hover(
+        &view.model,
+        word,
+        preferences,
+        || view.hover_timing(word).map(format_timing_line),
+        || view.hover_value(word),
+    )
+}
+
+fn declaration_hover(
+    model: &Model,
+    word: &str,
+    preferences: &PresentationSettings,
+    timing: impl FnOnce() -> Option<String>,
+    value: impl FnOnce() -> Option<f64>,
+) -> Option<String> {
     let name = model.intern.lookup(word)?;
     let kind = model
         .final_symbol_kind(name)
         .or_else(|| model.final_kind_or_written_if_excluded(name));
     if kind == Some("var") {
         let mut parts = vec![names::declaration_heading("var", false)?];
-        if let Some(info) = classify_variable_timing(model).get(word) {
-            parts.push(format_timing_line(info));
+        if let Some(timing) = timing() {
+            parts.push(timing);
         }
         append_name_metadata(&mut parts, model, word, preferences);
         return Some(parts.join("\n\n"));
@@ -4503,7 +4576,7 @@ fn decl_hover_markdown(
     }
     if kind == Some("parameters") {
         let mut parts = vec![names::declaration_heading("parameters", false)?];
-        match assigned_number(model, word) {
+        match value() {
             Some(n) => parts.push(format!("Value: `{n}`")),
             None => parts.push("Value: *not available to Dygnosis*".into()),
         }
@@ -4944,6 +5017,14 @@ fn extract_command_uri(arguments: &[Value]) -> Option<Url> {
 pub fn new_service() -> (LspService<Backend>, ClientSocket) {
     LspService::build(Backend::new)
         .custom_method("dynare/activeModelChanged", Backend::active_model_changed)
+        .custom_method(
+            "dynare/effectivePreviewHover",
+            Backend::effective_preview_hover,
+        )
+        .custom_method(
+            "dynare/effectivePreviewClosed",
+            Backend::effective_preview_closed,
+        )
         .finish()
 }
 

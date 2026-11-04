@@ -1318,6 +1318,7 @@ fn override_origins_survive_include_loop_reconstruction() {
         &ws.source_line_segments("main.mod"),
         &evaluations,
         Default::default(),
+        false,
     )
     .unwrap()
     .unwrap();

@@ -140,6 +140,7 @@ impl SourceNameSite {
 
 /// A retained projection of the existing written-folding parse. It stores no
 /// temporary Model, expressions, bindings, or effective equation numbers.
+#[derive(Debug)]
 pub(crate) struct SourceInventory {
     pub source_revision: String,
     pub items: Vec<SourceItem>,
@@ -168,6 +169,8 @@ pub(crate) struct SourceInventory {
     /// Literal ordinary-name slots read by the existing command-list parser.
     command_uses: Vec<Span>,
     pub named_sites: Vec<SourceNameSite>,
+    display_expressions: Vec<Span>,
+    display_assignments: Vec<Span>,
 }
 
 struct MacroFrame<'a> {
@@ -370,6 +373,8 @@ impl SourceInventory {
                 * size_of::<Span>()
             + self.contexts.capacity() * size_of::<(u32, Vec<SourcePathStep>)>()
             + self.named_sites.capacity() * size_of::<SourceNameSite>()
+            + (self.display_expressions.capacity() + self.display_assignments.capacity())
+                * size_of::<Span>()
             + self
                 .named_sites
                 .iter()
@@ -404,7 +409,73 @@ impl SourceInventory {
             nonordinary_names: Vec::new(),
             command_uses: Vec::new(),
             named_sites: Vec::new(),
+            display_expressions: Vec::new(),
+            display_assignments: Vec::new(),
         }
+    }
+
+    /// Project hover context from the parser pass that already proved the display.
+    /// This text is expanded, so it has no executable macro paths.
+    pub(crate) fn from_expanded_display(
+        text: &str,
+        mut model: Model,
+        work_limit: MacroWorkLimit,
+    ) -> Option<Self> {
+        use crate::engine::language::constructor::DataTreeScope;
+
+        let mut inventory = Self::empty();
+        let mut budget = MacroBudget::with_limit(work_limit, crate::engine::control::current());
+        if !inventory.reserve(&mut budget, model.constructor_scopes.len()) {
+            return None;
+        }
+        inventory.collect_model(text, &model, &mut budget);
+        if inventory.coverage_cause.is_some() || crate::engine::control::cancelled() {
+            return None;
+        }
+        inventory.lexical_tokens = std::mem::take(&mut model.expanded_tokens);
+        inventory.display_assignments = model
+            .statements
+            .iter()
+            .filter_map(|statement| {
+                (!statement.native && statement.kind == StatementKind::Assignment)
+                    .then_some(statement.span)
+            })
+            .collect();
+        inventory.display_expressions = model
+            .constructor_scopes
+            .iter()
+            .take_while(|_| !crate::engine::control::cancelled())
+            .filter(|(_, scope)| {
+                matches!(
+                    scope,
+                    DataTreeScope::Dynamic
+                        | DataTreeScope::Planner(_)
+                        | DataTreeScope::Epilogue
+                        | DataTreeScope::Occbin(_)
+                        | DataTreeScope::Heterogeneous(_)
+                )
+            })
+            .map(|(id, _)| model.exprs.get(*id).span)
+            .collect();
+        inventory
+            .display_expressions
+            .sort_unstable_by_key(|span| (span.start, span.end));
+        let mut count = 0;
+        for index in 0..inventory.display_expressions.len() {
+            let span = inventory.display_expressions[index];
+            if count > 0 && span.start <= inventory.display_expressions[count - 1].end {
+                let merged = &mut inventory.display_expressions[count - 1];
+                merged.end = merged.end.max(span.end);
+            } else {
+                inventory.display_expressions[count] = span;
+                count += 1;
+            }
+        }
+        inventory.display_expressions.truncate(count);
+        inventory.finish_items();
+        inventory.folds = Vec::new();
+        inventory.structure_complete = true;
+        (!crate::engine::control::cancelled()).then_some(inventory)
     }
 
     /// A resource stop in MacroSource acquisition has no reusable scan. Keep
@@ -1694,11 +1765,19 @@ impl SourceInventory {
     /// Context uses literal, complete source boundaries. Fragments withhold a
     /// guessed expression context; native MATLAB and verbatim stay opaque.
     pub(crate) fn context(&self, byte: u32) -> Option<SourceContext> {
-        if !self.structure_complete
-            || self
-                .opaque
-                .iter()
-                .any(|span| span.start <= byte && byte < span.end)
+        if !self.structure_complete {
+            return None;
+        }
+        if self.in_display_assignment(byte) {
+            return Some(SourceContext {
+                language: "expression",
+                parent: None,
+            });
+        }
+        if self
+            .opaque
+            .iter()
+            .any(|span| span.start <= byte && byte < span.end)
         {
             return None;
         }
@@ -1726,12 +1805,20 @@ impl SourceInventory {
             return None;
         }
         let body = row.kind == SourceItemKind::Block && byte >= row.header_end;
+        let in_display_expression = self
+            .display_expressions
+            .get(
+                self.display_expressions
+                    .partition_point(|span| span.end <= byte),
+            )
+            .is_some_and(|span| span.start <= byte);
         Some(SourceContext {
-            language: if body
-                && matches!(
-                    row.name.as_deref(),
-                    Some("model" | "model_replace" | "epilogue")
-                ) {
+            language: if in_display_expression
+                || body
+                    && matches!(
+                        row.name.as_deref(),
+                        Some("model" | "model_replace" | "epilogue")
+                    ) {
                 "model_expression"
             } else if body {
                 "expression"
@@ -1740,6 +1827,26 @@ impl SourceInventory {
             },
             parent: row.written_kind.clone(),
         })
+    }
+
+    pub(crate) fn permits_display_name(&self, byte: u32) -> bool {
+        self.in_display_assignment(byte)
+            || self.literal_value_anchor(
+                Span {
+                    start: byte,
+                    end: byte + 1,
+                },
+                byte,
+            )
+    }
+
+    fn in_display_assignment(&self, byte: u32) -> bool {
+        self.display_assignments
+            .get(
+                self.display_assignments
+                    .partition_point(|span| span.end <= byte),
+            )
+            .is_some_and(|span| span.start <= byte)
     }
 
     pub(crate) fn compatible_candidates(&self, byte: u32) -> impl Iterator<Item = &SourceItem> {

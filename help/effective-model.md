@@ -9,6 +9,8 @@ Dygnosis opens a read-only preview beside your file with `@#include` files,
 `@#for` loops, `@#if` branches and `@{...}` substitutions expanded before
 Dynare's internal equation transformations.
 
+Hover over names, commands and options in the preview to inspect them.
+
 | Action | Shortcut | Result |
 |---|---|---|
 | **Dygnosis: Go to written source** | `Ctrl+Alt+G` (`Cmd+Alt+G` on macOS) | Jumps from the preview to the written line that produced it (for example `beta_1` → `beta_@{j}`). |

@@ -27,6 +27,7 @@ class Range {
   constructor(line, character, endLine = line, endCharacter = character) {
     this.start = { line, character }; this.end = { line: endLine, character: endCharacter };
   }
+  isEqual(other) { return JSON.stringify(this) === JSON.stringify(other); }
 }
 class DocumentSymbol {
   constructor(name, detail, kind, range, selectionRange) {
@@ -41,7 +42,8 @@ function uri(value) {
 function doc(value, text = "model;\ny=1;\nend;", version = 1) {
   return { uri: uri(value), text, version, languageId: "dynare", isClosed: false,
     getText() { return this.text; }, get lineCount() { return this.text.split(/\r\n|\r|\n/).length; },
-    lineAt(line) { return { text: this.text.split(/\r\n|\r|\n/)[line] }; } };
+    lineAt(line) { return { text: this.text.split(/\r\n|\r|\n/)[line] }; },
+    validateRange(range) { return range; } };
 }
 function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
 function matches(pattern, value) {
@@ -55,9 +57,10 @@ const vscode = {
   Disposable, EventEmitter: Emitter, CancellationTokenSource, Range, DocumentSymbol, TreeItem: class {}, TabInputText, ViewColumn: { Beside: 2, One: 1 },
   DecorationRangeBehavior: { ClosedClosed: 1 },
   ThemeColor: class ThemeColor { constructor(id) { this.id = id; } },
+  MarkdownString: class MarkdownString { constructor(value) { this.value = value; } },
   RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } },
   Uri: { parse: uri, file: value => uri(`file://${value.startsWith("/") ? "" : "/"}${value.replaceAll("\\", "/")}`),
-    from: value => uri(`${value.scheme}:${value.path}`) },
+    from: value => uri(`${value.scheme}:${value.path.split("/").map(encodeURIComponent).join("/")}`) },
   commands: {
     registerCommand: (id, action) => { host.commands.set(id, action); return new Disposable(() => host.commands.delete(id)); },
     executeCommand: async (id, ...args) => {
@@ -69,6 +72,9 @@ const vscode = {
     setTextDocumentLanguage: async (document, language) => { document.languageId = language; return document; },
     registerDocumentSymbolProvider: (selector, provider) => {
       host.outline = { selector, provider }; return new Disposable(() => { host.outline = undefined; });
+    },
+    registerHoverProvider: (selector, provider) => {
+      host.hover = { selector, provider }; return new Disposable(() => { host.hover = undefined; });
     },
   },
   window: {
@@ -120,7 +126,8 @@ const vscode = {
       let document = host.documents.get(value.toString());
       if (!document) {
         const provider = host.providers.get(value.scheme);
-        document = doc(value.toString(), provider?.provideTextDocumentContent(value) ?? "model;\ny=1;\nend;");
+        const content = provider?.provideTextDocumentContent(value) ?? "model;\ny=1;\nend;";
+        document = doc(value.toString(), host.normalizePreview && provider ? host.normalizePreview(content) : content);
         host.documents.set(value.toString(), document);
       }
       return document;
@@ -198,6 +205,117 @@ function setup(options = {}) {
   const close = session => { session.document.isClosed = true; host.documents.delete(session.uri.toString()); host.closed.fire(session.document); };
   return { host, rootDocument, service, previews, registration, run, show, activate, edit, close };
 }
+
+// Guards stale snapshots and canceled requests returning hover for a replaced preview.
+test("preview hover uses its captured snapshot and drops stale replies", async () => {
+  const env = setup();
+  env.service.client.initializeResult.capabilities.experimental.dygnosis.effectivePreview.hover = true;
+  env.service.value.hover_snapshot_id = "snapshot-1";
+  const calls = [], reply = deferred();
+  env.service.client.sendRequest = (method, params, token) => { calls.push({ method, params, token }); return reply.promise; };
+  env.service.client.sendNotification = async (method, params) => { calls.push({ method, params }); };
+  env.service.client.protocol2CodeConverter = { asHover: value => value };
+  const session = await env.show(), token = new CancellationTokenSource();
+  assert.equal(env.service.requests[0].args[0].hover, true);
+  const pending = env.host.hover.provider.provideHover(session.document, { line: 1, character: 2 }, token.token);
+  assert.deepEqual(calls[0].params, { root_uri: main, snapshot_id: "snapshot-1", position: { line: 1, character: 2 }, definition_link: true });
+  assert.equal(calls[0].method, "dynare/effectivePreviewHover");
+  env.previews.markOutdated(session, "Changed.");
+  reply.resolve({ contents: "old" });
+  assert.equal(await pending, undefined);
+  assert.equal(await env.host.hover.provider.provideHover(session.document, { line: 1, character: 2 }, token.token), undefined);
+  env.registration.dispose(); env.previews.dispose();
+  assert.deepEqual(calls.at(-1), { method: "dynare/effectivePreviewClosed", params: { root_uri: main, snapshot_id: "snapshot-1" } });
+});
+
+// Guards command URI decoding, trusting server Markdown, and stale targets.
+test("preview Definition links trust only their command and refuse changed targets", async () => {
+  const env = setup();
+  env.service.client.initializeResult.capabilities.experimental.dygnosis.effectivePreview.hover = true;
+  env.service.value.hover_snapshot_id = "definition";
+  const contents = { value: "Model-local variable" }, definition = target();
+  env.service.client.sendNotification = async () => {};
+  env.service.client.sendRequest = async () => ({ contents: [contents], definition });
+  env.service.client.protocol2CodeConverter = { asHover: value => ({ contents: value.contents }) };
+  const session = await env.show(), token = new CancellationTokenSource();
+  const hover = await env.host.hover.provider.provideHover(session.document, { line: 1, character: 0 }, token.token);
+  assert.equal(hover.contents[0].isTrusted, undefined);
+  const [link] = hover.contents.slice(1);
+  const [, command, args] = link.value.match(/\[Definition\]\(command:([^?]+)\?([^)]*)\)/);
+  assert.deepEqual(link.isTrusted, { enabledCommands: [command] });
+  // VS Code decodes the URI query and then decodes the command arguments.
+  const invoke = () => vscode.commands.executeCommand(command, ...JSON.parse(decodeURIComponent(decodeURIComponent(args))));
+  const previewEditor = env.host.editor;
+  env.host.editor = { document: env.rootDocument };
+  env.host.visibleEditors = [env.host.editor, previewEditor];
+  await invoke();
+  assert.deepEqual(env.host.messages, [], "the rendered Definition link opens without a refusal");
+  assert.deepEqual(env.service.jumps, [{ location: definition, root: main, options: { reuseOpen: true } }]);
+  env.activate(session);
+  ++env.rootDocument.version; // Simulate a VS Code edit still in flight to the engine.
+  await invoke();
+  assert.equal(env.service.jumps.length, 1);
+  assert.match(env.host.messages.at(-1), /definition link is no longer available/i);
+  env.registration.dispose(); env.previews.dispose();
+});
+
+// Guards old engines, cancellation, and a successful hover on the displayed text.
+test("preview hover respects capability, cancellation and document version", async () => {
+  const env = setup();
+  const first = await env.show();
+  assert.equal(env.service.requests[0].args[0].hover, undefined);
+  const token = new CancellationTokenSource();
+  assert.equal(await env.host.hover.provider.provideHover(first.document, { line: 0, character: 0 }, token.token), undefined);
+  env.service.client.initializeResult.capabilities.experimental.dygnosis.effectivePreview.hover = true;
+  env.service.value.hover_snapshot_id = "snapshot-2";
+  env.service.client.sendNotification = async () => {};
+  env.service.client.sendRequest = async () => ({ contents: "variable" });
+  env.service.client.protocol2CodeConverter = { asHover: value => value };
+  env.host.editor = { document: env.rootDocument, selection: new Range(0, 0), setDecorations() {} };
+  const second = await env.show();
+  assert.deepEqual(await env.host.hover.provider.provideHover(second.document, { line: 1, character: 0 }, token.token), { contents: "variable" });
+  token.cancel();
+  assert.equal(await env.host.hover.provider.provideHover(second.document, { line: 1, character: 0 }, token.token), undefined);
+  ++second.document.version;
+  assert.equal(await env.host.hover.provider.provideHover(second.document, { line: 1, character: 0 }, new CancellationTokenSource().token), undefined);
+  env.registration.dispose(); env.previews.dispose();
+});
+
+// Guards preview availability when the editor normalizes or changes provider text.
+test("preview hover accepts CRLF normalization and withholds mismatched display text", async () => {
+  const env = setup();
+  env.service.client.initializeResult.capabilities.experimental.dygnosis.effectivePreview.hover = true;
+  env.service.value = payload({ effective_text: "model;\r\ny = 1;\r\nend;", hover_snapshot_id: "normalized" });
+  env.service.client.sendNotification = async () => {};
+  env.service.client.sendRequest = async () => ({ contents: "hover" });
+  env.service.client.protocol2CodeConverter = { asHover: value => value };
+  env.host.normalizePreview = text => text.replaceAll("\r\n", "\n");
+  const first = await env.show(), token = new CancellationTokenSource();
+  assert.ok(first);
+  assert.deepEqual(await env.host.hover.provider.provideHover(first.document, { line: 1, character: 0 }, token.token), { contents: "hover" });
+  env.host.normalizePreview = text => `${text}changed`;
+  const second = await env.previews.replace(first, payload({ hover_snapshot_id: "mismatch" }));
+  assert.ok(second, "mismatched text must not refuse replacement");
+  assert.equal(await env.host.hover.provider.provideHover(second.document, { line: 1, character: 0 }, token.token), undefined);
+  env.registration.dispose(); env.previews.dispose();
+});
+
+// Guards retaining a snapshot from a Refresh superseded before publication.
+test("superseded refresh releases its returned hover snapshot", async () => {
+  const env = setup(), notifications = [], reply = deferred();
+  env.service.client.initializeResult.capabilities.experimental.dygnosis.effectivePreview.hover = true;
+  env.service.client.sendNotification = async (method, params) => notifications.push({ method, params });
+  const session = await env.show();
+  env.activate(session);
+  env.service.executeHook = () => reply.promise;
+  const pending = env.run("refreshEffectiveModel");
+  await flush();
+  env.close(session);
+  reply.resolve(payload({ hover_snapshot_id: "abandoned" }));
+  await pending;
+  assert.ok(notifications.some(item => item.method === "dynare/effectivePreviewClosed" && item.params.snapshot_id === "abandoned"));
+  env.registration.dispose(); env.previews.dispose();
+});
 
 async function realClientSetup() {
   const base = setup(); base.registration.dispose(); base.previews.dispose();

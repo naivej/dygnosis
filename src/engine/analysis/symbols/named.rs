@@ -371,6 +371,11 @@ pub(super) fn owns_target(view: &SemanticModel, id: usize, file: &str, byte: u32
         })
 }
 
+pub(super) fn owns_order(row: &Fact, id: usize, order: usize) -> bool {
+    row.uses.iter().any(|site| site.order == order)
+        || row.origin == id && row.declarations.iter().any(|site| site.order == order)
+}
+
 pub(super) fn rename(
     view: &SemanticModel,
     id: usize,

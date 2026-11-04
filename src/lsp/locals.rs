@@ -239,12 +239,31 @@ fn expression(view: &LocalView, binding: Binding) -> Option<&str> {
     )
 }
 
+pub(super) struct LocalDescription {
+    pub(super) markdown: String,
+    pub(super) definition: Option<Location>,
+}
+
+impl LocalDescription {
+    pub(super) fn into_markdown(mut self) -> String {
+        if let Some(target) = self.definition {
+            let line = target.range.start.line + 1;
+            let column = target.range.start.character + 1;
+            self.markdown.push_str(&format!(
+                "\n\n[Definition]({}#L{line},{column})",
+                target.uri
+            ));
+        }
+        self.markdown
+    }
+}
+
 fn description(
     sources: &mut DescriptionSources<'_>,
     view: &LocalView,
     binding: Binding,
     preferences: &PresentationSettings,
-) -> String {
+) -> LocalDescription {
     let mut text = format!(
         "**Model-local variable** {}",
         crate::lsp::names::code(view.model().name(binding.name))
@@ -256,17 +275,21 @@ fn description(
     {
         text.push_str(&format!("\n\nTeX: {}", crate::lsp::names::code(tex)));
     }
-    if let Some(expression) = expression(view, binding) {
+    let definition = if let Some(expression) = expression(view, binding) {
         let definition = &view.facts().definitions[binding.definition.unwrap()];
         let row = &view.model().written_equations[definition.equation_index];
         let expanded = row.equation.active_tokens.clone().any(|index| {
             let token = &view.model().expanded_tokens[index];
             token.lexeme.as_ref().is_some_and(|lexeme| {
                 written(view, token.span).and_then(|(file, span)| {
-                    sources.source(&file).map(|source| {
-                        source.text.get(span.start as usize..span.end as usize)
-                            == Some(lexeme.as_str())
-                    })
+                    let workspace = &sources.inner.workspace;
+                    workspace
+                        .source_for_normalized_key(&file)
+                        .or_else(|| workspace.get_source(&file))
+                        .map(|text| {
+                            text.get(span.start as usize..span.end as usize)
+                                == Some(lexeme.as_str())
+                        })
                 }) != Some(true)
             })
         });
@@ -276,16 +299,97 @@ fn description(
             "\n\nExpression: "
         });
         text.push_str(&crate::lsp::names::code(expression));
-        if let Some(target) = sources.location(view, definition.target_span) {
-            let line = target.range.start.line + 1;
-            let column = target.range.start.character + 1;
-            text.push_str(&format!(
-                "\n\n[Definition]({}#L{line},{column})",
-                target.uri
-            ));
-        }
+        sources.location(view, definition.target_span)
+    } else {
+        None
+    };
+    LocalDescription {
+        markdown: text,
+        definition,
+    }
+}
+
+fn without_hover_name(mut text: String, name: &str) -> String {
+    let heading = "**Model-local variable**";
+    let repeated = format!("{heading} {}", crate::lsp::names::code(name));
+    if text.starts_with(&repeated) {
+        text.replace_range(..repeated.len(), heading);
     }
     text
+}
+
+pub(super) fn preview_hover(
+    inner: &Inner,
+    root: &Url,
+    semantic: &Arc<crate::engine::analysis::symbols::SemanticModel>,
+    order: usize,
+    preferences: &PresentationSettings,
+) -> Option<LocalDescription> {
+    let facts = semantic.local_facts();
+    // These inventories are in parser order. Keep the first matching use.
+    let use_index = facts
+        .uses
+        .partition_point(|usage| usage.parse_order < order);
+    let (definition, declaration, name, dimension) = if let Some(usage) = facts
+        .uses
+        .get(use_index)
+        .filter(|usage| usage.parse_order == order)
+    {
+        (
+            usage.definition,
+            usage.declaration,
+            usage.name,
+            usage.dimension,
+        )
+    } else {
+        // The parser records the # token as the definition's order.
+        let definition_index = facts
+            .definitions
+            .partition_point(|definition| definition.parse_order + 1 < order);
+        if let Some(definition) = facts
+            .definitions
+            .get(definition_index)
+            .filter(|definition| definition.parse_order + 1 == order)
+        {
+            (
+                Some(definition_index),
+                definition.declaration,
+                definition.name,
+                definition.dimension,
+            )
+        } else {
+            let declaration_index = facts
+                .declarations
+                .partition_point(|declaration| declaration.parse_order.saturating_sub(1) < order);
+            let declaration = facts
+                .declarations
+                .get(declaration_index)
+                .filter(|declaration| declaration.parse_order.saturating_sub(1) == order)?;
+            // Only a hovered explicit declaration needs to disambiguate definitions.
+            let mut definitions = facts
+                .definitions
+                .iter()
+                .enumerate()
+                .filter(|(_, definition)| definition.declaration == Some(declaration_index));
+            let unique = definitions.next().filter(|_| definitions.next().is_none());
+            (
+                unique.map(|(id, _)| id),
+                Some(declaration_index),
+                declaration.name,
+                unique.and_then(|(_, definition)| definition.dimension),
+            )
+        }
+    };
+    let view = LocalView {
+        root: root.clone(),
+        analysis: LocalAnalysis::Effective(Arc::clone(semantic)),
+    };
+    let binding = view.binding(definition, declaration, name, dimension);
+    let mut sources = DescriptionSources::new(inner, root);
+    let mut description = description(&mut sources, &view, binding, preferences);
+    description.markdown =
+        without_hover_name(description.markdown, view.model().name(binding.name));
+    Some(description)
 }
 
 /// The outer option distinguishes a local site from the ordinary request path.
@@ -305,12 +409,9 @@ pub(super) fn hover(inner: &mut Inner, pos: &TextDocumentPositionParams) -> Opti
             continue;
         }
         let mut sources = DescriptionSources::new(inner, &view.root);
-        descriptions.push(Some(description(
-            &mut sources,
-            &view,
-            bindings[0],
-            &preferences,
-        )));
+        descriptions.push(Some(
+            description(&mut sources, &view, bindings[0], &preferences).into_markdown(),
+        ));
     }
     if !found {
         return None;
@@ -324,16 +425,7 @@ pub(super) fn hover(inner: &mut Inner, pos: &TextDocumentPositionParams) -> Opti
                     .iter()
                     .all(|other| other.as_ref() == Some(first))
             })
-            .map(|mut markdown| {
-                let repeated = format!(
-                    "**Model-local variable** {}",
-                    crate::lsp::names::code(&hovered)
-                );
-                if markdown.starts_with(&repeated) {
-                    markdown.replace_range(..repeated.len(), "**Model-local variable**");
-                }
-                markdown_hover(markdown, Some(range))
-            }),
+            .map(|markdown| markdown_hover(without_hover_name(markdown, &hovered), Some(range))),
     )
 }
 
@@ -575,7 +667,8 @@ pub(super) fn completions(
                     insert_text: Some(name),
                     documentation: Some(Documentation::MarkupContent(MarkupContent {
                         kind: MarkupKind::Markdown,
-                        value: description(&mut sources, view, binding, preferences),
+                        value: description(&mut sources, view, binding, preferences)
+                            .into_markdown(),
                     })),
                     ..CompletionItem::default()
                 };

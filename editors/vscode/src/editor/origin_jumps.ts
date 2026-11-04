@@ -213,7 +213,6 @@ interface State {
 export function registerOriginJumps(service: OriginJumpClient, previews: EffectivePreviewRegistry): vscode.Disposable {
   const states = new Map<EffectivePreviewSession, State>();
   let disposed = false;
-  const hoverMessage = "Macro-expanded text. Go to written source opens the written text that produced it.";
   const macroDecoration = vscode.window.createTextEditorDecorationType({
     isWholeLine: false,
     rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
@@ -240,7 +239,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       Array.isArray(payload.macro_ranges) && state.instance === service.currentInstance &&
       !state.session.document.isClosed && state.session.document.getText() === state.session.text;
     const ranges = canTint ? macroTintRanges(payload, state.session.document, state.session.text) : [];
-    const decorations = ranges.map(range => ({ range, hoverMessage }));
+    const decorations = ranges.map(range => ({ range }));
     for (const editor of vscode.window.visibleTextEditors) {
       if (editor.document === state.session.document) editor.setDecorations(macroDecoration, decorations);
     }
@@ -341,10 +340,11 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     if (state.refreshTimer) { clearTimeout(state.refreshTimer); state.refreshTimer = undefined; }
     state.stale = true; const request = begin(state); updateContext();
     const instance = service.currentInstance, generation = state.session.generation;
+    let result: unknown, adopted = false;
     const current = (): boolean => !disposed && !state.closed && state.operation === request.operation && state.epoch === request.epoch &&
       state.session.generation === generation && !request.token.isCancellationRequested && service.currentInstance === instance;
     try {
-      const result = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, state.session.root), request.token);
+      result = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, state.session.root, true), request.token);
       if (!current()) return;
       if (record(result) && result.success === false && typeof result.message === "string")
         refuse(result.message);
@@ -361,12 +361,14 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       const replaced = await previews.replace(state.session, result, current,
         payload ? { revision: payload.revision, instance } : undefined);
       if (!replaced) { if (current()) unavailable(); return; }
+      adopted = true;
       // The new immutable display reuses this loader's accepted proof.
       updateContext();
     } catch (error) {
       if (current()) throw new Error(`Macro expansion was not refreshed: ${error instanceof Error ? error.message : String(error)} The displayed text keeps its old configuration.`, { cause: error });
     }
     finally {
+      if (!adopted) previews.releaseSnapshot(state.session.root, result, instance);
       if (state.operation === request.operation) {
         state.cancellation?.dispose(); state.cancellation = undefined;
       }

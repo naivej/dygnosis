@@ -194,6 +194,8 @@ pub(crate) struct SemanticModel {
     ordinary_sites: OnceLock<HashMap<Name, Vec<Reference>>>,
     accepted_calls: HashMap<ExprId, (usize, Span)>,
     call_sites: OnceLock<HashMap<String, Vec<Reference>>>,
+    hover_values: OnceLock<HashMap<Name, f64>>,
+    hover_timing: OnceLock<HashMap<String, super::timing::TimingInfo>>,
     parse_stop: Option<usize>,
     accepted_events: HashSet<usize>,
 }
@@ -348,6 +350,8 @@ impl SemanticModel {
             ordinary_sites: OnceLock::new(),
             accepted_calls,
             call_sites: OnceLock::new(),
+            hover_values: OnceLock::new(),
+            hover_timing: OnceLock::new(),
             parse_stop,
             accepted_events,
         };
@@ -746,6 +750,62 @@ impl SemanticModel {
             }
             Identity::Builtin => self.call_sites(binding),
         }
+    }
+
+    pub(crate) fn hover_timing(&self, word: &str) -> Option<&super::timing::TimingInfo> {
+        if self.hover_timing.get().is_none() {
+            let values = super::timing::classify_variable_timing(&self.model);
+            check_cancelled().ok()?;
+            let _ = self.hover_timing.set(values);
+        }
+        self.hover_timing.get()?.get(word)
+    }
+
+    pub(crate) fn hover_value(&self, word: &str) -> Option<f64> {
+        let name = self.model.intern.lookup(word)?;
+        if self.hover_values.get().is_none() {
+            let values = super::model_info::assigned_number_values(&self.model);
+            check_cancelled().ok()?;
+            let _ = self.hover_values.set(values);
+        }
+        self.hover_values.get()?.get(&name).copied()
+    }
+
+    pub(crate) fn semantic_tag_at(&self, order: usize, byte: u32) -> Option<(&str, Span)> {
+        self.tags.iter().find_map(|site| {
+            (site.order == Some(order)
+                && site.within_token.start <= byte
+                && byte < site.within_token.end)
+                .then_some((site.name.as_str(), site.within_token))
+        })
+    }
+
+    /// A selected display token proves an execution occurrence, even when
+    /// another copy maps to the same written bytes.
+    pub(crate) fn typed_at_order(&self, order: usize, spelling: &str) -> Option<Option<Binding>> {
+        let mut named = self
+            .named
+            .iter()
+            .enumerate()
+            .take_while(|_| !crate::engine::control::cancelled())
+            .filter(|(id, row)| row.name == spelling && named::owns_order(row, *id, order));
+        if let Some((id, _)) = named.next() {
+            return Some(named.next().is_none().then(|| named::binding(self, id)));
+        }
+        let name = self.model.intern.lookup(spelling)?;
+        let kind = self.model.final_symbol_kind(name)?;
+        if !matches!(kind, "external_function" | "trend_var" | "log_trend_var") {
+            return None;
+        }
+        let binding = self.binding_inventory().iter().find(|binding| {
+            binding.identity == Identity::Ordinary
+                && binding.name == spelling
+                && binding.kind == kind
+        })?;
+        self.references(binding, true)
+            .iter()
+            .any(|reference| reference.order == order)
+            .then(|| Some(binding.clone()))
     }
 
     /// All parser-owned ordinary-family sites in one cached traversal. Names

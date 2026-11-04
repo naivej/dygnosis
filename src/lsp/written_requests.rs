@@ -4,21 +4,29 @@ use crate::engine::workspace::SourceDocument;
 
 /// Some includes a proven empty result; None keeps model-aware providers eligible.
 pub(super) fn hover(source: &SourceDocument, position: Position) -> Option<Option<Hover>> {
-    use crate::engine::analysis::source_inventory::SourceItemKind;
     let text = source.source();
     let index = source.source_index();
     let byte = index.offset_utf16(text, span_pos(position));
     let inventory = source.inventory()?;
+    hover_at(&inventory, text, byte, &index)
+}
+
+pub(super) fn hover_at(
+    inventory: &crate::engine::analysis::source_inventory::SourceInventory,
+    text: &str,
+    byte: u32,
+    index: &LineIndex,
+) -> Option<Option<Hover>> {
+    use crate::engine::analysis::source_inventory::SourceItemKind;
     let value_source = inventory.option_value_at(text, byte);
-    if let Some(hover) =
-        written_values::hover(&inventory, value_source.as_ref(), text, byte, &index)
+    if let Some(hover) = written_values::hover(inventory, value_source.as_ref(), text, byte, index)
     {
         return Some(hover);
     }
-    if let Some(hover) = option_values::hover(value_source.as_ref(), text, byte, &index) {
+    if let Some(hover) = option_values::hover(value_source.as_ref(), text, byte, index) {
         return Some(Some(hover));
     }
-    if !syntax_intel::hover_may_need_model(&inventory, text, byte) {
+    if !syntax_intel::hover_may_need_model(inventory, text, byte) {
         return Some(None);
     }
     let (word, span) = syntax_intel::candidate_word_at(text, byte)?;
@@ -39,7 +47,7 @@ pub(super) fn hover(source: &SourceDocument, position: Position) -> Option<Optio
     {
         return None;
     }
-    let range = Some(span_range(&index, text, span));
+    let range = Some(span_range(index, text, span));
     if macro_directive_name_with_tokens(text, byte, &inventory.macro_tokens) == Some(span) {
         // Conditional headers need the selected arm's activity, including an active else.
         // Other macro keywords retain source-only syntax help.
@@ -62,9 +70,9 @@ pub(super) fn hover(source: &SourceDocument, position: Position) -> Option<Optio
             ))
         });
     }
-    let context = syntax_intel::source_context(&inventory, text, byte, false)?;
+    let context = syntax_intel::source_context(inventory, text, byte, false)?;
     if let Some(description) =
-        syntax_intel::written_syntax_help(&inventory, text, byte, word, span, &context)
+        syntax_intel::written_syntax_help(inventory, text, byte, word, span, &context)
     {
         return Some(Some(markdown_hover(description, range)));
     }

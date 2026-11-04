@@ -91,7 +91,7 @@ export function record(value: unknown): value is Record<string, unknown> {
 function natural(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
-function position(value: unknown): value is Position {
+export function position(value: unknown): value is Position {
   return record(value) && natural(value.line) && natural(value.character);
 }
 export function location(value: unknown): value is Location {

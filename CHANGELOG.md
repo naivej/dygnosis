@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.11.48
+
+- Hover in the macro expansion preview shows information about names,
+  commands and options.
+
 ## v0.11.47
 
 - The Source preview opens and refreshes faster on large models with many

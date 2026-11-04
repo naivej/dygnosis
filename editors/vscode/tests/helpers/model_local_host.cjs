@@ -56,9 +56,9 @@ async function checkModelLocalEditing(service, workspaceRoot, evidence, helpers)
   const productRoot = path.resolve(__dirname, "../../../..");
   const examples = [
     ["Gali_2008/Gali_2008_chapter_3.mod", "Gali model-local helper"],
-    ["Basu_Bundick_2017/Basu_Bundick_2017.mod", "Basu-Bundick model-local helper"],
+    ["Basu_Bundick_2017/Basu_Bundick_2017.mod", "Basu-Bundick model-local helper", /inactive or uncertain source occurrence/],
   ];
-  for (const [relative, description] of examples) {
+  for (const [relative, description, renameRefusal] of examples) {
     const original = path.join(productRoot, ".agents/skills/use-dynare/references/examples-code", relative);
     const originalText = await fs.readFile(original, "utf8");
     // The archived Gali example uses the retired resid(1) command form.
@@ -79,10 +79,16 @@ async function checkModelLocalEditing(service, workspaceRoot, evidence, helpers)
     const site = new vscode.Position(helperPosition.line, column);
     const help = await vscode.commands.executeCommand("vscode.executeHoverProvider", copy.uri, site);
     assert.ok(help.some(hover => hover.contents.some(content => content.value?.includes("Model-local variable"))), description);
-    const captured = await service.execute("dynare/captureRename", [{ textDocument: { uri: copy.uri.toString() }, position: site, newName: "zz_verified_helper" }]);
-    const edits = await service.client.protocol2CodeConverter.asWorkspaceEdit(captured.edit);
-    assert.ok(edits instanceof vscode.WorkspaceEdit, `${description} rename`);
-    assert.ok(edits.entries().flatMap(([, rows]) => rows).length >= 2);
+    const captureRename = () => service.execute("dynare/captureRename", [{ textDocument: { uri: copy.uri.toString() }, position: site, newName: "zz_verified_helper" }]);
+    if (renameRefusal) {
+      // Both CRRA arms define M. The selected arm alone cannot prove the edit.
+      await assert.rejects(captureRename, { code: "RENAME_REFUSED", message: renameRefusal });
+    } else {
+      const captured = await captureRename();
+      const edits = await service.client.protocol2CodeConverter.asWorkspaceEdit(captured.edit);
+      assert.ok(edits instanceof vscode.WorkspaceEdit, `${description} rename`);
+      assert.ok(edits.entries().flatMap(([, rows]) => rows).length >= 2);
+    }
     const references = await vscode.commands.executeCommand("vscode.executeReferenceProvider", copy.uri, site);
     const use = references.find(reference => reference.uri.toString() === copy.uri.toString() && !reference.range.contains(site));
     assert.ok(use, `${description} has a bound use`);
@@ -95,7 +101,8 @@ async function checkModelLocalEditing(service, workspaceRoot, evidence, helpers)
     copyEditor.selection = new vscode.Selection(use.range.start, use.range.start);
     await vscode.commands.executeCommand("editor.action.revealDefinition");
     await waitFor(() => vscode.window.activeTextEditor?.document.uri.toString() === copy.uri.toString() && vscode.window.activeTextEditor.selection.active.line === site.line, `${description} native definition jump`);
-    evidence.checks.push(`${description}: temporary copy, prefix acceptance, hover, native definition jump and scoped Rename capture`);
+    const rename = renameRefusal ? "conditional Rename refusal" : "scoped Rename capture";
+    evidence.checks.push(`${description}: temporary copy, prefix acceptance, hover, native definition jump and ${rename}`);
   }
 }
 

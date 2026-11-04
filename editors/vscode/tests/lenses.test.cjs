@@ -44,6 +44,7 @@ const vscode = {
     from: value => uri(`${value.scheme}:${value.path}`) },
   languages: {
     registerDocumentSymbolProvider: () => new Disposable(),
+    registerHoverProvider: () => new Disposable(),
     registerCodeLensProvider: (selector, provider) => {
       const registration = { selector, provider, disposed: false }; host.providers.push(registration);
       return new Disposable(() => { registration.disposed = true; });
@@ -91,7 +92,8 @@ const vscode = {
     },
     openTextDocument: async value => {
       host.loads.push(value.toString());
-      return host.load ? host.load(value) : document(value.toString());
+      const provider = host.content.get(value.scheme);
+      return host.load ? host.load(value) : document(value.toString(), { getText: () => provider?.provideTextDocumentContent(value) ?? "" });
     },
   },
 };

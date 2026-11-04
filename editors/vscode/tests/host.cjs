@@ -235,29 +235,129 @@ async function checkNativeMetadata(service, workspaceRoot, evidence) {
   evidence.checks.push("real equation-tag and long-name actions apply, undo, reapply, and do not repeat");
 }
 
+async function clickPreviewDefinition(editor, needle) {
+  const offset = editor.document.getText().indexOf(needle);
+  assert.ok(offset >= 0, `${needle} is present in the preview`);
+  const point = editor.document.positionAt(offset + 1);
+  editor.revealRange(new vscode.Range(point, point), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+  await nativeWorkbench(async send => {
+    const evaluate = async expression => (await send("Runtime.evaluate", { expression, returnByValue: true })).result.value;
+    let symbol;
+    await waitFor(async () => {
+      symbol = await evaluate(`(() => {
+        const word = ${JSON.stringify(needle)};
+        const line = [...document.querySelectorAll('.view-lines .view-line')].find(line => line.textContent.includes(word) && line.getClientRects().length);
+        if (!line) return null;
+        let column = line.textContent.indexOf(word) + 1;
+        const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (column < node.length) {
+            const range = document.createRange();
+            range.setStart(node, column);
+            range.setEnd(node, column + 1);
+            const box = range.getBoundingClientRect();
+            return {x: box.x + box.width / 2, y: box.y + box.height / 2};
+          }
+          column -= node.length;
+        }
+        return null;
+      })()`);
+      return !!symbol;
+    }, `rendered preview identifier ${needle}`);
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 10, y: 10 });
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...symbol });
+    let link;
+    await waitFor(async () => {
+      link = await evaluate(`(() => {
+        const link = [...document.querySelectorAll('.monaco-hover a')].find(a => a.textContent === 'Definition' && a.getClientRects().length);
+        if (!link) return null;
+        const box = link.getBoundingClientRect();
+        return {x: box.x + box.width / 2, y: box.y + box.height / 2};
+      })()`);
+      return !!link;
+    }, `native Definition link for ${needle}`);
+    for (const type of ["mousePressed", "mouseReleased"])
+      await send("Input.dispatchMouseEvent", { type, button: "left", clickCount: 1, ...link });
+  });
+}
+
 async function checkMacroPreview(service, workspaceRoot, evidence) {
   const names = ["home_1", "home_2", "foreign_1", "foreign_2"];
-  for (const name of names) await writeObservedInput(service, path.join(workspaceRoot, `${name}.inc`), `${name}=0;\n@#echo "${name}"\n`);
+  for (const name of names) await writeObservedInput(service, path.join(workspaceRoot, `${name}.inc`),
+    `${name === "home_1" ? "#included_gain = 1;\n" : ""}${name}=p_${name};\n@#echo "${name}"\n`);
   const filename = path.join(workspaceRoot, "macro-preview.mod");
   const source = '@#define countries=["home","foreign"]\n' +
     '@#define names=[c+"_"+(string)i for (c,i) in countries*(1:2)]\n' +
     '@#if 1 in 1:3\n@#echo "range"\n@#endif\n' +
-    '@#for n in names\nvar @{n};\n@#endfor\nmodel;\n' +
-    '@#for n in names\n@#include n+".inc"\n@#endfor\nend;\n';
+    '@#for n in names\nvar @{n};\nparameters p_@{n};\np_@{n}=0;\n@#endfor\nmodel;\n' +
+    '@#for n in names\n#gain_@{n} = 1;\n@#include n+".inc"\n@#endfor\nend;\nsteady(solve_algo=1);\n';
   await writeObservedInput(service, filename, source);
   const document = await vscode.workspace.openTextDocument(filename);
-  await vscode.window.showTextDocument(document);
+  const sourceEditor = await vscode.window.showTextDocument(document);
   const info = await currentSnapshot(service, document, () => service.modelInfo(document.uri), "macro preview counts", value => value.n_equations === 4);
   assert.equal(info.n_endogenous, 4);
-  await vscode.commands.executeCommand("dygnosis.showEffectiveModel");
-  const preview = vscode.window.activeTextEditor;
   const expanded = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, document.uri));
+  await vscode.commands.executeCommand("dygnosis.showEffectiveModel");
+  let preview = vscode.window.activeTextEditor;
   assert.equal(expanded.complete, true);
   assert.equal(expanded.navigation.filter(row => row.kind === "equation").length, 4);
   assert.deepEqual(expanded.macro_messages.map(message => message.message), ["range", ...names]);
   assert.equal(preview.document.getText(), expanded.effective_text);
-  for (const name of names) assert.ok(expanded.effective_text.includes(`${name}=0;`));
+  for (const name of names) assert.ok(expanded.effective_text.includes(`${name}=p_${name};`));
   assert.ok(expanded.macro_ranges.length > 0);
+  const hoverText = async needle => {
+    const offset = preview.document.getText().indexOf(needle);
+    assert.ok(offset >= 0, `${needle} is present in the preview`);
+    let text;
+    await waitFor(async () => {
+      const hovers = await vscode.commands.executeCommand("vscode.executeHoverProvider", preview.document.uri, preview.document.positionAt(offset + 1));
+      text = (hovers ?? []).flatMap(hover => hover.contents.map(content => typeof content === "string" ? content : content.value)).join("\n");
+      return text.length > 0;
+    }, `hover over ${needle}`);
+    return text;
+  };
+  const parameterHover = await hoverText("p_home_1;");
+  assert.match(parameterHover, /parameter/i, "generated parameter has ordinary language hover");
+  assert.doesNotMatch(parameterHover, /Macro-expanded text/);
+  const localHover = await hoverText("gain_home_1 =");
+  assert.match(localHover, /Model-local variable/, "generated model-local definition has ordinary language hover");
+  const optionHover = await hoverText("solve_algo");
+  assert.ok(optionHover.length > 0, "command option has ordinary language hover");
+  const definitionLink = localHover.match(/\[Definition\]\(command:([^?]+)\?([^)]*)\)/);
+  assert.ok(definitionLink, "the Definition link uses the source editor action");
+  const sourceTabs = () => vscode.window.tabGroups.all.flatMap(group => group.tabs)
+    .filter(tab => tab.input?.uri?.toString() === document.uri.toString()).length;
+  const tabsBefore = sourceTabs();
+  const visual = process.env.DYGNOSIS_HOST_REQUIRED_VISUAL === "1";
+  if (visual) await clickPreviewDefinition(preview, "gain_home_1");
+  else await vscode.commands.executeCommand(definitionLink[1], ...JSON.parse(decodeURIComponent(definitionLink[2])));
+  await waitFor(() => {
+    const group = vscode.window.tabGroups.activeTabGroup, input = group.activeTab?.input;
+    return input instanceof vscode.TabInputText && input.uri.toString() === document.uri.toString() && group.viewColumn === sourceEditor.viewColumn;
+  }, "Definition focuses the source tab");
+  assert.equal(sourceTabs(), tabsBefore, "following the definition must reuse the source tab");
+  assert.equal(document.getText(sourceEditor.selection), "gain_@{n}");
+  await vscode.window.showTextDocument(preview.document, preview.viewColumn);
+  const includeUri = vscode.Uri.file(path.join(workspaceRoot, "home_1.inc"));
+  assert.ok(!vscode.window.tabGroups.all.flatMap(group => group.tabs).some(tab => tab.input?.uri?.toString() === includeUri.toString()),
+    "the include starts without an editor tab");
+  const includeHover = await hoverText("included_gain =");
+  assert.match(includeHover, /Model-local variable/);
+  const includeLink = includeHover.match(/\[Definition\]\(command:([^?]+)\?([^)]*)\)/);
+  assert.ok(includeLink, "the included definition has a source action");
+  if (visual) await clickPreviewDefinition(preview, "included_gain");
+  else await vscode.commands.executeCommand(includeLink[1], ...JSON.parse(decodeURIComponent(includeLink[2])));
+  await waitFor(() => vscode.window.activeTextEditor?.document.uri.toString() === includeUri.toString(), "Definition opens the closed include");
+  assert.equal(vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection), "included_gain");
+  if (visual) evidence.checks.push("clicked both rendered Definition links in the native hover");
+  await vscode.window.showTextDocument(preview.document, preview.viewColumn);
+  // The include now has an editor overlay. Use a fresh snapshot for the independent source-jump check.
+  await waitFor(() => vscode.window.activeTextEditor?.document === preview.document, "focus the expansion before Refresh");
+  await vscode.commands.executeCommand("dygnosis.refreshEffectiveModel");
+  await waitFor(() => vscode.window.activeTextEditor?.document.uri.scheme === "dygnosis-effective" &&
+    vscode.window.activeTextEditor.document !== preview.document, "Refresh captures the open include");
+  preview = vscode.window.activeTextEditor;
+  assert.equal(preview.document.getText(), expanded.effective_text);
   const row = expanded.navigation.find(item => item.kind === "equation" && item.written_locations.some(location => location.uri.endsWith("home_1.inc")));
   assert.ok(row);
   const point = new vscode.Position(row.effective_range.start.line, row.effective_range.start.character + 1);
@@ -280,7 +380,7 @@ async function checkMacroPreview(service, workspaceRoot, evidence) {
   await waitFor(() => vscode.window.activeTextEditor.document.getText().startsWith("// INCOMPLETE EXPANSION"), "Refresh publishes the incomplete virtual document");
   assert.ok(vscode.window.activeTextEditor.document.getText().endsWith(failed.effective_text));
   await waitFor(() => vscode.languages.getDiagnostics(document.uri).some(diagnostic => diagnosticCode(diagnostic) === "E063"), "failing macro Problems");
-  evidence.checks.push("range, Cartesian and comprehension names, expression includes, exact preview text, macro ranges, written jump, edit/Refresh, debug order and fatal status");
+  evidence.checks.push("range, Cartesian and comprehension names, expression includes, generated parameter and model-local definition hover, Definition links reuse the source tab and open a closed include, command option hover, exact preview text, macro ranges, written jump, edit/Refresh, debug order and fatal status");
 }
 async function checkParseFollowups(service, workspaceRoot, evidence) {
   const cases = [
@@ -427,7 +527,9 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
     }, "native repository comparison MCP tool discovery");
     const repositoryInput = { repository_path: repositoryPath, before: { kind: "git", root_file: "root.mod", ref: afterCommit }, after: { kind: "working", root_file: "root.mod" } };
     const invoke = async input => {
-      const result = await vscode.lm.invokeTool(mcpTool.name, { input: { comparison: { kind: "repository", ...input } } }, token.token);
+      const result = await vscode.lm.invokeTool(mcpTool.name, {
+        input: { comparison: { kind: "repository", ...input }, sections: ["structural"] },
+      }, token.token);
       const envelope = JSON.parse(result.content.filter(item => item instanceof vscode.LanguageModelTextPart).map(item => item.value).join("\n"));
       assert.equal(envelope.schema_version, 3);
       return envelope.data;
@@ -563,7 +665,15 @@ exports.run = async function run() {
     evidence.extension_version = extension.packageJSON.version;
     evidence.extension_entrypoint_sha256 = createHash("sha256").update(await fs.readFile(path.resolve(extension.extensionPath, extension.packageJSON.main))).digest("hex");
     const service = await extension.activate();
-    assert.ok(["all", "mcp", "semantic", "folding", "presentation", "rename", "workspace", "syntax", "lifecycle", "analysis", "help"].includes(scope), "Unknown native host scope");
+    assert.ok(["all", "mcp", "semantic", "folding", "presentation", "rename", "workspace", "syntax", "lifecycle", "analysis", "help", "preview"].includes(scope), "Unknown native host scope");
+    if (scope === "preview") {
+      await checkMacroPreview(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
+      await service.shutdown();
+      evidence.artifacts_after = await historyArtifacts();
+      assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "native preview acceptance uses one matching candidate");
+      evidence.passed = true;
+      return;
+    }
     if (scope === "help") {
       await require("./helpers/help_host.cjs").checkHelpAccess(evidence, waitFor);
       await service.shutdown();
@@ -725,14 +835,20 @@ exports.run = async function run() {
     assert.ok(previewRow?.written_locations.length);
     const previewPoint = new vscode.Position(previewRow.effective_range.start.line, previewRow.effective_range.start.character + 1);
     previewEditor.selection = new vscode.Selection(previewPoint, previewPoint);
-    await waitFor(async () => {
-      if (vscode.window.activeTextEditor.document.uri.scheme === "dygnosis-effective") await vscode.commands.executeCommand("dygnosis.goToWrittenSource");
-      return vscode.window.activeTextEditor.document.uri.toString() === document.uri.toString();
+    await vscode.commands.executeCommand("dygnosis.goToWrittenSource");
+    let sourceEditor;
+    await waitFor(() => {
+      // In an unfocused host, activeTextEditor can still report the preview after the source tab activates.
+      const group = vscode.window.tabGroups.activeTabGroup;
+      const input = group.activeTab?.input;
+      if (!(input instanceof vscode.TabInputText) || input.uri.toString() !== document.uri.toString()) return false;
+      sourceEditor = vscode.window.visibleTextEditors.find(editor => editor.document === document && editor.viewColumn === group.viewColumn);
+      return !!sourceEditor;
     }, "effective preview jumps to its verified written equation");
-    assert.equal(vscode.window.activeTextEditor.selection.start.line, previewRow.written_locations[0].range.start.line);
+    assert.equal(sourceEditor.selection.start.line, previewRow.written_locations[0].range.start.line);
     const writtenCharacter = previewRow.written_locations[0].range.start.character + (previewResult.source_navigation ? 1 : 0);
-    assert.equal(vscode.window.activeTextEditor.selection.start.character, writtenCharacter, "source preview maps the clicked character; fallback uses the equation range");
-    evidence.checks.push("native preview source action maps the exact clicked written character");
+    assert.equal(sourceEditor.selection.start.character, writtenCharacter, "source preview maps the clicked character; fallback uses the equation range");
+    evidence.checks.push("native preview source action activates the existing source tab and maps the exact clicked character");
     const previewRootPath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, "preview-include.mod");
     const previewBodyPath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, "preview-body.inc");
     await writeObservedInput(service, previewBodyPath, "y=3;\n");
