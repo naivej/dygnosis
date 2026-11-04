@@ -53,16 +53,17 @@ pub(crate) fn arithmetic_number(
                     .copied()
                     .filter(|value| value.is_finite());
             }
-            let span = model.exprs.get(id).span;
-            let written = model
-                .source
-                .get(span.start as usize..span.end as usize)
-                .and_then(|raw| raw.parse().ok());
-            if mode == NumberMode::Hover {
-                model.numeric_literals.get(&id).copied().or(written)
-            } else {
-                written
+            if mode == NumberMode::Hover
+                && let Some(value) = model.numeric_literals.get(&id)
+            {
+                return Some(*value);
             }
+            let span = model.exprs.get(id).span;
+            model
+                .source
+                .get(span.start as usize..span.end as usize)?
+                .parse()
+                .ok()
         }
         ExprKind::Ident {
             name,
@@ -107,10 +108,12 @@ pub(crate) fn arithmetic_number(
 /// Final values from the legacy parameter-then-helper walk, not execution traces.
 pub fn assigned_number(model: &Model, name: &str) -> Option<f64> {
     let name = model.intern.lookup(name)?;
-    assigned_number_values(model).get(&name).copied()
+    legacy_assigned_values(model, NumberMode::Legacy, |_| {})
+        .get(&name)
+        .copied()
 }
 
-pub(crate) fn assigned_number_values(model: &Model) -> HashMap<Name, f64> {
+pub(crate) fn hover_assigned_number_values(model: &Model) -> HashMap<Name, f64> {
     legacy_assigned_values(model, NumberMode::Hover, |_| {})
 }
 

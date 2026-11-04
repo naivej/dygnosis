@@ -764,7 +764,7 @@ impl SemanticModel {
     pub(crate) fn hover_value(&self, word: &str) -> Option<f64> {
         let name = self.model.intern.lookup(word)?;
         if self.hover_values.get().is_none() {
-            let values = super::model_info::assigned_number_values(&self.model);
+            let values = super::model_info::hover_assigned_number_values(&self.model);
             check_cancelled().ok()?;
             let _ = self.hover_values.set(values);
         }

@@ -51,7 +51,7 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, ClientSocket, LanguageServer, LspService, Server};
 
 use crate::engine::analysis::model_info::{
-    TimingClass, assigned_number, classify_variable_timing, format_timing_line,
+    TimingClass, classify_variable_timing, format_timing_line, hover_assigned_number_values,
 };
 use crate::engine::catalog::{HET_SHOCKS_OVERWRITE, HETEROGENEITY_OPTION, option_doc};
 use crate::engine::diagnostics::explain;
@@ -4527,7 +4527,10 @@ fn decl_hover_markdown(
                 .get(word)
                 .map(format_timing_line)
         },
-        || assigned_number(model, word),
+        || {
+            let name = model.intern.lookup(word)?;
+            hover_assigned_number_values(model).get(&name).copied()
+        },
     )
 }
 
