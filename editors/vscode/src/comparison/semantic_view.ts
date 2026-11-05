@@ -40,6 +40,11 @@ function number(value: unknown): number { return typeof value === "number" && Nu
 function one<T extends string>(value: unknown, values: readonly T[]): T { return typeof value === "string" && values.includes(value as T) ? value as T : invalid(); }
 function nullable<T>(value: unknown, parse: (value: unknown) => T): T | null { return value === null ? null : parse(value); }
 function unique<T>(values: T[]): T[] { return new Set(values).size === values.length ? values : invalid(); }
+function validateChangeSides(change: SemanticRow["change"], before: object | null, after: object | null): void {
+  const needsBefore = change !== "added";
+  const needsAfter = change !== "removed";
+  if ((before !== null) !== needsBefore || (after !== null) !== needsAfter) invalid();
+}
 function pointer(value: unknown): string { const result = text(value); return /^\/(?:[^~\s]|~[01])+$/.test(result) ? result : invalid(); }
 function limit(value: unknown): Limit { const r = object(value, ["code", "reason", "owner", "omitted"]); return { code: text(r.code), reason: text(r.reason), owner: text(r.owner), omitted: nullable(r.omitted, v => integer(v, 1)) }; }
 function scope(value: unknown): Scope { const r = object(value, ["domain", "dimension", "block"]); return { domain: text(r.domain), dimension: nullable(r.dimension, text), block: nullable(r.block, text) }; }
@@ -85,7 +90,7 @@ function timing(value: unknown): TimingSide { const r = object(value, ["name", "
 function semanticRow(value: unknown): SemanticRow {
   const r = object(value, ["pointer", "family", "change", "name", "count_unit", "facets", "before", "after", "fields", "expressions", "timing", "references", "limits"]);
   const result: SemanticRow = { pointer: pointer(r.pointer), family: one(r.family, semanticFamilies), change: one(r.change, changes), name: text(r.name), count_unit: one(r.count_unit, ["final_fact", "accepted_occurrence", "operation"]), facets: unique(array(r.facets).map(v => one(v, facets))), before: nullable(r.before, rowSide), after: nullable(r.after, rowSide), fields: array(r.fields).map(field), expressions: array(r.expressions).map(expression), timing: array(r.timing).map(v => { const t = object(v, ["before", "after"]); const before = nullable(t.before, timing), after = nullable(t.after, timing); if (!before && !after) invalid(); return { before, after }; }), references: unique(array(r.references).map(pointer)), limits: array(r.limits).map(limit) };
-  if (!result.before && !result.after || result.change === "added" && result.before || result.change === "removed" && result.after || result.change === "changed" && (!result.before || !result.after)) invalid();
+  validateChangeSides(result.change, result.before, result.after);
   unique(result.fields.map(f => f.name)); unique(result.expressions.map(e => e.field));
   return result;
 }
@@ -114,14 +119,20 @@ export function parseSemantic(value: Record<string, unknown>, ids: Record<"befor
   const sourceChanges: SourceChanges = { schema_version: 1, availability: one(source.availability, availability), files: array(source.files).map(v => {
     const f = object(v, ["pointer", "change", "correspondence", "before", "after", "availability", "hunks", "omitted_hunks", "limits"]);
     const before = nullable(f.before, v => sourceSide(v, "before")), after = nullable(f.after, v => sourceSide(v, "after")), change = one(f.change, changes), correspondence = one(f.correspondence, ["selected_roots", "proven_file_identity", "unpaired"]);
-    if (!before && !after || change === "added" && before || change === "removed" && after || change === "changed" && (!before || !after) || correspondence === "unpaired" && before && after) invalid();
+    validateChangeSides(change, before, after);
+    if (correspondence === "unpaired" && before && after) invalid();
     return { pointer: pointer(f.pointer), change, correspondence, before, after, availability: one(f.availability, availability), omitted_hunks: nullable(f.omitted_hunks, v => integer(v, 1)), limits: array(f.limits).map(limit), hunks: array(f.hunks).map(v => { const h = object(v, ["before_start", "before_lines", "after_start", "after_lines", "lines"]), lines = runs(h.lines), before_lines = integer(h.before_lines), after_lines = integer(h.after_lines); if (lines.filter(l => l.role !== "added").length !== before_lines || lines.filter(l => l.role !== "removed").length !== after_lines) invalid(); return { before_start: integer(h.before_start, 1), before_lines, after_start: integer(h.after_start, 1), after_lines, lines }; }) };
   }), limits: array(source.limits).map(limit) };
-  unique(semantic.rows.map(r => r.pointer)); unique(semantic.references.map(r => r.pointer)); unique(coverage.families.map(f => f.family)); unique(sourceChanges.files.map(f => f.pointer));
+  unique(semantic.rows.map(r => r.pointer)); unique(coverage.families.map(f => f.family));
   semantic.rows.forEach((row, index) => { if (row.pointer.startsWith("/semantic/") && row.pointer !== `/semantic/rows/${index}`) invalid(); });
   semantic.references.forEach((row, index) => { if (row.pointer !== `/semantic/references/${index}`) invalid(); });
   sourceChanges.files.forEach((file, index) => { if (file.pointer !== `/source_changes/files/${index}`) invalid(); });
   const references = new Map(semantic.references.map(r => [r.pointer, r]));
-  for (const row of semantic.rows) for (const p of row.references) if (!references.has(p) || !row[references.get(p)!.side]) invalid();
+  for (const row of semantic.rows) {
+    for (const pointer of row.references) {
+      const target = references.get(pointer);
+      if (!target || !row[target.side]) invalid();
+    }
+  }
   return { semantic, sourceChanges, coverage };
 }

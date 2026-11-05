@@ -2,7 +2,7 @@
 //! Git bodies are acquired only when the shared snapshot engine requests them.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Read;
+use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -393,20 +393,32 @@ impl Acquisition<'_> {
             })?
         } else {
             let root = self.repository.join(root_file);
-            if !root.is_file() {
+            let metadata = match std::fs::metadata(&root) {
+                Ok(metadata) => metadata,
+                Err(error)
+                    if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) =>
+                {
+                    return Err(SnapshotFailure::new(
+                        "ROOT_NOT_FOUND",
+                        "Saved model root is absent on this server host",
+                        Some(root_file.to_owned()),
+                    ));
+                }
+                Err(error) => {
+                    return Err(SnapshotFailure::new(
+                        "SOURCE_READ_FAILED",
+                        format!("Cannot inspect saved model root: {error}"),
+                        Some(root_file.to_owned()),
+                    ));
+                }
+            };
+            if !metadata.is_file() {
                 return Err(SnapshotFailure::new(
                     "ROOT_NOT_FOUND",
-                    "Saved model root is absent on this server host",
+                    "Saved model root must be a regular file",
                     Some(root_file.to_owned()),
                 ));
             }
-            let metadata = std::fs::metadata(&root).map_err(|error| {
-                SnapshotFailure::new(
-                    "SOURCE_READ_FAILED",
-                    format!("Cannot inspect saved model root: {error}"),
-                    Some(root_file.to_owned()),
-                )
-            })?;
             if metadata.len() > MAX_BLOB_BYTES.min(self.limits.max_file_bytes) as u64 {
                 return Err(SnapshotFailure::new(
                     "CAPTURE_LIMIT",
@@ -1168,7 +1180,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_git_blob_and_oversized_sources_do_not_use_disk_or_publish_rows() {
+    fn unavailable_roots_and_oversized_sources_do_not_publish_rows() {
         let repo = TestRepository::new();
         repo.write("main.mod", "var y; model; [name='eq'] y=1; end;\n");
         let commit = repo.commit();
@@ -1185,6 +1197,32 @@ mod tests {
         assert_eq!(missing["inputs"]["before"]["commit"], commit);
         assert_eq!(missing["inputs"]["before"]["complete"], false);
         assert!(missing.get("changed_equations").is_none());
+        std::fs::create_dir(repo.0.join("directory.mod")).unwrap();
+        for (root, cause) in [
+            ("absent.mod", "absent"),
+            ("directory.mod", "must be a regular file"),
+            ("main.mod/nested.mod", "absent"),
+        ] {
+            let missing = repo.compare(working("main.mod"), working(root), &[]);
+            assert_eq!(missing["code"], "ROOT_NOT_FOUND", "{missing}");
+            assert_eq!(missing["side"], "after");
+            assert!(
+                missing["message"].as_str().unwrap().contains(cause),
+                "{missing}"
+            );
+            assert!(missing.get("changed_equations").is_none());
+        }
+        // A filesystem error must retain its cause instead of looking like an absent root.
+        let long_name = format!("{}.mod", "x".repeat(1024));
+        let error = std::fs::metadata(repo.0.join(&long_name)).unwrap_err();
+        let unreadable = repo.compare(working("main.mod"), working(&long_name), &[]);
+        assert_eq!(unreadable["code"], "SOURCE_READ_FAILED", "{unreadable}");
+        assert_eq!(unreadable["side"], "after");
+        assert_eq!(unreadable["file_key"], long_name);
+        assert_eq!(
+            unreadable["message"],
+            format!("Cannot inspect saved model root: {error}")
+        );
         repo.write("main.mod", &"x".repeat(MAX_BLOB_BYTES + 1));
         let oversized = repo.compare(working("main.mod"), working("main.mod"), &[]);
         assert_eq!(oversized["code"], "CAPTURE_LIMIT", "{oversized}");

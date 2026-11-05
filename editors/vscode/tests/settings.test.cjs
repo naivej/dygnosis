@@ -146,21 +146,26 @@ test("bundled and overridden LSP selections resolve to a direct MCP companion", 
     assert.equal(selected.path, overrideMcp); assert.equal(selected.override, true);
   } finally { delete globals.serverPath; }
 });
-test("MCP startup failures include a bounded stderr cause in the action error", async () => {
+test("early MCP exit retains the executable, exit code and bounded stderr", async () => {
   const filename = compiledModule("binary"), resolved = require.resolve(filename), originalLoad = Module._load;
-  const errorText = `missing sibling companion ${"x".repeat(900)}`;
+  const errorText = `missing sibling companion ${"x".repeat(32_000)}`;
+  const executable = "C:/tools/launcher.exe";
   delete require.cache[resolved];
   Module._load = function(id, ...args) {
     if (id === "vscode") return vscode;
     if (id === "node:child_process") return {
       ...childProcess,
       execFile: (_file, _args, _options, callback) => callback(null, "dygnosis-mcp 0.11.2", ""),
-      spawn: (_file, args) => {
+      spawn: (file, args) => {
+        assert.equal(file, executable);
         assert.deepEqual(args, []);
         const child = new EventEmitter();
         child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
-        child.stdin = { write() {} }; child.kill = () => {};
-        process.nextTick(() => { child.stderr.emit("data", Buffer.from(errorText)); child.emit("exit", 2, null); });
+        child.stdin = { write: () => process.nextTick(() => {
+          child.stderr.emit("data", Buffer.from(errorText));
+          child.emit("exit", 2, null);
+        }) };
+        child.kill = () => {};
         return child;
       },
     };
@@ -168,12 +173,15 @@ test("MCP startup failures include a bounded stderr cause in the action error", 
   };
   try {
     const { validateMcpBinary: validate } = require(filename);
-    await assert.rejects(validate({ path: "launcher", override: true, version: "test" }, () => {}), error => {
-      assert.match(error.message, /exited with code 2/);
-      assert.match(error.message, /MCP stderr: missing sibling companion/);
-      assert.ok(error.message.length < 800, "the action error should include only a bounded stderr excerpt");
+    const logs = [];
+    await assert.rejects(validate({ path: executable, override: true, version: "test" }, message => logs.push(message)), error => {
+      assert.match(error.message, /launcher\.exe:.*exited with code 2/);
+      assert.match(error.message, /MCP stderr: missing sibling companion x{1,640}$/);
       return true;
     });
+    const stderr = logs.find(line => line.startsWith("MCP stderr"));
+    assert.ok(stderr);
+    assert.ok(stderr.length < 16_600, "the log should retain only bounded stderr");
   } finally {
     Module._load = originalLoad;
     delete require.cache[resolved];

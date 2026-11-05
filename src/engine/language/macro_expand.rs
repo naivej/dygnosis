@@ -4511,13 +4511,13 @@ fn exec_debug_directive(state: &mut ExpandState<'_, '_>, tok: &Token, name: &str
 fn line_directive(argument: &str) -> Result<(), String> {
     let mut lexer = ArgLexer::new(argument);
     match lexer.next_token() {
-        ArgTok::Quoted(_) => {}
+        ArgTok::Quoted => {}
         other => {
             return Err(syntax_expecting(other.name(), "QUOTED_STRING"));
         }
     }
     match lexer.next_token() {
-        ArgTok::Number(_) => {}
+        ArgTok::Number => {}
         other => return Err(syntax_expecting(other.name(), "NUMBER")),
     }
     match lexer.next_token() {
@@ -4579,11 +4579,10 @@ fn parse_macrovars_argument(argument: &str) -> Result<(bool, Vec<String>), Strin
     }
 }
 
-#[allow(dead_code)]
 enum ArgTok {
     Ident(String),
-    Number(String),
-    Quoted(String),
+    Number,
+    Quoted,
     LParen,
     RParen,
     End,
@@ -4594,8 +4593,8 @@ impl ArgTok {
     fn name(&self) -> &str {
         match self {
             Self::Ident(_) => "IDENTIFIER",
-            Self::Number(_) => "NUMBER",
-            Self::Quoted(_) => "QUOTED_STRING",
+            Self::Number => "NUMBER",
+            Self::Quoted => "QUOTED_STRING",
             Self::LParen => "LPAREN",
             Self::RParen => "RPAREN",
             Self::End => "EOL",
@@ -4650,9 +4649,8 @@ impl<'a> ArgLexer<'a> {
         }
         if ch == '"' {
             if let Some(end) = rest[1..].find('"') {
-                let inner = rest[1..1 + end].to_string();
                 self.pos += end + 2;
-                return ArgTok::Quoted(inner);
+                return ArgTok::Quoted;
             }
             self.pos = self.src.len();
             return ArgTok::Other("TEXT");
@@ -4660,7 +4658,6 @@ impl<'a> ArgLexer<'a> {
         if ch.is_ascii_digit()
             || (ch == '.' && bytes.get(self.pos + 1).is_some_and(u8::is_ascii_digit))
         {
-            let start = self.pos;
             while bytes.get(self.pos).is_some_and(u8::is_ascii_digit) {
                 self.pos += 1;
             }
@@ -4689,7 +4686,7 @@ impl<'a> ArgLexer<'a> {
                     self.pos = end;
                 }
             }
-            return ArgTok::Number(self.src[start..self.pos].to_string());
+            return ArgTok::Number;
         }
         if ch.is_ascii_alphabetic() || ch == '_' {
             let start = self.pos;
@@ -4704,7 +4701,7 @@ impl<'a> ArgLexer<'a> {
             }
             let word = &self.src[start..self.pos];
             if word.eq_ignore_ascii_case("nan") || word.eq_ignore_ascii_case("inf") {
-                return ArgTok::Number(word.to_string());
+                return ArgTok::Number;
             }
             if let Some(token) = macro_reserved_token(word) {
                 return ArgTok::Other(token);

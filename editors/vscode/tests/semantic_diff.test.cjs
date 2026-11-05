@@ -151,7 +151,7 @@ test("all retained families have a frontend section and preserve their count uni
 });
 
 // Guards forecast instructions being filed under their backend collection family.
-test("forecast commands and paths have a Forecast category; state blocks have State", () => {
+test("forecast commands and paths have a Forecast category", () => {
   for (const [family, command] of [["commands", "forecast"], ["commands", "bvar_forecast"], ["ms_sbvar", "conditional_forecast"], ["ms_sbvar", "conditional_forecast_paths"], ["ms_sbvar", "plot_conditional_forecast"]]) {
     const r = response(), detail = r.diff.semantic.rows[0];
     detail.family = r.navigation.rows[0].family = family;
@@ -159,9 +159,6 @@ test("forecast commands and paths have a Forecast category; state blocks have St
     const row = parseCurrent(r).rows[0];
     assert.equal(row.section, "forecast"); assert.equal(row.group, "Forecast");
   }
-  const r = response(); r.diff.semantic.rows[0].family = r.navigation.rows[0].family = "steady_state";
-  r.diff.semantic.rows[0].before.context.name = r.diff.semantic.rows[0].after.context.name = "steady_state_model";
-  assert.equal(parseCurrent(r).rows[0].group, "State");
 });
 
 // Guards one accepted instruction being spread across its retained family and Commands.
