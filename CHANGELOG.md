@@ -2,6 +2,11 @@
 
 ## v0.11.49
 
+- The default macro work limit is now 20 million, so more macro-heavy models
+  can be analyzed without adjusting the setting. Macro loops that produce no
+  output retain less temporary memory.
+- Call Hierarchy follows the selected model, its includes and macro expansion.
+  When analysis is unavailable, the action explains why.
 - Help shows how to trace names, inspect equation dependencies and request
   completion and option hints with VS Code actions. It also covers Outline,
   symbol search, formatting, selection and Quick Fix from Problems.

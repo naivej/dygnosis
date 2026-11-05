@@ -3886,6 +3886,15 @@ fn unroll_for(
         {
             recorder.finish_loop_body(body_text.end, true);
         }
+        // Only token origins or a capture owner can retain this frame suffix.
+        // Evaluation, final bindings and work charges are unchanged.
+        let discard_frames = expanded.is_empty()
+            && expanded_traces.is_empty()
+            && state.file_visitor.is_none()
+            && state.source.is_none()
+            && !state.budget.has_provenance()
+            && state.replay_for_origins.is_empty()
+            && state.next_for_input.is_none();
         for (tok, trace) in expanded.into_iter().zip(expanded_traces) {
             if tok.kind != TokenKind::Eof {
                 out.push(tok);
@@ -3893,6 +3902,9 @@ fn unroll_for(
             }
         }
         state.origin_stack.pop();
+        if discard_frames {
+            state.arena.truncate(frame_id);
+        }
         if state.stopped {
             break;
         }
@@ -5412,7 +5424,10 @@ mod budget_regressions {
                 crate::engine::language::lexer::tokenize(source),
                 &[],
                 &[],
-                &mut MacroBudget::new(),
+                &mut MacroBudget::with_limit(
+                    crate::engine::macro_work::MacroWorkLimit::new(100_000).unwrap(),
+                    None,
+                ),
             );
         assert!(errors.is_empty(), "{errors:?}");
         assert!(incomplete.is_some());
@@ -5429,6 +5444,76 @@ mod budget_regressions {
         assert!(reason.message.contains("dynare.macroWorkLimit"));
         assert!(reason.message.contains("macro_work_limit"));
         assert!(tokens.iter().all(|token| token.kind == TokenKind::Eof));
+    }
+
+    #[test]
+    fn no_output_iterations_do_not_retain_unused_origin_frames() {
+        // Guards temporary frame memory growing with iterations that produce
+        // no token origins, while retaining every macro assignment.
+        let expand = |count: usize| {
+            let source = format!(
+                "@#for i in 1:{count}\n@#define i=i+1\n@#define last=i\n@#endfor\nvar x@{{i}} y@{{last}};\n"
+            );
+            let (tokens, _, arena, errors, _, incomplete, reasons, _, _) =
+                expand_macros_traced_full(
+                    &source,
+                    crate::engine::language::lexer::tokenize(&source),
+                    &[],
+                );
+            assert!(errors.is_empty(), "{errors:?}");
+            assert!(incomplete.is_none(), "{reasons:?}");
+            let text: Vec<_> = tokens
+                .iter()
+                .map(|token| token.text(&source).to_string())
+                .collect();
+            (arena.capacity(), text)
+        };
+        let (small, small_text) = expand(2);
+        let (large, large_text) = expand(10_000);
+        assert_eq!(small_text, ["var", "x3", "y3", ";", ""]);
+        assert_eq!(large_text, ["var", "x10001", "y10001", ";", ""]);
+        assert_eq!(large, small, "unused loop origins must not accumulate");
+    }
+
+    #[test]
+    fn empty_iterations_keep_earlier_and_later_token_origins() {
+        // Guards reused frame IDs removing a live ancestor or an earlier
+        // emitted token's origin after an empty nested/conditional body.
+        let source = "@#for i in 1:3\n@#for j in 1:2\n@#define ignored=j\n@#endfor\n@#if i != 2\nvar y@{i};\n@#endif\n@#endfor\n";
+        let (tokens, traces, arena, errors, _, incomplete, reasons, _, _) =
+            expand_macros_traced_full(
+                source,
+                crate::engine::language::lexer::tokenize(source),
+                &[],
+            );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(incomplete.is_none(), "{reasons:?}");
+        for (name, value) in [("y1", "1"), ("y3", "3")] {
+            let (token, trace) = tokens
+                .iter()
+                .zip(&traces)
+                .find(|(token, _)| token.text(source) == name)
+                .unwrap();
+            assert_eq!(
+                token.span,
+                Span::new(
+                    source.find("y@{i}").unwrap(),
+                    source.find("y@{i}").unwrap() + 5
+                )
+            );
+            let frame = trace
+                .frames
+                .iter()
+                .map(|id| &arena[*id])
+                .find(|frame| frame.variable.as_deref() == Some("i"))
+                .unwrap();
+            assert_eq!(frame.value.as_deref(), Some(value));
+            assert_eq!(
+                &source[frame.directive_span.start as usize..frame.directive_span.end as usize],
+                "@#for i in 1:3"
+            );
+        }
+        assert!(!tokens.iter().any(|token| token.text(source) == "y2"));
     }
 
     #[test]

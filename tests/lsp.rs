@@ -3287,6 +3287,312 @@ async fn call_hierarchy_prepare_on_endogenous() {
     );
 }
 
+// Guards raw root parsing losing included declarations and repeated expanded equations.
+#[tokio::test]
+async fn call_hierarchy_maps_included_bindings_and_loop_equations() {
+    let dir = std::env::temp_dir().join(format!(
+        "dygnosis-hierarchy-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let _cleanup = Cleanup(dir.clone());
+    let root_path = dir.join("root.mod");
+    let decl_path = dir.join("decl.inc");
+    let eq_path = dir.join("equations.inc");
+    let root = "@#include \"decl.inc\"\nvar y;\nmodel;\n@#for k in 1:2\n@#include \"equations.inc\"\n@#endfor\nend;\n";
+    let decl = "parameters beta;\n";
+    let eq = "y = beta*y(-1);\n";
+    fs::write(&root_path, root).unwrap();
+    fs::write(&decl_path, decl).unwrap();
+    fs::write(&eq_path, eq).unwrap();
+    let root_uri = file_url(&root_path);
+    let decl_uri = file_url(&decl_path);
+    let eq_uri = file_url(&eq_path);
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(root_uri, root.into(), 1))
+        .await;
+    service
+        .inner()
+        .did_open(open_params(decl_uri.clone(), decl.into(), 1))
+        .await;
+    service
+        .inner()
+        .did_open(open_params(eq_uri.clone(), eq.into(), 1))
+        .await;
+    let prepare = |uri: Url, text: &str, byte: usize| CallHierarchyPrepareParams {
+        text_document_position_params: tdp(uri, text, byte),
+        work_done_progress_params: Default::default(),
+    };
+    let declared = service
+        .inner()
+        .prepare_call_hierarchy(prepare(decl_uri.clone(), decl, decl.find("beta").unwrap()))
+        .await
+        .unwrap()
+        .expect("declaration hierarchy");
+    let beta = declared
+        .into_iter()
+        .find(|item| item.name == "beta")
+        .expect("included parameter");
+    assert_eq!(beta.uri, decl_uri);
+    assert_eq!(slice_range(decl, beta.selection_range), "beta");
+    let incoming = service
+        .inner()
+        .incoming_calls(CallHierarchyIncomingCallsParams {
+            item: beta.clone(),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .expect("incoming equations");
+    assert_eq!(
+        incoming.len(),
+        2,
+        "each macro execution remains an equation occurrence: {incoming:?}"
+    );
+    for call in &incoming {
+        assert_eq!(call.from.uri, eq_uri);
+        assert!(slice_range(eq, call.from.range).contains("beta"));
+        assert_eq!(slice_range(eq, call.from.selection_range), "y");
+        assert!(
+            call.from_ranges
+                .iter()
+                .any(|range| slice_range(eq, *range) == "beta")
+        );
+        let outgoing = service
+            .inner()
+            .outgoing_calls(CallHierarchyOutgoingCallsParams {
+                item: call.from.clone(),
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .expect("outgoing names");
+        let beta_call = outgoing
+            .iter()
+            .find(|call| call.to.name == "beta")
+            .expect("equation uses beta");
+        assert_eq!(beta_call.to.uri, decl_uri);
+        assert_eq!(slice_range(decl, beta_call.to.selection_range), "beta");
+        assert!(
+            beta_call
+                .from_ranges
+                .iter()
+                .any(|range| slice_range(eq, *range) == "beta")
+        );
+    }
+    assert_ne!(
+        incoming[0].from.data, incoming[1].from.data,
+        "macro copies retain separate identities"
+    );
+}
+
+// Guards split equations reporting occurrences outside the displayed source segment.
+#[tokio::test]
+async fn call_hierarchy_outgoing_ranges_stay_in_the_selected_equation_segment() {
+    let dir = std::env::temp_dir().join(format!(
+        "dygnosis-hierarchy-split-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let _cleanup = Cleanup(dir.clone());
+    let root_path = dir.join("root.mod");
+    let part_path = dir.join("part.inc");
+    let root = "parameters beta gamma;\nvar y;\nmodel;\ny = beta\n@#include \"part.inc\"\n + gamma;\nend;\n";
+    let part = "+ beta\n";
+    fs::write(&root_path, root).unwrap();
+    fs::write(&part_path, part).unwrap();
+    let root_uri = file_url(&root_path);
+    let part_uri = file_url(&part_path);
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(root_uri.clone(), root.into(), 1))
+        .await;
+    service
+        .inner()
+        .did_open(open_params(part_uri.clone(), part.into(), 1))
+        .await;
+    let mut equation_items = Vec::new();
+    for (uri, text, needle) in [
+        (root_uri.clone(), root, "y = beta"),
+        (part_uri, part, "beta"),
+        (root_uri, root, "+ gamma"),
+    ] {
+        let items = service
+            .inner()
+            .prepare_call_hierarchy(CallHierarchyPrepareParams {
+                text_document_position_params: tdp(uri, text, text.find(needle).unwrap()),
+                work_done_progress_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .expect("equation segment");
+        equation_items.push(
+            items
+                .into_iter()
+                .find(|item| item.kind == SymbolKind::FUNCTION)
+                .expect("equation item"),
+        );
+    }
+    let identity = |item: &CallHierarchyItem| item.data.as_ref().unwrap()["equation"].clone();
+    assert_eq!(
+        identity(&equation_items[0]),
+        identity(&equation_items[1]),
+        "segments share one equation identity"
+    );
+    assert_eq!(
+        identity(&equation_items[0]),
+        identity(&equation_items[2]),
+        "same-file segments share one equation identity"
+    );
+    for (item, expected) in
+        equation_items
+            .into_iter()
+            .zip([vec!["beta", "y"], vec!["beta"], vec!["gamma"]])
+    {
+        let calls = service
+            .inner()
+            .outgoing_calls(CallHierarchyOutgoingCallsParams {
+                item: item.clone(),
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .expect("outgoing calls");
+        let names: Vec<_> = calls.iter().map(|call| call.to.name.as_str()).collect();
+        assert_eq!(
+            names, expected,
+            "only the selected segment's uses can be reported"
+        );
+        for call in calls {
+            assert!(
+                !call.from_ranges.is_empty(),
+                "every reported call has a written occurrence"
+            );
+            assert!(
+                call.from_ranges
+                    .iter()
+                    .all(|range| item.range.start <= range.start && range.end <= item.range.end),
+                "call ranges must lie inside the displayed equation segment: {item:?} {call:?}"
+            );
+        }
+    }
+}
+
+// Guards reusing an equation identity after its analysis configuration changes.
+#[tokio::test]
+async fn call_hierarchy_rejects_items_after_configuration_changes() {
+    let uri = Url::parse("file:///hierarchy-stale.mod").unwrap();
+    let text = "parameters beta; var y; model; y=beta; end;\n";
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.into(), 1))
+        .await;
+    let items = service
+        .inner()
+        .prepare_call_hierarchy(CallHierarchyPrepareParams {
+            text_document_position_params: tdp(uri, text, text.find("y=beta").unwrap()),
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .expect("hierarchy items");
+    let equation = items
+        .into_iter()
+        .find(|item| item.detail.as_deref() == Some("equation"))
+        .expect("equation item");
+    let initial = service
+        .inner()
+        .outgoing_calls(CallHierarchyOutgoingCallsParams {
+            item: equation.clone(),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .expect("current outgoing calls");
+    assert!(
+        initial.iter().any(|call| call.to.name == "beta"),
+        "current item resolves beta: {initial:?}"
+    );
+    service
+        .inner()
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: serde_json::json!({"dynare":{"macroWorkLimit":1000000}}),
+        })
+        .await;
+    let result = service
+        .inner()
+        .outgoing_calls(CallHierarchyOutgoingCallsParams {
+            item: equation,
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await;
+    assert!(
+        result.is_err(),
+        "a stale hierarchy item must refuse rather than return old or unrelated calls: {result:?}"
+    );
+}
+
+// Guards an exhausted macro budget looking like a complete hierarchy with no calls.
+#[tokio::test]
+async fn call_hierarchy_reports_incomplete_macro_expansion() {
+    let uri = Url::parse("file:///hierarchy-incomplete.mod").unwrap();
+    let text = "var y;\nmodel;\n@#for k in 1:100\ny=0;\n@#endfor\nend;\n";
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: serde_json::json!({"dynare":{"macroWorkLimit":1}}),
+        })
+        .await;
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.into(), 1))
+        .await;
+    let result = service
+        .inner()
+        .prepare_call_hierarchy(CallHierarchyPrepareParams {
+            text_document_position_params: tdp(uri, text, text.find("y;").unwrap()),
+            work_done_progress_params: Default::default(),
+        })
+        .await;
+    let error = result.expect_err("incomplete expansion must explain why hierarchy is unavailable");
+    let explanation = format!("{error:?}").to_lowercase();
+    assert!(
+        explanation.contains("macro")
+            && (explanation.contains("work") || explanation.contains("limit")),
+        "missing macro work limit cause: {error:?}"
+    );
+}
+
 #[tokio::test]
 async fn did_save_clean_trend_has_no_e001() {
     let text = read_mod("trend_rbc_gov_inv");

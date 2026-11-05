@@ -64,7 +64,7 @@ export function engineSettings(resource: vscode.Uri | undefined, log: Log) {
   const formatIndent = rawIndent === "tab" || (typeof rawIndent === "number" && Number.isInteger(rawIndent) && rawIndent >= 1 && rawIndent <= 8) ? rawIndent : "tab";
   if (formatIndent !== rawIndent) invalidSetting("formatIndent", resource, "tab or an integer from 1 to 8", "using tab", log);
   return {
-    searchPaths, macroWorkLimit: valueSetting("macroWorkLimit", resource, 2_000_000), formatIndent, workspaceExcludePaths: stringListSetting("workspaceExcludePaths", resource, log),
+    searchPaths, macroWorkLimit: valueSetting("macroWorkLimit", resource, 20_000_000), formatIndent, workspaceExcludePaths: stringListSetting("workspaceExcludePaths", resource, log),
     nameDetails: {
       longName: booleanSetting("nameDetails.longName", resource, true, log),
       tex: booleanSetting("nameDetails.tex", resource, true, log),

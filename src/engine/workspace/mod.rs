@@ -1621,16 +1621,12 @@ impl Workspace {
     fn insert_overlay(&mut self, key: &str, source: String) {
         self.invalidate_read(None);
         let input_generation = self.overlay_generation(key, &source);
-        let model = crate::engine::language::parser::parse_with_budget(
-            &source,
-            &mut self.macro_budget(key),
-        );
         self.docs.insert(
             key.to_string(),
             Arc::new(Doc {
                 source: Arc::new(source),
                 source_index: OnceLock::new(),
-                model: OnceLock::from(Arc::new(model)),
+                model: OnceLock::new(),
                 source_inventory: Mutex::new(Vec::new()),
                 macro_source: Mutex::new(None),
                 work_limit: self.root_macro_work_limit(key),
@@ -5495,10 +5491,11 @@ mod include_load_budget_tests {
             ),
         ]);
         for _ in 0..32 {
+            // The walk pays for cold source preparation before the copy test.
             let mut workspace = Workspace::overlay_documents_with_work_limit(
                 &files,
                 None,
-                MacroWorkLimit::new(250_000).unwrap(),
+                MacroWorkLimit::new(1_000_000).unwrap(),
             );
             let IncludeWalk {
                 mut proof, targets, ..

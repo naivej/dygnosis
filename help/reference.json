@@ -963,7 +963,7 @@
                 "$ref": "#/definitions/MacroWorkLimit"
               }
             ],
-            "default": 2000000
+            "default": 20000000
           },
           "page_size": {
             "description": "Shared maximum rows across collections, from 1 to 1000. Default 25.",
@@ -1432,7 +1432,7 @@
                 "$ref": "#/definitions/MacroWorkLimit"
               }
             ],
-            "default": 2000000
+            "default": 20000000
           },
           "page_size": {
             "description": "Shared maximum rows across collections, from 1 to 1000. Default 25.",
@@ -2035,7 +2035,7 @@
                 "$ref": "#/definitions/MacroWorkLimit"
               }
             ],
-            "default": 2000000
+            "default": 20000000
           },
           "occurrences": {
             "type": [
@@ -2734,7 +2734,7 @@
                 "$ref": "#/definitions/MacroWorkLimit"
               }
             ],
-            "default": 2000000
+            "default": 20000000
           },
           "name": {
             "type": [
@@ -3369,7 +3369,7 @@
                 "$ref": "#/definitions/MacroWorkLimit"
               }
             ],
-            "default": 2000000
+            "default": 20000000
           },
           "page_size": {
             "description": "Shared maximum rows across collections, from 1 to 1000. Default 25.",
@@ -3891,7 +3891,7 @@
                 "$ref": "#/definitions/MacroWorkLimit"
               }
             ],
-            "default": 2000000
+            "default": 20000000
           },
           "page_size": {
             "description": "Shared maximum rows across collections, from 1 to 1000. Default 25.",
@@ -4436,7 +4436,7 @@
                 "$ref": "#/definitions/MacroWorkLimit"
               }
             ],
-            "default": 2000000
+            "default": 20000000
           },
           "new_name": {
             "allOf": [
@@ -4973,7 +4973,7 @@
                 "$ref": "#/definitions/MacroWorkLimit"
               }
             ],
-            "default": 2000000
+            "default": 20000000
           },
           "page_size": {
             "description": "Shared maximum rows across collections, from 1 to 1000. Default 25.",
@@ -5502,7 +5502,7 @@
                 "$ref": "#/definitions/MacroWorkLimit"
               }
             ],
-            "default": 2000000
+            "default": 20000000
           },
           "names": {
             "default": [],
@@ -6130,7 +6130,7 @@
                 "$ref": "#/definitions/MacroWorkLimit"
               }
             ],
-            "default": 2000000
+            "default": 20000000
           },
           "page_size": {
             "description": "Shared maximum rows across collections, from 1 to 1000. Default 25.",

@@ -11,6 +11,45 @@ fn workspace(source: &str, other: &[(&str, &str)]) -> Workspace {
     Workspace::overlay_documents(&files)
 }
 
+#[test]
+fn stopped_overlay_analysis_does_not_parse_unused_original_documents() {
+    // Guards eager standalone macro execution before a checked file walk
+    // stops the root, including supplied files that execution never reads.
+    let source = "var before;\n@#for outer in 1:1000\n@#for inner in 1:1000\n@#define value=inner\n@#endfor\n@#endfor\nvar after;\n";
+    let files = BTreeMap::from([
+        ("main.mod".to_owned(), source.to_owned()),
+        ("unused.inc".to_owned(), "var dormant;".to_owned()),
+    ]);
+    let mut ws = Workspace::overlay_documents_with_work_limit(
+        &files,
+        None,
+        MacroWorkLimit::new(100_000).unwrap(),
+    );
+    let model = ws.get_effective_model("main.mod").unwrap();
+    assert!(model.macro_incomplete());
+    assert!(
+        model
+            .incomplete_reasons
+            .iter()
+            .any(|reason| reason.limit_name == Some("iteration work"))
+    );
+    let report = ws.expand_report("main.mod").unwrap();
+    assert!(!report.complete);
+    assert!(report.effective_text.contains("var before"));
+    assert!(!report.effective_text.contains("var after"));
+    assert!(
+        ws.docs["main.mod"].model.get().is_none(),
+        "the stopped request has no use for a standalone parse"
+    );
+    assert!(
+        ws.docs["unused.inc"].model.get().is_none(),
+        "dormant input is not executed"
+    );
+    let raw = ws.get_model("unused.inc").unwrap();
+    assert_eq!(raw.endogenous.len(), 1);
+    assert_eq!(raw.name(raw.endogenous[0].name), "dormant");
+}
+
 fn target(ws: &mut Workspace, text: &str) -> GuardedTarget {
     ws.source_structure(
         "main.mod",

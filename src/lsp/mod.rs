@@ -32,6 +32,7 @@ mod presentation_refresh;
 
 mod locals;
 
+mod call_hierarchy;
 mod rename;
 
 #[cfg(test)]
@@ -2956,109 +2957,6 @@ impl Backend {
         }
         json!(reasons)
     }
-
-    fn prepare_hierarchy(
-        &self,
-        pos: &TextDocumentPositionParams,
-    ) -> Option<Vec<CallHierarchyItem>> {
-        let inner = self.lock_inner();
-        let doc = inner.document(&pos.text_document.uri)?;
-        let model = inner.workspace.get_model(pos.text_document.uri.as_str())?;
-        let index = LineIndex::new(&doc.text);
-        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
-        let mut items = Vec::new();
-        if let Some((word, _)) = ident_at(&doc.text, byte)
-            && find_decl(model, &word).is_some()
-        {
-            items.push(ch_variable_item(
-                model,
-                &index,
-                &doc.text,
-                &pos.text_document.uri,
-                &word,
-            ));
-        }
-        if let Some(eq) = equation_at(model, &index, &doc.text, pos.position) {
-            items.push(ch_equation_item(
-                model,
-                &index,
-                &doc.text,
-                &pos.text_document.uri,
-                eq,
-            ));
-        }
-        if items.is_empty() { None } else { Some(items) }
-    }
-
-    fn incoming(&self, item: &CallHierarchyItem) -> Option<Vec<CallHierarchyIncomingCall>> {
-        let data = item.data.as_ref()?;
-        if data.get("dynare").and_then(|v| v.as_str()) != Some("variable") {
-            return Some(Vec::new());
-        }
-        let name = data.get("name")?.as_str()?.to_string();
-        let inner = self.lock_inner();
-        let doc = inner.document(&item.uri)?;
-        let model = inner.workspace.get_model(item.uri.as_str())?;
-        let index = LineIndex::new(&doc.text);
-        let mut calls = Vec::new();
-        for eq in &model.equations {
-            if eq.is_local || eq.model_local {
-                continue;
-            }
-            let in_eq: Vec<Span> = model
-                .ident_refs(eq)
-                .into_iter()
-                .filter(|r| model.name(r.name) == name)
-                .map(|r| r.span)
-                .collect();
-            if in_eq.is_empty() {
-                continue;
-            }
-            calls.push(CallHierarchyIncomingCall {
-                from: ch_equation_item(model, &index, &doc.text, &item.uri, eq),
-                from_ranges: in_eq
-                    .into_iter()
-                    .map(|s| span_range(&index, &doc.text, s))
-                    .collect(),
-            });
-        }
-        Some(calls)
-    }
-
-    fn outgoing(&self, item: &CallHierarchyItem) -> Option<Vec<CallHierarchyOutgoingCall>> {
-        let data = item.data.as_ref()?;
-        if data.get("dynare").and_then(|v| v.as_str()) != Some("equation") {
-            return Some(Vec::new());
-        }
-        let start = data.get("start")?.as_u64()? as u32;
-        let inner = self.lock_inner();
-        let doc = inner.document(&item.uri)?;
-        let model = inner.workspace.get_model(item.uri.as_str())?;
-        let eq = model.equations.iter().find(|e| e.span.start == start)?;
-        let index = LineIndex::new(&doc.text);
-        let mut by_name: HashMap<String, Vec<Span>> = HashMap::new();
-        for r in model.ident_refs(eq) {
-            let n = model.name(r.name).to_string();
-            if find_decl(model, &n).is_none() {
-                continue;
-            }
-            by_name.entry(n).or_default().push(r.span);
-        }
-        let mut names: Vec<String> = by_name.keys().cloned().collect();
-        names.sort();
-        let mut calls = Vec::new();
-        for name in names {
-            let occs = by_name.remove(&name).unwrap_or_default();
-            calls.push(CallHierarchyOutgoingCall {
-                to: ch_variable_item(model, &index, &doc.text, &item.uri, &name),
-                from_ranges: occs
-                    .into_iter()
-                    .map(|s| span_range(&index, &doc.text, s))
-                    .collect(),
-            });
-        }
-        Some(calls)
-    }
 }
 
 #[tower_lsp::async_trait]
@@ -3779,7 +3677,10 @@ impl LanguageServer for Backend {
             &params.text_document_position_params.text_document.uri,
         ))
         .await;
-        Ok(self.prepare_hierarchy(&params.text_document_position_params))
+        call_hierarchy::prepare(
+            &mut self.lock_inner(),
+            &params.text_document_position_params,
+        )
     }
 
     async fn incoming_calls(
@@ -3788,7 +3689,7 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
         ordering::ready().await;
         self.wait_document_analysis(Some(&params.item.uri)).await;
-        Ok(self.incoming(&params.item))
+        call_hierarchy::incoming(&mut self.lock_inner(), &params.item)
     }
 
     async fn outgoing_calls(
@@ -3797,7 +3698,7 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
         ordering::ready().await;
         self.wait_document_analysis(Some(&params.item.uri)).await;
-        Ok(self.outgoing(&params.item))
+        call_hierarchy::outgoing(&mut self.lock_inner(), &params.item)
     }
 }
 
@@ -4611,17 +4512,6 @@ fn append_name_metadata(
     );
 }
 
-fn find_named<'a>(decls: &'a [Decl], model: &Model, word: &str) -> Option<&'a Decl> {
-    decls.iter().find(|d| model.name(d.name) == word)
-}
-
-fn find_decl<'a>(model: &'a Model, word: &str) -> Option<&'a Decl> {
-    find_named(&model.endogenous, model, word)
-        .or_else(|| find_named(&model.exogenous, model, word))
-        .or_else(|| find_named(&model.parameters, model, word))
-        .or_else(|| find_named(&model.retyped_trend_decls, model, word))
-}
-
 fn fix_title(d: &crate::Diagnostic) -> String {
     if let Some(rest) = d.message.split_once("Fix:") {
         let suffix = rest.1.trim();
@@ -5126,25 +5016,6 @@ fn equation_at_byte(model: &Model, byte: u32) -> Option<&Equation> {
         .find(|equation| equation.span.start <= byte && byte <= equation.span.end)
 }
 
-fn equation_at<'a>(
-    model: &'a Model,
-    index: &LineIndex,
-    text: &str,
-    pos: Position,
-) -> Option<&'a Equation> {
-    for eq in model
-        .equations
-        .iter()
-        .chain(model.steady_state_equations.iter())
-    {
-        let rng = span_range(index, text, eq.span);
-        if range_has_pos(rng, pos) {
-            return Some(eq);
-        }
-    }
-    None
-}
-
 fn is_model_root(uri: &Url) -> bool {
     crate::engine::workspace::check_walk::is_model_path(Path::new(uri.path()))
 }
@@ -5183,61 +5054,6 @@ fn extract_explain_code(arguments: &[Value]) -> Option<String> {
         return Some(s.to_string());
     }
     obj.get("code")?.as_str().map(|s| s.to_string())
-}
-
-fn ch_variable_item(
-    model: &Model,
-    index: &LineIndex,
-    text: &str,
-    uri: &Url,
-    name: &str,
-) -> CallHierarchyItem {
-    let rng = find_decl(model, name)
-        .map(|d| span_range(index, text, d.span))
-        .unwrap_or_else(|| Range::new(Position::new(0, 0), Position::new(0, 0)));
-    CallHierarchyItem {
-        name: name.to_string(),
-        kind: SymbolKind::VARIABLE,
-        tags: None,
-        detail: Some("variable".into()),
-        uri: uri.clone(),
-        range: rng,
-        selection_range: rng,
-        data: Some(json!({"dynare": "variable", "name": name})),
-    }
-}
-
-fn ch_equation_item(
-    _model: &Model,
-    index: &LineIndex,
-    text: &str,
-    uri: &Url,
-    eq: &Equation,
-) -> CallHierarchyItem {
-    let rng = span_range(index, text, eq.span);
-    let name = if !eq.name.is_empty() {
-        eq.name.clone()
-    } else if !eq.lhs.trim().is_empty() {
-        format!("{} = ...", eq.lhs.trim())
-    } else {
-        eq.text
-            .lines()
-            .next()
-            .unwrap_or("equation")
-            .chars()
-            .take(48)
-            .collect()
-    };
-    CallHierarchyItem {
-        name,
-        kind: SymbolKind::FUNCTION,
-        tags: None,
-        detail: Some("equation".into()),
-        uri: uri.clone(),
-        range: rng,
-        selection_range: rng,
-        data: Some(json!({"dynare": "equation", "start": eq.span.start})),
-    }
 }
 
 #[cfg(test)]
