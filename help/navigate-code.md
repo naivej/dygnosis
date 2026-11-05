@@ -10,9 +10,10 @@ share those files, place the cursor on the name and press `F2`, or choose
 **Rename symbol** from the editor context menu.
 
 To inspect dependencies in the current file, right-click a symbol or equation
-and choose **Show Call Hierarchy**. Choose the symbol and **Show Incoming
-Calls** to see equations that use it, or choose the equation and **Show
-Outgoing Calls** to see the declared symbols it uses.
+and choose **Show Call Hierarchy**. If prompted, choose the symbol or equation.
+In the results view, use **Show Incoming Calls** to see equations that use a
+symbol, or **Show Outgoing Calls** to see the declared symbols an equation uses.
+The toolbar offers the opposite direction from the one currently shown.
 
 Use [Jump to equation...](model-and-includes.md#equations) to filter and jump to
 equations across the model, including repeated macro copies. Editor gutter
