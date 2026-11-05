@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use dygnosis::{Workspace, dynare_diagnose, dynare_expand, dynare_model_info};
+use dygnosis::{MacroWorkLimit, Workspace, dynare_diagnose, dynare_expand, dynare_model_info};
 
 const ROOT: &str = "/budget/root.mod";
 
@@ -17,7 +17,9 @@ fn files(copies: usize, dormant_bytes: usize) -> HashMap<String, String> {
 
 #[test]
 fn repeated_dormant_includes_spend_the_root_work_before_splicing() {
-    let supplied = files(100, 20_000);
+    // The direct MCP helpers use the default allowance. Repeated scans must
+    // exceed it without reaching an individual source or output limit.
+    let supplied = files(100, MacroWorkLimit::DEFAULT / 100);
     let root = &supplied[ROOT];
     let diags = dynare_diagnose(root, Some(ROOT), Some(&supplied));
     assert!(

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use dygnosis::diagnostic::{Severity, analyze};
 use dygnosis::expand::expand_report;
-use dygnosis::{JsonStage, dynare_diagnose, dynare_expand, parse};
+use dygnosis::{JsonStage, MacroWorkLimit, Workspace, dynare_diagnose, dynare_expand, parse};
 
 const MODEL: &str = "var y;\nmodel; y=0; end;\n";
 
@@ -667,22 +667,29 @@ fn thousands_of_adjacent_interpolations_use_one_final_lexer_join() {
 
 #[test]
 fn nested_if_origins_spend_the_root_work_budget_before_cloning() {
+    // Guards origin-copy work exceeding the configured allowance, independent
+    // of the product default and the separate nesting limit.
+    let root = "/budget/nested.mod";
+    let mut workspace = Workspace::new();
+    workspace.set_root_macro_work_limit(root, MacroWorkLimit::new(2_000_000).unwrap());
     let within = format!(
         "{}{}{MODEL}",
         "@#if1\n \n".repeat(200),
         "@#endif\n".repeat(200)
     );
-    assert!(expand_report(&within).complete);
+    workspace.update_document(root, within);
+    assert!(workspace.expand_report(root).unwrap().complete);
     let bounded = format!(
         "{}{}{MODEL}",
         "@#if1\n \n".repeat(1500),
         "@#endif\n".repeat(1500)
     );
-    let report = expand_report(&bounded);
+    workspace.update_document(root, bounded);
+    let report = workspace.expand_report(root).unwrap();
     assert!(!report.complete);
     assert_eq!(report.n_equations, 0);
     assert!(
-        analyze(&parse(&bounded))
+        analyze(workspace.get_effective_model(root).unwrap())
             .iter()
             .any(|row| row.code == "I211" && row.message.contains("iteration work"))
     );
