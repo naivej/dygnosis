@@ -37,13 +37,8 @@ their order) in [Dynare › Status Bar: Counts](settings:dynare.statusBar.counts
 
 ## Equations
 
-| Action | Result |
-|---|---|
-| **Dygnosis: Jump to equation...** in the Command Palette | Filters and jumps to any counted equation by number, `[name]` tag, symbol or expression. |
-| Click **Find references** above a declaration | Runs **Find All References** for that symbol, or lets you pick one when several are declared ([Dynare › Code Lens: Declaration References](settings:dynare.codeLens.declarationReferences)). |
-| Click **Expand macros** above the first `model` block | Opens the macro expansion preview ([Dynare › Code Lens: Effective Model](settings:dynare.codeLens.effectiveModel)). |
-
-CodeLens actions require VS Code's **Editor: Code Lens** (`editor.codeLens`).
+Run **Dygnosis: Jump to equation...** from the Command Palette to filter and
+jump to a counted equation by number, `[name]` tag, symbol or expression.
 
 Equations are numbered before Dynare's internal lead/lag transformations
 (excluding `#` model-local definitions, `[static]` replacement rows and removed

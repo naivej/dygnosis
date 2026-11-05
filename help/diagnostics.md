@@ -37,8 +37,9 @@ var y;
 
 ## Actions
 
-Place the cursor on an underlined diagnostic and press `Ctrl+.` (or click the
-lightbulb) to open **Quick Fix...**.
+To fix a reported issue, select it in **Problems** to open its location. Place
+the cursor on the underlined text and press `Ctrl+.` (or click the lightbulb)
+to open **Quick Fix...**.
 
 | Action | Result |
 |---|---|

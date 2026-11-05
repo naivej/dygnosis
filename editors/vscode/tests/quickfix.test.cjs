@@ -44,6 +44,7 @@ class Base {}
 let host;
 const vscode = {
   Disposable, EventEmitter: Emitter, Uri, Position, Range, Diagnostic, CodeAction, CodeActionKind: Kind,
+  // The language-client converters import subclasses of these native API types.
   CompletionItem: Base, CodeLens: Base, DocumentLink: Base, CallHierarchyItem: Base, TypeHierarchyItem: Base, SymbolInformation: Base, InlayHint: Base,
   DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 }, DiagnosticTag: { Unnecessary: 1, Deprecated: 2 },
   DiagnosticRelatedInformation: class { constructor(location, message) { this.location = location; this.message = message; } },

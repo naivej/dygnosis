@@ -23,7 +23,6 @@ const moduleFiles = Object.freeze({
   help: "help/help",
   help_content: "help/help_content",
   history_sources: "comparison/history_sources",
-  lenses: "editor/lenses",
   lifecycle: "client/lifecycle",
   mcp: "mcp/mcp",
   model_navigation: "editor/model_navigation",

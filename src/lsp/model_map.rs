@@ -949,7 +949,7 @@ pub(crate) fn add_source_symbols(
             .or_else(|| item.name.clone())
             .unwrap_or_else(|| {
                 text.get(item.span.start as usize..item.span.end as usize)
-                    .unwrap_or("source template")
+                    .unwrap_or("Source code")
                     .trim()
                     .chars()
                     .take(80)

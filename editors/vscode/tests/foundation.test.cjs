@@ -142,26 +142,33 @@ test("the palette exposes user actions in their context and hides aliases and ta
   for (const command of palette.keys()) assert.ok(expected.has(command), command);
 });
 
-test("editor context commands share one ordered Dygnosis block and retain their contexts", () => {
-  // Guards split menu groups, lost context clauses/shortcuts, missing Skip, or restored Compare command.
+test("editor context commands use one scoped submenu and keep Rename with standard editing", () => {
+  // Guards source-only candidate navigation, source/preview submenu access, and misplaced safe Rename.
   const { contributes } = require("../package.json");
   const commands = contributes.commands;
-  const context = contributes.menus["editor/context"].filter(row => row.command.startsWith("dygnosis."));
+  assert.deepEqual(contributes.submenus, [{ id: "dygnosis.editorContext", label: "Dygnosis" }]);
+  assert.deepEqual(contributes.menus["editor/context"], [
+    { command: "dygnosis.renameSymbol", when: "dygnosis.analysisDocument && !editorReadonly", group: "1_modification@1" },
+    { submenu: "dygnosis.editorContext", when: "(dygnosis.analysisDocument && dygnosis.contextActions) || (dygnosis.effectivePreview && dygnosis.previewContextActions)", group: "dygnosis" },
+  ]);
+  const context = contributes.menus["dygnosis.editorContext"];
   const expected = [
-    ["dygnosis.renameSymbol", "dygnosis.analysisDocument && !editorReadonly"],
-    ["dygnosis.showEffectiveModel", "dygnosis.modelContext && dygnosis.contextActions"],
-    ["dygnosis.openChanges", "dygnosis.changesContext && dygnosis.contextActions"],
-    ["dygnosis.selectAnalysisConfiguration", "(dygnosis.analysisDocument && dygnosis.contextActions) || (dygnosis.effectivePreview && dygnosis.previewContextActions)"],
-    ["dygnosis.overrideMacroDefinition", "dygnosis.analysisDocument && dygnosis.contextActions"],
-    ["dygnosis.skipMacroDefinition", "dygnosis.analysisDocument && dygnosis.contextActions"],
-    ["dygnosis.previewMacroBranch", "dygnosis.analysisDocument && dygnosis.contextActions"],
-    ["dygnosis.goToSourceCandidate", "dygnosis.analysisDocument && dygnosis.contextActions"],
-    ["dygnosis.goToWrittenSource", "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions"],
-    ["dygnosis.refreshEffectiveModel", "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions"],
+    ["dygnosis.goToSourceCandidate", "dygnosis.analysisDocument && dygnosis.contextActions", "navigation@1"],
+    ["dygnosis.selectAnalysisConfiguration", "(dygnosis.analysisDocument && dygnosis.contextActions) || (dygnosis.effectivePreview && dygnosis.previewContextActions)", "dygnosis@1"],
+    ["dygnosis.overrideMacroDefinition", "dygnosis.analysisDocument && dygnosis.contextActions", "dygnosis@2"],
+    ["dygnosis.skipMacroDefinition", "dygnosis.analysisDocument && dygnosis.contextActions", "dygnosis@3"],
+    ["dygnosis.previewMacroBranch", "dygnosis.analysisDocument && dygnosis.contextActions", "dygnosis@4"],
+    ["dygnosis.goToWrittenSource", "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions", "dygnosis@5"],
+    ["dygnosis.refreshEffectiveModel", "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions", "dygnosis@6"],
   ];
   assert.deepEqual(context.map(row => row.command), expected.map(([command]) => command));
-  assert.deepEqual(context.map(row => row.group), expected.map((_, index) => `dygnosis@${index + 1}`));
+  assert.deepEqual(context.map(row => row.group), expected.map(([, , group]) => group));
   assert.deepEqual(context.map(row => row.when), expected.map(([, when]) => when));
+
+  const candidate = commands.find(row => row.command === "dygnosis.goToSourceCandidate");
+  assert.equal(candidate?.title, "Find possible declarations...");
+  assert.ok(contributes.menus["editor/title"].some(row => row.command === "dygnosis.showEffectiveModel"));
+  assert.ok(contributes.menus["editor/title"].some(row => row.command === "dygnosis.openChanges"));
 
   const skip = commands.find(row => row.command === "dygnosis.skipMacroDefinition");
   assert.deepEqual({ title: skip?.title, category: skip?.category, enablement: skip?.enablement }, {

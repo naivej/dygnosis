@@ -2,8 +2,7 @@
 
 With a model or included file active, run **Dygnosis: Expand macros** from the
 Command Palette, or click **Expand macros** in the editor title bar
-(`$(open-preview)`). The same action is available from the editor context menu
-and as a CodeLens above the first `model` block.
+(`$(open-preview)`).
 
 Dygnosis opens a read-only preview beside your file with `@#include` files,
 `@#for` loops, `@#if` branches and `@{...}` substitutions expanded before
@@ -27,8 +26,8 @@ Limit](settings:dynare.macroWorkLimit).
 ## Choose the analysis configuration
 
 Run **Dygnosis: Select analysis configuration** from the editor title gear,
-Command Palette or editor context menu to test different macro values or
-equation selections without modifying your `.mod` file.
+Command Palette or the editor context menu under **Dygnosis** to test different
+macro values or equation selections without modifying your `.mod` file.
 
 ### Macro inputs and previews
 

@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.48",
+  "version": "0.11.49",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -290,9 +290,15 @@
       },
       {
         "command": "dygnosis.goToSourceCandidate",
-        "title": "Go to source candidate",
+        "title": "Find possible declarations...",
         "category": "Dygnosis",
         "enablement": "dygnosis.analysisDocument"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "dygnosis.editorContext",
+        "label": "Dygnosis"
       }
     ],
     "menus": {
@@ -327,52 +333,49 @@
         {
           "command": "dygnosis.renameSymbol",
           "when": "dygnosis.analysisDocument && !editorReadonly",
-          "group": "dygnosis@1"
+          "group": "1_modification@1"
         },
         {
-          "command": "dygnosis.showEffectiveModel",
-          "when": "dygnosis.modelContext && dygnosis.contextActions",
-          "group": "dygnosis@2"
-        },
+          "submenu": "dygnosis.editorContext",
+          "when": "(dygnosis.analysisDocument && dygnosis.contextActions) || (dygnosis.effectivePreview && dygnosis.previewContextActions)",
+          "group": "dygnosis"
+        }
+      ],
+      "dygnosis.editorContext": [
         {
-          "command": "dygnosis.openChanges",
-          "when": "dygnosis.changesContext && dygnosis.contextActions",
-          "group": "dygnosis@3"
+          "command": "dygnosis.goToSourceCandidate",
+          "when": "dygnosis.analysisDocument && dygnosis.contextActions",
+          "group": "navigation@1"
         },
         {
           "command": "dygnosis.selectAnalysisConfiguration",
           "when": "(dygnosis.analysisDocument && dygnosis.contextActions) || (dygnosis.effectivePreview && dygnosis.previewContextActions)",
-          "group": "dygnosis@4"
+          "group": "dygnosis@1"
         },
         {
           "command": "dygnosis.overrideMacroDefinition",
           "when": "dygnosis.analysisDocument && dygnosis.contextActions",
-          "group": "dygnosis@5"
+          "group": "dygnosis@2"
         },
         {
           "command": "dygnosis.skipMacroDefinition",
           "when": "dygnosis.analysisDocument && dygnosis.contextActions",
-          "group": "dygnosis@6"
+          "group": "dygnosis@3"
         },
         {
           "command": "dygnosis.previewMacroBranch",
           "when": "dygnosis.analysisDocument && dygnosis.contextActions",
-          "group": "dygnosis@7"
-        },
-        {
-          "command": "dygnosis.goToSourceCandidate",
-          "when": "dygnosis.analysisDocument && dygnosis.contextActions",
-          "group": "dygnosis@8"
+          "group": "dygnosis@4"
         },
         {
           "command": "dygnosis.goToWrittenSource",
           "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions",
-          "group": "dygnosis@9"
+          "group": "dygnosis@5"
         },
         {
           "command": "dygnosis.refreshEffectiveModel",
           "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions",
-          "group": "dygnosis@10"
+          "group": "dygnosis@6"
         }
       ],
       "extension/context": [
@@ -958,18 +961,6 @@
             ],
             "scope": "window",
             "description": "Locations for model actions. Commands remain in the Command Palette. An empty list hides toolbar and context-menu actions."
-          },
-          "dynare.codeLens.declarationReferences": {
-            "type": "boolean",
-            "default": false,
-            "scope": "resource",
-            "description": "Offer native Find All References at declaration lines. Several names open a symbol picker; no usage count is shown. Also respects editor.codeLens."
-          },
-          "dynare.codeLens.effectiveModel": {
-            "type": "boolean",
-            "default": false,
-            "scope": "resource",
-            "description": "Offer Expand macros above the first model block when its location is available. Also respects editor.codeLens."
           },
           "dynare.effectiveModel.macroTint": {
             "type": "boolean",

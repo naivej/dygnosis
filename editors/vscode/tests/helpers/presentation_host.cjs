@@ -146,7 +146,6 @@ async function checkPresentation(service, workspaceRoot, evidence, helpers) {
   assert.ok(commands.includes("dygnosis.chooseModelOwner"));
   assert.ok(commands.includes("dygnosis.openChanges"));
   assert.ok(commands.includes("dygnosis.jumpToEquation"));
-  assert.ok(!commands.includes("dygnosis.browseLensEquations"));
   evidence.checks.push("native Outline keeps parameter declarations and model equations without assignment rows; complete model has no detail; owner and Changes actions remain registered");
 
   const pick = async (environment, command, args, cancel = false) => {
@@ -179,9 +178,7 @@ async function checkPresentation(service, workspaceRoot, evidence, helpers) {
   };
   await pick(input, "dygnosis.jumpToEquation", [], true);
   await pick(input, "dygnosis.jumpToEquation", []);
-  const lenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", input.document.uri);
-  assert.ok(!lenses?.some(row => row.command?.command === "dygnosis.browseLensEquations"));
-  evidence.checks.push("equation CodeLens and its adapter command are absent; the native Jump to equation command shows one unnamed-equation list, jumps to written source, and cancels without moving selection");
+  evidence.checks.push("the native Jump to equation command shows one unnamed-equation list, jumps to written source, and cancels without moving selection");
 
   const heterogeneous = await open("scope-counts.mod", await fs.readFile(path.resolve(__dirname, "../../../../tests/fixtures/compare/het_before.mod"), "utf8"));
   assert.equal(heterogeneous.info.complete, true);
@@ -200,8 +197,6 @@ async function checkPresentation(service, workspaceRoot, evidence, helpers) {
 
   const repeated = await open("repeated-opener.mod", "var y;\n@#for copy in 1:2\nmodel;\ny=@{copy};\nend;\n@#endfor\n");
   assert.equal(repeated.info.equations.length, 2);
-  const repeatedLenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", repeated.document.uri);
-  assert.ok(!repeatedLenses?.some(row => row.command?.command === "dygnosis.browseLensEquations"));
   await pick(repeated, "dygnosis.jumpToEquation", []);
   evidence.checks.push("the native Jump to equation command lists both counted macro copies and keeps the written target");
   await checkPreviewOutline(service, workspaceRoot, evidence, helpers);
@@ -320,79 +315,56 @@ async function checkOwnerContexts(service, workspaceRoot, evidence, { waitFor, c
 
 async function checkNamePresentation(service, workspaceRoot, evidence, { waitFor, currentSnapshot, writeObservedInput }) {
   // Guard the actual editor rendering: repeated hover names, unlabelled
-  // metadata, broken bold delimiters, and plain-text labels in native pickers.
+  // metadata and broken bold delimiters.
   const filename = path.join(workspaceRoot, "name-presentation.mod");
   const text = "var pce $p_c$ (long_name='pce') spaced (long_name=' pce ');\nparameters rho; rho=.9;\nmodel;\npce=rho*pce(-1);\nspaced=0;\nend;\n@#if 0\nvar hidden (long_name='hidden');\nmodel; hidden=hidden(-1); end;\n@#endif\n";
   await writeObservedInput(service, filename, text);
   const document = await vscode.workspace.openTextDocument(filename);
   const editor = await vscode.window.showTextDocument(document);
   const info = await currentSnapshot(service, document, () => service.modelInfo(document.uri), "name presentation snapshot");
-  const settings = vscode.workspace.getConfiguration("dynare", document.uri);
-  const previous = settings.get("codeLens.declarationReferences");
-  await settings.update("codeLens.declarationReferences", true, vscode.ConfigurationTarget.Workspace);
-  try {
-    evidence.name_hovers = [];
-    for (const [needle, heading, label, timing] of [
-      ["pce=rho", "Endogenous variable", "pce", true],
-      ["spaced=0", "Endogenous variable", " pce ", true],
-      ["hidden=hidden", "Written endogenous variable", "hidden", false],
-    ]) {
-      const position = document.positionAt(text.indexOf(needle) + 1);
-      editor.selection = new vscode.Selection(position, position);
-      editor.revealRange(new vscode.Range(position, position));
-      const hovers = await vscode.commands.executeCommand("vscode.executeHoverProvider", document.uri, position);
-      assert.ok(hovers?.length, `${needle} has a language hover`);
-      await vscode.commands.executeCommand("editor.action.showHover");
-      let rendered;
-      await waitFor(async () => {
-        rendered = await nativeWorkbench(async send => {
-          const result = await send("Runtime.evaluate", { returnByValue: true, expression:
-            `(() => { const hover=[...document.querySelectorAll('.monaco-hover .rendered-markdown')].find(node=>node.getClientRects().length && node.textContent.includes(${JSON.stringify(heading)})); return hover ? {text:hover.innerText,strong:[...hover.querySelectorAll('strong')].map(node=>node.textContent),first:hover.querySelector('p')?.textContent} : null; })()` });
-          return result.result.value;
-        });
-        return rendered?.strong.includes(label);
-      }, `${needle} renders labelled bold metadata`).catch(async error => {
-        const state = await nativeWorkbench(async send => {
-          const result = await send("Runtime.evaluate", { returnByValue: true, expression:
-            "({focus:document.activeElement?.className,hovers:[...document.querySelectorAll('.monaco-hover,.monaco-hover-content')].map(node=>({text:node.innerText,html:node.outerHTML.slice(0,5000)}))})" });
-          return result.result.value;
-        });
-        error.message += `; native hover state=${JSON.stringify(state)}`;
-        throw error;
+  evidence.name_hovers = [];
+  for (const [needle, heading, label, timing] of [
+    ["pce=rho", "Endogenous variable", "pce", true],
+    ["spaced=0", "Endogenous variable", " pce ", true],
+    ["hidden=hidden", "Written endogenous variable", "hidden", false],
+  ]) {
+    const position = document.positionAt(text.indexOf(needle) + 1);
+    editor.selection = new vscode.Selection(position, position);
+    editor.revealRange(new vscode.Range(position, position));
+    const hovers = await vscode.commands.executeCommand("vscode.executeHoverProvider", document.uri, position);
+    assert.ok(hovers?.length, `${needle} has a language hover`);
+    await vscode.commands.executeCommand("editor.action.showHover");
+    let rendered;
+    await waitFor(async () => {
+      rendered = await nativeWorkbench(async send => {
+        const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+          `(() => { const hover=[...document.querySelectorAll('.monaco-hover .rendered-markdown')].find(node=>node.getClientRects().length && node.textContent.includes(${JSON.stringify(heading)})); return hover ? {text:hover.innerText,strong:[...hover.querySelectorAll('strong')].map(node=>node.textContent),first:hover.querySelector('p')?.textContent} : null; })()` });
+        return result.result.value;
       });
-      assert.equal(rendered.first, heading, "hover heading does not repeat the selected name");
-      assert.match(rendered.text, /Long name:/);
-      assert.doesNotMatch(rendered.text, /\*\*/);
-      assert.equal(rendered.text.includes("Timing:"), timing);
-      evidence.name_hovers.push(rendered);
-      await vscode.commands.executeCommand("editor.action.hideHover");
-    }
-    const symbols = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", document.uri);
-    const flatten = rows => rows.flatMap(row => [row, ...flatten(row.children ?? [])]);
-    const rows = flatten(symbols);
-    assert.equal(rows.find(row => row.name === "pce").detail, "Long name: pce · TeX: $p_c$");
-    assert.equal(rows.find(row => row.name === "hidden").detail, "Long name: hidden");
-    editor.selection = new vscode.Selection(0, 5, 0, 5);
-    const lenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", document.uri);
-    const lens = lenses.find(row => row.command?.title === "Find references" && row.range.start.line === 0);
-    assert.ok(lens, "declaration CodeLens is available for the symbol picker");
-    const pending = vscode.commands.executeCommand(lens.command.command, ...lens.command.arguments);
-    try {
-      await waitFor(async () => {
-        const result = await nativeWorkbench(send => send("Runtime.evaluate", { returnByValue: true, expression:
-          "[...document.querySelectorAll('.quick-input-list .monaco-list-row')].filter(node=>node.getClientRects().length).map(node=>node.textContent)" }));
-        evidence.name_picker = result.result.value;
-        return evidence.name_picker?.some(row => row.includes("pce") && row.includes("Long name: pce"));
-      }, "native references picker labels the long name beside the symbol identity");
-    } finally {
-      await closePicker(waitFor);
-      await pending;
-    }
-    assert.equal(info.declarations.find(row => row.name === "pce").long_name, "pce", "structured metadata stays complete");
-    evidence.checks.push("native active/inactive hovers omit selected names, label and bold long names including boundary spaces; Outline and references picker label metadata and retain identity");
-  } finally {
-    await settings.update("codeLens.declarationReferences", previous, vscode.ConfigurationTarget.Workspace);
+      return rendered?.strong.includes(label);
+    }, `${needle} renders labelled bold metadata`).catch(async error => {
+      const state = await nativeWorkbench(async send => {
+        const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+          "({focus:document.activeElement?.className,hovers:[...document.querySelectorAll('.monaco-hover,.monaco-hover-content')].map(node=>({text:node.innerText,html:node.outerHTML.slice(0,5000)}))})" });
+        return result.result.value;
+      });
+      error.message += `; native hover state=${JSON.stringify(state)}`;
+      throw error;
+    });
+    assert.equal(rendered.first, heading, "hover heading does not repeat the selected name");
+    assert.match(rendered.text, /Long name:/);
+    assert.doesNotMatch(rendered.text, /\*\*/);
+    assert.equal(rendered.text.includes("Timing:"), timing);
+    evidence.name_hovers.push(rendered);
+    await vscode.commands.executeCommand("editor.action.hideHover");
   }
+  const symbols = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", document.uri);
+  const flatten = rows => rows.flatMap(row => [row, ...flatten(row.children ?? [])]);
+  const rows = flatten(symbols);
+  assert.equal(rows.find(row => row.name === "pce").detail, "Long name: pce · TeX: $p_c$");
+  assert.equal(rows.find(row => row.name === "hidden").detail, "Long name: hidden");
+  assert.equal(info.declarations.find(row => row.name === "pce").long_name, "pce", "structured metadata stays complete");
+  evidence.checks.push("native active/inactive hovers omit selected names, label and bold long names including boundary spaces; Outline labels metadata and retains identity");
 }
 
 module.exports = { checkPresentation };

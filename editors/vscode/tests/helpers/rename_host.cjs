@@ -85,7 +85,8 @@ async function refusedPrepare(document, offset, waitFor, description) {
   editor.selection = new vscode.Selection(cursor, cursor);
   const before = document.getText();
   const result = vscode.commands.executeCommand("dygnosis.renameSymbol");
-  assert.equal(await settledCommand(result, waitFor, `${description} refuses before name input`), false, description);
+  // The refusal notice can keep the command pending until it is dismissed.
+  assert.equal(await settledCommand(result, waitFor, `${description} refuses before name input`, true), false, description);
   assert.equal(await nativeValue(visibleRename), false, `${description} must not open a name input`);
   assert.equal(document.getText(), before, `${description} must preserve the selected source`);
 }
@@ -184,7 +185,8 @@ async function staleNativeApplication(child, mutation, invoke, evidence, waitFor
       await send("Debugger.removeBreakpoint", { breakpointId: breakpoint }); breakpoint = undefined;
       await send("Debugger.resume"); paused = undefined;
       const { result } = await invoked;
-      assert.equal(await settledCommand(result, waitFor, "the native stale Rename command settles"), false, "native applyEdit must refuse the complete stale Rename operation");
+      // A stale-edit refusal can also wait for its information notice to close.
+      assert.equal(await settledCommand(result, waitFor, "the native stale Rename command settles", true), false, "native applyEdit must refuse the complete stale Rename operation");
     } finally {
       clearTimeout(timer); unlisten();
       // Always resume and disable the debugger, including an assertion failure.

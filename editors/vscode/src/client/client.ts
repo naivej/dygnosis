@@ -103,7 +103,7 @@ export interface NavigationDecision { isCurrent(): boolean }
 export type NavigationGuard = (loadedDocument: vscode.TextDocument) => boolean | NavigationDecision | Promise<boolean | NavigationDecision>;
 export interface InputInvalidation { root?: string; reason: "input" | "file" | "lifecycle"; uri?: string; inputRevision?: string; modelRevision?: string }
 
-/** Shared service for status, view, tint, lenses, diagnostics and previews. */
+/** Shared service for status, view, tint, diagnostics and previews. */
 export class DygnosisClient implements vscode.Disposable {
   readonly output = vscode.window.createOutputChannel("Dygnosis");
   readonly middleware: Middleware = {};

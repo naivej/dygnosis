@@ -1,6 +1,6 @@
 [
   {"id":"get-started","title":"Dynare workflow","keywords":["features","install","Marketplace","GitHub","first model","language mode","version","simulation","estimation"]},
-  {"id":"model-and-includes","title":"Understand the model and files","keywords":["model overview","counts","timing","equations","owner","root","CodeLens","searchPaths"]},
+  {"id":"model-and-includes","title":"Understand the model and files","keywords":["model overview","counts","timing","equations","owner","root","searchPaths"]},
   {"id":"navigate-code","title":"Follow equations and names","keywords":["navigation","definition","Peek","references","rename","Outline","folding","call hierarchy"]},
   {"id":"edit-models","title":"Write equations and commands","keywords":["editing","declarations","parameters","steady state","shocks","completion","hover","snippets","signature","format","fix","selection","linked editing","model-local"]},
   {"id":"appearance","title":"Read labels, hints and colors","keywords":["appearance","semantic tokens","tint","theme","file icons",".mod",".inc",".dyn","long_name","TeX","inlay"]},

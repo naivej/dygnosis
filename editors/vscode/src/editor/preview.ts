@@ -2,7 +2,6 @@ import { refuse, explainFailure, runCommand } from "../client/refusal";
 import * as vscode from "vscode";
 import { Buffer } from "node:buffer";
 import { DygnosisClient } from "../client/client";
-import { NavigationContext, validateNavigationContext } from "./model_navigation";
 import { location, position as isPosition, Position, Range, record } from "../client/protocol";
 import { sameSourceUri } from "../client/source_uri";
 import { analysisLabel, resultAnalysis } from "./analysis_configuration";
@@ -206,32 +205,25 @@ export function registerEffectivePreview(service: DygnosisClient): EffectivePrev
       return { isCurrent };
     }, { reuseOpen: true });
   }, () => !disposed));
-  const command = vscode.commands.registerCommand("dygnosis.showEffectiveModel", async (argument?: unknown) => {
+  const command = vscode.commands.registerCommand("dygnosis.showEffectiveModel", async () => {
     const document = vscode.window.activeTextEditor?.document;
-    // Editor menus pass a URI. Only our explicit snapshot argument supplies
-    // an expected input; ordinary palette/menu actions keep their root picker.
-    const expected = record(argument) && record(argument.info) && typeof argument.info.revision === "string" &&
-      typeof argument.info.client_instance === "number" && typeof argument.version === "number" &&
-      record(argument.document) && record(argument.root) ? argument as unknown as NavigationContext : undefined;
     if (disposed) return;
     let selectionWatcher: vscode.Disposable | undefined;
     const expired = (): never => refuse("The source or model changed. Request macro expansion again from the current Dynare document.");
     try {
-    if (!document) { refuse("Open a Dynare model or include before expanding macros."); }
-    if (expected && expected.document !== document) { expired(); }
-    const version = document.version;
-      const valid = async (): Promise<boolean> => !disposed && !document.isClosed && document.version === version &&
-        vscode.window.activeTextEditor?.document === document && (!expected ||
-        !!await validateNavigationContext(service, expected, () => !disposed));
-      if (!await valid()) { expired(); }
-      const root = expected?.root ?? await service.rootForDocument(document, true);
+      if (!document) { refuse("Open a Dynare model or include before expanding macros."); }
+      const version = document.version;
+      const valid = (): boolean => !disposed && !document.isClosed && document.version === version &&
+        vscode.window.activeTextEditor?.document === document;
+      if (!valid()) { expired(); }
+      const root = await service.rootForDocument(document, true);
       if (!root) { refuse("Open a model root or choose a known owner for this include."); }
       await service.ensureStarted();
       const instance = service.currentInstance;
       let selectionChanged = false;
       selectionWatcher = service.onDidChangeAnalysis?.(event => { if (event.root === root.toString()) selectionChanged = true; });
-      const validRoot = async (): Promise<boolean> => !selectionChanged && await valid() && service.currentInstance === instance &&
-        (await service.rootForDocument(document))?.toString() === root.toString() && await valid() && service.currentInstance === instance;
+      const validRoot = async (): Promise<boolean> => !selectionChanged && valid() && service.currentInstance === instance &&
+        (await service.rootForDocument(document))?.toString() === root.toString() && valid() && service.currentInstance === instance;
       if (!await validRoot()) { expired(); }
       const result = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, root, true));
       if (!await validRoot()) { release(root, result, instance); expired(); }

@@ -143,7 +143,7 @@ Module._load = function(id, ...args) {
   };
   return originalLoad.call(this, id, ...args);
 };
-const { registerEffectivePreview } = require(compiledModule("preview"));
+const { effectivePreviewArguments, registerEffectivePreview } = require(compiledModule("preview"));
 const { registerOriginJumps, parsePreviewNavigation, previewRowAt, previewRegionAt, writtenSourcePicks, projectRegionTarget, macroTintRanges } = require(compiledModule("origin_jumps"));
 const contributed = require("../package.json").contributes;
 const originCommands = ["dygnosis.goToWrittenSource", "dygnosis.refreshEffectiveModel"];
@@ -205,6 +205,26 @@ function setup(options = {}) {
   const close = session => { session.document.isClosed = true; host.documents.delete(session.uri.toString()); host.closed.fire(session.document); };
   return { host, rootDocument, service, previews, registration, run, show, activate, edit, close };
 }
+
+test("effective preview requires the advertised source layout", () => {
+  // Guards requesting an unsupported or different display layout from the engine.
+  const root = uri(main);
+  const service = layout => ({ client: { initializeResult: { capabilities: { experimental: { dygnosis: { effectivePreview: layout } } } } } });
+  assert.deepEqual(effectivePreviewArguments(service({ command: "dynare/showEffectiveModel", source_layout: true }), root), [{ root_uri: main, layout: "source" }]);
+  assert.throws(() => effectivePreviewArguments(service({ command: "dynare/showEffectiveModel", readable_layout: true }), root), /does not advertise the source-preserving macro expansion layout/);
+  assert.throws(() => effectivePreviewArguments(service({ navigation_schema_version: 1 }), root), /does not advertise the source-preserving macro expansion layout/);
+});
+test("preview menu URI retains the root picker and opens the selected preview", async () => {
+  // Guards a context-menu URI bypassing root selection or suppressing the preview.
+  const env = setup(), calls = [];
+  env.service.rootForDocument = async (document, choose) => { calls.push({ document, choose }); return document.uri; };
+  await env.host.commands.get("dygnosis.showEffectiveModel")(env.rootDocument.uri);
+  assert.ok(calls.some(call => call.document === env.rootDocument && call.choose === true));
+  assert.deepEqual(env.service.requests.map(({ command, args }) => ({ command, args })),
+    [{ command: "dynare/showEffectiveModel", args: [{ root_uri: main, layout: "source" }] }]);
+  assert.equal(env.host.shown.length, 1);
+  env.registration.dispose(); env.previews.dispose();
+});
 
 // Guards stale snapshots and canceled requests returning hover for a replaced preview.
 test("preview hover uses its captured snapshot and drops stale replies", async () => {
@@ -440,7 +460,7 @@ test("menus and native keys are preview-scoped and toolbar placements have separ
   for (const items of Object.values(originJumpContributions.menus)) for (const item of items) assert.match(item.when, /resourceScheme == dygnosis-effective/);
   for (const binding of originJumpContributions.keybindings) assert.match(binding.when, /dygnosis-effective.*editorTextFocus/);
   assert.match(originJumpContributions.menus["editor/title"][0].when, /previewToolbarActions/);
-  assert.match(originJumpContributions.menus["editor/context"][0].when, /previewContextActions/);
+  assert.match(originJumpContributions.menus["dygnosis.editorContext"][0].when, /previewContextActions/);
 });
 
 test("one verified source reuses an open editor with its stored root", async () => {

@@ -5,7 +5,6 @@ import { registerWorkspaceMcp } from "./mcp/workspace_mcp";
 export { verifyPackagedBundle, ensureManagedBinary } from "./mcp/workspace_mcp";
 import { registerOriginJumps } from "./editor/origin_jumps";
 import { registerDiagnosticActions } from "./editor/quickfix";
-import { registerLenses } from "./editor/lenses";
 import { registerColors } from "./editor/color";
 import { registerModelNavigation } from "./editor/model_navigation";
 import { registerStatus } from "./editor/status";
@@ -31,7 +30,7 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
   context.subscriptions.push(registerWorkspaceMcp(context, client));
   const previews = registerEffectivePreview(client);
   const changes = registerChanges(client, context.extensionUri, previews);
-  context.subscriptions.push(client, registerDiagnosticActions(client), registerWorkspaceStatus(client), registerLenses(client), registerStatus(client, previews), registerModelNavigation(client), registerColors(client), registerMcp(context, client.log), previews, registerOriginJumps(client, previews), changes,
+  context.subscriptions.push(client, registerDiagnosticActions(client), registerWorkspaceStatus(client), registerStatus(client, previews), registerModelNavigation(client), registerColors(client), registerMcp(context, client.log), previews, registerOriginJumps(client, previews), changes,
     registerAnalysisConfigurations(client, previews), registerSourceCandidates(client), registerOutlineFilter(client),
     vscode.commands.registerCommand("dygnosis.restartServer", () => runCommand(client, () => client.restart())),
     vscode.commands.registerCommand("dygnosis.showOutput", () => client.output.show()),

@@ -364,7 +364,7 @@ pub(super) fn hover(inner: &mut Inner, document: &Url, byte: u32) -> Option<Hove
                 "Source activity is unknown, so model information is unavailable."
             }
             SourceAvailability::Active => {
-                "Model information is unavailable for this source template."
+                "This statement contains `@{...}` macro substitutions, so model information is unavailable here. Use **Expand macros** to inspect the generated model."
             }
         };
         reason.to_owned()

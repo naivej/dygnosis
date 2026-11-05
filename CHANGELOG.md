@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.11.49
+
+- Help shows how to trace names, inspect equation dependencies and request
+  completion and option hints with VS Code actions. It also covers Outline,
+  symbol search, formatting, selection and Quick Fix from Problems.
+- Hover explains when an `@{...}` macro substitution prevents model information
+  at a position and points to **Expand macros**.
+- **Find possible declarations...** and analysis configuration actions appear
+  under **Dygnosis** in the editor context menu. **Rename symbol** remains in
+  the main menu and on `F2`.
+- **Find possible declarations...** also remains in the Command Palette.
+  **Expand macros** and **Show model changes** remain available in the Command
+  Palette and editor title bar. **Show model changes** is also available from
+  Source Control. The optional **Expand macros** and **Find references**
+  CodeLens actions and their settings have been removed.
+
 ## v0.11.48
 
 - Hover in the macro expansion preview shows information about names,

@@ -1,18 +1,18 @@
 # Follow equations and names
 
-Navigation works across the active model and its `@#include` files. Place the
-cursor on a symbol and right-click in the editor, or press `F1` to run a
-command from the Command Palette.
+Navigation works across the active model and its `@#include` files. To trace a
+parameter, hover over its name for its details, then right-click and choose
+**Go to Definition** or **Peek Definition** to inspect its declaration. Choose
+**Find All References** to see its uses across the model and includes.
 
-| Action | What it does |
-|---|---|
-| **Go to Definition** / **Peek Definition** | Opens or previews the symbol's declaration or `#name` model-local definition. |
-| **Go to Declaration** / **Go to Type Definition** | Opens the symbol's declaration. |
-| **Find All References** | Lists every use of the symbol across the model and its includes. |
-| **Rename symbol** (`F2` or **Dygnosis: Rename symbol**) | Renames the symbol across the model, its includes, and other known models that share those files. |
-| **Show Call Hierarchy** | On a symbol, incoming calls list the equations that use it; on an equation, outgoing calls list the declared symbols it uses in the current file. |
-| **Go to Symbol in Editor...** | Lists declarations, blocks, commands and equations in the current file. |
-| **Go to Symbol in Workspace...** | Searches symbols across models analyzed by Dygnosis. |
+To rename a symbol across the model, its includes and other known models that
+share those files, place the cursor on the name and press `F2`, or choose
+**Rename symbol** from the editor context menu.
+
+To inspect dependencies in the current file, right-click a symbol or equation
+and choose **Show Call Hierarchy**. Choose the symbol and **Show Incoming
+Calls** to see equations that use it, or choose the equation and **Show
+Outgoing Calls** to see the declared symbols it uses.
 
 Use [Jump to equation...](model-and-includes.md#equations) to filter and jump to
 equations across the model, including repeated macro copies. Editor gutter
@@ -26,8 +26,11 @@ MATLAB `.m` files unchanged.
 ## Outline
 
 Open **Outline** in Explorer or use editor **breadcrumbs** to browse the file's
-structure. Choose which groups appear in [Dynare › Outline:
-Sections](settings:dynare.outline.sections) and toggle equation numbers in
+structure. Run **Go to Symbol in Editor...** from the Command Palette to find a
+declaration, block, command or equation in the current file, or **Go to Symbol
+in Workspace...** to search analyzed models. Choose which groups appear in
+[Dynare › Outline: Sections](settings:dynare.outline.sections) and toggle
+equation numbers in
 [Dynare › Outline: Equation Numbers](settings:dynare.outline.equationNumbers).
 
 Macro branches (`@#if`) and `@#for` loops follow the [selected analysis
@@ -43,7 +46,8 @@ configuration, **Outline** can still list its declarations and equations
 without active equation numbers.
 
 To jump to a symbol declared only inside an inactive macro branch, place the
-cursor on the name and run **Dygnosis: Go to source candidate**. To analyze a
+cursor on the name and run **Dygnosis: Find possible declarations...** from the
+Command Palette or the editor context menu under **Dygnosis**. To analyze a
 different branch, see [Choose the analysis
 configuration](effective-model.md#choose-the-analysis-configuration).
 
