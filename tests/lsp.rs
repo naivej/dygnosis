@@ -2366,30 +2366,35 @@ fn initialize_capabilities_wave_c() {
         result.capabilities.text_document_sync,
         Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL))
     );
-    let commands = result
+    let mut commands = result
         .capabilities
         .execute_command_provider
         .as_ref()
         .expect("executeCommand")
         .commands
-        .clone();
-    assert_eq!(commands.len(), 13, "commands: {commands:?}");
-    assert!(commands.contains(&"dynare/validateComparisonInputs".into()));
-    assert!(commands.contains(&"dynare/analysisContext".into()));
-    assert!(commands.contains(&"dynare/setAnalysisConfiguration".into()));
-    assert!(commands.contains(&"dynare/sourceCandidates".into()));
-    assert!(commands.contains(&"dynare/setDocumentContext".into()));
-    assert!(commands.contains(&"dynare/explainDiagnostic".into()));
-    assert!(commands.contains(&"dynare/compareModelSnapshots".into()));
-    assert!(commands.contains(&"dynare/showEffectiveModel".into()));
-    assert!(commands.contains(&"dynare/captureRename".into()));
-    assert!(commands.contains(&"dynare/modelInfo".into()));
-    assert!(commands.contains(&"dynare/workspaceStatus".into()));
-    assert!(commands.contains(&"dynare/recheckWorkspace".into()));
-    assert!(commands.contains(&"dynare/cancelWorkspace".into()));
-    assert!(!commands.contains(&"dynare/runPreprocessor".into()));
-    assert!(!commands.iter().any(|c| c.contains("computeSteadyState")));
-    assert!(!commands.iter().any(|c| c.contains("runDynare")));
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    commands.sort_unstable();
+    assert_eq!(
+        commands,
+        [
+            "dynare/analysisContext",
+            "dynare/cancelWorkspace",
+            "dynare/captureRename",
+            "dynare/compareModelSnapshots",
+            "dynare/documentOwners",
+            "dynare/explainDiagnostic",
+            "dynare/modelInfo",
+            "dynare/recheckWorkspace",
+            "dynare/setAnalysisConfiguration",
+            "dynare/setDocumentContext",
+            "dynare/showEffectiveModel",
+            "dynare/sourceCandidates",
+            "dynare/validateComparisonInputs",
+            "dynare/workspaceStatus",
+        ]
+    );
 
     let json = serde_json::to_string(&result).expect("serialize initialize result");
     assert_no_out_json(&json);
