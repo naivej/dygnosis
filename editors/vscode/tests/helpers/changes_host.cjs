@@ -230,6 +230,7 @@ function createHost() {
     onDidInvalidate: host.changed.event, onDidChange: host.changed.event, onDidUpdateModelInfo: host.modelUpdated.event, log: message => host.logs.push(message), failure: async message => host.failures.push(message), ensureStarted: async () => {},
     rootForDocument: async document => host.rootFor ? host.rootFor(document) : document.uri,
     knownOwners: uri => host.knownOwners?.(uri) ?? [], knownIncludedFiles: () => host.includedFiles ?? [],
+    sourceMenuFacts: () => ({}),
     selectOwner: (source, root) => host.owners.push({ source, root }),
     modelInfo: async (root, document, fresh, cancel) => host.modelInfo ? host.modelInfo(root, document, fresh, cancel) : ({ revision: `revision:${root.toString()}`, complete: true, related_files: [] }),
     revalidate: async (root, expected, instance) => { host.revalidations.push({ root, expected, instance }); return host.validate ? host.validate(root, expected, instance) : { revision: expected, complete: true }; },

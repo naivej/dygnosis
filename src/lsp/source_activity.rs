@@ -236,6 +236,10 @@ mod tests {
         server.lock_inner().analysis_configuration.enabled = true;
 
         let initial = server.model_info_command(&[json!({"root_uri":uri})]);
+        assert_eq!(
+            initial["macro_actions"],
+            json!({"definition":false,"branch":true})
+        );
         let first_ranges = initial["inactive_ranges"].as_array().unwrap();
         assert_eq!(first_ranges.len(), 1, "{initial}");
         assert_eq!(first_ranges[0]["start"], json!({"line":0,"character":6}));
@@ -288,6 +292,35 @@ mod tests {
         let stale = server.model_info_command(&[json!({"root_uri":uri})]);
         assert_eq!(stale["status"], "stale", "{stale}");
         assert_eq!(stale["inactive_ranges"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn model_info_keeps_named_equation_action_after_filtering_its_only_target() {
+        let uri = Url::parse("untitled:filtered-equation-menu.mod").unwrap();
+        let source = "var y z;\nmodel;\ny=z;\n[name='policy',endogenous='z'] z=0;\nend;\n";
+        let (service, _socket) = super::super::new_service();
+        let server = service.inner();
+        server.upsert(uri.clone(), source.into(), 1);
+        server.wait_document_analysis(Some(&uri)).await;
+        server.lock_inner().analysis_configuration.enabled = true;
+        let context = server.analysis_context_command(&[json!({"root_uri":uri})]);
+        let applied = server
+            .set_analysis_configuration(&[json!({
+                "root_uri":uri,
+                "document_version":1,
+                "expected_revision":context["revision"],
+                "expected_selection_generation":context["analysis"]["selection_generation"],
+                "analysis":{"equation_selection":{"mode":"exclude","tag":"name","values":["policy"]}},
+                "include_paths":null
+            })])
+            .await;
+        assert_eq!(applied["accepted"], true, "{applied}");
+
+        let result = server.model_info_command(&[json!({"root_uri":uri})]);
+        assert_eq!(result["complete"], true, "{result}");
+        assert_eq!(result["equations"].as_array().unwrap().len(), 1);
+        assert_eq!(result["equations"][0]["name"], "");
+        assert_eq!(result["has_named_equation"], true);
     }
 
     #[tokio::test]

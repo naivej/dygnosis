@@ -50,7 +50,7 @@ without active equation numbers.
 
 To jump to a symbol declared only inside an inactive macro branch, place the
 cursor on the name and run **Dygnosis: Find possible declarations...** from the
-Command Palette or the editor context menu under **Dygnosis**. To analyze a
+Command Palette or the editor context menu. To analyze a
 different branch, see [Choose the analysis
 configuration](effective-model.md#choose-the-analysis-configuration).
 

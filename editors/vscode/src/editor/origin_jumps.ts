@@ -8,6 +8,7 @@ import { location, record } from "../client/protocol";
 import type { Location, Position, Range } from "../client/protocol";
 import { analysisSettingsChanged, booleanSetting, listSetting } from "../client/settings";
 import { fileLabel } from "../client/failure";
+import { commandEditor } from "../client/editor_target";
 
 /** The input-only event and native placement option are integrated with 0.11.2. */
 export interface OriginJumpClient extends Pick<DygnosisClient, "client" | "currentInstance" | "log" | "failure" | "revalidate" | "execute" | "output" | "onDidChangeAnalysis"> {
@@ -248,9 +249,11 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     const state = activeState(), editor = vscode.window.activeTextEditor;
     const actions = listSetting("editorActions", state?.session.root, ["toolbar", "contextMenu"], ["toolbar", "contextMenu"], service.log);
     const regions = state?.payload?.source_navigation;
-    const region = state && editor && usable(state) && regions ? previewRegionAt(regions, editor.selection) : undefined;
-    const row = state && editor && usable(state) && !regions ? previewRowAt(state.payload!.navigation, editor.selection) : undefined;
+    const ready = state && usable(state);
+    const region = ready && editor && regions ? previewRegionAt(regions, editor.selection) : undefined;
+    const row = ready && editor && !regions ? previewRowAt(state.payload!.navigation, editor.selection) : undefined;
     for (const [key, value] of Object.entries({ effectivePreview: !!state, previewWrittenSource: !!(region || row?.written_locations.length),
+      previewHasOrigins: !!ready && (regions?.length ?? state.payload!.navigation.length) > 0,
       previewToolbarActions: actions.includes("toolbar"), previewContextActions: actions.includes("contextMenu") }))
       void vscode.commands.executeCommand("setContext", `dygnosis.${key}`, value);
     for (const candidate of states.values()) applyMacroTint(candidate);
@@ -457,11 +460,12 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       }
     }
   };
-  const navigate = async (): Promise<void> => {
-    const state = activeState(), editor = vscode.window.activeTextEditor;
+  const navigate = async (resource?: unknown): Promise<void> => {
+    const editor = commandEditor(resource), state = activeState();
     if (!state || !editor) refuse("Open a macro expansion preview before requesting a written source jump.");
     if (!supportsNavigation(service)) refuse("This engine does not support verified source jumps. Use the bundled binary or update dynare.serverPath.");
     if (!usable(state)) unavailable();
+    if (editor.selections?.length > 1) refuse("Select one region in the preview and try again.");
     const regions = state.payload!.source_navigation;
     if (regions) {
       const region = previewRegionAt(regions, editor.selection);
@@ -568,7 +572,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     }
   });
   const subscriptions = [previews.onDidCreate(attach), previews.onDidClose(detach),
-    vscode.commands.registerCommand("dygnosis.goToWrittenSource", () => runCommand(service, navigate, () => !disposed)),
+    vscode.commands.registerCommand("dygnosis.goToWrittenSource", (resource?: unknown) => runCommand(service, () => navigate(resource), () => !disposed)),
     vscode.commands.registerCommand("dygnosis.refreshEffectiveModel", () => runCommand(service, refresh, () => !disposed)),
     vscode.window.onDidChangeActiveTextEditor(updateContext), vscode.window.onDidChangeTextEditorSelection(updateContext),
     vscode.window.onDidChangeVisibleTextEditors(visible),

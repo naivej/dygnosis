@@ -396,11 +396,44 @@ fn context(inner: &mut Inner, arguments: &[Value]) -> std::result::Result<Value,
     } else {
         None
     };
-    let (sites, coverage) = site_rows(inner,&root,&document,&mut budget).unwrap_or_else(|cause| (Vec::new(),json!({"complete":false,"cause":cause.get("error").and_then(Value::as_str).unwrap_or("Source directive presentation is unavailable.")})));
+    // The equation action needs the guarded selection, not directive pickers.
+    // Keep the response shape while avoiding their separate source-sized work.
+    let equation_only = argument.get("equation_range").is_some()
+        && argument.get("prepare_analysis").is_none()
+        && argument.get("prepare_preset").and_then(Value::as_bool) != Some(true);
+    let (sites, coverage) = if equation_only {
+        (
+            Vec::new(),
+            json!({"complete":false,"cause":"Directive sites were not requested."}),
+        )
+    } else {
+        site_rows(inner,&root,&document,&mut budget).unwrap_or_else(|cause| (Vec::new(),json!({"complete":false,"cause":cause.get("error").and_then(Value::as_str).unwrap_or("Source directive presentation is unavailable.")})))
+    };
     let analysis = metadata(inner, &root);
+    let equation_filter = if let Some(value) = argument.get("equation_range") {
+        let range: Range = serde_json::from_value(value.clone()).map_err(|_| {
+            refusal(
+                "INVALID_ARGUMENTS",
+                "equation_range must be a valid editor range.",
+            )
+        })?;
+        Some(equation_filter(
+            inner,
+            &root,
+            &document,
+            range,
+            &analysis,
+            &mut budget,
+        )?)
+    } else {
+        None
+    };
     let mut result = json!({"schema_version":1,"root_uri":root,"document_uri":document,
         "document_version":inner.document(&document).map(|document|document.version),"revision":revision,
         "analysis":analysis,"sites":sites,"source_coverage":coverage});
+    if let Some(name) = equation_filter {
+        result["equation_filter"] = json!({"name":name});
+    }
     if arguments
         .first()
         .and_then(|value| value.get("prepare_preset"))
@@ -426,6 +459,135 @@ fn context(inner: &mut Inner, arguments: &[Value]) -> std::result::Result<Value,
         );
     }
     Ok(result)
+}
+
+fn equation_filter(
+    inner: &mut Inner,
+    root: &Url,
+    document: &Url,
+    range: Range,
+    analysis: &Value,
+    budget: &mut MacroBudget,
+) -> std::result::Result<String, Value> {
+    let unavailable = || {
+        refusal(
+            "ANALYSIS_EQUATION_FILTER_UNAVAILABLE",
+            "Cannot verify one named equation at this position. Use Select analysis configuration to enter a tag expression.",
+        )
+    };
+    let target = || {
+        refusal(
+            "ANALYSIS_EQUATION_TARGET",
+            "Place the cursor on one named aggregate equation, or select only that equation, and try again.",
+        )
+    };
+    let ambiguous = || {
+        refusal(
+            "ANALYSIS_EQUATION_AMBIGUOUS",
+            "This equation name may select more than one written equation. Use Select analysis configuration to enter a tag expression.",
+        )
+    };
+    let spend = |budget: &mut MacroBudget, work| {
+        budget.spend_work(work).map_err(|_| {
+            refusal(
+                "ANALYSIS_EQUATION_FILTER_LIMIT",
+                "The equation check reached the work limit or was cancelled. Use Select analysis configuration to enter a tag expression.",
+            )
+        })
+    };
+    if analysis["state"] != "selected" || analysis["model_complete"] != true {
+        return Err(unavailable());
+    }
+    let model = inner
+        .workspace
+        .effective_model_snapshot(root.as_str())
+        .ok_or_else(unavailable)?;
+    let report = inner
+        .workspace
+        .expand_report_snapshot(root.as_str())
+        .ok_or_else(unavailable)?;
+    if !report.complete
+        || !report.model_map.complete
+        || !inner.workspace.includes_complete(root.as_str())
+    {
+        return Err(unavailable());
+    }
+    let key = normalize_uri(document.as_str());
+    let source = inner
+        .workspace
+        .source_document(root.as_str(), &key)
+        .ok_or_else(unavailable)?;
+    let text = source.source();
+    let index = source.source_index();
+    if range.start > range.end {
+        return Err(unavailable());
+    }
+    spend(
+        budget,
+        (range.start.character as usize).saturating_add(range.end.character as usize),
+    )?;
+    let start = index.offset_utf16(text, span_pos(range.start));
+    let end = index.offset_utf16(text, span_pos(range.end));
+    if index.position_utf16(text, start) != span_pos(range.start)
+        || index.position_utf16(text, end) != span_pos(range.end)
+    {
+        return Err(unavailable());
+    }
+    let root_key = normalize_uri(root.as_str());
+    let mut matched = None;
+    for (row_index, row) in report.model_map.equations.iter().enumerate() {
+        spend(budget, row.source.segments.len().saturating_add(1))?;
+        if row.source.segments.iter().any(|segment| {
+            segment.span.start <= start
+                && start < segment.span.end
+                && end <= segment.span.end
+                && segment.file.as_deref().unwrap_or(&root_key) == key
+        }) && matched.replace((row_index, row)).is_some()
+        {
+            return Err(ambiguous());
+        }
+    }
+    let (row_index, occurrence) = matched.ok_or_else(target)?;
+    if occurrence.local
+        || occurrence.static_only
+        || occurrence.dimension.is_some()
+        || occurrence.source.segments.len() != 1
+    {
+        return Err(target());
+    }
+    let row = model
+        .written_equations
+        .get(row_index)
+        .ok_or_else(unavailable)?;
+    for surgery in &model.equation_surgery {
+        spend(budget, surgery.removed.len().saturating_add(1))?;
+        if surgery
+            .removed
+            .iter()
+            .any(|removed| removed.equation.parse_order == row.equation.parse_order)
+        {
+            return Err(refusal(
+                "ANALYSIS_EQUATION_REMOVED",
+                "This equation was removed or replaced before equation selection. Use Select analysis configuration to enter a tag expression.",
+            ));
+        }
+    }
+    let name = row
+        .equation
+        .tag_map
+        .get("name")
+        .filter(|name| !name.is_empty())
+        .ok_or_else(target)?;
+    // All executed written rows form an upper bound even when surgery removed a row.
+    // Counting static rows and other dimensions may refuse a safe selection, but
+    // cannot hide another tag match from the invocation selector.
+    for (index, candidate) in model.written_equations.iter().enumerate() {
+        spend(budget, 1)?;
+        if index != row_index && candidate.equation.tag_map.get("name") == Some(name) {
+            return Err(ambiguous());
+        }
+    }
+    Ok(name.clone())
 }
 
 fn rebind(
@@ -714,6 +876,63 @@ mod tests {
     fn request(root: &Url, proof: &Value, analysis: Value) -> Value {
         json!({"root_uri":root,"document_uri":root,"document_version":proof["document_version"],"expected_revision":proof["revision"],
             "expected_selection_generation":proof["analysis"]["selection_generation"],"analysis":analysis,"include_paths":null})
+    }
+
+    #[test]
+    fn equation_filter_requires_one_verified_named_equation() {
+        let (mut inner, root) = state("var y;\nmodel;\n[name='policy'] y=0;\nend;\n");
+        let query = |line, start, end| {
+            json!({"root_uri":root,"document_uri":root,"document_version":1,
+            "equation_range":{"start":{"line":line,"character":start},"end":{"line":line,"character":end}}})
+        };
+        let result = context(&mut inner, &[query(2, 17, 17)]).unwrap();
+        assert_eq!(result["equation_filter"]["name"], "policy");
+        assert_eq!(result["sites"], json!([]));
+        assert_eq!(result["source_coverage"]["complete"], false);
+        assert!(context(&mut inner, &[query(2, 20, 20)]).is_err());
+
+        edit(
+            &mut inner,
+            &root,
+            "var y;\nmodel;\n[name='policy'] y=0;\n[name='policy'] y=1;\nend;\n",
+            2,
+        );
+        let duplicate = json!({"root_uri":root,"document_uri":root,"document_version":2,
+            "equation_range":{"start":{"line":2,"character":17},"end":{"line":2,"character":17}}});
+        assert!(context(&mut inner, &[duplicate]).is_err());
+    }
+
+    #[test]
+    fn equation_filter_proves_before_current_selection_and_after_surgery() {
+        let (mut inner, root) =
+            state("var a b;\nmodel;\n[name='a'] a=a(-1);\n[name='b'] b=b(-1);\nend;\n");
+        let choices: AnalysisConfiguration =
+            serde_json::from_value(json!({"equation_selection":{"mode":"include","values":["a"]}}))
+                .unwrap();
+        inner
+            .workspace
+            .set_root_analysis_configuration(root.as_str(), choices)
+            .unwrap();
+        let query = json!({"root_uri":root,"document_uri":root,"document_version":1,
+            "equation_range":{"start":{"line":3,"character":12},"end":{"line":3,"character":12}}});
+        assert_eq!(
+            context(&mut inner, &[query]).unwrap()["equation_filter"]["name"],
+            "b"
+        );
+
+        edit(
+            &mut inner,
+            &root,
+            "var a b;\nmodel;\n[name='a'] a=a(-1);\n[name='b'] b=b(-1);\nend;\nmodel_remove('b');\n",
+            2,
+        );
+        inner
+            .workspace
+            .set_root_analysis_configuration(root.as_str(), AnalysisConfiguration::default())
+            .unwrap();
+        let removed = json!({"root_uri":root,"document_uri":root,"document_version":2,
+            "equation_range":{"start":{"line":3,"character":12},"end":{"line":3,"character":12}}});
+        assert!(context(&mut inner, &[removed]).is_err());
     }
 
     #[test]

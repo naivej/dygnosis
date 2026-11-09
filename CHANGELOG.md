@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.11.50
+
+- Editor context actions appear together as direct `Dygnosis:` commands.
+  **Rename symbol** stays in its standard editing position and remains
+  available on `F2`. Model owner and macro actions are available from the
+  context menu and Command Palette.
+- **Filter analysis by equation…** starts an Include or Exclude selection from
+  a uniquely named aggregate model equation without a `[static]` tag.
+  **Select analysis configuration** accepts other tag expressions.
+
 ## v0.11.49
 
 - The default macro work limit is now 20 million, so more macro-heavy models

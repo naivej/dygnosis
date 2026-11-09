@@ -460,7 +460,8 @@ test("menus and native keys are preview-scoped and toolbar placements have separ
   for (const items of Object.values(originJumpContributions.menus)) for (const item of items) assert.match(item.when, /resourceScheme == dygnosis-effective/);
   for (const binding of originJumpContributions.keybindings) assert.match(binding.when, /dygnosis-effective.*editorTextFocus/);
   assert.match(originJumpContributions.menus["editor/title"][0].when, /previewToolbarActions/);
-  assert.match(originJumpContributions.menus["dygnosis.editorContext"][0].when, /previewContextActions/);
+  assert.match(originJumpContributions.menus["editor/context"][0].when, /previewContextActions/);
+  assert.match(originJumpContributions.menus["editor/context"][0].when, /previewHasOrigins/);
 });
 
 test("one verified source reuses an open editor with its stored root", async () => {

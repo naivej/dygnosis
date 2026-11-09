@@ -11,11 +11,11 @@ owner**.
   automatically. If an `.inc` helper is unlinked, open its parent `.mod` or
   `.dyn` file once to connect them.
 - **Shared across several models**: Run **Dygnosis: Choose model owner** from
-  the Command Palette to pick which parent model provides context for
-  diagnostics, **Outline**, navigation and macro expansion.
+  the Command Palette or editor context menu to pick which parent model
+  provides context for diagnostics, **Outline**, navigation and macro expansion.
 - **Standalone `.mod` or `.dyn` file**: When a `.mod` or `.dyn` file is also
   included by another model, run **Dygnosis: Treat this file as a model root**
-  to check it on its own.
+  from the Command Palette or editor context menu to check it on its own.
 
 Hover over an `@#include` path or a recognized parameter, data or
 external-function filename in the editor to open it through VS Code's document

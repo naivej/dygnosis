@@ -65,6 +65,7 @@ export interface AnalysisContext {
   schema_version: 1; root_uri: string; document_uri: string; document_version: number | null;
   revision: string; analysis: AnalysisMetadata; sites: DirectiveSite[];
   source_coverage: { complete: boolean; cause?: string | null }; preset_bindings?: PresetBinding[];
+  equation_filter?: { name: string };
   partial?: boolean; message?: string;
   prepared_analysis?: AnalysisConfiguration; prepared_include_paths?: string[];
 }
@@ -84,6 +85,8 @@ export interface ModelInfo {
   status?: string; message?: string;
   incomplete_reasons?: { code?: string; message?: string; location?: unknown }[];
   analysis?: AnalysisMetadata; source_browsing?: boolean; browsing_documents?: string[];
+  macro_actions?: { definition: boolean; branch: boolean };
+  has_named_equation?: boolean;
 }
 export function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -170,6 +173,7 @@ export function parseAnalysisContext(value: unknown, root: string): AnalysisCont
         rows(site.branches, branch => typeof branch.branch_id === "string" && typeof branch.expected_text === "string" && location(branch.location))) ||
       !record(value.source_coverage) || typeof value.source_coverage.complete !== "boolean" ||
       (value.source_coverage.cause !== undefined && !nullableString(value.source_coverage.cause)) ||
+      (value.equation_filter !== undefined && (!record(value.equation_filter) || typeof value.equation_filter.name !== "string" || !value.equation_filter.name)) ||
       (value.partial !== undefined && typeof value.partial !== "boolean") || (value.message !== undefined && typeof value.message !== "string") ||
       (value.prepared_analysis !== undefined && !analysisConfiguration(value.prepared_analysis)) ||
       (value.prepared_include_paths !== undefined && !strings(value.prepared_include_paths)) ||
@@ -189,6 +193,8 @@ export function parseModelInfo(value: unknown, root: string, document: string): 
       !strings(value.owner_roots) ||
       !(value.browsing_documents === undefined || strings(value.browsing_documents)) ||
       !(value.source_browsing === undefined || typeof value.source_browsing === "boolean") ||
+      (value.macro_actions !== undefined && (!record(value.macro_actions) || typeof value.macro_actions.definition !== "boolean" || typeof value.macro_actions.branch !== "boolean")) ||
+      (value.has_named_equation !== undefined && typeof value.has_named_equation !== "boolean") ||
       !(value.dependency_candidates === undefined || strings(value.dependency_candidates)) ||
       !(value.inactive_ranges === undefined || Array.isArray(value.inactive_ranges) && value.inactive_ranges.every(range)) ||
       !rows(value.statements, row => source(row) && typeof row.id === "string" &&

@@ -45,6 +45,7 @@ function setup() {
   const proof = { schema_version: 1, root_uri: document.uri.toString(), document_uri: document.uri.toString(), document_version: 1, revision: "guarded-source",
     analysis: metadata(), sites: [], source_coverage: { complete: true } };
   const service = { currentInstance: 1, supportsAnalysisConfiguration: true, log() {}, ensureStarted: async () => {},
+    documentContextIdentity: () => "owner",
     rootForDocument: async () => document.uri, analysisContext: async () => proof, calls: [],
     setAnalysisConfiguration: async (...args) => { service.calls.push(args); return proof; } };
   const sessions = new Map(), previews = { get: value => sessions.get(value.toString()) };
@@ -270,6 +271,43 @@ test("equation selection composes with macros and Clear equation selection prese
   host.answers.push(items => { assert.ok(!items.some(item => item.action === "clearEquations")); return items.find(item => item.label === "Source"); });
   await env.run("selectAnalysisConfiguration");
   assert.deepEqual(env.service.calls[2][1], {});
+  env.registration.dispose();
+});
+
+test("the equation filter uses the captured selection and replaces only the tag filter", async () => {
+  // A later cursor move must not select a different equation while the root is resolved.
+  const env = setup();
+  host.editor.selection = { active: { line: 5, character: 2 }, start: { line: 5, character: 2 }, end: { line: 5, character: 10 } };
+  env.service.rootForDocument = async () => { host.editor.selection.active.line = 8; return env.document.uri; };
+  env.service.analysisContext = async (_root, _document, _token, _prepare, range) => {
+    assert.deepEqual(range, { start: { line: 5, character: 2 }, end: { line: 5, character: 10 } });
+    return env.proof;
+  };
+  env.proof.equation_filter = { name: "policy" };
+  env.proof.analysis.configuration = { defines: [{ name: "N", expression: "2" }], equation_selection: { mode: "include", values: ["old"] } };
+  env.proof.analysis.include_paths = ["/workspace/includes"];
+  host.answers.push(items => items.find(item => item.mode === "exclude"));
+  host.inputAnswers.push("name='policy'");
+  await env.run("filterAnalysisByEquation");
+  assert.equal(host.inputs[0].value, "name='policy'");
+  assert.match(host.picks[0].options.placeHolder, /Replace the current include filter.*old/);
+  assert.deepEqual(env.service.calls[0][1], { defines: [{ name: "N", expression: "2" }], equation_selection: { mode: "exclude", tag: "name", values: ["policy"] } });
+  assert.deepEqual(env.service.calls[0][3], ["/workspace/includes"]);
+  env.registration.dispose();
+});
+
+test("the equation filter refuses proof-less targets and stale confirmation", async () => {
+  // Prevent a shortcut on an older engine or a change to the displayed document during confirmation.
+  const env = setup();
+  await env.run("filterAnalysisByEquation");
+  assert.match(host.messages.at(-1), /Cannot verify a unique equation name/);
+  assert.equal(host.picks.length, 0);
+  env.proof.equation_filter = { name: "policy" };
+  host.answers.push(items => { ++env.document.version; return items[0]; });
+  await env.run("filterAnalysisByEquation");
+  assert.match(host.messages.at(-1), /changed/);
+  assert.equal(host.inputs.length, 0);
+  assert.equal(env.service.calls.length, 0);
   env.registration.dispose();
 });
 

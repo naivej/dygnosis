@@ -5,6 +5,8 @@ import { AnalysisConfiguration, AnalysisContext, AnalysisMetadata, AnalysisOverr
 import { CommandCancelled, refuse, runCommand } from "../client/refusal";
 import type { EffectivePreviewRegistry } from "./preview";
 import { automaticConfigurationName, configurationSummary } from "../client/analysis_presentation";
+import { captureSelection, commandEditor, containsSelection } from "../client/editor_target";
+import type { Range } from "../client/protocol";
 
 export interface AnalysisSide { analysis: AnalysisConfiguration; include_paths: string[] | null; preset_bindings?: PresetBinding[] }
 interface Preset { name: string; root: string; analysis: AnalysisConfiguration; includePaths?: string[]; bindings: PresetBinding[] }
@@ -48,6 +50,11 @@ export function parseEquationSelection(raw: string): Omit<EquationSelection, "mo
 function equationSelectionExpression(selection: EquationSelection): string {
   const values = selection.values.map(value => `'${value}'`);
   return `${selection.tag ?? "name"}=${values.length === 1 ? values[0] : `(${values.join(", ")})`}`;
+}
+
+function onDirective(range: Range, selection: Range): boolean {
+  return containsSelection({ start: { line: range.start.line, character: 0 },
+    end: { line: range.end.line + (range.end.character > 0 ? 1 : 0), character: 0 } }, selection);
 }
 
 function fileUri(file: string): vscode.Uri {
@@ -133,21 +140,33 @@ function replaceOverride(choices: AnalysisConfiguration, operation: AnalysisOver
 /** Native commands share the same root client state in source and expansion. */
 export function registerAnalysisConfigurations(service: DygnosisClient, previews: EffectivePreviewRegistry): vscode.Disposable {
   let disposed = false;
-  const target = async (written = false): Promise<Target> => {
-    const document = vscode.window.activeTextEditor?.document;
-    if (!document || document.isClosed) refuse("Open a Dynare source or macro expansion before selecting its analysis configuration.");
+  const target = async (editor = commandEditor(), written?: "directive" | "equation"): Promise<Target> => {
+    const document = editor?.document;
+    if (!editor || !document || document.isClosed) refuse("Open a Dynare source or macro expansion before selecting its analysis configuration.");
+    const version = document.version;
     const session = previews.get(document.uri);
-    if (written && session) refuse("Use Go to written source, then select the controlling macro directive for this analysis preview.");
+    if (written && session) refuse(written === "directive" ?
+      "Use Go to written source, then select the controlling macro directive for this analysis preview." :
+      "Use Go to written source, then select a named equation to filter the analysis.");
     const root = session?.root ?? await service.rootForDocument(document, true);
     if (!root) refuse("Choose the model root for this source before selecting an analysis configuration.");
+    const owner = service.documentContextIdentity(document.uri);
     await service.ensureStarted();
     if (!service.supportsAnalysisConfiguration) refuse("This engine does not support analysis configurations. Use the bundled binary or update dynare.serverPath.");
-    const instance = service.currentInstance, version = document.version;
+    const instance = service.currentInstance;
     return { root, document: session ? root : document.uri, current: () => !disposed && !document.isClosed && document.version === version &&
-      vscode.window.activeTextEditor?.document === document && service.currentInstance === instance && (!session || previews.get(document.uri) === session) };
+      vscode.window.activeTextEditor === editor && service.currentInstance === instance && (session ? previews.get(document.uri) === session :
+        service.documentContextIdentity(document.uri) === owner) };
   };
-  const context = async (invocation: Target, prepare = false): Promise<AnalysisContext> => {
-    const value = await service.analysisContext(invocation.root, invocation.document, undefined, prepare);
+  const targeted = async (resource: unknown, kind: string) => {
+    const editor = commandEditor(resource);
+    if (!editor) refuse(`Open the written Dynare source and select a ${kind}.`);
+    const selection = captureSelection(editor, kind);
+    return { selection, invocation: await target(editor, kind === "named equation" ? "equation" : "directive") };
+  };
+  const context = async (invocation: Target, prepare = false, equationRange?: Range): Promise<AnalysisContext> => {
+    if (!invocation.current()) refuse("The source, engine, or chosen root changed. Request the analysis action again.");
+    const value = await service.analysisContext(invocation.root, invocation.document, undefined, prepare, equationRange);
     if (!value || !invocation.current()) refuse("The source, server, or chosen root changed. Request the analysis action again.");
     return value;
   };
@@ -221,12 +240,12 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
       : [...current, ...(input ? [input] : [])];
     await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });
   };
-  const equations = async (invocation: Target, proof: AnalysisContext, mode: "include" | "exclude"): Promise<void> => {
+  const equations = async (invocation: Target, proof: AnalysisContext, mode: "include" | "exclude", expression?: string): Promise<void> => {
     const choices = modified(proof), previous = choices.equation_selection;
     const invalid = "Enter a tag expression, such as name='policy', endogenous='rate' or name=('policy','demand'). Use single quotes for tag values and give each value once.";
     const raw = await vscode.window.showInputBox({
       title: mode === "include" ? "Include equations" : "Exclude equations", prompt: "Dynare tag expression, for example name='policy', endogenous='rate' or name=('policy','demand')",
-      placeHolder: "name='policy'", value: previous ? equationSelectionExpression(previous) : "",
+      placeHolder: "name='policy'", value: expression ?? (previous ? equationSelectionExpression(previous) : ""),
       validateInput: value => parseEquationSelection(value) ? undefined : invalid,
     });
     if (raw === undefined) throw new CommandCancelled();
@@ -235,33 +254,43 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     choices.equation_selection = { mode, ...selection };
     await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });
   };
-  const previewBranch = async (): Promise<void> => {
-    const invocation = await target(true), proof = await context(invocation);
-    const position = vscode.window.activeTextEditor!.selection.active;
-    let operation: Extract<AnalysisOverride, { kind: "branch" }> | undefined;
-    for (const site of proof.sites) {
-      if (site.kind !== "conditional") continue;
-      const arm = site.branches.find(arm => arm.location.uri === invocation.document.toString() &&
-        arm.location.range.start.line <= position.line && (position.line < arm.location.range.end.line ||
-          position.line === arm.location.range.end.line && arm.location.range.end.character > 0));
-      if (arm) {
-        operation = { kind: "branch", target: site.target, branch_id: arm.branch_id };
-        break;
-      }
-    }
-    if (!operation) refuse(proof.source_coverage.cause ?? "Place the cursor on a macro condition or @#else to preview that branch.");
+  const filterByEquation = async (resource?: unknown): Promise<void> => {
+    const { selection, invocation } = await targeted(resource, "named equation");
+    const proof = await context(invocation, false, selection);
+    const name = proof.equation_filter?.name;
+    if (!name) refuse("Cannot verify a unique equation name. Use Select analysis configuration to enter a tag expression.");
+    const expression = equationSelectionExpression({ mode: "include", values: [name] });
+    if (parseEquationSelection(expression)?.values[0] !== name) refuse("This equation name cannot be entered as a tag expression. Choose another named equation.");
+    const previous = proof.analysis.configuration.equation_selection;
+    const pick = await vscode.window.showQuickPick([
+      { label: "Include matching equations", description: expression, mode: "include" as const },
+      { label: "Exclude matching equations", description: expression, mode: "exclude" as const },
+    ], { title: "Filter analysis by equation", placeHolder: previous ?
+      `Replace the current ${previous.mode} filter (${equationSelectionExpression(previous)})` : "Choose how to filter the model" });
+    if (!pick) throw new CommandCancelled();
+    if (!invocation.current()) refuse("The source or chosen root changed. Request the equation filter again.");
+    await equations(invocation, proof, pick.mode, expression);
+  };
+  const previewBranch = async (resource?: unknown): Promise<void> => {
+    const { selection, invocation } = await targeted(resource, "conditional branch header");
+    const proof = await context(invocation);
+    const matches = proof.sites.filter(site => site.kind === "conditional").flatMap(site => site.branches
+      .filter(arm => arm.location.uri === invocation.document.toString() && onDirective(arm.location.range, selection))
+      .map(arm => ({ kind: "branch" as const, target: site.target, branch_id: arm.branch_id })));
+    if (!matches.length) refuse(proof.source_coverage.cause ?? "Place the cursor on a macro condition or @#else to preview that branch.");
+    if (matches.length > 1) refuse("Select one macro condition or @#else header and try again.");
     const choices = modified(proof);
-    replaceOverride(choices, operation);
+    replaceOverride(choices, matches[0]);
     await apply(invocation, proof, { analysis: choices, include_paths: proof.analysis.include_paths });
   };
-  const override = async (skip = false): Promise<void> => {
-    const invocation = await target(true), proof = await context(invocation);
-    const position = vscode.window.activeTextEditor!.selection.active;
+  const override = async (skip: boolean, resource?: unknown): Promise<void> => {
+    const { selection, invocation } = await targeted(resource, "value macro definition");
+    const proof = await context(invocation);
     const sites = proof.sites.filter(site => site.kind !== "conditional" && site.location.uri === invocation.document.toString() &&
-      site.location.range.start.line <= position.line && position.line <= site.location.range.end.line);
-    if (!sites.length) refuse(`Place the cursor on an @#define directive before ${skip ? "skipping" : "overriding"} it for analysis. To select a conditional branch, use Dygnosis: Preview macro branch.`);
-    const site = sites.length === 1 ? sites[0] : (await vscode.window.showQuickPick(sites.map(site => ({ label: site.expected_text, site })), { placeHolder: "Select the written macro definition" }))?.site;
-    if (!site) throw new CommandCancelled();
+      onDirective(site.location.range, selection));
+    if (!sites.length) refuse(proof.source_coverage.cause ?? `Place the cursor on an @#define directive before ${skip ? "skipping" : "overriding"} it for analysis. To select a conditional branch, use Dygnosis: Preview macro branch.`);
+    if (sites.length > 1) refuse("Select one value macro definition and try again.");
+    const site = sites[0];
     const choices = modified(proof);
     if (site.kind === "function_definition") refuse(`Function-like macro definitions cannot be ${skip ? "skipped" : "overridden"} for analysis. Select a value definition.`);
     if (skip) replaceOverride(choices, { kind: "skip_definition", target: site.target });
@@ -290,9 +319,10 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     }, () => !disposed)),
     vscode.commands.registerCommand("dygnosis.resetAnalysisConfiguration", () => runCommand(service, async () => { const invocation = await target(); await apply(invocation, await context(invocation), { analysis: {}, include_paths: null }); }, () => !disposed)),
     vscode.commands.registerCommand("dygnosis.saveAnalysisConfiguration", () => runCommand(service, () => save(), () => !disposed)),
-    vscode.commands.registerCommand("dygnosis.overrideMacroDefinition", () => runCommand(service, () => override(), () => !disposed)),
-    vscode.commands.registerCommand("dygnosis.skipMacroDefinition", () => runCommand(service, () => override(true), () => !disposed)),
-    vscode.commands.registerCommand("dygnosis.previewMacroBranch", () => runCommand(service, previewBranch, () => !disposed)),
+    vscode.commands.registerCommand("dygnosis.overrideMacroDefinition", (resource?: unknown) => runCommand(service, () => override(false, resource), () => !disposed)),
+    vscode.commands.registerCommand("dygnosis.skipMacroDefinition", (resource?: unknown) => runCommand(service, () => override(true, resource), () => !disposed)),
+    vscode.commands.registerCommand("dygnosis.previewMacroBranch", (resource?: unknown) => runCommand(service, () => previewBranch(resource), () => !disposed)),
+    vscode.commands.registerCommand("dygnosis.filterAnalysisByEquation", (resource?: unknown) => runCommand(service, () => filterByEquation(resource), () => !disposed)),
   ];
   return new vscode.Disposable(() => { disposed = true; for (const registration of registrations) registration.dispose(); });
 }

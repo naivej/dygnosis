@@ -665,7 +665,15 @@ exports.run = async function run() {
     evidence.extension_version = extension.packageJSON.version;
     evidence.extension_entrypoint_sha256 = createHash("sha256").update(await fs.readFile(path.resolve(extension.extensionPath, extension.packageJSON.main))).digest("hex");
     const service = await extension.activate();
-    assert.ok(["all", "mcp", "semantic", "folding", "presentation", "rename", "workspace", "syntax", "lifecycle", "analysis", "help", "preview"].includes(scope), "Unknown native host scope");
+    assert.ok(["all", "mcp", "semantic", "folding", "presentation", "rename", "workspace", "syntax", "lifecycle", "analysis", "help", "preview", "menu"].includes(scope), "Unknown native host scope");
+    if (scope === "menu") {
+      await require("./helpers/menu_host.cjs").checkMenu(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, currentSnapshot, writeObservedInput });
+      await service.shutdown();
+      evidence.artifacts_after = await historyArtifacts();
+      assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "native menu acceptance uses one matching candidate");
+      evidence.passed = true;
+      return;
+    }
     if (scope === "preview") {
       await checkMacroPreview(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
       await service.shutdown();

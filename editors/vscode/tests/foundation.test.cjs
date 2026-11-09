@@ -119,10 +119,10 @@ test("the palette exposes user actions in their context and hides aliases and ta
   const groups = [
     [undefined, ["openHelp", "restartServer", "showOutput", "openSettings", "workspaceStatus", "showDiagnostic", "showAllDiagnostics"]],
     ["false", ["editSettingsJson", "ignoreWorkspaceFolder"]],
-    ["dygnosis.analysisDocument", ["jumpToEquation", "chooseModelOwner", "filterOutline", "overrideMacroDefinition", "skipMacroDefinition", "previewMacroBranch", "goToSourceCandidate"]],
+    ["dygnosis.analysisDocument", ["jumpToEquation", "chooseModelOwner", "filterOutline", "overrideMacroDefinition", "skipMacroDefinition", "previewMacroBranch", "goToSourceCandidate", "filterAnalysisByEquation"]],
     ["dygnosis.analysisDocument && !editorReadonly", ["renameSymbol"]],
     ["dygnosis.modelContext", ["showEffectiveModel"]],
-    ["dygnosis.analysisDocument && resourceExtname =~ /\\.(mod|dyn)$/", ["treatAsRoot"]],
+    ["dygnosis.analysisDocument && resourceExtname =~ /\\.(mod|dyn)$/i", ["treatAsRoot"]],
     ["resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewWrittenSource", ["goToWrittenSource"]],
     ["resourceScheme == dygnosis-effective && dygnosis.effectivePreview", ["refreshEffectiveModel"]],
     ["dygnosis.changesContext", ["openChanges", "diffWith"]],
@@ -133,46 +133,47 @@ test("the palette exposes user actions in their context and hides aliases and ta
   ];
   const expected = new Map(groups.flatMap(([when, commands]) => commands.map(command => [`dygnosis.${command}`, when])));
   const palette = new Map(contributes.menus.commandPalette.map(row => [row.command, row.when]));
+  const editorActions = new Set(contributes.menus["editor/context"].filter(row => row.group.startsWith("0_navigation_dygnosis@")).map(row => row.command));
   assert.equal(palette.size, contributes.menus.commandPalette.length, "each command has one palette visibility rule");
   assert.deepEqual(new Set(contributes.commands.map(row => row.command)), new Set(expected.keys()), "each public action has a deliberate palette classification");
   for (const command of contributes.commands) {
-    assert.equal(command.category, "Dygnosis", command.command);
+    assert.equal(command.category, editorActions.has(command.command) ? undefined : "Dygnosis", command.command);
     assert.equal(palette.get(command.command), expected.get(command.command), command.command);
   }
   for (const command of palette.keys()) assert.ok(expected.has(command), command);
 });
 
-test("editor context commands use one scoped submenu and keep Rename with standard editing", () => {
-  // Guards source-only candidate navigation, source/preview submenu access, and misplaced safe Rename.
+test("editor context commands form one ordered prefixed block with file and preview gates", () => {
+  // Guards the native menu contract and duplicate labels in the Command Palette.
   const { contributes } = require("../package.json");
   const commands = contributes.commands;
-  assert.deepEqual(contributes.submenus, [{ id: "dygnosis.editorContext", label: "Dygnosis" }]);
-  assert.deepEqual(contributes.menus["editor/context"], [
-    { command: "dygnosis.renameSymbol", when: "dygnosis.analysisDocument && !editorReadonly", group: "1_modification@1" },
-    { submenu: "dygnosis.editorContext", when: "(dygnosis.analysisDocument && dygnosis.contextActions) || (dygnosis.effectivePreview && dygnosis.previewContextActions)", group: "dygnosis" },
-  ]);
-  const context = contributes.menus["dygnosis.editorContext"];
+  assert.equal(contributes.submenus, undefined);
+  assert.equal(contributes.menus["dygnosis.editorContext"], undefined);
+  const sourceMenu = "dygnosis.analysisDocument && dygnosis.contextActions";
+  const [rename, ...context] = contributes.menus["editor/context"];
+  assert.deepEqual(rename, { command: "dygnosis.renameSymbol", when: "dygnosis.analysisDocument && !editorReadonly", group: "1_modification@1" });
+  assert.equal(commands.find(command => command.command === rename.command)?.title, "Rename symbol");
   const expected = [
-    ["dygnosis.goToSourceCandidate", "dygnosis.analysisDocument && dygnosis.contextActions", "navigation@1"],
-    ["dygnosis.selectAnalysisConfiguration", "(dygnosis.analysisDocument && dygnosis.contextActions) || (dygnosis.effectivePreview && dygnosis.previewContextActions)", "dygnosis@1"],
-    ["dygnosis.overrideMacroDefinition", "dygnosis.analysisDocument && dygnosis.contextActions", "dygnosis@2"],
-    ["dygnosis.skipMacroDefinition", "dygnosis.analysisDocument && dygnosis.contextActions", "dygnosis@3"],
-    ["dygnosis.previewMacroBranch", "dygnosis.analysisDocument && dygnosis.contextActions", "dygnosis@4"],
-    ["dygnosis.goToWrittenSource", "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions", "dygnosis@5"],
-    ["dygnosis.refreshEffectiveModel", "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions", "dygnosis@6"],
+    ["goToSourceCandidate", sourceMenu],
+    ["goToWrittenSource", "resourceScheme == dygnosis-effective && dygnosis.previewContextActions && dygnosis.previewHasOrigins"],
+    ["overrideMacroDefinition", `${sourceMenu} && dygnosis.hasMacroDefinition`],
+    ["skipMacroDefinition", `${sourceMenu} && dygnosis.hasMacroDefinition`],
+    ["previewMacroBranch", `${sourceMenu} && dygnosis.hasMacroBranch`],
+    ["filterAnalysisByEquation", `${sourceMenu} && dygnosis.hasNamedEquation`],
+    ["chooseModelOwner", `${sourceMenu} && dygnosis.hasModelOwnerChoice`],
+    ["treatAsRoot", `${sourceMenu} && dygnosis.canTreatAsRoot`],
   ];
-  assert.deepEqual(context.map(row => row.command), expected.map(([command]) => command));
-  assert.deepEqual(context.map(row => row.group), expected.map(([, , group]) => group));
-  assert.deepEqual(context.map(row => row.when), expected.map(([, when]) => when));
+  assert.deepEqual(context, expected.map(([command, when], index) => ({ command: `dygnosis.${command}`, when, group: `0_navigation_dygnosis@${index + 1}` })));
+  for (const row of context) assert.match(commands.find(command => command.command === row.command)?.title, /^Dygnosis: \S/);
 
   const candidate = commands.find(row => row.command === "dygnosis.goToSourceCandidate");
-  assert.equal(candidate?.title, "Find possible declarations...");
+  assert.equal(candidate?.title, "Dygnosis: Find possible declarations…");
   assert.ok(contributes.menus["editor/title"].some(row => row.command === "dygnosis.showEffectiveModel"));
   assert.ok(contributes.menus["editor/title"].some(row => row.command === "dygnosis.openChanges"));
 
   const skip = commands.find(row => row.command === "dygnosis.skipMacroDefinition");
   assert.deepEqual({ title: skip?.title, category: skip?.category, enablement: skip?.enablement }, {
-    title: "Skip macro definition for analysis", category: "Dygnosis", enablement: "dygnosis.analysisDocument",
+    title: "Dygnosis: Skip macro definition for analysis", category: undefined, enablement: "dygnosis.analysisDocument",
   });
   for (const command of ["dygnosis.filterOutline", "dygnosis.showNotFullyCheckedModels", "dygnosis.showAllWorkspaceFiles"]) {
     assert.ok(contributes.menus["view/title"].some(row => row.command === command), command);

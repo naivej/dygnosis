@@ -453,12 +453,23 @@ impl<'a> WrittenView<'a> {
                 row
             })
             .collect();
+        let mut has_named_equation = false;
         let equations: Vec<_> = if self.authoritative {
             self.map
                 .equations
                 .iter()
                 .enumerate()
-                .filter(|(_, row)| row.active && row.number.is_some())
+                .filter(|(_, equation)| {
+                    // Invocation filtering removes numbers, but the named
+                    // written equation can still seed a replacement filter.
+                    has_named_equation |= !equation.local
+                        && !equation.static_only
+                        && equation.dimension.is_none()
+                        && !equation.name.is_empty()
+                        && matches!(equation.source.segments.as_slice(), [segment]
+                            if segment.file.as_deref() == Some(self.root_key.as_str()));
+                    equation.active && equation.number.is_some()
+                })
                 .map(|(index, equation)| {
                     let mut row = self.source_json(&equation.source);
                     row["id"] = json!(format!("e{}", equation.id));
@@ -483,7 +494,7 @@ impl<'a> WrittenView<'a> {
             .iter()
             .find(|row| row["name"] == "model" && row["anchor"].is_object())
             .map(|row| row["anchor"].clone());
-        json!({"statements":statements,"declarations":declarations,"equations":equations,"first_model_anchor":first,
+        json!({"statements":statements,"declarations":declarations,"equations":equations,"first_model_anchor":first,"has_named_equation":has_named_equation,
             "equation_numbering":"Dygnosis numbers before transformation"})
     }
 

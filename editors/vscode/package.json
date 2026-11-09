@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.49",
+  "version": "0.11.50",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -141,9 +141,8 @@
       },
       {
         "command": "dygnosis.treatAsRoot",
-        "title": "Treat this file as a model root",
-        "category": "Dygnosis",
-        "enablement": "dygnosis.analysisDocument && resourceExtname =~ /\\.(mod|dyn)$/"
+        "title": "Dygnosis: Treat this file as a model root",
+        "enablement": "dygnosis.analysisDocument && resourceExtname =~ /\\.(mod|dyn)$/i"
       },
       {
         "command": "dygnosis.jumpToEquation",
@@ -154,8 +153,7 @@
       },
       {
         "command": "dygnosis.chooseModelOwner",
-        "title": "Choose model owner",
-        "category": "Dygnosis",
+        "title": "Dygnosis: Choose model owner",
         "enablement": "dygnosis.analysisDocument",
         "icon": "$(organization)"
       },
@@ -178,10 +176,9 @@
       },
       {
         "command": "dygnosis.goToWrittenSource",
-        "title": "Go to written source",
-        "category": "Dygnosis",
+        "title": "Dygnosis: Go to written source",
         "icon": "$(go-to-file)",
-        "enablement": "dygnosis.previewWrittenSource"
+        "enablement": "dygnosis.previewHasOrigins"
       },
       {
         "command": "dygnosis.refreshEffectiveModel",
@@ -266,20 +263,22 @@
       },
       {
         "command": "dygnosis.overrideMacroDefinition",
-        "title": "Override macro definition for analysis",
-        "category": "Dygnosis",
+        "title": "Dygnosis: Override macro definition for analysis",
         "enablement": "dygnosis.analysisDocument"
       },
       {
         "command": "dygnosis.skipMacroDefinition",
-        "title": "Skip macro definition for analysis",
-        "category": "Dygnosis",
+        "title": "Dygnosis: Skip macro definition for analysis",
         "enablement": "dygnosis.analysisDocument"
       },
       {
         "command": "dygnosis.previewMacroBranch",
-        "title": "Preview macro branch",
-        "category": "Dygnosis",
+        "title": "Dygnosis: Preview macro branch",
+        "enablement": "dygnosis.analysisDocument"
+      },
+      {
+        "command": "dygnosis.filterAnalysisByEquation",
+        "title": "Dygnosis: Filter analysis by equation…",
         "enablement": "dygnosis.analysisDocument"
       },
       {
@@ -290,15 +289,8 @@
       },
       {
         "command": "dygnosis.goToSourceCandidate",
-        "title": "Find possible declarations...",
-        "category": "Dygnosis",
+        "title": "Dygnosis: Find possible declarations…",
         "enablement": "dygnosis.analysisDocument"
-      }
-    ],
-    "submenus": [
-      {
-        "id": "dygnosis.editorContext",
-        "label": "Dygnosis"
       }
     ],
     "menus": {
@@ -336,46 +328,44 @@
           "group": "1_modification@1"
         },
         {
-          "submenu": "dygnosis.editorContext",
-          "when": "(dygnosis.analysisDocument && dygnosis.contextActions) || (dygnosis.effectivePreview && dygnosis.previewContextActions)",
-          "group": "dygnosis"
-        }
-      ],
-      "dygnosis.editorContext": [
-        {
           "command": "dygnosis.goToSourceCandidate",
           "when": "dygnosis.analysisDocument && dygnosis.contextActions",
-          "group": "navigation@1"
-        },
-        {
-          "command": "dygnosis.selectAnalysisConfiguration",
-          "when": "(dygnosis.analysisDocument && dygnosis.contextActions) || (dygnosis.effectivePreview && dygnosis.previewContextActions)",
-          "group": "dygnosis@1"
-        },
-        {
-          "command": "dygnosis.overrideMacroDefinition",
-          "when": "dygnosis.analysisDocument && dygnosis.contextActions",
-          "group": "dygnosis@2"
-        },
-        {
-          "command": "dygnosis.skipMacroDefinition",
-          "when": "dygnosis.analysisDocument && dygnosis.contextActions",
-          "group": "dygnosis@3"
-        },
-        {
-          "command": "dygnosis.previewMacroBranch",
-          "when": "dygnosis.analysisDocument && dygnosis.contextActions",
-          "group": "dygnosis@4"
+          "group": "0_navigation_dygnosis@1"
         },
         {
           "command": "dygnosis.goToWrittenSource",
-          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions",
-          "group": "dygnosis@5"
+          "when": "resourceScheme == dygnosis-effective && dygnosis.previewContextActions && dygnosis.previewHasOrigins",
+          "group": "0_navigation_dygnosis@2"
         },
         {
-          "command": "dygnosis.refreshEffectiveModel",
-          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions",
-          "group": "dygnosis@6"
+          "command": "dygnosis.overrideMacroDefinition",
+          "when": "dygnosis.analysisDocument && dygnosis.contextActions && dygnosis.hasMacroDefinition",
+          "group": "0_navigation_dygnosis@3"
+        },
+        {
+          "command": "dygnosis.skipMacroDefinition",
+          "when": "dygnosis.analysisDocument && dygnosis.contextActions && dygnosis.hasMacroDefinition",
+          "group": "0_navigation_dygnosis@4"
+        },
+        {
+          "command": "dygnosis.previewMacroBranch",
+          "when": "dygnosis.analysisDocument && dygnosis.contextActions && dygnosis.hasMacroBranch",
+          "group": "0_navigation_dygnosis@5"
+        },
+        {
+          "command": "dygnosis.filterAnalysisByEquation",
+          "when": "dygnosis.analysisDocument && dygnosis.contextActions && dygnosis.hasNamedEquation",
+          "group": "0_navigation_dygnosis@6"
+        },
+        {
+          "command": "dygnosis.chooseModelOwner",
+          "when": "dygnosis.analysisDocument && dygnosis.contextActions && dygnosis.hasModelOwnerChoice",
+          "group": "0_navigation_dygnosis@7"
+        },
+        {
+          "command": "dygnosis.treatAsRoot",
+          "when": "dygnosis.analysisDocument && dygnosis.contextActions && dygnosis.canTreatAsRoot",
+          "group": "0_navigation_dygnosis@8"
         }
       ],
       "extension/context": [
@@ -427,7 +417,7 @@
         },
         {
           "command": "dygnosis.treatAsRoot",
-          "when": "dygnosis.analysisDocument && resourceExtname =~ /\\.(mod|dyn)$/"
+          "when": "dygnosis.analysisDocument && resourceExtname =~ /\\.(mod|dyn)$/i"
         },
         {
           "command": "dygnosis.jumpToEquation",
@@ -463,6 +453,10 @@
         },
         {
           "command": "dygnosis.previewMacroBranch",
+          "when": "dygnosis.analysisDocument"
+        },
+        {
+          "command": "dygnosis.filterAnalysisByEquation",
           "when": "dygnosis.analysisDocument"
         },
         {

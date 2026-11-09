@@ -2,8 +2,9 @@ import { refuse, runCommand } from "../client/refusal";
 import * as vscode from "vscode";
 import { DygnosisClient, isAnalysisDocument } from "../client/client";
 import type { ModelSnapshot } from "../client/client";
-import type { Equation, Location } from "../client/protocol";
+import type { Equation, Location, Range } from "../client/protocol";
 import { fileLabel } from "../client/failure";
+import { captureSelection, commandEditor, containsSelection } from "../client/editor_target";
 
 export interface NavigationContext {
   document: vscode.TextDocument;
@@ -22,8 +23,28 @@ function sourceLabel(location: Location | null): string {
 function scopeLabel(equation: Equation): string {
   return equation.scope === "aggregate" ? "Aggregate" : `Dimension ${equation.dimension ?? "(unnamed)"}`;
 }
-function equationPicks(equations: Equation[]): EquationPick[] {
-  return equations.map(equation => {
+function equationPicks(context: NavigationContext, selection?: Range): EquationPick[] {
+  const { document, info } = context;
+  const uri = document.uri.toString();
+  const local: Equation[] = [], other: Equation[] = [];
+  let block: string | undefined;
+  let ambiguousBlock = false;
+  for (const equation of info.equations) {
+    const inFile = equation.segments.some(segment => segment.uri === uri);
+    (inFile ? local : other).push(equation);
+    if (selection && inFile && equation.segments.some(segment => segment.uri === uri && containsSelection(segment.range, selection))) {
+      if (block !== undefined && block !== equation.block_id) ambiguousBlock = true;
+      block = equation.block_id;
+    }
+  }
+  if (block === undefined && selection) {
+    const blocks = info.statements.filter(row => row.kind === "block" && row.segments.some(segment =>
+      segment.uri === uri && containsSelection(segment.range, selection)));
+    if (blocks.length === 1) block = blocks[0].id;
+  }
+  if (ambiguousBlock) block = undefined;
+  const ordered = block === undefined ? local : [...local.filter(row => row.block_id === block), ...local.filter(row => row.block_id !== block)];
+  return [...ordered, ...other].map(equation => {
     const origins = equation.origin_frames.map(frame => frame.variable && frame.value !== null
       ? `${frame.variable}=${frame.value}` : ({ override_definition: "Definition override", definition_override: "Definition override", branch: "Branch preview", include: "Include", for: "Macro loop" }[frame.kind] ?? frame.kind.replaceAll("_", " "))).join(", ");
     return {
@@ -83,11 +104,8 @@ async function jumpEquation(service: DygnosisClient, context: NavigationContext,
 /** Equation navigation and owner selection over the client's shared model facts. */
 export function registerModelNavigation(service: DygnosisClient): vscode.Disposable {
   let disposed = false;
-  const currentDocument = (document: vscode.TextDocument, version: number, instance: number): boolean =>
-    !disposed && !document.isClosed && vscode.window.activeTextEditor?.document === document &&
-    document.version === version && service.currentInstance === instance;
-  const acquire = async (): Promise<NavigationContext | undefined> => {
-    const document = vscode.window.activeTextEditor?.document;
+  const acquire = async (editor = vscode.window.activeTextEditor): Promise<NavigationContext | undefined> => {
+    const document = editor?.document;
     if (disposed) return undefined;
     if (!document || document.isClosed || !isAnalysisDocument(document)) { refuse("Open a Dynare model or include before using equation navigation."); }
     const version = document.version;
@@ -95,28 +113,33 @@ export function registerModelNavigation(service: DygnosisClient): vscode.Disposa
     if (!root) { refuse("Choose a known model owner before using equation navigation."); }
     const info = await service.modelInfo(root, document.uri);
     if (!info) { refuse("Model information is unavailable. Restart the server or open Dygnosis Output for details."); }
-    if (!currentDocument(document, version, info.client_instance) || info.root_uri !== root.toString() ||
+    const guard = (): boolean => !disposed && !document.isClosed && vscode.window.activeTextEditor === editor &&
+      document.version === version && service.currentInstance === info.client_instance;
+    if (!guard() || info.root_uri !== root.toString() ||
         info.document_uri !== document.uri.toString() || info.document_version !== version) { refuse("The document or model owner changed. Request equation navigation again."); }
     if (!info.complete) { refuse(`Equation navigation is unavailable because expansion is incomplete. ${info.incomplete_reasons?.map(reason => reason.message).join(" ") || info.message || "Resolve the reported model problems first."}`); }
-    return { document, version, root, info };
+    return { document, version, root, info, guard };
   };
   const jumpToEquation = async (): Promise<void> => {
-    const context = await acquire();
+    const editor = vscode.window.activeTextEditor;
+    const selection = editor?.selection && !(editor.selections?.length > 1) ? captureSelection(editor, "equation") : undefined;
+    const context = await acquire(editor);
     if (!context) return;
     if (!context.info.equations.length) { refuse("This model has no counted equations."); }
-    const pick = await vscode.window.showQuickPick(equationPicks(context.info.equations),
+    const pick = await vscode.window.showQuickPick(equationPicks(context, selection),
       { placeHolder: "Jump to an equation before transformation", matchOnDescription: true, matchOnDetail: true });
     if (pick) await jumpEquation(service, context, pick.equation, () => !disposed);
   };
-  const chooseOwner = async (): Promise<void> => {
-    const document = vscode.window.activeTextEditor?.document;
+  const chooseOwner = async (resource?: unknown): Promise<void> => {
+    const editor = commandEditor(resource), document = editor?.document;
     if (disposed) return;
     if (!document || document.isClosed || !isAnalysisDocument(document)) { refuse("Open a Dynare include before choosing its model owner."); }
     const version = document.version;
     const owners = await service.ownerChoices(document);
     // Discovery can start the client. Pin its instance before reading owner facts.
     const instance = service.currentInstance;
-    const current = (): boolean => currentDocument(document, version, instance);
+    const current = (): boolean => !disposed && !document.isClosed && vscode.window.activeTextEditor === editor &&
+      document.version === version && service.currentInstance === instance;
     if (!current()) { if (!disposed) refuse("The document or server changed. Choose its model owner again."); return; }
     const picks: OwnerPick[] = [];
     for (const root of owners) {
@@ -128,20 +151,19 @@ export function registerModelNavigation(service: DygnosisClient): vscode.Disposa
     if (picks.length === 0) { refuse("No known model owns this include. Open its model root first."); }
     const pick = await vscode.window.showQuickPick(picks, { placeHolder: "Choose the model that owns this include" });
     if (!pick) return;
-    if (!currentDocument(document, version, pick.info.client_instance)) { if (!disposed) refuse("The document or server changed. Choose its model owner again."); return; }
+    if (!current()) { if (!disposed) refuse("The document or server changed. Choose its model owner again."); return; }
     const fresh = await service.revalidate(pick.root, pick.info.revision, pick.info.client_instance, document.uri);
     if (!fresh || fresh.root_uri !== pick.root.toString() || fresh.document_uri !== document.uri.toString() ||
         fresh.document_version !== version || fresh.client_instance !== pick.info.client_instance || !fresh.owner_roots.includes(pick.root.toString()) ||
-        !currentDocument(document, version, pick.info.client_instance)) {
+        !current()) {
       refuse("The model changed. Choose its owner again.");
     }
-    await service.applyOwner(document, pick.root, fresh);
+    await service.applyOwner(document, pick.root, fresh, current);
     await service.reportDocumentContextOutcome();
   };
-  const action = (run: () => Promise<void>) => (): Promise<void | undefined> => runCommand(service, run, () => !disposed);
   const listeners = [
-    vscode.commands.registerCommand("dygnosis.jumpToEquation", action(jumpToEquation)),
-    vscode.commands.registerCommand("dygnosis.chooseModelOwner", action(chooseOwner)),
+    vscode.commands.registerCommand("dygnosis.jumpToEquation", () => runCommand(service, jumpToEquation, () => !disposed)),
+    vscode.commands.registerCommand("dygnosis.chooseModelOwner", (resource?: unknown) => runCommand(service, () => chooseOwner(resource), () => !disposed)),
   ];
   return new vscode.Disposable(() => {
     disposed = true;

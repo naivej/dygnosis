@@ -24,6 +24,8 @@ pub(crate) struct MacroSource {
     pub source_revision: String,
     pub tokens: Arc<[Token]>,
     pub sites: Arc<[DirectiveSite]>,
+    pub has_definition: bool,
+    pub has_branch: bool,
     pub syntax_refusal: Option<MacroSyntaxRefusal>,
     pub work_used: usize,
 }
@@ -51,6 +53,8 @@ impl MacroSource {
             source_revision: String::new(),
             tokens: tokens.into(),
             sites: Arc::from([]),
+            has_definition: false,
+            has_branch: false,
             syntax_refusal: None,
             work_used: before - budget.remaining_work(),
         }))
@@ -69,7 +73,13 @@ impl MacroSource {
         let tokens = scan_macro_tokens(&normalized);
         let (mut sites, syntax_refusal) =
             source_syntax_sites(&normalized, &revision, &tokens, budget)?;
+        let mut has_definition = false;
+        let mut has_branch = false;
         for site in &mut sites {
+            has_definition |=
+                site.kind == crate::engine::analysis_configuration::DirectiveKind::Definition;
+            has_branch |=
+                site.kind == crate::engine::analysis_configuration::DirectiveKind::Conditional;
             // Newline normalization preserves offsets. Guards and displayed
             // directive text still describe the exact original bytes.
             let raw =
@@ -94,6 +104,8 @@ impl MacroSource {
             source_revision: revision,
             tokens: tokens.into(),
             sites: sites.into(),
+            has_definition,
+            has_branch,
             syntax_refusal,
             work_used: before - budget.remaining_work(),
         }))

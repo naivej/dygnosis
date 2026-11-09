@@ -10,6 +10,7 @@ import { Binary, resolveBinary } from "./binary";
 import { ClientLifecycle, ManagedClient } from "./lifecycle";
 import { analysisSettingsChanged, configurationSnapshot, serverSettingsChanged } from "./settings";
 import { AnalysisConfiguration, AnalysisContext, PresetBinding, ModelInfo, parseAnalysisContext, parseModelInfo, record, timingModifiers, tokenRoles } from "./protocol";
+import type { Range } from "./protocol";
 import { renameSymbol } from "./rename";
 import { sameSourceUri as sameUri } from "./source_uri";
 import { ModelActivity, RequestActivity } from "./activity";
@@ -97,6 +98,7 @@ class ProcessClient implements ManagedClient {
 interface CachedRequest {
   version: number | null; cancellation: vscode.CancellationTokenSource; settled: boolean;
   result: Promise<ModelSnapshot | undefined>;
+  menuFacts?: Pick<ModelInfo, "macro_actions" | "has_named_equation">;
 }
 export interface ModelSnapshot extends ModelInfo { client_instance: number }
 export interface NavigationDecision { isCurrent(): boolean }
@@ -163,7 +165,7 @@ export class DygnosisClient implements vscode.Disposable {
       try { await next({ ...params, registrations: params.registrations.filter(registration => registration.method !== RenameRequest.method) }, cancellation.token); }
       finally { cancellation.dispose(); }
     };
-    this.disposables.push(vscode.commands.registerCommand("dygnosis.renameSymbol", () => renameSymbol(this)));
+    this.disposables.push(vscode.commands.registerCommand("dygnosis.renameSymbol", (resource?: unknown) => renameSymbol(this, resource)));
     this.middleware.provideDocumentLinks = async (document, token, next) => {
       const instance = this.instance, client = this.client, version = document.version;
       const links = await next(document, token);
@@ -436,13 +438,14 @@ export class DygnosisClient implements vscode.Disposable {
     if (!this.modelInfoSupported) refuse("The selected engine does not support model information. Use the bundled binary or update dynare.serverPath.");
     return fresh ? this.freshModelInfo(root, document, token) : this.requestModelInfo(root, document);
   }
-  async analysisContext(root: vscode.Uri, document = root, token?: vscode.CancellationToken, preparePreset = false): Promise<AnalysisContext | undefined> {
+  async analysisContext(root: vscode.Uri, document = root, token?: vscode.CancellationToken, preparePreset = false, equationRange?: Range): Promise<AnalysisContext | undefined> {
     await this.ensureStarted();
     if (this.closed || token?.isCancellationRequested) return undefined;
     if (!this.analysisSupported) refuse("This engine does not support analysis configurations. Use the bundled engine or update dynare.serverPath.");
     const instance = this.instance, epoch = this.epoch;
     const version = vscode.workspace.textDocuments.find(doc => sameUri(doc.uri, document))?.version ?? null;
-    const raw = await this.execute("dynare/analysisContext", [{root_uri:root.toString(), document_uri:document.toString(), document_version:version, prepare_preset:preparePreset}], token);
+    const raw = await this.execute("dynare/analysisContext", [{root_uri:root.toString(), document_uri:document.toString(), document_version:version,
+      prepare_preset:preparePreset, ...(equationRange && { equation_range: equationRange })}], token);
     if (this.closed || token?.isCancellationRequested || instance !== this.instance || epoch !== this.epoch ||
         version !== (vscode.workspace.textDocuments.find(doc => sameUri(doc.uri, document))?.version ?? null)) return undefined;
     const context = parseAnalysisContext(raw, root.toString());
@@ -547,6 +550,8 @@ export class DygnosisClient implements vscode.Disposable {
       const info = parseModelInfo(value, rootKey, documentKey);
       const currentVersion = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === documentKey)?.version ?? null;
       if (info.document_version !== currentVersion) return undefined;
+      const request = this.cache.get(key);
+      if (request?.cancellation === cancellation) request.menuFacts = { macro_actions: info.macro_actions, has_named_equation: info.has_named_equation };
       const ownersBefore = this.knownOwners(document).map(owner => owner.toString()).sort().join("\n");
       this.infos.set(rootKey, info);
       this.watchDependencies(info);
@@ -610,6 +615,25 @@ export class DygnosisClient implements vscode.Disposable {
       ...(sameUri(vscode.Uri.parse(info.document_uri), document) ? info.owner_roots.filter(root => !sameUri(vscode.Uri.parse(root), document)) : []),
     ]);
     return [...new Set(roots)].map(root => vscode.Uri.parse(root));
+  }
+  /** Document-scoped facts from an existing model information response. */
+  sourceMenuFacts(document: vscode.TextDocument, owners: vscode.Uri[]): Record<string, boolean> {
+    const uri = document.uri.toString(), selected = this.selectedOwners.get(uri);
+    const parent = !this.standaloneDocuments.has(uri) && owners.find(owner => owner.toString() === selected);
+    const root = parent || (!this.standaloneDocuments.has(uri) && owners.length === 1 ? owners[0] : document.uri);
+    const request = this.cache.get(`${root.toString()}\n${uri}`);
+    const facts = request?.version === document.version && !request.cancellation.token.isCancellationRequested ? request.menuFacts : undefined;
+    return {
+      hasModelOwnerChoice: owners.length > 1,
+      canTreatAsRoot: !!parent && isRootUri(document.uri),
+      hasMacroDefinition: this.analysisSupported && facts?.macro_actions?.definition === true,
+      hasMacroBranch: this.analysisSupported && facts?.macro_actions?.branch === true,
+      hasNamedEquation: this.analysisSupported && facts?.has_named_equation === true,
+    };
+  }
+  documentContextIdentity(document: vscode.Uri): string {
+    const uri = document.toString();
+    return JSON.stringify([this.contextGenerations.get(uri), this.selectedOwners.get(uri), this.standaloneDocuments.has(uri)]);
   }
   /** Written include paths with a current known owner, for resource menus. */
   knownIncludedFiles(): string[] {
@@ -740,9 +764,9 @@ export class DygnosisClient implements vscode.Disposable {
   async applyOwner(document: vscode.TextDocument, root: vscode.Uri, info?: ModelSnapshot, guard: () => boolean = () => true): Promise<void> {
     await this.applyDocumentContext(document, root, () => this.selectOwner(document.uri, root), info, guard);
   }
-  async treatDocumentAsRoot(document: vscode.TextDocument): Promise<void> {
+  async treatDocumentAsRoot(document: vscode.TextDocument, guard?: () => boolean): Promise<void> {
     if (!isAnalysisDocument(document) || !isRootUri(document.uri)) refuse("Open a .mod or .dyn file before treating it as a model root.");
-    await this.applyDocumentContext(document, document.uri, () => this.rememberStandalone(document.uri));
+    await this.applyDocumentContext(document, document.uri, () => this.rememberStandalone(document.uri), undefined, guard);
     await this.reportDocumentContextOutcome();
   }
   /** The explicit command owns the explanation for older configured engines. */

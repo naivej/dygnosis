@@ -21,6 +21,7 @@ import { changesViewType, historyScheme } from "./comparison/changes_resource";
 import * as path from "node:path";
 import { record } from "./client/protocol";
 import { runCommand } from "./client/refusal";
+import { commandEditor } from "./client/editor_target";
 
 let service: DygnosisClient | undefined;
 export function activate(context: vscode.ExtensionContext): DygnosisClient {
@@ -36,13 +37,22 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
     vscode.commands.registerCommand("dygnosis.showOutput", () => client.output.show()),
     vscode.commands.registerCommand("dygnosis.openSettings", () => vscode.commands.executeCommand("workbench.action.openSettings", "@ext:CoconutWater.dygnosis")),
     vscode.commands.registerCommand("dygnosis.editSettingsJson", () => vscode.commands.executeCommand("workbench.action.openSettingsJson")),
-    vscode.commands.registerCommand("dygnosis.treatAsRoot", () => runCommand(client, async () => {
-      const document = vscode.window.activeTextEditor?.document;
-      if (document) await client.treatDocumentAsRoot(document);
+    vscode.commands.registerCommand("dygnosis.treatAsRoot", (resource?: unknown) => runCommand(client, async () => {
+      const editor = commandEditor(resource), document = editor?.document;
+      const version = document?.version;
+      if (document) await client.treatDocumentAsRoot(document, () => vscode.window.activeTextEditor === editor && document.version === version);
       else await vscode.window.showInformationMessage("Open a Dynare model file before treating it as a root.");
     })),
   );
   let contextGeneration = 0;
+  const updateSourceMenu = (document = vscode.window.activeTextEditor?.document): vscode.Uri[] => {
+    const ordinary = document && isAnalysisDocument(document);
+    const owners = ordinary ? client.knownOwners(document.uri) : [];
+    const facts = ordinary ? client.sourceMenuFacts(document, owners) : undefined;
+    for (const key of ["hasModelOwnerChoice", "canTreatAsRoot", "hasMacroDefinition", "hasMacroBranch", "hasNamedEquation"])
+      void vscode.commands.executeCommand("setContext", `dygnosis.${key}`, facts?.[key] === true);
+    return owners;
+  };
   const updateContext = (): void => {
     const generation = ++contextGeneration;
     const document = vscode.window.activeTextEditor?.document;
@@ -69,9 +79,10 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
     void vscode.commands.executeCommand("setContext", "dygnosis.modelContext", false);
     void vscode.commands.executeCommand("setContext", "dygnosis.toolbarActions", actions.includes("toolbar"));
     void vscode.commands.executeCommand("setContext", "dygnosis.contextActions", actions.includes("contextMenu"));
+    const owners = updateSourceMenu(document);
     if (ordinary && document) void client.rootForDocument(document).then(root => {
       if (generation !== contextGeneration) return;
-      const hasOwner = !!root || client.knownOwners(document.uri).length > 0;
+      const hasOwner = !!root || owners.length > 0;
       if (!custom) void vscode.commands.executeCommand("setContext", "dygnosis.changesContext", hasOwner);
       const supported = client.client?.initializeResult?.capabilities.executeCommandProvider?.commands.includes("dynare/showEffectiveModel") ?? false;
       void vscode.commands.executeCommand("setContext", "dygnosis.modelContext", hasOwner && supported);

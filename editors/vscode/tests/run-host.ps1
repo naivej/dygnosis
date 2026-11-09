@@ -10,7 +10,7 @@ if ($env:DYGNOSIS_HOST_EXTENSION_PATH) {
     if ($testedManifest.name -ne 'dygnosis' -or $testedManifest.publisher -ne 'coconutwater') { throw 'The tested extension must be a Dygnosis package.' }
 }
 $scope = $env:DYGNOSIS_HOST_SCOPE
-if ($scope -and $scope -notin @('all', 'mcp', 'semantic', 'folding', 'presentation', 'rename', 'workspace', 'syntax', 'lifecycle', 'analysis', 'help', 'preview')) { throw 'Unknown DYGNOSIS_HOST_SCOPE.' }
+if ($scope -and $scope -notin @('all', 'mcp', 'semantic', 'folding', 'presentation', 'rename', 'workspace', 'syntax', 'lifecycle', 'analysis', 'help', 'preview', 'menu')) { throw 'Unknown DYGNOSIS_HOST_SCOPE.' }
 $testRoot = Join-Path $extensionRoot '.test-data'
 $runId = [Guid]::NewGuid().ToString()
 $hostRoot = Join-Path $testRoot $runId
@@ -29,7 +29,7 @@ if (-not $vscodeExecutable) {
 }
 if (-not (Test-Path -LiteralPath $vscodeExecutable)) { throw 'Set DYGNOSIS_VSCODE_EXECUTABLE to the minimum/current VS Code executable.' }
 if (-not $env:DYGNOSIS_TEST_BINARY) { throw 'Set DYGNOSIS_TEST_BINARY to the matching built engine.' }
-$visualEnabled = $env:DYGNOSIS_HOST_VISUAL -eq '1' -or $scope -in @('folding', 'presentation', 'rename', 'workspace', 'syntax', 'analysis', 'help', 'preview')
+$visualEnabled = $env:DYGNOSIS_HOST_VISUAL -eq '1' -or $scope -in @('folding', 'presentation', 'rename', 'workspace', 'syntax', 'analysis', 'help', 'preview', 'menu')
 if ($visualEnabled) {
     $cdpPort = 0
     if ($env:DYGNOSIS_HOST_CDP_PORT) {
@@ -54,7 +54,9 @@ if ($visualEnabled) {
 }
 $hostUser = Join-Path $hostRoot 'profile/User'
 New-Item -ItemType Directory -Force -Path $hostUser | Out-Null
-@{ 'dynare.serverPath' = $env:DYGNOSIS_TEST_BINARY; 'extensions.autoUpdate' = $false; 'extensions.autoCheckUpdates' = $false } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $hostUser 'settings.json') -Encoding utf8
+$hostSettings = @{ 'dynare.serverPath' = $env:DYGNOSIS_TEST_BINARY; 'extensions.autoUpdate' = $false; 'extensions.autoCheckUpdates' = $false }
+if ($scope -eq 'menu') { $hostSettings['window.menuStyle'] = 'custom' }
+$hostSettings | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $hostUser 'settings.json') -Encoding utf8
 $env:DYGNOSIS_HOST_RESULT = Join-Path $hostRoot 'result.json'
 $env:DYGNOSIS_HOST_RUN_ID = $runId
 $arguments = @(

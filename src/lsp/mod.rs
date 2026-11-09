@@ -2355,6 +2355,14 @@ impl Backend {
         result["schema_version"] = json!(MODEL_INFO_SCHEMA_VERSION);
         result["root_uri"] = json!(root);
         result["document_uri"] = json!(document);
+        if let Some(source) = inner
+            .workspace
+            .source_document(root.as_str(), &document_key)
+            .and_then(|source| source.cached_macro_source())
+        {
+            result["macro_actions"] =
+                json!({"definition":source.has_definition,"branch":source.has_branch});
+        }
         result["inactive_ranges"] = json!(inactive_ranges);
         result["document_version"] = json!(inner.document(&document).map(|doc| doc.version));
         result["revision"] = json!(revision);

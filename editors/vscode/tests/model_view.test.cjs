@@ -152,12 +152,28 @@ test("same equation numbers across scopes remain distinct rows in the only picke
   assert.match(env.host.picks[0].items[1].description, /Dimension households.*hank.inc:21/);
   assert.equal(env.service.jumps[0].target.uri, "file:///workspace/hank.inc"); env.registration.dispose();
 });
+test("equation navigation ranks the current block and file without dropping other equations", async () => {
+  // A local cursor should reorder the whole-model picker, with remote equations still selectable.
+  const env = setup();
+  env.host.editor.selection = { active: { line: 10, character: 4 } };
+  const remote = location("file:///workspace/shared.inc", 3), current = location(env.doc.uri.toString(), 10);
+  env.service.info = () => facts(env.doc, { equations: [
+    equation("remote", { name: "Remote", location: remote, segments: [remote] }),
+    equation("same-file", { name: "Same file" }),
+    equation("same-block", { name: "Same block", block_id: "block:2", location: current, segments: [current] }),
+  ] });
+  env.host.answers.push(items => items.at(-1));
+  await env.run("jumpToEquation");
+  assert.deepEqual(env.host.picks[0].items.map(item => item.equation.name), ["Same block", "Same file", "Remote"]);
+  assert.equal(env.service.jumps[0].target.uri, remote.uri);
+  env.registration.dispose();
+});
 test("equation list cancellation leaves the cursor and source untouched", async () => {
-  const env = setup(); const editor = env.host.editor; editor.selection = { line: 8, character: 3 };
+  const env = setup(); const editor = env.host.editor; editor.selection = { active: { line: 8, character: 3 } };
   await env.run("jumpToEquation");
   assert.equal(env.host.picks.length, 1); assert.equal(env.host.inputs.length, 0);
   assert.equal(env.service.jumps.length, 0); assert.equal(env.service.validations.length, 0); assert.equal(env.host.fileRequests.length, 0);
-  assert.equal(env.host.editor, editor); assert.deepEqual(editor.selection, { line: 8, character: 3 }); env.registration.dispose();
+  assert.equal(env.host.editor, editor); assert.deepEqual(editor.selection.active, { line: 8, character: 3 }); env.registration.dispose();
 });
 test("empty, incomplete, unowned and unavailable models explain why no equation list opens", async () => {
   const env = setup();

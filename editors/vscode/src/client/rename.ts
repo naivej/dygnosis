@@ -6,6 +6,7 @@ import { PrepareRenameRequest, TextDocumentEdit, WorkspaceEdit as ProtocolEdit }
 import type { DygnosisClient } from "./client";
 import { record } from "./protocol";
 import { sourceUriKey } from "./source_uri";
+import { captureSelection, commandEditor, containsSelection } from "./editor_target";
 
 interface Source { uri: string; text: string; version: number | null }
 interface Capture { edit: ProtocolEdit; sources: Source[]; owners: string[] }
@@ -43,7 +44,7 @@ function capture(value: unknown): Capture | undefined {
 
 /** Keep guards alive through the public applyEdit serialization/application. */
 export async function withCheckedRenameEdit<T>(service: DygnosisClient, document: vscode.TextDocument, position: vscode.Position,
-  newName: string, token: vscode.CancellationToken, consume: (edit: vscode.WorkspaceEdit) => T | PromiseLike<T>): Promise<T | undefined> {
+  newName: string, token: vscode.CancellationToken, consume: (edit: vscode.WorkspaceEdit) => T | PromiseLike<T>, guard: () => boolean = () => true): Promise<T | undefined> {
     if (token.isCancellationRequested) return undefined;
     const client = service.client;
     if (!client?.initializeResult?.capabilities.executeCommandProvider?.commands.includes("dynare/captureRename")) refuse("This engine does not support safe Rename. Use the bundled binary or update dynare.serverPath.");
@@ -58,7 +59,7 @@ export async function withCheckedRenameEdit<T>(service: DygnosisClient, document
       service.onDidInvalidate(event => { if (event.reason === "file" || event.reason === "lifecycle") stale = event.reason === "lifecycle" ? "The engine stopped or restarted." : "Model inputs changed."; }),
     ];
     const current = (): boolean => !stale && !token.isCancellationRequested && client === service.client
-      && instance === service.currentInstance && document.version === version;
+      && instance === service.currentInstance && document.version === version && guard();
     const params = { textDocument: { uri: document.uri.toString() }, position: { line: position.line, character: position.character }, newName };
     try {
       const offered = capture(await service.execute("dynare/captureRename", [params], token));
@@ -108,13 +109,17 @@ export async function withCheckedRenameEdit<T>(service: DygnosisClient, document
     } finally { for (const subscription of subscriptions) subscription.dispose(); }
 }
 
-export async function renameSymbol(service: DygnosisClient): Promise<boolean> {
+export async function renameSymbol(service: DygnosisClient, resource?: unknown): Promise<boolean> {
   try {
-  const editor = vscode.window.activeTextEditor;
+  const editor = commandEditor(resource);
   if (!editor || editor.document.languageId !== "dynare" || !["file", "untitled"].includes(editor.document.uri.scheme)) {
     refuse("Rename requires an open Dynare source file or untitled Dynare document.");
   }
-  const document = editor.document, position = editor.selection.active, version = document.version;
+  const document = editor.document, version = document.version, selection = captureSelection(editor, "name");
+  const position = new vscode.Position(selection.start.line, selection.start.character);
+  const owner = service.documentContextIdentity(document.uri);
+  const current = (): boolean => !document.isClosed && vscode.window.activeTextEditor === editor && document.version === version &&
+    service.documentContextIdentity(document.uri) === owner;
   await service.ensureStarted();
   const client = service.client, instance = service.currentInstance;
   if (!client?.initializeResult?.capabilities.executeCommandProvider?.commands.includes("dynare/captureRename")) {
@@ -126,20 +131,22 @@ export async function renameSymbol(service: DygnosisClient): Promise<boolean> {
       textDocument: { uri: document.uri.toString() }, position: { line: position.line, character: position.character },
     }, cancellation.token);
     if (!prepared) { refuse("The engine could not prepare Rename at this position. Place the cursor on a declared model name."); }
-    if (document.version !== version || client !== service.client || instance !== service.currentInstance) {
-      refuse(`Rename in ${fileLabel(document.uri.toString())} stopped: ${document.version !== version ? "the document changed" : "the engine changed"}. No edits were applied. Request Rename again.`);
+    if (!current() || client !== service.client || instance !== service.currentInstance) {
+      refuse(`Rename in ${fileLabel(document.uri.toString())} stopped because the editor, source, model owner, or engine changed. Request Rename again.`);
     }
     const range = "range" in prepared ? prepared.range : "start" in prepared ? prepared : undefined;
     if (!range) throw new Error("The engine returned an invalid Rename range. Update the engine and try again.");
+    if ((selection.start.line !== selection.end.line || selection.start.character !== selection.end.character) &&
+        !containsSelection(range, selection)) refuse("Select one name and try again.");
     const name = document.getText(client.protocol2CodeConverter.asRange(range));
     const newName = await vscode.window.showInputBox({ title: "Dygnosis: Rename symbol", prompt: `New name for ${name}`, value: name });
     if (newName === undefined || newName === name) return false;
     if (!newName.trim()) { refuse("Rename requires a nonempty identifier."); }
-    if (document.version !== version || client !== service.client || instance !== service.currentInstance) {
-      refuse(`Rename ${name} → ${newName} stopped: ${document.version !== version ? fileLabel(document.uri.toString()) + " changed" : "the engine changed"}. No edits were applied. Request Rename again.`);
+    if (!current() || client !== service.client || instance !== service.currentInstance) {
+      refuse(`Rename ${name} → ${newName} stopped because the editor, source, model owner, or engine changed. Request Rename again.`);
     }
     const applied = await withCheckedRenameEdit(service, document, position, newName, cancellation.token,
-      edit => vscode.workspace.applyEdit(edit, { isRefactoring: true }));
+      edit => vscode.workspace.applyEdit(edit, { isRefactoring: true }), current);
     if (applied === false) refuse("VS Code did not apply Rename. A target may have changed or become read-only. Refresh the model and try again.");
     return applied === true;
   } finally { cancellation.dispose(); }

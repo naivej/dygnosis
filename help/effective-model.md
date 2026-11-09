@@ -26,7 +26,7 @@ Limit](settings:dynare.macroWorkLimit).
 ## Choose the analysis configuration
 
 Run **Dygnosis: Select analysis configuration** from the editor title gear,
-Command Palette or the editor context menu under **Dygnosis** to test different
+or Command Palette to test different
 macro values or equation selections without modifying your `.mod` file.
 
 ### Macro inputs and previews
@@ -42,7 +42,7 @@ Because an in-file `@#define` replaces a `-D` input when reached:
 ```
 
 you can also place the cursor directly on a macro directive in the editor and
-run:
+run these actions from the Command Palette or editor context menu:
 
 - **Dygnosis: Override macro definition for analysis** to substitute a different
   value (such as `true`) at that definition.
@@ -60,6 +60,12 @@ equations using Dynare's [`include_eqs` and `exclude_eqs` tag
 rules](https://www.dynare.org/manual/running-dynare.html#exclude-eqs). Enter a
 tag expression with single-quoted values, such as `name='policy'`,
 `endogenous='z'` or `name=('policy','demand')`.
+
+To select one named aggregate model equation without a `[static]` tag, place
+the cursor on it and run **Dygnosis: Filter analysis by equation…** from the
+editor context menu or Command Palette. Choose Include or Exclude and confirm
+its `name` expression. If the name does not identify one equation, use
+**Select analysis configuration** to enter a tag expression.
 
 ```dynare
 var y z;

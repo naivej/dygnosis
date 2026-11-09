@@ -3,6 +3,7 @@ import type { DygnosisClient } from "../client/client";
 import { location, record } from "../client/protocol";
 import type { Location } from "../client/protocol";
 import { CommandCancelled, refuse, runCommand } from "../client/refusal";
+import { captureSelection, commandEditor, comparePositions } from "../client/editor_target";
 
 export interface SourceCandidate {
   source_id: string;
@@ -50,21 +51,28 @@ function sameCandidate(left: SourceCandidate, right: SourceCandidate): boolean {
 /** Always ask, even for one candidate, because this is unverified source navigation. */
 export function registerSourceCandidates(service: Pick<DygnosisClient, "ensureStarted" | "currentInstance" | "execute" | "log" | "openLocation">): vscode.Disposable {
   let disposed = false;
-  const registration = vscode.commands.registerCommand("dygnosis.goToSourceCandidate", () => runCommand(service, async () => {
-    const editor = vscode.window.activeTextEditor;
+  const registration = vscode.commands.registerCommand("dygnosis.goToSourceCandidate", (resource?: unknown) => runCommand(service, async () => {
+    const editor = commandEditor(resource);
     if (!editor || editor.document.isClosed || !["file", "untitled"].includes(editor.document.uri.scheme)) {
       refuse("Open the written Dynare source and place the cursor on a name before finding source candidates.");
     }
     const document = editor.document, version = document.version;
+    const selection = captureSelection(editor, "name");
     await service.ensureStarted();
     const instance = service.currentInstance;
     const current = (): boolean => !disposed && !document.isClosed && document.version === version &&
       vscode.window.activeTextEditor === editor && service.currentInstance === instance;
-    const args = [{ textDocument: { uri: document.uri.toString() }, position: { line: editor.selection.active.line, character: editor.selection.active.character } }];
+    if (!current()) refuse("The source or server changed. Request source candidates again.");
+    const args = [{ textDocument: { uri: document.uri.toString() }, position: selection.start }];
     const response = await service.execute("dynare/sourceCandidates", args);
     if (!current()) refuse("The source or server changed. Request source candidates again.");
     const proof = parseSourceCandidates(response, document);
     if (!proof.candidates.length) refuse(proof.message);
+    if (comparePositions(selection.start, selection.end) !== 0) {
+      const { start, end } = selection;
+      const selected = document.getText(new vscode.Range(start.line, start.character, end.line, end.character));
+      if (selected !== proof.candidates[0].name) refuse("Select one name and try again.");
+    }
     const pick = await vscode.window.showQuickPick(proof.candidates.map(candidate => ({
       label: candidate.name, description: `${candidate.kind ?? "declaration"} · ${candidate.availability === "mixed" ? "active in some expansions" : candidate.availability}`,
       detail: `${vscode.workspace.asRelativePath(document.uri)}:${String(candidate.location.range.start.line + 1)}`, candidate,
