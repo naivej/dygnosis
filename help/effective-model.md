@@ -9,6 +9,9 @@ Dygnosis opens a read-only preview beside your file with `@#include` files,
 Dynare's internal equation transformations.
 
 Hover over names, commands and options in the preview to inspect them.
+Right-click the preview and choose **Dygnosis: Go to written source** to return
+to written code. Use **Refresh macro expansion** in the preview title bar or
+**Dygnosis: Refresh macro expansion** in the Command Palette after editing.
 
 | Action | Shortcut | Result |
 |---|---|---|
@@ -25,9 +28,10 @@ Limit](settings:dynare.macroWorkLimit).
 
 ## Choose the analysis configuration
 
-Run **Dygnosis: Select analysis configuration** from the editor title gear,
-or Command Palette to test different
-macro values or equation selections without modifying your `.mod` file.
+Run **Dygnosis: Select analysis configuration** from the editor title gear or
+Command Palette to test different macro values or equation selections without
+modifying your `.mod` file. Each model root has one current selection shared
+by its source files and macro preview. The session starts with **Source**.
 
 ### Macro inputs and previews
 
@@ -88,10 +92,11 @@ filtering.
 ### Save, reset and compare
 
 - In **Select analysis configuration**, choose **Save current configuration**
-  to save your choices in [Dynare: Analysis Configurations](settings:dynare.analysisConfigurations),
-  or **Source** to reset them. You can also run **Dygnosis: Save analysis
-  configuration** or **Dygnosis: Reset analysis configuration** from the
-  Command Palette.
+  to save your choices for the model's workspace folder in [Dynare: Analysis
+  Configurations](settings:dynare.analysisConfigurations), or **Source** to
+  reset them. Select a saved configuration again after the engine restarts.
+  You can also run **Dygnosis: Save analysis configuration** or **Dygnosis:
+  Reset analysis configuration** from the Command Palette.
 - **Compare configurations**: Run **Dygnosis: Show model changes** and choose
   **config…** to diff two configurations ([Review model
   changes](structural-diff.md)). For navigating inactive macro branches, see

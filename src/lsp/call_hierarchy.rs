@@ -51,7 +51,7 @@ impl Context {
         if inner.context_ambiguous(uri) || roots.len() > 1 {
             return Err(refusal(OWNER));
         }
-        if roots.is_empty() && (is_model_root(uri) || uri.scheme() == "untitled") {
+        if roots.is_empty() && is_model_root(uri) {
             roots.push(uri.clone());
         }
         let root = roots.pop().ok_or_else(|| refusal(UNAVAILABLE))?;

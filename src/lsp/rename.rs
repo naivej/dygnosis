@@ -60,7 +60,7 @@ pub(super) fn decide(
         return Err("Choose a model owner before requesting Rename for this file.".into());
     }
     let mut roots = inner.context_roots(uri);
-    if roots.is_empty() && (is_model_root(uri) || uri.scheme() == "untitled") {
+    if roots.is_empty() && is_model_root(uri) {
         roots.push(uri.clone());
     }
     if roots.is_empty() || !matches!(uri.scheme(), "file" | "untitled") {

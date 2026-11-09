@@ -207,8 +207,8 @@ pub(crate) fn hover_may_need_model(inventory: &SourceInventory, text: &str, byte
     item.is_some_and(|item| item.selection.start <= byte && byte < item.selection.end)
 }
 
-/// Literal display tags have no hover. Semantic tag operands retain their
-/// existing name providers; generated or incomplete prefixes stay uncertain.
+/// Literal display tags never need model hover. Written tag help is answered
+/// separately. Semantic operands retain their name providers.
 pub(crate) fn display_equation_tag_at(
     inventory: &SourceInventory,
     text: &str,
@@ -430,7 +430,11 @@ pub(super) fn value_hover_documentation(
     reference_form: Option<&str>,
     description: &str,
 ) -> String {
-    let mut text = format!("**`{owner}: {slot}`**\n\n{description}");
+    let mut text = if slot == "equation_tag_key" {
+        format!("**`{literal}` equation tag**\n\n{description}")
+    } else {
+        format!("**`{owner}: {slot}`**\n\n{description}")
+    };
     if let Some(form) = reference_form.filter(|form| *form != literal) {
         text.push_str("\n\nReference form: ");
         text.push_str(&super::names::code(form));

@@ -7,6 +7,8 @@ A **model root** is a top-level `.mod` or `.dyn` file. Included files (such as
 values and declarations from the parent model that includes them—their **model
 owner**.
 
+An untitled editor in Dynare language mode is analyzed as a standalone model.
+
 - **Single parent model**: Dygnosis links the included file to its known owner
   automatically.
 - **Shared across several models**: Run **Dygnosis: Choose model owner** from
@@ -14,7 +16,9 @@ owner**.
   provides context for diagnostics, **Outline**, navigation and macro expansion.
 - **Standalone `.mod` or `.dyn` file**: When a `.mod` or `.dyn` file is also
   included by another model, run **Dygnosis: Treat this file as a model root**
-  from the Command Palette or editor context menu to check it on its own.
+  from the Command Palette or editor context menu to check it on its own. If
+  several owners are known, use the Command Palette to choose standalone
+  analysis directly. Use **Choose model owner** to return to a parent model.
 
 Workspace checks find owners from saved models, so you can open an included
 `.mod`, `.dyn` or Dynare `.inc` file without opening its parents. If workspace

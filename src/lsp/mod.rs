@@ -5030,7 +5030,8 @@ fn equation_at_byte(model: &Model, byte: u32) -> Option<&Equation> {
 }
 
 fn is_model_root(uri: &Url) -> bool {
-    crate::engine::workspace::check_walk::is_model_path(Path::new(uri.path()))
+    uri.scheme() == "untitled"
+        || crate::engine::workspace::check_walk::is_model_path(Path::new(uri.path()))
 }
 
 enum ModelInfoChanged {}

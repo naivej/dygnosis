@@ -1018,10 +1018,11 @@ test("native navigation upgrades automatic provenance and close, restart and fol
 test("ordinary and untitled roots need no owner proof while includes and retained mod fragments cannot guess one", async () => {
   reset(); const client = service();
   client.modelInfo = () => { throw new Error("no model lookup"); }; client.ownerChoices = () => { throw new Error("no owner discovery"); };
-  for (const value of ["file:///workspace/root.mod", "file:///outside/loose.DYN", "untitled:/scratch.mod"]) {
+  for (const value of ["file:///workspace/root.mod", "file:///outside/loose.DYN", "untitled:/scratch.mod", "untitled:Untitled-1"]) {
     const doc = { uri: Uri.parse(value), languageId: "dynare", version: 1 };
     assert.equal(client.chosenRootForDocument(doc).toString(), value);
     assert.equal(client.chosenRootForDocument({ ...doc, isClosed: true }), undefined);
+    if (doc.uri.scheme === "untitled") assert.equal((await client.rootForDocument(doc)).toString(), value);
   }
   const owner = Uri.parse("file:///workspace/owner.mod"), fragment = { uri: Uri.parse("file:///workspace/fragment.mod"), languageId: "dynare", version: 1 };
   assert.equal(client.chosenRootForDocument({ uri: Uri.parse("file:///workspace/shared.inc"), languageId: "dynare" }), undefined);

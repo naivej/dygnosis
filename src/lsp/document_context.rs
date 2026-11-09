@@ -247,7 +247,7 @@ fn set_context(inner: &mut Inner, arguments: &[Value]) -> std::result::Result<Va
             .ok_or_else(|| {
                 refusal(
                     "INVALID_ARGUMENTS",
-                    "The model context must be a file or untitled .mod or .dyn root.",
+                    "The model context must be an untitled Dynare editor or a .mod or .dyn root.",
                 )
             })?;
         let revision = inner

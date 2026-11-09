@@ -408,7 +408,8 @@ pub(super) fn expression_completions(
     items
 }
 
-/// The outer option marks a typed site, including an ambiguous or unavailable result.
+/// The outer option marks a typed name or equation tag operand, including an
+/// ambiguous or unavailable result.
 pub(super) fn hover(inner: &mut Inner, pos: &TextDocumentPositionParams) -> Option<Option<Hover>> {
     let uri = &pos.text_document.uri;
     let text = inner.document(uri)?.text.clone();
@@ -416,6 +417,23 @@ pub(super) fn hover(inner: &mut Inner, pos: &TextDocumentPositionParams) -> Opti
     let byte = index.offset_utf16(&text, span_pos(pos.position));
     let file = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
     let views = views(inner, uri)?;
+    if let Some(span) = views.first()?.written_endogenous_operand_at(&file, byte) {
+        let preferences = inner.presentation_for(uri);
+        let mut descriptions = views.iter().map(|view| {
+            let binding = view.select(Selector::Target { file: &file, byte }).ok()??;
+            if !binding.is_ordinary() {
+                return None;
+            }
+            let markdown = decl_hover_markdown_in_view(view, &binding.name, &preferences)?;
+            Some((binding.name, markdown))
+        });
+        let hover = descriptions.next().flatten().and_then(|first| {
+            descriptions
+                .all(|description| description.as_ref() == Some(&first))
+                .then(|| markdown_hover(first.1, Some(span_range(&index, &text, span))))
+        });
+        return Some(hover);
+    }
     let mut selected = Vec::new();
     let mut typed = false;
     for view in &views {

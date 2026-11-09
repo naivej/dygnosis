@@ -164,7 +164,7 @@ mod tests {
         "# second_local = 4;\n",
         "@#for j in 1:2\n",
         "# local_@{j} = @{j} + beta_@{j};\n",
-        "/* 🧪 */ [mcp='y_@{j} > 0'] y_@{j} = local_@{j} + beta_@{j} * y_@{j}(-1);\n",
+        "/* 🧪 */ [name='rule_@{j}',endogenous='y_@{j}',mcp='y_@{j} > 0'] y_@{j} = local_@{j} + beta_@{j} * y_@{j}(-1);\n",
         "@#endfor\n",
         "end; steady(solve_algo=1); stoch_simul(order=2, pruning);\n",
     );
@@ -324,6 +324,33 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(markdown(&value).contains("solve_algo"), "{value:?}");
+        let label = backend
+            .effective_preview_hover(params(&root, &result, "name"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            markdown(&label).contains("`name` equation tag"),
+            "{label:?}"
+        );
+        assert!(
+            backend
+                .effective_preview_hover(params(&root, &result, "rule_2"))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let mut endogenous = params(&root, &result, "'y_2'");
+        endogenous.position.character += 1;
+        let variable = backend
+            .effective_preview_hover(endogenous)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            markdown(&variable).contains("Endogenous variable"),
+            "{variable:?}"
+        );
         let tag_query = params(&root, &result, "y_2 >");
         let start = tag_query.position;
         let tag = backend

@@ -164,6 +164,38 @@ fn site<'a>(
             at -= 1;
         }
         let token = tokens.get(at)?;
+        if !completion
+            && token.kind == TokenKind::Ident
+            && token.span.start <= byte
+            && byte < token.span.end
+            && begin < at
+            && at + 3 < end
+            && let [before, key, equals, value, after] = &tokens[at - 1..=at + 3]
+            && matches!(before.kind, TokenKind::LBrack | TokenKind::Comma)
+            && equals.kind == TokenKind::Eq
+            && value.kind == TokenKind::String
+            && value.text(text).starts_with('\'')
+            && matches!(after.kind, TokenKind::Comma | TokenKind::RBrack)
+            && let Some(tag) = ["name", "endogenous"].into_iter().find(|tag| {
+                key.text(text).eq_ignore_ascii_case(tag) && item.tags.contains_key(*tag)
+            })
+            && inventory.literal_value_anchor(
+                Span {
+                    start: item.span.start,
+                    end: item.header_end,
+                },
+                byte,
+            )
+        {
+            return Some(Site {
+                parent: Some("model"),
+                slot: "equation_tag_key",
+                span: token.span,
+                literal: tag.into(),
+                nested: None,
+                closed: false,
+            });
+        }
         let (span, before, following) = if token.kind == TokenKind::Ident
             && token.span.start <= byte
             && (byte < token.span.end || completion && byte == token.span.end)

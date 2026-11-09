@@ -381,7 +381,7 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
     status = undefined; render(); void refresh();
   };
   const documentChanged = (document: vscode.TextDocument): void => {
-    if (!enabled() || !capability || document.languageId !== "dynare" || !["file", "untitled"].includes(document.uri.scheme)) return;
+    if (!enabled() || !capability || document.languageId !== "dynare" || document.uri.scheme !== "file") return;
     if (status?.complete || status?.cancelled) minPass = status.pass_revision + 1;
     ++generation; ++response; cancelRequest(); beginBarrier(); status = undefined; render();
     if (inputTimer) clearTimeout(inputTimer);

@@ -652,6 +652,10 @@ test("a background workspace startup failure clears retained rows and logs witho
 test("rapid overlay edits coalesce a status query and close refreshes saved coverage", async () => {
   const env = setup(), registration = registerWorkspaceStatus(env.service); await flush();
   const doc = document(), before = env.service.queries.length;
+  const untitled = document("untitled:Untitled-1"), savedStatus = env.host.items[0].text;
+  env.host.edited.fire({ document: untitled });
+  env.host.closed.fire(untitled);
+  assert.equal(env.host.items[0].text, savedStatus, "untitled model edits and close keep saved coverage current");
   env.service.status = facts([root("pending")], { pass_revision: 2 });
   for (let index = 0; index < 4; ++index) { ++doc.version; env.host.edited.fire({ document: doc }); }
   assert.match(env.host.items[0].text, /updating/); assert.equal(env.service.queries.length, before);

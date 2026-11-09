@@ -780,6 +780,29 @@ impl SemanticModel {
         })
     }
 
+    /// A written tag operand is a hover candidate. Selection still has to
+    /// prove that the operand bound a variable in this execution.
+    pub(crate) fn written_endogenous_operand_at(&self, file: &str, byte: u32) -> Option<Span> {
+        let tokens = self.written_tokens(file)?;
+        let at = tokens.partition_point(|token| token.span.end <= byte);
+        let [key, equals, value] = tokens.get(at.checked_sub(2)?..=at)? else {
+            return None;
+        };
+        let source = self.sources.get(file)?;
+        if key.kind != TokenKind::Ident
+            || !key.text(source).eq_ignore_ascii_case("endogenous")
+            || equals.kind != TokenKind::Eq
+            || value.kind != TokenKind::String
+            || byte < value.span.start
+        {
+            return None;
+        }
+        let operand = value.text(source).strip_prefix('\'')?.strip_suffix('\'')?;
+        let start = value.span.start + 1;
+        let end = start + operand.len() as u32;
+        (start <= byte && byte < end).then_some(Span { start, end })
+    }
+
     /// A selected display token proves an execution occurrence, even when
     /// another copy maps to the same written bytes.
     pub(crate) fn typed_at_order(&self, order: usize, spelling: &str) -> Option<Option<Binding>> {

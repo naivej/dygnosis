@@ -244,15 +244,7 @@ async function checkRename(service, workspaceRoot, evidence, helpers) {
   };
   const ready = async document => {
     await vscode.window.showTextDocument(document);
-    if (document.uri.scheme === "untitled" && !/\.(mod|dyn)$/i.test(document.uri.path)) {
-      // Model Info requires a .mod/.dyn root. Bare untitled inputs are a
-      // Rename contract, so wait for their real Prepare Rename response.
-      await waitFor(async () => service.client.sendRequest("textDocument/prepareRename", {
-        textDocument: { uri: document.uri.toString() }, position: document.positionAt(document.getText().indexOf("p;")),
-      }), `Prepare Rename synchronizes ${document.uri.toString()}`);
-      return;
-    }
-    await currentSnapshot(service, document, () => service.modelInfo(document.uri), `Rename snapshot for ${document.uri.toString()}`);
+    return currentSnapshot(service, document, () => service.modelInfo(document.uri), `Rename snapshot for ${document.uri.toString()}`);
   };
   const plain = "var y; parameters p; p=.9; model; y=p; end;\n";
   for (const name of ["rename-control.mod", "rename-control.dyn"]) {
@@ -271,7 +263,14 @@ async function checkRename(service, workspaceRoot, evidence, helpers) {
       const insert = new vscode.WorkspaceEdit(); insert.insert(document.uri, new vscode.Position(0, 0), plain);
       assert.equal(await vscode.workspace.applyEdit(insert), true);
     }
-    await ready(document);
+    const info = await ready(document);
+    assert.equal(info.n_equations, 1, "untitled model counts are available before saving");
+    assert.equal((await service.rootForDocument(document))?.toString(), document.uri.toString(), "the untitled buffer is its own model root");
+    if (!name) {
+      await waitFor(async () => await nativeValue("Array.from(document.querySelectorAll('.statusbar-item')).find(item => item.id.endsWith('dygnosis.modelCounts'))?.textContent.replace(/\\s+/g, ' ').trim()") === "Source: 1 0 1",
+        "the untitled editor shows counts in the native status bar");
+      evidence.checks.push("the unsaved Dynare editor shows Source counts without a model owner");
+    }
     // Associated untitled files can adopt the native default CRLF on insert.
     // Rename must preserve the actual input's line endings and every other byte.
     const before = document.getText();

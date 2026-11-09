@@ -37,7 +37,10 @@ export function isAnalysisDocument(document: vscode.TextDocument): boolean {
   return document.languageId === "dynare" && ["file", "untitled"].includes(document.uri.scheme);
 }
 export function isRootUri(uri: vscode.Uri): boolean {
-  return ["file", "untitled"].includes(uri.scheme) && /\.(mod|dyn)$/i.test(uri.path);
+  return uri.scheme === "untitled" || uri.scheme === "file" && /\.(mod|dyn)$/i.test(uri.path);
+}
+function isOpenModelCandidate(document: vscode.TextDocument): boolean {
+  return isRootUri(document.uri) && (document.uri.scheme !== "untitled" || isAnalysisDocument(document));
 }
 export function extendCapabilities(capabilities: ClientCapabilities): void {
   const semantic = capabilities.textDocument?.semanticTokens;
@@ -327,7 +330,7 @@ export class DygnosisClient implements vscode.Disposable {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = undefined;
-      const roots = new Set(vscode.workspace.textDocuments.filter(doc => isRootUri(doc.uri) && !this.ownedDocuments.has(doc.uri.toString())).map(doc => doc.uri.toString()));
+      const roots = new Set(vscode.workspace.textDocuments.filter(doc => isOpenModelCandidate(doc) && !this.ownedDocuments.has(doc.uri.toString())).map(doc => doc.uri.toString()));
       for (const root of this.selectedOwners.values()) roots.add(root);
       this.pruneModelCaches();
       void Promise.all([...roots].map(root => this.modelInfo(vscode.Uri.parse(root)))).catch(error => this.log(String(error)));
@@ -680,6 +683,7 @@ export class DygnosisClient implements vscode.Disposable {
     return result;
   }
   noModelOwnersMessage(document: vscode.Uri): string {
+    if (document.scheme === "untitled") return "Dygnosis analyzes this unsaved model on its own.";
     const facts = this.documentOwners.get(document.toString());
     if (facts?.error) return `Could not look up model owners. ${facts.error}`;
     const coverage = facts?.coverage;
@@ -730,11 +734,11 @@ export class DygnosisClient implements vscode.Disposable {
     return isRootUri(document.uri) && !this.ownedDocuments.has(key) && this.knownOwners(document.uri).length === 0 ? document.uri : undefined;
   }
   async ownerChoices(document: vscode.TextDocument, token?: vscode.CancellationToken): Promise<vscode.Uri[]> {
-    if (token?.isCancellationRequested) return [];
+    if (document.uri.scheme === "untitled" || token?.isCancellationRequested) return [];
     // A document cannot prove itself to be its parent. Its ordinary model-info
     // request owns cancellation; do not block actions on a second self-discovery
     // request before that action can create its cancellable result.
-    const roots = new Set(vscode.workspace.textDocuments.filter(doc => isRootUri(doc.uri) && !sameUri(doc.uri, document.uri) && !this.ownedDocuments.has(doc.uri.toString())).map(doc => doc.uri.toString()));
+    const roots = new Set(vscode.workspace.textDocuments.filter(doc => isOpenModelCandidate(doc) && !sameUri(doc.uri, document.uri) && !this.ownedDocuments.has(doc.uri.toString())).map(doc => doc.uri.toString()));
     const known = this.usesWorkspaceOwners(document.uri) ? [] : this.knownOwners(document.uri);
     for (const root of [...this.selectedOwners.values(), ...known.map(owner => owner.toString())]) if (!sameUri(vscode.Uri.parse(root), document.uri)) roots.add(root);
     await Promise.all([...roots].map(root => {
@@ -746,7 +750,8 @@ export class DygnosisClient implements vscode.Disposable {
     return this.knownOwners(document.uri);
   }
   async rootForDocument(document: vscode.TextDocument, prompt = false, token?: vscode.CancellationToken): Promise<vscode.Uri | undefined> {
-    if (!isAnalysisDocument(document) || token?.isCancellationRequested) return undefined;
+    if (!isAnalysisDocument(document) || document.isClosed || token?.isCancellationRequested) return undefined;
+    if (document.uri.scheme === "untitled") return document.uri;
     const key = document.uri.toString(), selected = this.selectedOwners.get(key);
     if (selected || this.standaloneDocuments.has(key)) await this.refreshDocumentOwners(document);
     if (token?.isCancellationRequested || this.selectedOwners.get(key) !== selected) return undefined;

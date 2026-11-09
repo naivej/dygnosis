@@ -354,13 +354,13 @@ async fn change_source(server: &Backend, uri: &Url, text: String, version: i32) 
 }
 
 #[tokio::test]
-async fn equation_label_collision_has_no_variable_hover() {
-    // Guards display tag punctuation/keys/labels borrowing source receipts or
-    // equal-name declarations, while body identifiers remain useful.
+async fn equation_tags_have_written_help_without_borrowing_variable_hover() {
+    // A literal tag has the same syntax help in active and inactive source.
+    // Unknown tags and punctuation cannot borrow equal-name declarations.
     let uri = Url::parse("untitled:label-collision.mod").unwrap();
     for condition in [0, 1] {
         let source = format!(
-            "var y name;\n@#if {condition}\nmodel; [name='y',other='name'] y=name+log(1); end;\n@#endif\n"
+            "var y name;\n@#if {condition}\nmodel; [name='y',endogenous='y',other='name'] y=name+log(1); end;\n@#endif\n"
         );
         let (service, _socket) = new_service();
         let server = service.inner();
@@ -371,8 +371,7 @@ async fn equation_label_collision_has_no_variable_hover() {
         };
         for (needle, offset) in [
             ("[name", 0),
-            ("[name", 1),
-            ("'y'", 1),
+            ("name='y'", 6),
             ("other=", 0),
             ("'name'", 1),
             ("] y=", 0),
@@ -386,6 +385,51 @@ async fn equation_label_collision_has_no_variable_hover() {
                 server.hover_at(&pos).is_none(),
                 "display tag acquired hover: {condition}/{needle}"
             );
+        }
+        for (needle, offset, key, explanation) in [
+            ("[name", 1, "name", "`resid`"),
+            (
+                "endogenous=",
+                0,
+                "endogenous",
+                "declare an endogenous variable",
+            ),
+        ] {
+            let byte = source.find(needle).unwrap() + offset;
+            let hover = server
+                .hover_at(&at(byte))
+                .unwrap_or_else(|| panic!("missing written tag hover: {condition}/{needle}"));
+            let HoverContents::Markup(markup) = hover.contents else {
+                panic!("expected Markdown tag help");
+            };
+            assert!(
+                markup
+                    .value
+                    .starts_with(&format!("**`{key}` equation tag**"))
+            );
+            assert!(markup.value.contains(explanation), "{}", markup.value);
+        }
+        let endogenous_value = source.find("endogenous='y'").unwrap() + 12;
+        let pos = at(endogenous_value);
+        assert!(server.syntax_hover_at(&pos).is_none());
+        let hover = server.hover_at(&pos);
+        if condition == 1 {
+            let hover = hover.expect("an active endogenous tag names a bound variable");
+            let ordinary = server
+                .hover_at(&at(source.find("y=name").unwrap()))
+                .expect("the ordinary variable has hover");
+            assert_eq!(hover.contents, ordinary.contents);
+            let index = LineIndex::new(&source);
+            assert_eq!(
+                hover.range,
+                Some(span_range(
+                    &index,
+                    &source,
+                    Span::new(endogenous_value, endogenous_value + 1)
+                ))
+            );
+        } else {
+            assert!(hover.is_none(), "an inactive tag has no model binding");
         }
         for needle in ["y=name", "name+log", "log(1)"] {
             assert!(
@@ -444,20 +488,21 @@ async fn hover_providers_share_one_current_root_input_proof() {
 
 #[tokio::test]
 async fn equation_label_does_not_wait_for_pending_model_analysis() {
-    // Guards a position with no model hover waiting for a cold model check.
+    // Written tag help and negative answers must finish before a cold model check.
     let uri = Url::parse("untitled:pending-label.mod").unwrap();
     let source = "var y(long_name='y'); model; [name='y',custom='y'] y=0; end; // y\n/* y */\n";
     let (service, _socket) = new_service();
     let server = service.inner();
     open_source(server, &uri, source.into(), 1).await;
     let output = server.output_gate.lock().await;
-    for byte in [
-        source.find("'y'").unwrap() + 1,
-        source.find("name='y',").unwrap() + 6,
-        source.find("custom='y'").unwrap() + 8,
-        source.find("// y").unwrap() + 3,
-        source.find("/* y").unwrap() + 3,
-        source.find("=0").unwrap() + 1,
+    for (byte, has_hover) in [
+        (source.find("'y'").unwrap() + 1, false),
+        (source.find("name='y',").unwrap(), true),
+        (source.find("name='y',").unwrap() + 6, false),
+        (source.find("custom='y'").unwrap() + 8, false),
+        (source.find("// y").unwrap() + 3, false),
+        (source.find("/* y").unwrap() + 3, false),
+        (source.find("=0").unwrap() + 1, false),
     ] {
         let index = LineIndex::new(source);
         let hover = tokio::time::timeout(
@@ -473,7 +518,7 @@ async fn equation_label_does_not_wait_for_pending_model_analysis() {
         .await
         .expect("equation label waited for unrelated model facts")
         .unwrap();
-        assert!(hover.is_none());
+        assert_eq!(hover.is_some(), has_hover);
         assert!(server.lock_inner().semantic_views.is_empty());
     }
     drop(output);
@@ -494,18 +539,20 @@ async fn non_name_hover_reuses_written_tokens_without_semantic_work() {
         .source_inventory(uri.as_str())
         .unwrap();
     PARSE_EXPANDED_BUILDS.with(|builds| builds.set(0));
-    for byte in [
-        source.find("'y'").unwrap() + 1,
-        source.find("name='y']").unwrap() + 6,
-        source.find("// y").unwrap() + 3,
+    for (byte, has_hover) in [
+        (source.find("'y'").unwrap() + 1, false),
+        (source.find("[name='y']").unwrap() + 1, true),
+        (source.find("[name='y']").unwrap() + 7, false),
+        (source.find("// y").unwrap() + 3, false),
     ] {
-        assert!(
+        assert_eq!(
             server
                 .hover_at(&TextDocumentPositionParams {
                     text_document: TextDocumentIdentifier { uri: uri.clone() },
                     position: Position::new(0, byte as u32),
                 })
-                .is_none()
+                .is_some(),
+            has_hover
         );
     }
     assert_eq!(PARSE_EXPANDED_BUILDS.with(std::cell::Cell::get), 0);

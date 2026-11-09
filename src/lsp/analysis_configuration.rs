@@ -183,7 +183,7 @@ fn root_argument(inner: &Inner, arguments: &[Value]) -> std::result::Result<(Url
         .ok_or_else(|| {
             refusal(
                 "ROOT_REQUIRED",
-                "Choose a file or untitled .mod or .dyn model root.",
+                "Choose an untitled Dynare editor or a .mod or .dyn model root.",
             )
         })?;
     let document = argument
@@ -941,7 +941,7 @@ mod tests {
         // still requires the exact source revision and directive identity.
         let mut inner = Inner::default();
         inner.analysis_configuration.enabled = true;
-        let root = Url::parse("untitled:Untitled-1.mod").unwrap();
+        let root = Url::parse("untitled:Untitled-1").unwrap();
         edit(
             &mut inner,
             &root,

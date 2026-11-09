@@ -5,14 +5,20 @@ change in later releases; see Dygnosis Help for current guidance.
 
 ## v0.11.50
 
-The editor context menu is redesigned to put Dygnosis actions together without
-a submenu. It adds actions to choose a model owner and filter analysis by
-equation. Configuration selection and macro preview refresh are removed from
-the menu; they remain in the editor title bar and Command Palette. Rename stays
-in its usual position and on F2. Workspace checks also make known model owners
-available when an included file is opened without its parent models.
-W011 no longer incorrectly warns on numeric macro substitutions or dependent
-parameter assignments whose values can be evaluated.
+The editor context menu groups Dygnosis actions directly below navigation,
+including model owner selection and equation filtering. Configuration selection
+and macro preview refresh are available from the editor title bar and Command
+Palette. Rename keeps its usual position and F2 shortcut. Workspace checks make
+known model owners available when an included file opens without its parents.
+
+Help explains model owners, saved analysis configurations and macro actions.
+Hover explains the `name` and `endogenous` equation-tag keys and shows variable
+details on active `endogenous` values. Untitled Dynare editors are analyzed as
+standalone models and show model counts before saving.
+
+W011 uses expanded numeric macro values, including in dependent parameter
+assignments. On Windows, Rename can update shared files when their parent models
+are closed.
 
 ## v0.11.49
 

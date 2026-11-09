@@ -276,7 +276,7 @@ impl Inner {
     }
 
     pub(super) fn align_workspace_root(&mut self, uri: &Url) {
-        if !is_model_root(uri) {
+        if uri.scheme() != "file" || !is_model_root(uri) {
             return;
         }
         // One fresh identity for the opened URI. Other roots keep the identity
@@ -358,7 +358,10 @@ impl Inner {
     }
 
     pub(super) fn workspace_changed(&mut self, changed: &Url, deleted: bool) {
-        if !self.settings.workspace_diagnostics || self.workspace_checks.shutdown {
+        if changed.scheme() != "file"
+            || !self.settings.workspace_diagnostics
+            || self.workspace_checks.shutdown
+        {
             return;
         }
         let resuming = self.workspace_checks.cancelled;

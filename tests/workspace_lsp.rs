@@ -757,6 +757,32 @@ async fn legacy_client_uses_unique_owner_without_enabling_explicit_context_comma
     assert!(has_code(&wire.pull(&h).await, "E285"));
 }
 
+// A new Dynare editor supplies model facts before it has a filename.
+#[tokio::test]
+async fn untitled_model_info_does_not_start_workspace_discovery() {
+    let files = Files::new();
+    let source = "var y;\nmodel;\ny=0;\nend;\n";
+    files.write("saved.mod", source);
+    let mut wire = Wire::new();
+    wire.start_context(&files, true).await;
+    let before = wire.complete().await;
+    let uri = "untitled:Untitled-1";
+    wire.open(uri, source, 1);
+    let info = wire
+        .command_args("dynare/modelInfo", json!({"root_uri":uri}))
+        .await;
+    assert_eq!(info["n_equations"], 1, "{info}");
+    assert_eq!(info["document_version"], 1);
+    let expanded = wire
+        .command_args("dynare/showEffectiveModel", json!({"root_uri":uri}))
+        .await;
+    assert_eq!(expanded["complete"], true, "{expanded}");
+    wire.change(uri, &source.replace("y=0", "y=1"), 2);
+    let after = wire.command("dynare/workspaceStatus").await;
+    assert_eq!(after["pass_revision"], before["pass_revision"]);
+    assert_eq!(after["roots"], before["roots"]);
+}
+
 // A VS Code owner choice can use an encoded drive while workspace discovery
 // uses a file path URL. Each model and guarded source must occur once.
 #[cfg(windows)]

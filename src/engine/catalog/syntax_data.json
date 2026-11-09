@@ -58621,6 +58621,46 @@
     "value_rules": []
   },
   {
+    "id": "syntax_value:model:equation_tag_key:endogenous:equation_tag",
+    "name": "endogenous",
+    "kind": "syntax_value",
+    "contexts": [
+      "equation_tag"
+    ],
+    "parent": "model",
+    "slot": "equation_tag_key",
+    "signatures": [
+      "endogenous"
+    ],
+    "summary": "Can declare an endogenous variable in the model block. When this equation is excluded, Dynare uses the tag to identify which variable to remove from the endogenous set.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:1152"
+    ],
+    "value": {
+      "value": "endogenous",
+      "token_kind": "bare",
+      "insert_text": "endogenous",
+      "case_sensitive": false,
+      "forms": [
+        "assignment"
+      ],
+      "signed": false,
+      "description": "Can declare an endogenous variable in the model block. When this equation is excluded, Dynare uses the tag to identify which variable to remove from the endogenous set.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:1152"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:500"
+      ],
+      "default": false
+    },
+    "value_rules": []
+  },
+  {
     "id": "option:estimation:endogenous_prior:command_option",
     "name": "endogenous_prior",
     "kind": "option",
@@ -94642,6 +94682,46 @@
     "value_rules": [
       "NAMESPACE_QUALIFIED_FILENAME"
     ]
+  },
+  {
+    "id": "syntax_value:model:equation_tag_key:name:equation_tag",
+    "name": "name",
+    "kind": "syntax_value",
+    "contexts": [
+      "equation_tag"
+    ],
+    "parent": "model",
+    "slot": "equation_tag_key",
+    "signatures": [
+      "name"
+    ],
+    "summary": "Names this equation in `resid` output and for tag-based equation selection.",
+    "aliases": [],
+    "options": [],
+    "grammar_sources": [
+      "src/DynareBison.yy:1152"
+    ],
+    "value": {
+      "value": "name",
+      "token_kind": "bare",
+      "insert_text": "name",
+      "case_sensitive": false,
+      "forms": [
+        "assignment"
+      ],
+      "signed": false,
+      "description": "Names this equation in `resid` output and for tag-based equation selection.",
+      "status": "documented",
+      "applicability": "",
+      "grammar_sources": [
+        "src/DynareBison.yy:1152"
+      ],
+      "manual_sources": [
+        "doc/manual/source/the-model-file.rst:1009"
+      ],
+      "default": false
+    },
+    "value_rules": []
   },
   {
     "id": "option:sensitivity:namendo:command_option",
