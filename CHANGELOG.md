@@ -1,986 +1,386 @@
 # Changelog
 
+Each entry describes the release at the time. Feature names and interfaces can
+change in later releases; see Dygnosis Help for current guidance.
+
 ## v0.11.50
 
-- Editor context actions appear together as direct `Dygnosis:` commands.
-  **Rename symbol** stays in its standard editing position and remains
-  available on `F2`. Model owner and macro actions are available from the
-  context menu and Command Palette.
-- **Filter analysis by equation…** starts an Include or Exclude selection from
-  a uniquely named aggregate model equation without a `[static]` tag.
-  **Select analysis configuration** accepts other tag expressions.
+The editor context menu is redesigned to put Dygnosis actions together without
+a submenu. It adds actions to choose a model owner and filter analysis by
+equation. Configuration selection and macro preview refresh are removed from
+the menu; they remain in the editor title bar and Command Palette. Rename stays
+in its usual position and on F2.
 
 ## v0.11.49
 
-- The default macro work limit is now 20 million, so more macro-heavy models
-  can be analyzed without adjusting the setting. Macro loops that produce no
-  output retain less temporary memory.
-- Call Hierarchy follows the selected model, its includes and macro expansion.
-  When analysis is unavailable, the action explains why.
-- Help shows how to trace names, inspect equation dependencies and request
-  completion and option hints with VS Code actions. It also covers Outline,
-  symbol search, formatting, selection and Quick Fix from Problems.
-- Hover explains when an `@{...}` macro substitution prevents model information
-  at a position and points to **Expand macros**.
-- **Find possible declarations...** and analysis configuration actions appear
-  under **Dygnosis** in the editor context menu. **Rename symbol** remains in
-  the main menu and on `F2`.
-- **Find possible declarations...** also remains in the Command Palette.
-  **Expand macros** and **Show model changes** remain available in the Command
-  Palette and editor title bar. **Show model changes** is also available from
-  Source Control. The optional **Expand macros** and **Find references**
-  CodeLens actions and their settings have been removed.
+Editor navigation and Help are streamlined, and Call Hierarchy follows the
+selected model and its macro expansion. The default macro work limit increases
+to 20 million for larger models. The optional Expand macros and Find
+references CodeLens actions are removed; their actions remain available
+elsewhere.
 
 ## v0.11.48
 
-- Hover in the macro expansion preview shows information about names,
-  commands and options.
+Macro expansion previews now support hover, so names, commands and options can
+be inspected without returning to the written source.
 
 ## v0.11.47
 
-- The Source preview opens and refreshes faster on large models with many
-  macro-generated names.
-- The Explorer view and status bar use the name **Dynare Workspace**.
-- Hover explains fixed values in active and inactive source without repeating
-  the value under the pointer.
+Source preview opens and refreshes faster for large models with many
+macro-generated names. Workspace checks also use the name Dynare Workspace.
 
 ## v0.11.46
 
-- Large models with includes can respond sooner when opening or editing a
-  file. Dygnosis reuses completed macro expansion work for editor and MCP
-  results when the inputs match.
-- **Expand macros** and **Refresh macro expansion** respond faster in large
-  models with macro loops or repeated includes.
+Large models with includes open, update and expand faster in the editor and
+MCP by reusing completed macro work.
 
 ## v0.11.45
 
-- Hover explains PAC component kinds and inverse-gamma prior types, including
-  in inactive macro branches.
-- Hover and completion explain more Dynare values in their written context,
-  including equation tags, calibration intervals and selected nested options.
-- MCP `dynare_syntax` can look up these values by their command and position.
-- Hover, completion and MCP explain more values in nested optimizer, sampler
-  and particle filter settings. MCP also describes the open `fsolve_options`
-  list. OccBin look-ahead options show their runtime defaults and integer limits.
-- E434 recognizes equivalent VAR left-hand sides with redundant parentheses
-  and unary wrappers. Macro-generated `diff()` expressions with distinct
-  arguments no longer cause a false duplicate error.
+Contextual value help covers more written Dynare syntax, including equation
+tags and nested settings, in both the editor and MCP.
 
 ## v0.11.44
 
-- Hover and completion explain fixed option values in their command context,
-  including in inactive macro branches.
-- MCP `dynare_syntax` can look up option values by command and option, and
-  returns their available meanings and written forms.
+Fixed option values have contextual explanations in hover, completion and MCP,
+including in inactive macro branches.
 
 ## v0.11.43
 
-- MCP equation pages retain all matching equations in repeated heterogeneity
-  blocks. Configured batch coverage identifies the correct job.
-- MCP model comparisons page requested changes and references together. Default
-  results include direct locations; request references to inspect equation uses.
+MCP results retain more complete model information: equation pages include
+matches from repeated heterogeneity blocks, configured batch results identify
+their job, and comparisons page changes and references together.
 
 ## v0.11.42
 
-- Hovers omit repeated names and label long names in active and inactive code.
-  Outline and the Find All References picker label long-name details.
+Name information is easier to read across hover, Outline and the references
+picker, with less repetition and clearer long names.
 
 ## v0.11.41
 
-- Symbol queries, equation inspection and model counts respond faster in large
-  models, including MCP Symbol Info with selected sections or small pages.
-- Model Diff compares large parameter calibrations faster, including added,
-  removed and retyped parameters.
+Symbol and equation inspection, model counts and comparisons respond faster on
+large models in the editor and MCP.
 
 ## v0.11.40
 
-- Hover on a name in an inactive macro branch can show a matching written
-  declaration and its labels, including from a file named by a literal
-  `@#include` path. Included-file lookup follows the configured macro work
-  limit. PAC and auxiliary model names, command expressions and model-local
-  uses can also show their written declarations or definitions.
-- MCP `dynare_symbol_info` can inspect the written declaration and labels at
-  an inactive name use, including through literal includes. It also returns
-  written model-local expressions and supported named-model declarations.
-- Written declaration and model-local hovers use the same label layout as
-  active names. Equation-name tags stay silent in inactive branches.
+Written declarations and model-local definitions can be inspected in inactive
+macro branches through hover and MCP, including supported literal includes.
 
 ## v0.11.39
 
-- Clarify model owner selection, workspace coverage and diagnostic guidance in
-  Help. The status bar no longer suggests that clicking it selects an owner.
-- Comparison messages explain unreadable includes and omitted equation references.
-  Option descriptions and MCP setup instructions are corrected.
-- Open Help from the Command Palette or the Dygnosis extension's gear or context
-  menu in **Extensions**.
-- Find more actions in the Command Palette, including saving or resetting an
-  analysis configuration, filtering Outline and workspace checks, and selecting
-  another model file in **Dygnosis Changes**. These actions also remain available
-  from their local controls.
-- Simple hand-written configurations work without extra source information.
-  Unavailable configurations explain why, and saving keeps other entries.
+Analysis configurations and commands are easier to find and use. Simple
+hand-written configurations work without extra source information, and more
+actions and Help are available from the Command Palette.
 
 ## v0.11.38
 
-- Outline shows more named blocks and their entries, including names in
-  inactive macro branches.
-- Inactive macro branches are dimmed for the selected analysis configuration,
-  including branch previews. Turn this off with **Dynare: Inactive Code:
-  Enabled**.
-- Hover describes recognized options, expressions and block keywords in
-  inactive macro branches. Written declarations and model-local definitions
-  show their own labels and expressions.
+Inactive macro branches are easier to explore: Outline and hover show more
+written content, and inactive code is dimmed for the selected configuration.
 
 ## v0.11.37
 
-- MCP equation queries and pages select matching rows before projecting their
-  details. Expansion selects navigation and origins for the requested range or
-  equation. Results keep their existing counts, paging and source locations.
-- Launch MCP with the `dygnosis-mcp` companion. Completed source analysis is
-  reused by default for each connection. Set `DYGNOSIS_MCP_REUSE=0` in the MCP
-  server environment to disable reuse.
-- Fix MCP memory alignment on Intel macOS, which could crash the server during
-  panic recovery.
+MCP reuses completed model analysis by default, making repeated queries more
+efficient. Launch the `dygnosis-mcp` companion directly without arguments;
+update existing MCP launch configurations. Set `DYGNOSIS_MCP_REUSE=0` to
+disable reuse.
 
 ## v0.11.36
 
-- Choose the **Dygnosis** file icon theme for colored `dy` icons on `.mod`,
-  `.inc` and `.dyn` files. Compatible themes can use a shared Dynare icon.
-- Status, workspace checks and action messages identify affected files and
-  known causes. Recovery actions follow the cause. Macro preview failures
-  retain the captured text and explain what could not be refreshed.
-- Model Diff keeps branch application results with each captured choice and
-  comparison limits with the affected row. Configuration titles summarize
-  choices instead of repeating automatic preview names.
-- MCP outcomes identify affected override targets and omitted metadata actions.
-  Tool descriptions keep the rules relevant to each operation. Engine startup
-  failures include the executable and observed exit or timeout.
-- Macro definition actions on an `@#if` condition point to **Preview Macro
-  Branch** instead of opening an empty picker.
-- Preview a branch directly from its conditional directive. **Clear branch
-  previews** restores source conditions and keeps the other analysis choices.
-- Activity hovers omit repeated source and generic explanations. Conditional
-  headers show the selected arm's activity, including forced `@#else` previews.
-- The **Current config** hover identifies selected branches by their controlling
-  condition. Outcomes such as **not reached** appear beside the affected
-  choice. Automatic preview names are omitted from count and source hovers.
+Editor and MCP actions give clearer reasons when results are incomplete or an
+action cannot proceed. Macro branches can also be previewed directly from
+their directives.
 
 ## v0.11.35
 
-- Configure macro inputs and equation selection with one complete expression
-  per prompt, with Dynare syntax examples. Equation tag expressions accept
-  quoted values such as `name='policy'` or `endogenous='rate'`, including
-  commas inside a value.
-- Select equations by tag values in an analysis configuration. Include or
-  exclude the selected equations to inspect their model facts without changing
-  the `.mod` file. Equation selection is a preview; Rename and diagnostic fixes
-  are unavailable for it.
-- The **Current config** hover shows each macro input, replacement expression and equation tag choice on its own line, without generic configuration labels, and lists each selection failure cause once. Macro replacements include the name, such as **Macro: x=1**.
-- Select a current macro input to edit it, or choose **Add macro input**. Choose **Include equations** or **Exclude equations** and enter the tag expression directly. **Clear equation selection** keeps the other configuration choices.
-- Compare the current configuration with **Written source** or a saved configuration for the same model from **Show mod changes** > **config…**. Written source is always available. The current configuration is **After**.
-- Choose a baseline under **Compare filename with**: **.mod file…**, **config…**, recent commits, branches and tags, or enter a revision such as `HEAD~2`. A single changed file with captured text opens directly in Text diff.
-- Comparison headers show filenames and configuration choices. Revision details
-  and model counts are in the hover.
-- Remove **Explain a check** and **Explain this check**. Use **Dygnosis: Open Help** and search for the diagnostic code.
-- Clicking model counts opens **Outline**; the **Current config** hover link still opens configuration choices.
-- Dygnosis editor right-click actions appear together in one group.
-- Workspace diagnostics update faster after edits in large models.
+Equation selection lets users analyze a tagged subset without editing the
+model, including when comparing configurations. This is an analysis preview,
+so Rename and diagnostic fixes are unavailable for the selection.
 
 ## v0.11.34
 
-- Changing the Outline activity filter or other presentation settings keeps the
-  current model analysis. Outline presentation updates without rechecking the
-  model.
-- Editing a file rechecks the models that use it. Results for independent models
-  remain available during that check.
-- Literal command, macro-directive and explicit option help can appear while
-  model analysis runs.
-- Hover and occurrence highlights skip model lookups for equation labels,
-  quoted include paths and other positions that have no result. Syntax help
-  can respond while another request uses model information.
-- Go to Definition and Find References return sooner on positions with no
-  symbol. Expanding selections with multiple cursors is faster.
-- Completion, syntax colors and parameter value hints respond faster in
-  large models. Automatic lightbulb requests skip shock templates;
-  choose **Refactor...** to request them.
-- Hover responds faster in models with many labelled declarations, and
-  declaration labels no longer produce false helper-file links.
-- Model counts and Outline respond faster in large models and reuse current
-  model information.
-- Parameter value hints reuse their current result when the editor requests
-  another visible range. Edits and changed model inputs update the result.
+Editor features respond sooner on large models by reusing analysis. Affected
+models are rechecked after edits while independent results remain available.
 
 ## v0.11.33
 
-- Remove the **Jump to equation...** CodeLens and its setting. The Command
-  Palette command remains available.
-- Model counts show **Source** or **Current config** in the status bar. The
-  hover shows selected macro choices and links to the configuration selector,
-  where **Source** resets the choices. The same item shows pending model work,
-  including macro expansion, and restores counts when the action finishes.
-- Hover inside inactive commands selects the requested option or name instead
-  of the command keyword at the start of the line.
-- Fold and collapse each macro conditional arm separately in the editor and
-  Outline. Collapsing `@#if` keeps `@#elseif` and `@#else` visible.
-- Outline activity labels describe the selected macro arm or loop body and
-  appear only on its controlling entry. Use the Outline toolbar filter to show
-  active entries, inactive entries or both.
-- Inactive Outline declarations keep available labels and type icons. Remove
-  source-candidate labels and endogenous timing from Outline. Equations with
-  included expressions have one entry, without duplicate model or fragment rows.
-- Choose one analysis configuration for a model root from the source editor or
-  macro expansion preview. Set initial macro values, preview a definition or
-  conditional branch, or save choices for later use. Saved configurations do
-  not become the startup selection; each session starts with Source.
-- Browse recognizable inactive source in Outline and use the source-candidate
-  picker to open written names that are not active declarations. Inactive
-  source remains separate from executed model facts and counts.
-- Compare two captured analysis configurations in Model Diff. Each side keeps
-  its own choices with its source, including when the source text is unchanged.
-- MCP source inspection, expansion, checking and comparison accept explicit
-  analysis choices. Calls keep their choices request-local, and source views
-  keep written candidates separate from effective model facts.
+Analysis configurations let users try macro inputs and branches, explore
+inactive source and compare the resulting models without changing the file.
+MCP accepts equivalent choices. The Jump to equation CodeLens is removed; the
+command remains available.
 
 ## v0.11.32
 
-- Hover and model-local completion respond faster in large models.
-- Go to Definition, Find References, occurrence highlights and Outline respond
-  faster in large models.
-- Large models are checked faster after edits.
-- Parameter value hints respond faster in files with many assignments.
-- Equation navigation and model counts update faster in large models, including
-  the first refresh after an edit.
+Large-model editing is more responsive, from checking after edits to
+navigation, hover, Outline and parameter hints.
 
 ## v0.11.31
 
-- Fix a freeze that could stop model features after rapid edits or settings changes.
-- Hover, name colors and named-model completion respond faster in large models.
-- I211 now names the VS Code setting and MCP request option to increase the
-  macro work limit when that limit stops analysis. Its **Configure macro work
-  limit** quick fix opens the setting in VS Code.
-  At the maximum allowance, the message explains that it cannot be increased
-  and the setting quick fix is not offered.
+Large-model analysis is more reliable and responsive: a freeze after rapid
+changes is fixed, and macro work-limit messages explain how to continue.
 
 ## v0.11.30
 
-- Restart Language Server closes the old connection before stopping its process.
-  Pending requests from the old client no longer show restart-related errors.
-- Model Diff omits Dynare and MATLAB comments from change cards.
-  Comment markers inside strings remain part of the compared text.
-- Outline and the status bar use matching icons for exogenous variables and
-  equations.
-- Outline shows named VAR, trend-component, VAR-expectation and PAC model
-  commands on one row, such as `var_model(rvar)`. `pac_target_info` lists its
-  target and components. Macro expansion previews use the same labels and children.
+Named VAR and PAC models are easier to browse in Outline. Model Diff also
+focuses on model changes by ignoring comments.
 
 ## v0.11.29
 
-- VS Code's Outline supports macro expansion previews, including included
-  declarations and separate loop copies. Entries select the expanded text;
-  **Go to written source** opens the original model or include file.
-- Workspace checks use VS Code's workspace terminology in Explorer, the status
-  bar, commands, settings, MCP setup and Help. Saved configuration now uses
-  `dynare.workspaceDiagnostics` and `dynare.workspaceExcludePaths`. Update
-  existing saved settings to these names.
-- Model-count hovers keep timing beside the endogenous count under **Aggregate
-  model**, with separate heterogeneous model blocks. The filename,
-  before-transformation qualifier and click instructions are removed.
-- Status bar variable and equation totals sum counts from the aggregate model
-  and every heterogeneous dimension. The hover keeps their separate breakdowns.
-- The **Models in workspace** hover shows a compact count table. Incomplete and
-  failed checks share **Not fully checked**; that row and **Excluded** appear
-  only when nonzero. Labels and counts align in a headerless table.
-  The status bar shows the checked ratio without an incomplete prefix.
-  Cancellation and unreadable folders retain short messages.
-- Workspace checks can show only models that were not fully checked. Their
-  folder paths expand, and **Show all workspace files** restores the full list
-  and previous folder collapse choices. The extra Help row and routine
-  incomplete-coverage message are removed from the panel.
-- Opening models and background updates preserve the workspace checks tree.
-  Affected models remain visible in the filter while their next check is pending
-  or running, and leave the list after a successful result.
+Workspace checks adopt VS Code's workspace terminology and make incomplete
+checks easier to find; macro expansion previews gain Outline support. Update
+saved settings to `dynare.workspaceDiagnostics` and
+`dynare.workspaceExcludePaths`.
 
 ## v0.11.28
 
-- MCP uses the 12-tool contract 3. The `legacy-v2` launch profile is removed.
-  Existing callers must use the current tool names and typed source/selection
-  inputs advertised by `tools/list`.
-- Outline, breadcrumbs and Go to Symbol omit top-level parameter and MATLAB
-  assignments, including the former **MATLAB expressions** group. Parameters
-  remain available under their declarations.
+Outline and symbol navigation focus on Dynare declarations and structure
+rather than top-level MATLAB and parameter assignments. MCP removes
+`legacy-v2`; callers must use the 12-tool contract and typed inputs advertised
+by `tools/list`.
 
 ## v0.11.27
 
-- Syntax help, completion and highlighting cover Dynare commands, options,
-  expressions, macro forms, and PAC/VAR model syntax in their accepted
-  contexts. Native MATLAB and `verbatim` text keep their own language context.
-- Outline includes named macro definitions, declared dimensions, trends,
-  external functions and named VAR/PAC models. Expression operators remain
-  within their equation or definition row.
-- Navigate declared dimensions, trends, named subsamples and VAR/PAC models.
-  References and Rename follow their accepted declarations and uses when the
-  complete source relationship is known. External namespace/database names,
-  database members and external function implementation names explain their
-  Rename limit; built-in operators have references but no editable declaration.
-- Formatting recognizes all parsed Dynare block kinds while preserving native
-  MATLAB and `verbatim` text. Linked Editing follows known declared names only
-  within the current file.
-- References include accepted conditional-path and calibration names, trend
-  expressions and special model operators. `EXPECTATION` and `STEADY_STATE`
-  are recognized as operators; their argument names keep their own references.
-- MCP advertises 12 tools with one job each. `dynare_syntax` includes options;
-  diagnostic reference, single/batch checks, binding/references and source
-  actions each have one entry point. Canonical results use contract 3 with
-  bounded collections. Existing clients can select `mcp --profile legacy-v2`
-  during 0.11.27; that profile is scheduled for removal in 0.11.28.
-- Extraction retains required VAR/PAC definitions, auxiliary equations, target
-  context and model locals. The fragment states retained extra context and
-  omitted runtime setup.
+Dynare syntax support is broader across editor features and extraction. MCP is
+reorganized around 12 focused tools; a temporary `legacy-v2` profile remains
+available for migration.
 
 ## v0.11.26
 
-- W022 again reports a parameter used only by `pac_model`'s `discount` option,
-  as Dynare does. Parameters used only by `growth` also warn. The message now
-  says `Parameter(s) g not used in model equations or steady_state_model` to
-  name the full checked scope. The parameter can still be used elsewhere.
-- Large indexed macro tables copy only the selected values. The unmodified
-  basic and growth DynareTransformationEngine examples now complete.
-- Configure macro work with `dynare.macroWorkLimit` in the editor or
-  `macro_work_limit` in MCP model requests. Each checked root or comparison
-  side receives its own finite allowance. Other resource bounds stay separate.
-- Terminating recursive includes expand with written origins. Unbounded
-  recursion stops at its actual resource limit; the filename-cycle warning
-  W062 is retired. Partial results name the cause and unavailable work.
-- Included `.mod` helpers use a unique known model owner automatically. Choose
-  an owner or standalone analysis with the existing selection commands; the
-  choice applies to diagnostics and model features. Closing the last editor
-  tab clears it. Help explains the selection rule.
-- An equation with an empty right-hand side, such as `y=;`, reports E001.
-- Formatting files with long macro string values is faster.
+Macro-heavy models have better support for recursive includes and configurable
+work limits in the editor and MCP. Included model files also use a unique
+known owner automatically.
 
 ## v0.11.25
 
-- Project checks show `.mod` and `.dyn` models in collapsible folder and
-  subfolder groups. Saved `.inc` files appear once at their actual paths as
-  **Include file** entries, even when unreferenced or stored in a folder with
-  no root models. Include entries open the file but have no separate check
-  state or project counts. Exclusions affect background root checks and do not
-  hide include entries. Choose **Ignore this folder** on a workspace or
-  subfolder row to exclude its model roots from background checks; the toolbar
-  gear opens **Configure project exclusions**. Generated `+` directories
-  remain skipped.
+Workspace checks organize models by folder, show saved include files for
+navigation and let users exclude folders from background checks.
 
 ## v0.11.24
 
-- The Reference page lists commands, check codes and command options. MCP tools
-  stay in Work with an agent, and each tool name there still opens its input
-  reference.
-- The Reference entry for W102 opens its explanation. A bracket in a check
-  title no longer ends that link early.
-- References and Rename include the parameter named by `pac_model`'s `discount`
-  option. Rename updates that option together with the declaration and other
-  bound uses.
+Help reference navigation is improved, and References and Rename recognize the
+parameter used by `pac_model`'s `discount` option.
 
 ## v0.11.23
 
-- MCP model tools accept explicit text, supplied-map or saved-disk sources.
-  Supplied maps resolve only supplied keys; selected owners and input revisions
-  are returned with each result.
-- Inspect a symbol by name, source target or binding identity. References use
-  accepted model bindings, and Rename returns a complete guarded proposal.
-- Model inspection, equation selection, source actions, formatting and
-  extraction return focused facts and complete edit proposals. MCP results use
-  a versioned structured envelope with causes, coverage, selection and limits;
-  legacy leading text items remain available by default.
-- Proposals do not write files. Verify their input guards before applying them.
-- Help describes the controls you can see in VS Code and gives steps for using
-  them. Related problem locations have a duplicate-declaration example, with
-  instructions for the Problems panel and Alt+F8 details.
-- Rename an included file that is not open using the same folder path as the
-  open model. A Windows short path or a linked folder no longer sends that
-  edit to a different file URI.
+MCP model inspection and edits use consistent source inputs and guarded
+proposals. Agents can inspect supplied text, file maps or saved files;
+proposed edits do not write files.
 
 ## v0.11.22
 
-- Explain why MCP and LSP edit requests are refused, and report the cause of
-  partial MCP results. Auto Fix keeps the resulting text first and reports its
-  status and remaining diagnostics in a second item.
-- Show a reason when a native editor edit or source jump expires or cannot be
-  applied. Partial macro expansion previews identify why source navigation is
-  unavailable.
-- Focus Help on available features, controls and source scope. Remove repeated
-  refusal and partial-result explanations; support lists extension controls
-  and problem-report details.
+Editor and MCP actions explain why a request is refused or a result is
+partial, including when an edit or source jump is no longer available.
 
 ## v0.11.21
 
-- The Reference page, before the diagnostic code list, defines **shared**,
-  **added**, and **skipped**. A skipped code stays documented because Dynare's
-  message depends on rewritten equations or on the MATLAB file it generates.
-- Fix **Set up MCP for this project** rejecting local VS Code extension
-  storage with a false file-backed storage error. Managed executable updates
-  also work when VS Code exposes that disk storage as `vscode-userdata`.
-- Press F2 or choose **Rename symbol** from the editor context menu to rename
-  ordinary Dynare symbols across the selected model and its known source files,
-  including `.mod`, `.dyn`, `.inc`, and supported untitled documents. Rename
-  is withheld when the complete edit cannot be verified, a replacement name
-  already exists or source ownership is ambiguous. Verified literal references
-  in `endogenous` and `mcp` equation tags are renamed with existing quotes
-  preserved; generated name occurrences withhold the edit. Equation `name`
-  tags and symbol `long_name` labels stay unchanged. MATLAB companion text is
-  not renamed.
-- Remove the public Rust functions `format_structure_lens`,
-  `format_check_lines`, and `format_check_lines_with_origins`. Callers can use
-  the shared analysis data or current LSP and MCP output instead.
-- Remove the legacy private integer macro-value and replay branches.
-  Evaluation and replay continue to use real values, including loop values and
-  collection members.
+Rename works across the selected model and its known source files. Use F2 or
+the editor context menu; incomplete or ambiguous edits are withheld.
 
 ## v0.11.20
 
-- Use **Jump to equation...** from the Command Palette or an equation CodeLens
-  to choose a counted equation and open its written source. The list includes
-  unnamed equations, scopes, and macro occurrences.
-- Remove the **Dynare model** Explorer panel. The status-bar hover presents
-  aggregate and dimension counts, including endogenous classes.
-- Group consecutive top-level Dynare assignments and MATLAB statements under
-  **MATLAB expressions** in Outline. Model and declaration names show written
-  heterogeneity options. Complete model blocks no longer show the
-  **Dygnosis numbers before transformation** detail.
+Equation navigation moves to one searchable picker, and the Dynare model
+Explorer panel is removed. Model counts remain available in the status-bar
+hover.
 
 ## v0.11.19
 
-- Fold complete Dynare blocks, written macro loops and conditionals, and
-  individual conditional branches. Multiline declarations, commands and Dynare
-  assignments fold by statement. Starting lines stay visible; with
-  `editor.foldingStrategy` set to `auto`, indentation does not determine the
-  ranges.
-- Outline names omit the declaration type already shown by their group.
-  Timing, long names, TeX names and changed types remain visible.
-- `predetermined_variables` reports E023 for heterogeneous variables and names
-  that are not aggregate endogenous variables when the command is read.
-  Writing the command inside a `model` block reports E001 and no longer adds
-  a false equation or equation-count warning.
+Editor folding covers Dynare blocks, statements and macro branches, making
+long model files easier to navigate.
 
 ## v0.11.18
 
-- Expression value hints remain available after simple MATLAB helper assignments.
-  This restores later parameter values such as `cfp_ss` in `CA_BMZ12_rep.mod`.
-- Variable hover shows the timing class. Variables declared with
-  `predetermined_variables` also show **end-of-period convention**.
+Parameter value hints can follow simple MATLAB helper assignments. Variable
+hover also shows timing and predetermined conventions.
 
 ## v0.11.17
 
-- Help follows the Dynare workflow: understand the model and files, write
-  equations and experiment setup, inspect and check, then review changes and
-  project models. Agent tools follow the same stages. Configuration appears
-  with the feature it affects. Short descriptions replace GUI tutorials and
-  internal implementation details; important result limits remain.
-- Adds an overview of every MCP tool and links to missing configuration controls,
-  including the default comparison filters. Developer integration contracts stay
-  in the repository, outside the Help contents.
+Help is organized around the Dynare workflow, bringing feature guidance,
+configuration and agent tools together.
 
 ## v0.11.16
 
-- In **Show mod changes**, a source link on the missing side of an added or
-  removed row opens the start of the corresponding declaration, command or
-  block when verified. This includes `var`, `varexo`, `parameters` and
-  observable lists. The link shows that context's line instead of opening the
-  file at the top.
+Model comparison can open source context for the missing side of an added or
+removed item when that context is verified.
 
 ## v0.11.15
 
-- Formatting preserves native MATLAB command arguments, continuations and
-  verbatim text in document and selection edits.
-- Command cards show changed expanded values when their written macro text is
-  unchanged, and retain available values when written text is unavailable.
-- Adding or removing a model block option keeps both sides of the block in
-  the comparison instead of reporting the block as added or removed.
-- Estimation output-variable and `irf_shocks` edits appear once, with their
-  named lists retained in the command's comparison row.
+Formatting and model comparison handle native MATLAB text, macro values and
+block changes more reliably.
 
 ## v0.11.14
 
-- Syntax highlighting recognizes every supported block opener, including
-  `pac_target_info`, `osr_params_bounds`, and `optim_weights`.
-- The **Dynare project** status item shows check progress and coverage. Completed checks keep the check icon; error and warning counts remain in Problems and the project checks view.
-- **Show mod changes** compares retained model facts across parser families in
-  a pinned tab in the active editor group. A left panel lists change groups.
-  Each group shows all its filtered changes as rows with Before on the left
-  and After on the right, expression tokens, other changed fields, and
-  direct written references within each side's card. Card headers open each
-  side's verified source at the instruction's line when known, including the
-  corresponding HEAD file for an added row.
-  Expressions appear once; unchanged timing entries and repeated metadata are
-  omitted. Change comparison and Swap sides sit beside the file indicators.
-- The change-color legend stays at the bottom during scrolling. All available
-  categories appear in the left panel. Find changes and Kind filter their rows.
-  Missing and empty Before/After values stay blank.
-- Equation changes pair across repeated names when their unchanged regime tags
-  identify a unique variant on each side. This includes an OccBin `r=1` to `r=0`
-  edit in one `bind` variant. Repeated copies with the same regime appear as
-  separate Removed and Added rows when their correspondence is uncertain.
-- Added symbols show one declaration with available metadata. Model-local
-  variables are grouped with equations. Their semicolons no longer produce
-  redundant Commands changes.
-- Shock cards show written instructions and block options with token highlights.
-  Their body edits no longer create duplicate Commands rows. Symbol declaration
-  keywords stay plain. Added or removed shock instructions
-  and model-local definitions are highlighted in full. Commands omit repeated role and token headings.
-  Predetermined conventions stay in the symbol card without another declaration
-  row or timing notes on direct references.
-  Each direct equation appears once per side.
-  Heterogeneous dimensions stay in card headers; repeated dimension fields and
-  matching labels on direct references are omitted.
-  **Equations** combines aggregate and heterogeneous equation changes in one group.
-- Extra properties use change colors without `−` or `+` prefixes. Numeric
-  difference lines are removed. Evaluated parameter values appear only when
-  Before or After contains an expression, including when both results are equal.
-- Commands and Operations show captured `.mod` instructions with their original
-  spacing, quotes and comments. An owned `model_replace` block no longer adds a
-  Commands row containing only `; end ;`. Formatting-only edits stay in Text diff.
-- **Type of changes** replaces Kind with a checkbox menu. Added, Removed
-  and Replaced can be selected together; All selects every type.
-  Replaced is the label in the menu, counts, legend and accessibility text.
-  Occurrences without a proven match use Removed and Added in the view and
-  comparison result, with no Unpaired change type.
-- **Forecast** groups forecast commands and conditional paths. **State** replaces
-  Steady state and includes historical, initial and terminal values. Each `endval`
-  assignment appears once in State, including exogenous values. Historical
-  assignments pair by variable and period. Changed periods of one variable share
-  a written block; unchanged periods are omitted and only edited tokens are highlighted.
-  The source link opens the first visible assignment after filtering.
-  `steady_state_model` uses State, `varobs` uses Data and `estimation`
-  uses Commands, including their retained options and statement context.
-  **Method of moments** replaces Moments and IRFs.
-- **Data** combines Observables and Data. Each observable shows one declaration,
-  such as `varobs y;` or `varobs c;`. New or removed declarations highlight the
-  keyword and name; shared declarations highlight only changed names.
-  The observable list no longer adds a redundant Commands row.
-- Instruction cards, including State, Priors and policy blocks, show captured
-  `.mod` text. Unchanged sibling instructions and duplicate field records are omitted.
-  New or removed blocks highlight their opener and `end;`. Unchanged boundaries
-  stay plain when both models have the block, even for an added or removed instruction.
-  Plain block additions do not add another card beside their added content.
-  Empty accepted blocks and block-option changes remain visible. An `estimation`
-  command shows once with its data options and other written settings.
-  Forecast-path cards show only the
-  changed variable inside its block context, with replaced values highlighted.
-  An unchanged named shock-group heading stays plain when its members change.
-- Notes explain missing details in plain language, once below the shown changes.
-  Notes about hidden details are omitted. **Text diff…**
-  in the top bar opens VS Code's native diff for a changed captured root or include,
-  including unsaved text, with filenames and revision labels in its tab title.
-  Out-of-date inputs disable source and text-diff actions
-  until Refresh. The comparison does not infer solver results or capture
-  unexecuted child files, external MATLAB functions or data-file contents.
-- The Layout and group expansion controls and settings, Change list and its Presentation
-  setting, Scope and Section controls and the Section setting, More actions,
-  the Partial comparison explainer and Update revision
-  are removed. Saved filters and selected group still restore
-  in the single model view.
-- **Expand macros** and **Refresh macro expansion** replace the effective-model
-  command labels. The preview remains read-only and expands macros and includes.
+Model Diff is redesigned around semantic model changes and captured source,
+with source navigation and access to VS Code's text diff. Macro expansion
+commands also use clearer names.
 
 ## v0.11.13
 
-- Block backgrounds stay visible while you type and while a new model result is pending. Tint refreshes after a 200 ms typing pause, without clearing first. Current results remove deleted or unfinished blocks; turning tint off still clears it immediately. Language checks continue to use unsaved edits.
+Block backgrounds stay visible while typing and while updated analysis is
+pending.
 
 ## v0.11.12
 
-- Model-local variables have completion, expression hover, definition and declaration navigation, scoped references and highlights, and safe editor rename. Definitions in earlier blocks of the same model remain available; ambiguous source edits are withheld.
-- Model-local syntax follows `#name = expression;`. Explicit declarations permit forward uses, duplicate definitions are checked across blocks of the same model, and shifted local uses remain legal. An unfinished or refused row creates no valid definition.
-- `dynare_model_info` returns separate model-local declaration and definition lists. Equation identifiers recognize `model_local`; extraction keeps the selected model's local dependencies. MCP references and rename continue to match identifier spelling.
+Model-local variables gain consistent syntax checks and editor support for
+completion, navigation, references and safe Rename. MCP inspection and
+extraction use the same model-local facts.
 
 ## v0.11.11
 
-- After a line-start `@#`, **Trigger Suggest** lists the macro directives and inserts the chosen name. Typing `#` in `@#` opens the same list; a prefix such as `@#def` selects `define`.
+Macro directives can be completed after `@#`, making them easier to discover
+and enter.
 
 ## v0.11.10
 
-- **Open changes** compares the invoking model with its previous revision, a selected revision, a branch or tag, or another `.mod` file. Before is the selected baseline; After is the invoking model. Historical includes come from the same fixed commit as their root. Split comparison tabs keep separate filters, and source actions open the exact side's written file. **Open root file text diff** shows the native editor diff.
-- `dynare_compare_models` also accepts a repository and explicit Git or saved Working inputs. It returns resolved commits and source policies with the comparison. Supplied-text calls keep their existing behavior. Incomplete or unavailable inputs return no authoritative change arrays.
+Model comparison extends to Git history and other files in the editor and MCP.
+Historical comparisons use the included files from the selected revision.
 
 ## v0.11.9
 
-- **E999** (Additional errors truncated) is removed from Explain and Help. The checker reports every diagnostic, so this truncation note has no current result. The code remains unused.
-- `shock_paths` values are read as complete Dynare expressions. Constructor errors such as `log(0)`, `log10(0)`, and division by zero are reported in the value. Lag and circular-reference checks use references that remain after Dynare simplifies the value, so `0*self.e` does not report E420.
-- Empty `steady_state_model` blocks report Dynare's `syntax error, unexpected END` on `end`, unless an earlier Parse refusal occurred in the block. E278 follows Dynare's numeric spelling and constructor rules for written denominator identities, and reports the constructed numerator. A Parse refusal suppresses shared Check diagnostics such as E021, W022, and W042. `verbatim` text continues through Dynare's `end` terminator, so a bare `end` inside it does not hide later statements or W042.
-- `resid` accepts only `resid;` and `resid(non_zero);`. Unused parameter and exogenous checks follow Dynare's surviving model uses. Calibration, initial-value, and shock expressions no longer hide unused parameters; observed exogenous names and PAC growth or component-growth uses remain exempt from E021. Ramsey conditional steady-state instruments are excluded from W042, and a policy parse error stops later W042 warnings.
-- MATLAB text after a non-assignment native entry stays on that line and no longer creates Dynare declarations, blocks, or namespace errors. Invalid continuation dots, block characters, model-local statement heads, bare block `end`, and incomplete regular shock rows now report Dynare’s parse sentence.
-- Macro syntax is checked before execution, including inactive branches and separately read includes. Macro names such as `inflation`, numerical branch results, generated native text, and expression effects in nested or repeated includes follow Dynare 7.2 within the stated limits. When written origins cannot be proved, I211 names the source context or source mapping limit and withholds model facts.
-- A native MATLAB assignment may read `oo_.steady_state` after `steady` or `perfect_foresight_solver`. The left-hand side is an unknown name, a `steady_state_model` value, or an external function. Double-quoted strings and Unicode after a block comment stay MATLAB text. Macro substitutions and loops keep the native line's end, including a substituted `...`. A declared parameter, a `#` local, and a `model_local_variable` still refuse a bare namespace name.
-- The bundled agent skill is renamed to **use-dynare** (folder `.agents/skills/use-dynare/`). Upstream credit to EconSolider/dynare-copilot is unchanged.
-- **use-dynare** no longer teaches how to launch MATLAB or Octave. Numerical Dynare runs go through the [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit).
-- **I210** (Number written in an equation) is no longer reported. A number written in an equation, including a square such as `x^2`, does not establish a problem.
-- A missing-semicolon report counts only the active equation. A discarded macro branch no longer looks like a second equation or an unmatched parenthesis. A real missing semicolon still reports E001, and its edit stays at the proved location.
-- A parameter assignment in the selected macro branch reports a missing semicolon when the next line is `@#endif` and the next statement is a block such as `model`, or when that assignment ends the file. A discarded branch stays quiet.
-- A quick fix applies only to the selected check. Another check at the same place is not substituted. With no check selected, each offered fix names its check. Ignore and Explain follow the same selection. Refactor templates stay separate. A captured Quick Fix, naming action, or refactor template runs only while the file and check that offered it are still current. A later edit, a withdrawn or ignored check, a new model check that does not repeat that revision, or a change of model owner does not apply that captured action again.
-- Macro arithmetic, ranges, casts, array operators, comprehensions, and `@#include` expressions expand in diagnostics and the effective model. A substitution is read with the surrounding model text, so it can join a name, open or close a comment, or change a quote. `@{…}` is evaluated in `//` and `%` comments. A `@#` directive at the start of a line inside `/* */` still runs. Two backslashes continue a directive; a `//` comment on that break is not part of the expression. `@#echo` and `@#echomacrovars` appear in `macro_messages` and in the Dygnosis output channel on Open or Refresh. `@#echomacrovars(save)` is assignment text in the preview, numbered from the written file. The first fatal macro error, missing include, or `@#error` stops that root: later echoes, includes, and equations are not produced, and earlier messages remain. A macro that passes an explicit limit stays Information I211 and withholds model checks. The limits are expression depth (128), value depth (128), execution depth (64), string size (1 MiB), range size (10,000), collection size, iteration work (1,000,000), output size (8 MiB), message size (1,000,000), and a non-UTF-8 byte slice.
-- **Show effective model** shades macro-expanded text with a faint background. Turn off `dynare.effectiveModel.macroTint` to remove it. Changing the tint keeps source jumps available and needs no Refresh.
-- **Go to written source** opens the editor that already has the file, and it works on any written text in the preview, including a macro-built name such as `beta_1`, which selects `beta_@{j}`. Show macro origins is removed.
-- When expansion is incomplete, the status item names the missing symbol, file, or expression, and the same words appear on that place in the file.
-- **Show effective model** keeps the spacing of the `.mod` file. Macro substitution and includes still expand. An older engine keeps the indented preview.
-- Each check is shown once in the editor and Problems panel.
-- Showing hidden checks does not restore results from obsolete inputs. Checks from another current owner of a shared include remain available.
-- A macro directive inside a `var`, `varexo`, `parameters`, or similar declaration list is no longer reported as an invalid name. Discarded-branch names stay quiet; an active illegal name such as `bad-name` still refuses.
-- `@#if` can test whether a value is in an array or tuple, for example `("8" in possible_signals)`.
-- **W070** (Parameter outside its conventional range) is no longer reported. A parameter name such as `beta` or `rho` can mean whatever the model uses.
+Macro expansion, native MATLAB handling and editor fixes are more reliable
+across includes and repeated macro execution. I210 and W070 are removed
+because their triggers do not establish a problem; the bundled agent skill is
+renamed `use-dynare`.
 
 ## v0.11.8
 
-- **Trigger Suggest** completes the lowest unused positive `eqN` equation tag
-  and adds a symbol's own `long_name`. **Add equation tags** and **Add long
-  names** fill missing metadata counted by I208 and I209, including in included
-  files. Existing values stay unchanged.
-- Macro interpolation expands inside quoted equation tags, `long_name` labels, and other quoted values. Repeated copies retain their written source and macro frames. A replacement is read again as model text when it closes the surrounding quote or adds a line break.
-- Complete files without a `model` block receive the applicable unused-parameter,
-  unused-exogenous and unused-endogenous checks on their written declarations.
-  An earlier Check error suppresses the later Transform refusal.
-- An empty aggregate `model; end;` reports `syntax error, unexpected END` on
-  `end`, before later unused-variable checks or writing summaries.
-- A refused namespace-qualified assignment reports E275 without the duplicate assignment-evaluation warning.
-- Plain comparison equations participate in the preprocessor equation count check.
-- Exogenous assignments in `initval` stay quiet in perfect-foresight workflows, including permanent shocks.
-
-- Incomplete required includes, parsing, or macro expansion withhold MCP equation counts. Model comparison waits for both inputs to be complete.
-- MCP tools reject a nonempty file map with a missing or invalid active root using an explicit invalid-parameters error. A matching root still permits an empty text overlay.
-- The `dynare_equations` schema states that `index` starts at zero, matching the existing selector.
-- Help supports native **Find** in the open page. The header search still finds topics.
-- The equation CodeLens says **Jump to equation** or **Jump to N equations**. Its picker opens the written equation before transformation.
-- Timing classes, model summaries, hovers, colors and Outline use Dynare's
-  end-of-period convention for valid `predetermined_variables` marks. Written
-  equations stay unchanged. MCP identifier `timing` remains the written offset;
-  the added `dynare_timing` gives the offset after this convention conversion.
+Editor actions and model checks better handle metadata, quoted macro values
+and predetermined-variable timing. MCP withholds authoritative counts and
+comparisons when required inputs are incomplete.
 
 ## v0.11.7
 
-- **Dygnosis: Open Help** opens one offline reference with search, reading history, topic links, examples and feature guides. Help is available before a model opens and when the engine is unavailable. First-use guidance and persistent Explorer actions make it easy to find.
-- **Explain this check** and **Explain a check** open the matching Help explanation and identify the active engine edition. Commands, check explanations, command options and MCP schemas come from the shipped manifest and engine.
-- Settings explain their controls; feature guides link to relevant settings. UI and recovery text use consistent action names. Equation pickers show source context and macro values without opaque internal IDs.
-- Parameter hovers and check explanations distinguish written values from unavailable calibration and numerical results. The checks keep their existing conditions and severity.
-- MCP input descriptions state how supplied text, include maps, active roots and disk paths work. The Marketplace is the main installation route; GitHub binaries support MCP without VS Code.
-- The previous user guides are removed. **Dygnosis Help** is the product reference.
-- The `check` and `explain` commands are removed. Open models use editor diagnostics. Unopened saved models use project checks or `dynare_workspace_diagnose`. Explanations use Help or `dynare_explain`. The executable still starts the language server with no arguments and MCP with `mcp`.
+Offline Dygnosis Help replaces the previous user guides and brings feature and
+diagnostic references into VS Code. The `check` and `explain` CLI commands are
+removed; use editor or MCP diagnostics for checks, and Help or MCP for
+explanations.
 
 ## v0.11.6
 
-- The Windows x64 release executable is about 9% smaller than in 0.11.5. The Windows x64 standalone archive is about 6% smaller, and the VSIX is about 5% smaller. The editor and agent transports both stay in the binary.
-- W011, "Parameter assignment cannot be evaluated", is reported in written source order. Macro assignments that share one source range keep a stable order.
+The Windows x64 package is smaller following a maintenance and binary-size
+review.
 
 ## v0.11.5
 
-- Model-expression diagnostics reach heterogeneous and replacement equations, epilogue expressions, planner and Ramsey expressions, OccBin constraints, trends and deflators, matched moments, VAR expectations, PAC expressions, and complementarity conditions.
-- External-function calls in those expressions require a declaration before use and the declared argument count. Calls with integer arguments remain function calls. Invalid variable calls and malformed argument lists use Dynare's messages and point to the written call or the offending token.
-- Symbol-role errors and deterministic-exogenous timing errors use Dynare's wording on these expressions. A later declaration or type change does not change an earlier use.
+Model-expression diagnostics cover more Dynare constructs, including
+heterogeneous equations, policy expressions and PAC/VAR models.
 
 ## v0.11.4
 
-- Duplicate checks reach heterogeneous shock rows for E111, E393, and E394, and link to the earlier row.
-- Includes in inactive macro branches and empty loops no longer produce false missing-file or syntax errors.
-- Steady-state assignments accept valid scalar targets and multiple outputs. A target of the wrong type is E481, `NAME has incorrect type`, using the type at that assignment. The editor marks the output name. An endogenous or temporary name used on the right side before it is assigned is E130.
-- Valid assigned outputs, excluded names, and qualified native calls no longer receive the repaired false diagnostics. Right-side symbol roles use Dynare's sentences.
-- Related-file discovery retains qualified external-function and derivative-helper names and resolves their package files.
-- Model expressions retain complete qualified external-function calls, require their declarations at the call, and check argument counts and malformed arguments with Dynare's sentences.
+Diagnostics better handle inactive includes, steady-state assignments,
+heterogeneous shocks and qualified external functions.
 
 ## v0.11.3
 
-- Saved `.mod` files in a workspace folder are checked when they are not open. `dynare.projectDiagnostics` is on by default. Progress is separate from the model-count bar. **Dygnosis: Recheck project** runs discovery again. Cancelling pauses that pass until an edit or Recheck.
-- `dynare.projectExcludePaths` keeps matching roots out of that discovery. An open model keeps its editor diagnostics. An excluded file that another model includes still affects that model. `.dyn`, loose, and untitled models keep their editor diagnostics. Turning project checks off leaves ordinary diagnostics on open files.
-- The extension page shows the shipped editor, structural Diff, and effective-model jumps.
+Workspace model checks are enabled by default for saved files, with progress,
+recheck and exclusion controls.
 
 ## v0.11.2
 
-- **Diff with…** compares the active model (Before) with a chosen model (After). It shows symbols, parameter values, aggregate equations, heterogeneous equations, and shock setup, with change and dimension filters. Each side opens its written source when that location is known. Edits, includes, and search-path changes mark the comparison stale until refresh.
-- Those written locations are also in MCP comparison results. Values and pairing stay the same.
-- The effective-model preview jumps to the written equation and to the macro directive that produced the row, including the loop value. **Refresh effective model** replaces the text and those jumps together. Edits and changed inputs disable jumps until refresh. The preview stays read-only.
-- **Dygnosis: Set up MCP for this project** writes project-local `.mcp.json` in a trusted workspace. The bundled engine is copied to a stable path. Managed updates keep that command path. On Windows, a running agent process keeps the current executable until it stops. Other servers in the file, and global agent settings, stay as they are.
+Structural model comparison and macro preview navigation connect model facts
+and generated equations to written source. Project-local MCP setup provides a
+stable executable path for agents.
 
 ## v0.11.1
 
-First VS Code extension. It checks open models and the files they include.
-
-- Adds a VS Code extension for `.mod`, `.dyn`, and `.inc`, for VS Code 1.102 or newer. The extension includes the engine for Windows, macOS, and Linux, on x64 and ARM64. `dynare.serverPath` selects another executable for the editor and for VS Code's agent tools. Those tools register before a model is opened.
-- Adds model counts, a Dynare model view, and equation navigation. An include asks which model owns it when more than one model is known. Block tinting follows the theme and can be set per block. **Browse equations** CodeLens is on. Declaration references and **Show effective model** CodeLens stay off until enabled.
-- **Ignore this check** hides one code in this window. **Show** and **Show all** restore hidden codes. The file, the command line, and agents still report those codes. **Explain this check** opens a read-only explanation. Existing fixes keep their diagnostic and source context.
-- **Show effective model** opens a read-only preview of the expanded model. That preview stays outside model checking.
-- The language server applies document opens and edits before it answers a later request. A request that is waiting can still be cancelled.
-- Prepares a VSIX and a standalone archive for each of the six targets above, with the engine, licenses, and checksums. Publication remains open.
+The first VS Code extension packages Dynare editing, model counts,
+diagnostics, macro previews and agent tools for Windows, macOS and Linux.
 
 ## v0.11.0
 
-Language server and agent tools.
-
-- Workspace folders and loose files keep separate include paths and cached inputs. A settings change sends the full configuration. Clients can opt in to `dynare/modelInfoChanged` when the model should refresh.
-- Adds `dynare/modelInfo`. Counts and timing match `dynare_model_info`. The response also has written statements, declarations, counted equations, block categories, related files, and source segments. Outline and folding stay in the file on screen. Incomplete expansion withholds counts and equation numbers. Equation numbers describe the written model before Dynare rewrites it.
-- Hover and completion show the written `long_name` and TeX name. Each can be hidden. Completion uses separate icons for endogenous variables, exogenous variables, and parameters, and offers empty block skeletons. Highlights mark declarations and assignment targets as writes, and other uses as reads.
-- Semantic tokens negotiate `dynareEndogenous`, `dynareExogenous`, `dynareParameter`, and `dynareModelLocal`. A client that does not support a role receives `variable`. Full and range responses use that legend.
-- Duplicate and include-cycle diagnostics link to the earlier written location in the editor and in MCP results. A fix in an unopened include uses the current source. An edit to an open file uses that file's version. W020 and W022 carry LSP Unnecessary. E021 does not.
-- Expression-value hints return for an assignment whose right side is not a plain number. The hint is the value at that assignment when the arithmetic is finite and known. Plain numbers stay quiet. Unknown execution, and macro copies that do not share one value, withhold the hint. Hover values and comparison values stay as they were.
+The shared language server and agent tools gain richer model information,
+source locations, semantic colors and expression-value hints.
 
 ## v0.10.2
 
-- Internal symbol history uses distinct types for symbol kinds and parser positions. Explicit removal-fallback queries preserve existing diagnostic and view behavior.
-
-- Subsample definitions, copies, and named prior/options uses follow macro execution order. An earlier written line in a later iteration can use a definition already executed in the previous iteration without false E428/E429.
-
-- Extract retains successful type changes for selected names in parser order. Space-separated declaration lists filter unselected names while preserving TeX and per-name options.
-- Finishes the written-parameter-list audit. Initial/history values, filter rows, shock/path targets, init2shocks, homotopy, shock groups, varobs, estimated-parameter roles, Markov parameter options, and prior copy sources use the type at the statement. Macro iterations keep their own parser context for ordinary names too.
-- Steady-state order, estimated skewness, parameters in shock values, deterministic-trend warnings, and PAC/VAR matching use final types. Completion, semantic colors, and compare names, kinds, and parameter values agree with the final-type views.
-
-- Named external_function declarations reject unknown options with E001. Repeated valid options keep the first value, as Dynare does, without false E271.
-- An unused trend_var or log_trend_var name can change to an ordinary type without false E295. Final counts and symbol lists include it while retaining its written trend declaration.
-- Names excluded before optim_weights report E317; later excluded planner or Ramsey-constraint references report E426. Earlier accepted uses keep their removal warrants.
-- The policy-generated discount parameter is known to later command lists, assignments, and duplicate checks. Its implicit creation keeps written declarations and counts intact.
-- Non-model expression calls register unknown functions and distinguish integer arguments from variable timing. A later declaration or command list uses their known function kind; valid calls no longer get E279/E280 as bare function-name uses.
-- `dsge_prior_weight` is reserved in Dynare blocks. Accepted parameter-assignment and policy-option expressions no longer get E001 for that name.
-- Command symbol lists use final types after `change_type`, including exclusion/restoration and a heterogeneous name made ordinary. E240 no longer rejects valid retyped names or accepts a heterogeneous name as an ordinary type.
-- A later declaration that clashes with an expression-created native local reports E030 with Dynare's declared-twice sentence.
-- Command symbol lists report E240 for native locals introduced by expressions, including a list written before the expression. Native MATLAB assignment heads remain undeclared.
-- Equation symbol classes, timing, model counts, and hover follow each name's final type after `change_type`. Declaration locations still point at the written declaration. Hover distinguishes `varexo_det` from ordinary `varexo`.
-- `E251`, `E182`, and `E255` use a name's type after `change_type`, not the list where it was declared. A `varexo` retyped to a parameter is no longer an exogenous in the planner objective or in `occbin_constraints`, and a parameter retyped to `varexo` is. A `var` retyped to a parameter can be used in `osr_params_bounds`; a parameter retyped to `var` cannot.
-- Policy instruments use their type when the policy command is read. Undeclared names use `E101`; declared names of the wrong type use `E317` with `N is not endogenous.` A later declaration or type change cannot validate an earlier instrument. Repeated macro iterations retain their own type checks.
-- `discretionary_policy` reports `E378` when an existing `optimal_policy_discount_factor` is not a parameter at the command. That earlier refusal withholds instrument errors on the same command. Native locals introduced by preceding expressions or by the command's options use the declared wrong-type instrument sentence.
-- A comment that mentions `differentiate_forward_vars` no longer hides the equation-count error. The option still withholds `E188` when it is written on `model(…)` or `model_options(…)`, because that option can add helper variables.
-
-- Diagnostic location mapping reuses joined include text and source maps. Document edits, disk reloads, and search-path changes invalidate that snapshot while preserving included-file diagnostic locations.
+A stability pass makes name types, source order, macro execution and
+extraction more consistent across diagnostics and model views.
 
 ## v0.10.1
 
-- Macro functions, scalar `@#for ... when ...` filters, and tuple loops expand in diagnostics and model views, with loop origins kept. A filtered-out iteration no longer invents an unknown name or a count warning. A range bound can use arithmetic: `1:N-1` ends at `N-1`. An undefined macro variable or function is `E063` at the directive that uses it, and a quoted macro string used as a name is reported without its quotes. A valid expression Dygnosis cannot evaluate shows `I211` Information, withholds the checks that need the expanded model, and marks model info, equations, compare, and the effective-model view as incomplete.
-- Equation counts use each name's final type after `change_type`. A `var` retyped to a parameter or `varexo` no longer counts for `W013`, `E186`, or `E188`, and a parameter or `varexo` retyped to `var` does.
-- Parameter checks follow `change_type`. `z = 1;` or `z.prior(…)` after `change_type(parameters) z;` is no longer `E378`; before it, or after `change_type(var)`, it still is. `W010`, `W022`, and `W121` use the final type, so a parameter retyped to `var` no longer gets them and a `var` retyped to a parameter does.
-- `E193` reports three PAC target-equation refusals visible in the written file: a nonlinear right side, a variable absent from `pac_target_info` components, or a listed component absent from the equation. That check runs before the missing-operator refusal. Unary, diff, and other rewrite-dependent forms remain quiet, as does a competing assignment that might be simplified first.
-- A written constant division by zero is `E189` on the first proven left- or right-hand side. A direct unused endogenous is `E186`. A plain aggregate or heterogeneous equation count that cannot create helper variables is `E188` or `E192`. A direct two-variable `EXPECTATION(0)` sum under `partial_information` is `E190`. Counts and substitutions that depend on rewrite stay quiet.
-- `W186` reports Dynare's auxiliary-name warning on a symbol list and stops that list. A duplicate name in the same list still warns.
-- `W212` warns when an `initval` or `endval` assignment, including `endval(learnt_in=1)`, names a variable that a later `model_remove` or `var_remove` still excludes. `change_type` after `var_remove` restores the name, so the warning stays quiet and an unused restored exogenous is `E021`.
-- An incomplete macro expansion withholds later workspace file and companion checks. The incomplete notice stays; a complete file still reports a real missing include or unknown value-file name.
-- Command option lists follow the Dynare 7.2 grammar for membership, separators, and simple numeric values. A missing comma after an option value is reported on the next option, where Dynare reports it. `estimated_params_remove` parses its rows and checks each name when that row is read.
-- Diagnostics and references from an included file use the included source. Batch diagnosis uses that same ownership.
+Language checks and macro expansion cover more of Dynare 7.2, with
+included-file locations retained and unverifiable model facts withheld.
 
 ## v0.10.0
 
-- A non-ASCII character in active Dynare syntax is `E001` with Dynare's `character unrecognized by lexer`. That includes a declaration (`var café;`), an equation (`y = café;`), and a shock name. Unicode comments, `long_name`, TeX names, equation-name strings, verbatim text, native MATLAB text, and a discarded `@#if` branch stay accepted, as does the complementarity operator.
-- A heterogeneity dimension whose written equations do not match its distinct written endogenous names warns `W208`, the same kind of count as aggregate `W013`. Leads and lags that Dynare later turns into helper variables are not part of this count. A repeated name counts once. An unresolved include or macro expansion withholds the count.
-- `W211` warns when an ordinary aggregate `varexo` is written with a lead in an aggregate equation or model-local definition and the file contains `stoch_simul` or `estimation`. The lead is legal; the warning asks for a timing review. `varexo_det`, heterogeneous variables, lags, `simul`, and any `perfect_foresight_*` command stay quiet. There is no switch that turns the warning off.
-- `x@{i}` in a macro loop is the identifier `x1`, `x2`, and so on, in diagnostics and model views.
-- Comment silencing (`// dygnosis:disable` and the `vsd:` names) is removed. The editor, the command line, and agents all show the same diagnostics. Hiding a check in one editor, without writing it into the file, is a 0.11 editor action.
-- Information codes `I208`, `I209`, and `I210` summarize missing equation `name` tags, missing declaration `long_name`s, and numeric literals written in model equations. Each note is one count for the compilation unit and points to its first affected source file, including through CLI, MCP and editor include handling. They are writing preferences, not Dynare refusals. An unresolved include or macro expansion withholds the count.
-- When that equation-name summary is shown, the editor can add `eq_N` tags to the counted equations it can edit safely. Existing tags stay. A generated `@#for` copy, an equation whose source is ambiguous, and an include that would name more than one equation are left unchanged. The action title counts those skips. Running it again does not change the file.
-- Compare pairs aggregate equations by name first. A unique name pairs across reordering; a repeated name pairs only when the normalized text and tags match. Equation rows include each side's name and tags, and `unmatched_same_name` groups leftovers that still share a name.
-- Compare diffs each heterogeneity dimension on its own, with the same name and tag pairing. Those rows are `heterogeneous_equations`. Aggregate equation lists stay aggregate-only.
-- Removes parameter-value inlay hints and the model-counts code lens. Folded assignment values stay on hover and in compare. Counts stay in `dynare_model_info`.
-- `dynare_format` formats a `.mod` file with the same rules as the editor. It returns the full text when the formatting changes. Empty or whitespace-only input, and a file that is already formatted, are `unchanged`. Formatting that cannot be done safely is `unsupported`. `formatIndent` is `tab` or 1–8 spaces, as in the editor.
-- `dynare_extract` returns a named equation group with the declarations, model locals, and heterogeneity dimension it needs. It retains required static/dynamic partners, OccBin constraint declarations, expanded equation order and macro iteration origins, including static rows. Supplied file maps are self-contained and preserve source-key identity. The text is a fragment, not a runnable or square model. An empty selector is an input error. No match is `empty`. Missing required setup, a PAC or VAR expectation, heterogeneous static replacement or OccBin regime context, or an unresolved include or macro returns `unsupported_context` with no fragment.
-- `dynare_workspace_diagnose` checks several root `.mod` files in one call. Pass a files map with the roots to check, or paths to files and directories. Map includes, inherited include search paths and companion existence use only supplied files; unprovided disk files cannot affect the report. Disk paths with redundant `.` components are diagnosed once. Each root is reported on its own, and one failure does not drop the others.
-- Compare reports `symbols_changed` for a shared name whose declaration kind, `long_name`, or TeX name differs, including metadata that was added or removed. Missing metadata stays empty rather than being filled with the symbol name. Parameter value changes stay in `changed_parameter_values`. A kind change across `var`, `varexo`, and `parameters` also stays in the existing added and removed name lists. A change between `varexo` and `varexo_det`, or between an aggregate declaration and the same command with a heterogeneity dimension, stays on that command's list and is reported in `symbols_changed`.
-- Signature help inside a known command's option list shows that command's catalog option names and descriptions and marks the option being typed. The editor asks again on `(`, `,`, and `=`. A comma inside parentheses, brackets, braces, a string, or a comment stays on the same option. `shocks(heterogeneity=…)` lists the heterogeneous shock options. A model equation, and a command with no catalog options, has no signature.
-- The editor offers named stochastic and deterministic shocks templates for eligible aggregate exogenous declarations. Clear stochastic or perfect-foresight contexts choose the appropriate form; ambiguous or mixed contexts offer both eligible forms. Each unfinished row and the wrapper are commented, and no standard deviation, period or value is filled in. Insertion stays outside every block, including unfinished blocks. A heterogeneous shocks block does not hide the actions, and nothing is applied automatically.
-- LSP requests, diagnostics and edits use UTF-16 positions, including supplementary Unicode characters. MCP retains its existing scalar coordinates. Public equation rows retain `text` and omit the redundant `lhs` and `rhs` fields.
+Editor and agent workflows expand with formatting, extraction, multi-model
+checks and richer comparison. Comment-based diagnostic silencing is removed so
+editor, CLI and agent results use the same checks.
 
 ## v0.9.0
 
-- Reads Dynare 7.2 heterogeneity dimensions, declarations, model blocks, shock rows, and the four heterogeneity commands while keeping aggregate and heterogeneous equations separate.
-- `dynare_model_info` shows aggregate counts and per-dimension heterogeneous counts; `dynare_equations` returns heterogeneous rows with dimension and source origin. Variable hover and outline use timing from heterogeneous equations.
-- `dynare_expand` and the editor's effective-model view include heterogeneous equations in their origin lists. The expand count covers all counted written model equations and reports aggregate and per-dimension counts separately.
-- Reports the written heterogeneity refusals (`E459`–`E479` and the recorded `E001` shapes) and warns on a second distinct heterogeneity dimension (`W207`). The per-dimension equation count after auxiliary equations stays silent (`E192`).
-- Adds Dynare 7.2 names and descriptions for the heterogeneity commands and options to completion, hover, and `dynare_list_options`. `SUM` is operator help. `heterogeneity` is listed on `shocks`. Hover and completion on `overwrite` inside `shocks(heterogeneity=…)` describe that dimension's variance settings; ordinary `shocks(overwrite)` keeps the regular-shocks sentence.
-- `shock_setup_changes` pairs heterogeneous variance, standard-error, covariance, and correlation rows by dimension, and shows the written settings, overwrite status, and source locations.
+Dynare 7.2 heterogeneity support adds syntax, checks, model information and
+shock comparison while keeping aggregate and per-dimension facts separate.
 
 ## v0.8.0
 
-- Reads Dynare 7.2 `var_model`, `trend_component_model`, `var_expectation_model`, `pac_model`, and `pac_target_info`, plus their named model operators. The independent `deterministic_trends` block is also checked. Parse summaries and equation tools still show the equations you wrote.
-- Reports the family's parse and PAC target checks, selected VAR/trend equation shape and tag errors, VAR and PAC expectation name errors, and written PAC growth, target, operator-use, and fixed generated-name clashes (`E432`–`E458`, `W206`). Shared `E021` and `E058` now reach applicable family fields. Diagnostics use the same core in LSP and MCP.
-- Adds Dynare 7.2 option names and descriptions to completion, hover, and `dynare_list_options`. These include bare `structural` and `eqtags`; `pac_target_info` body rows remain block content rather than command options.
-- Checks that require Dynare's generated equations, substituted expressions, or lag-derived auxiliary names remain silent until their source causes can be mapped. The installed 7.2 PAC example passes the check-stage smoke test; it prints an unused-parameter warning.
+VAR, trend-component and PAC model syntax gains help and applicable checks for
+semi-structural models.
 
 ## v0.7.0
 
-- Reads the written shock, path, learning-date, and database forms accepted by Dynare 7.2 and reports their parse, check, and written transform refusals (`E393`–`E425`). Existing `E343`/`E344` now reach deterministic shocks; `E111` catches covariance followed by correlation and skew/co-skew duplicates have their own codes.
-- Subsample declarations, copies, and named `prior` / `options` uses now report missing or repeated ranges (`E427`–`E430`) and invalid final target types at Write (`E431`). A model use after `var_remove` reports `E426`; command lists recognize removed and model-local names through `E240`. Written denominator cancellation reaches `E278`, and malformed DATE and handed-over command forms reach `E001`. Mixed-type `corr(A,B).options` uses `E379`.
-- W060 names missing selected shocks from `irf_shocks`, or warns for an unselected positive `irf` only when no plain exogenous shock has a written size. It stays quiet for bare declarations, bare `stoch_simul`, explicit zero size, an estimated standard error for the plain exogenous shock, a possible external size, and uncertain macro or include input. An observed-variable measurement-error estimate alone does not suppress it. Warnings in a file with resolved includes point to the active file.
-- Compare adds `shock_setup_changes` and a **Shock setup changes** markdown section for stochastic, scheduled, surprise, multiplicative, heteroskedastic, controlled, and terminal instructions. It shows written values, timing, learning dates, controls, and overwrite status, with source locations when the input text can be verified against the parsed file. It does not infer realized paths or solver results.
-- Compare also shows changed initial and terminal values, time settings, database references, and heteroskedastic data settings beside affected shocks; `shock_groups` and `init2shocks` changes have a separate **Shock analysis setup** section.
+Shock, path and subsample support expands, and model comparison shows changes
+to written shock and simulation setup.
 
 ## v0.6.1
 
-Pins language checks and optional honesty tests to Dynare 7.2.
-
-- **E243** uses 7.2's `histval: y(0) declared twice` sentence.
-- `histval_file` no longer offers `nobs` or `last_simulation_period`; either option reports Dynare's syntax error on its name. `initval_file` still accepts both.
-- Duplicate checks for shocks, histval, generated IRFs, filter initial state, observation trends, optimization weights, and estimated parameters compare entries within one block. Repeating an entry in a later block stays quiet. **E248** now checks a value reference only against parameters declared in the same block. Existing same-block refusals remain.
+Language checks and verification move to Dynare 7.2, with affected option and
+duplicate checks aligned to the new pin.
 
 ## v0.6.0
 
-Reads method of moments, matched moments and IRFs, and the IRF and moment calibration blocks, and reports the refusals Dynare makes on them. Codes `E382`–`E392`.
-
-Diagnostics implemented in this release:
-- **E382**–**E385** — `method_of_moments` needs `mom_method` (`GMM`, `SMM`, or `IRF_MATCHING`); GMM and SMM need `datafile`; `analytic_standard_errors` and `analytic_jacobian` need GMM; only one of the HP, one-sided HP, and bandpass filters.
-- **E386** — a `matched_moments` row is not a product of endogenous variables: `Matched moment expression has incorrect format`.
-- **E387**–**E392** — a matched-IRF shock that is not exogenous, a repeated endogenous/exogenous pair or tuple, `periods` and `values` (or `weights`) of different lengths, and a date written in `periods`.
-- **E058** and **E317** reach the name slots of `matched_irfs`, `matched_irfs_weights`, `irf_calibration`, and `moment_calibration`.
-- **E239** and **E240** reach the trailing name lists of `forecast`, `rplot`, `dynasave`, `dynatype`, and the shock-decomposition commands. `rplot` allows an endogenous or an exogenous.
-
-Other changes:
-- `dynare_list_options` knows `matched_moments`, `matched_irfs`, `matched_irfs_weights`, and `moment_calibration`.
-- A variable may be named after a block opener (`shocks`, `matched_irfs`) or after a command whose only lexer rule is at the start of a statement (`steady`, `dynatype`). `forecast`, `identification`, `simul`, `stoch_simul`, and `varobs` are still not names.
-- `model = 0.2;` and `steady = 0.9;` at the start of a statement are syntax errors, as they are in Dynare. Inside a block, `end` is the block closer, not a name.
+Method-of-moments, matched moment and IRF, and calibration syntax gain
+applicable checks.
 
 ## v0.5.5
 
-Adds the refusals the Dynare preprocessor prints only at its last stage, when it writes the MATLAB files — after its check and transform stages have already accepted the file. The file you edit is enough to decide each of them. Codes `E380`, `E381` and `W205`.
-
-Diagnostics implemented in this release:
-- **E380** — a `load_params_and_steady_state` file names something the loader cannot take: an `epilogue` helper, an `external_function` name (the `name=` value or a value named by `first_deriv_provided` / `second_deriv_provided`), or a trend variable. The four slots it accepts are parameter, endogenous, `varexo` and `varexo_det`. Dynare refuses only when writing: `Unsupported variable type for A in load_params_and_steady_state`.
-- **E381** — a `steady_state(…)` expression calls an `external_function`: `The expression inside a steady_state operator cannot contain external functions`. The operand walk descends, so a call nested under an operator is caught too.
-- **W205** — two rows of the same `shock_groups` block reuse a label: `shock group label 'g1' has been reused. Only using the last definition.` The comparison is within one block, as Dynare's is: two separate `shock_groups` blocks may share a label silently.
-
-Other changes:
-- **`W204` narrows**: the unsupported kinds above now error `E380` instead, and `W204` keeps the genuinely unknown name. All three kinds are positional, as Dynare's own reading is — a name declared only *after* the `load_params_and_steady_state` statement is still unknown to the loader, warns `Unknown symbol`, and stays `W204`.
-- **Writer-stage honesty**: the test harness can now spawn a run that reaches the MATLAB writer (bare `nopreprocessoroutput`, without `onlyjson`, which is what skips the writer), and cleans the `+<name>/` package directory such a run leaves beside the `.mod`.
-- The two writer-stage messages that no `.mod` shape can be matched against — the more-than-32-nested-parentheses warning (whose trigger is Dynare's generated text) and the excluded-name-still-in-`initval` refusal (which aborts Dynare with no message) — are documented as deliberately silent (`W187`, `E191`).
+Selected problems that Dynare reports when writing MATLAB output can be
+checked from the edited source.
 
 ## v0.5.4
 
-Adds the MS-SBVAR family: the `ms_*` commands, `sbvar`, `svar`, `markov_switching`, the `svar_identification` and `conditional_forecast_paths` blocks, `conditional_forecast`, `plot_conditional_forecast`, the `data` statement and the dotted `prior` statement are read instead of skipped, and the refuses Dynare makes on them are reported. Codes `E338`–`E379`.
-
-Diagnostics implemented in this release:
-- **The family's own refusals** (one code per distinct Dynare message): the `data` statement's file-or-series rule, its both-at-once rule and its `nobs` bound (`E338`–`E340`); `ms_estimation`'s `datafile` / `initial_year` gate (`E341`); `conditional_forecast`'s `parameter_set` (`E342`), and `conditional_forecast_paths`' mismatched period and value counts and its repeated `var` name (`E343`, `E344`); `markov_switching`'s required options, its chain and regime-count values, its chain order, its `parameters` types, its `restrictions` row shape, its regime bound, its repeated regime pair, its transition probabilities and their sums (`E345`–`E355`); `svar_identification`'s one-block and one-cholesky rules, its repeated lag, its repeated equation, its equation-number bound, its repeated name and its Qi-or-Ri restriction (`E356`–`E362`); `svar`'s choice of one of `coefficients` / `variances` / `constants` with its chain and equation values (`E363`–`E367`); the `ms_*` commands' mutually exclusive regime and filtered-probability options (`E368`–`E371`); and the `prior` statement's `shape`, `mean` / `mode`, `stdev` / `variance` and `domain` rules, the joint head's name count, a head that is not a parameter, and a `corr` head whose two names differ in type (`E372`–`E379`).
-- **`E227` reads the `data` statement in file order**: `estimation; data(file='x.csv');` is refused, as Dynare refuses it, while a `data` statement written before the `estimation` silences the refusal on both sides.
-- **The parsed family reaches the shared name checks**: an undeclared name in the `svar_identification` body, in a `conditional_forecast_paths` `var` row or in a `prior` head reports `E058`; a `var` row naming an exogenous reports `E317`; a `prior` head naming a parameter reports `E059`; and the trailing name lists of `ms_irf` and `plot_conditional_forecast` report `E239` / `E240` with Dynare's own text.
-- **Malformed family shapes** are `E001`, pointed at the token Dynare's parser stops on: a missing or empty option list, an option name the command does not take, a value written in a shape the grammar has no production for, an empty or malformed block body, and the statements `dsample(10, 10);`, `rplot(periods=10);`, `smoother2histval(periods=10);`, `var_remove(alpha);`, `y(1) = 2;` and the dotted heads whose body is not `prior`, `options` or `subsamples`.
-- **`E378` also fires on a top-level assignment** (`y = 3;`), where Dynare's `y is not a parameter` is the same sentence its `prior` head prints.
-
-Other changes:
-- The `data` statement is parsed: it replaces the presence-only record 0.5.2 kept for the `datafile` gate.
-- A line the Dynare lexer reads as native MATLAB text is no longer reported as a parameter assignment with a missing semicolon; `aaaa = 1` followed by `bbbb = 2;` is accepted here, as Dynare accepts it.
-- `sbvar`, `svar_identification`, `svar_global_identification_check`, `conditional_forecast_paths`, `plot_conditional_forecast` and the dotted `prior` are in `dynare_list_options`, in option hover and completion, and in command-name completion.
-
-Three shapes stay silent on purpose, because Dynare 7.1 prints no message for them: it aborts on `markov_switching(…, parameters=[<undeclared>])`, on a `restriction` whose expression is not a `coeff(…)` term, and on a `duration` written as a vector.
+MS-SBVAR, Markov switching, conditional forecast and prior syntax gain
+applicable checks.
 
 ## v0.5.3
 
-Adds the equation surgery family: the `model_remove(TAGS);` statement and the `model_replace(TAGS); … end;` block now change the model before the checks run, and the refuses they can cause are reported. Codes `E335`–`E337`.
-
-Diagnostics implemented in this release:
-- **Equation surgery**: a tag set that matches no equation of the model (`E335`), an excluded equation whose left side is not one endogenous variable and which carries no `endogenous` tag (`E336`, `model_remove` only), and the same endogenous excluded twice by one statement (`E337`). Each refusal points at the equation or the statement in the file you edit.
-- **`E256`** (a tag key used twice) also fires on the tag list of a surgery statement, where the preprocessor refuses the list while parsing it.
-- **Double-quoted strings**: a tag, a `shock_groups` name, a `bvar_*` string, or an option value written with double quotes is now `E001` — the preprocessor refuses `"…"` with `character unrecognized by lexer` in every one of those positions. Macro directives keep their double quotes, and single quotes are unaffected.
-- **Names read as of the statement that names them**: a symbol a later `model_remove` takes out of the model was still endogenous when an earlier statement used it, so `optim_weights` (`E317`) and `ramsey_constraints` (`E321`) written before the removal no longer report a false Error whichever way the symbol left, and `planner_objective` (`E251`) no longer does when the symbol is dropped. A statement written after the removal refuses the name, as before. A constraint's bound is read as of its own row, so a bound a removal re-typed still refuses (`E320`), with the preprocessor's own sentence. The same rule keeps `initval` / `endval` / `histval` / `varobs` entries for a symbol a removal drops from reading as undeclared, `filter_initial_state` reports the timing refusal (`E314`) instead of the undeclared one, and a removed equation's body joins the undeclared-name walk (`E020`).
-
-Other changes:
-- The equation list, the counts, and the `[static]` / `[dynamic]` check (`E208`) are the post-removal model, the way 7.1 sees it.
-- `model_remove` and `model_replace` are in `dynare_list_options` and in command-name completion.
-
-`exclude_eqs` / `include_eqs` are not covered: they are preprocessor invocation options rather than `.mod` syntax, and the editor never sees them.
+Equation removal and replacement are reflected in the inspected and checked
+model through `model_remove` and `model_replace`.
 
 ## v0.5.2
 
-Covers more of the checks the Dynare preprocessor performs. Codes `E219`–`E334` and `W201`–`W204`. No new command family.
-
-Diagnostics implemented in this release:
-- **Commands**: option walks on `estimation` (DSGE-VAR, the `datafile` gate, deprecated options), `sensitivity`, `identification`, `discretionary_policy`, `stoch_simul`, `prior_function` / `posterior_function`, and symbol lists on commands we already record.
-- **Blocks we now parse**: `histval`, `estimated_params_init` / `estimated_params_bounds`, `osr_params_bounds`, `epilogue`, `change_type`, `trend_var` / `log_trend_var` / `var(deflator=…)`, `filter_initial_state`, `optim_weights` contents, `ramsey_constraints` body, `external_function`, `init2shocks`, `homotopy_setup`, `shock_groups`.
-- **Names, types, macro**: MATLAB/Octave function name as a variable, external function as a bare `var`, macro type mismatches, `log(0)` and division by zero while building an expression, shock type checks (`var` / `stderr` / `cov` / `corr` / `skew`).
-- **Duplicates and reuse**: an equation tag twice, an option declared twice, an empty option vector, several `varobs` statements, namespace-qualified misuse, and Warnings for `restriction_fname` and a symbol listed twice.
-- **Reserved token**: `dsge_prior_weight` is refused wherever an expression is expected, while a declaration, `estimated_params`, or a model-local `#` may still name it.
-
-Other changes:
-- Trend declarations, epilogue helpers, and `external_function(name=…)` names join the duplicate-declaration pass (`E030` / `W031`).
-- An unused `varexo_det` no longer reports `E021` (Dynare accepts it), and the `first_deriv_provided` / `second_deriv_provided` function names join the duplicate-declaration pass (`E030` / `W031`).
-- `external_function` with the Jacobian and Hessian from the same non-top-level function is refused with Dynare's message (`E334`).
+Diagnostic coverage expands across existing Dynare commands, declarations,
+blocks and expressions.
 
 ## v0.5.1
 
-Until this release, some diagnostics arrived only by running a local Dynare preprocessor and overlaying its messages (`P###`), which is too late for typing. Some refuses appear only after Dynare rewrites the equations — those points do not land on the `.mod` you edit. 
-
-This release make dygnosis a second preprocessor, which drop the official one and implements all diagnostics itself, except rewrite refuses we cannot map back to the original `.mod`. Dynare 7.1 remains the ground truth.
-
-Diagnostics implemented in this release:
-- **Written clash**: Errors Dynare refuses only after transform, when the file you edit is enough to decide: `shocks(surprise)` without `occbin_constraints` (`E178`), `occbin_constraints` with an incompatible command (`E179`), `varexo_det` clashes, two `planner_objective` statements with Ramsey, `shock_paths` mixed with `shocks` / `mshocks` / `endval` / controlled paths.
-- **Check-class**: Errors Dynare refuses at check on syntax we already parse: empty model with a run command, perfect-foresight mixed with stochastic context, `model(linear)` nonsmooth ops, policy clashes, solver before setup, `initval`/`endval` order and `all_values_required`.
-- Warning Dynare also emits: nonsmooth ops in a stochastic context (`W200`). Isolated `log` in `model(linear)` stays extra Warning (`W140`).
-
-Other changes:
-- `dygnosis explain --list` marks each code **shared**, **skipped**, or **added**.
-- Include-cycle is extra Warning (`W062`), not Error.
+Diagnostics run in Dygnosis without starting the official preprocessor, while
+Dynare remains the reference for supported refusals and warnings.
 
 ## v0.5.0
-- **Occasional constraints (OccBin)**
-  - Parse `occbin_constraints` (name / bind / relax / error_*).
-  - Keep every source bind/relax equation; count a named pair as one for the equation-count gap.
-  - Store all equation tag keys (`bind`, `relax`, `mcp`, `static`, `dynamic`, …). Flag tags are empty strings.
-  - Parse complementarity `⟂` / `_|_` on a model equation.
-- **Check**
-  - Structural OccBin Errors they refuse at check (duplicate blocks, more than two constraints, missing regime / bind / name, …).
-  - Warning when an `mcp` tag is used instead of `⟂` (they warn and accept).
-- **Catalog / MCP**
-  - `dynare_list_options` knows `occbin_constraints`.
-  - `dynare_equations` rows include `tags` and, when present, complementarity.
+
+OccBin support adds syntax and structural checks for occasionally binding
+constraints, including equation tags and complementarity.
 
 ## v0.4.0
-- **Expand view**
-  - See the model after `@#if` / `@#for` / `@{…}` and includes (effective text).
-  - Jump from each counted equation to the source that wrote it (origin).
-- **MCP**
-  - `dynare_expand`: effective text and origin for each counted equation.
-  - `dynare_equations`: additive origin on each counted row.
-- **Editor**
-  - Command `dynare/showEffectiveModel`: source URI, effective text, and origins.
+
+Macro expansion can be inspected in the editor and MCP, with navigation from
+generated equations to their written origins.
 
 ## v0.3.0
-- **Companion files for one `.mod`**
-  - Jump from the `.mod` to companions (for example `FILENAME_steadystate.m`, a `datafile=`, a helper `.m`, `run_FILENAME.m`).
-  - MCP: `dynare_related_files` (includes and companions).
-- **Check changes**
-  - `W160` when a named data file or helper path does not resolve.
-  - `I050` (no `initval` / `steady_state_model` block) is quiet when `FILENAME_steadystate.m` is present.
+
+Companion-file discovery and navigation support models that use several files.
 
 ## v0.2.0
-- **Fewer false Errors**
-  - A `method_of_moments(...)` (and other catalog commands) option list was misread as missing semicolons (`E001`). That false Error stopped later checks on the same file, so real MoM / similar work could not start. Those lists are now one statement; only a true missing `;` still fires `E001`.
-  - Declaring the same name twice in `var`, `varexo`, or `parameters` is a Warning (`W031`), matching the preprocessor. Declaring one name as two different types, or `#` twice, is still an Error (`E030`).
-- **Equations as structured objects**
-  - New MCP tool `dynare_equations`: each model equation with index, lhs, rhs, and timing at each use, plus the equation-count gap. For Ramsey / discretionary policy with N instruments, the gap check (`W013`) expects −N equations, not a square file.
-  - `dynare_compare_models` diffs equations by index; it no longer lists shared equation text.
-  - Editor outline groups endogenous names by timing (predetermined, forward-looking, mixed, static).
-- **Check many files**
-  - `dygnosis check` can take a directory of `*.mod` files (skips `+` folders). Exit code 1 only when there are Errors, not Warnings.
+
+A more accurate model representation exposes structured equations for editor
+and agent workflows and reduces false diagnostics.
 
 ## v0.1.1
 
-Audit of v0.1.0 against two principles:
-
-- A check is built in instead of delegated to the Dynare preprocessor if (1) it is new; (2) it powers an editor feature; or (3) it helps while typing. The audit finds no check to drop.
-- Where checks exist in both dygnosis and the preprocessor, the latter is ground truth. Severity must match (Error or Warning in both), and parity is pinned by honesty tests.
-
-Other changes:
-
-- A check that exists only in dygnosis can only be a Warning or Information. A Warning means the preprocessor would accept the file, but something looks wrong.
-- MCP tools are simplified to nine.
+Shared diagnostic severities are aligned with Dynare, and additional Dygnosis
+guidance is distinguished from preprocessor refusals.
 
 ## v0.1.0
 
-This release of dygnosis is a Rust rewrite of the thin analysis core from [LLMacro-Dynare-LSP](https://github.com/pdwhoward/LLMacro-Dynare-LSP) (Python).
-
-### Behaviour vs the Python origin
-
-We aimed to keep the useful diagnostic **codes and messages**, not a line-for-line port of Python internals. Notable differences:
-
-- **Native analysis** — identifiers and spans come from a real expression tree, not regex over masked text. Spans usually underline the bad token, not the whole equation or block.
-- **Macros** — inactive `@#if` branches are dropped after expand; `@#for` unrolls fully (Python sometimes kept only the first list value or left dead text in slices).
-- **Fewer false alarms** — e.g. call names are not treated as undeclared variables; `1/0` is non-finite (W122), not a “missing value” warning; parameter-range checks look at top-level assignments only, not values inside `steady_state_model`.
-- **Where Python was wrong, Rust ships the fix** — e.g. I050 is “no `initval` / `steady_state_model` block” (no fake “compute steady state” solver path); some E001/auto-fix cases report only the missing `;`.
-- **One wording across transports** — LSP and MCP no longer disagree on the same warning text where Python did.
-
-### What we left out (numerical / Dynare compute)
-
-These stay with Dynare, not this binary:
-
-- Numerical steady-state solve and “compute steady state” / auto-solve on edit
-- Blanchard–Kahn / eigenvalue checks
-- Identification and static Jacobian singularity
-- Per-equation numerical residuals
-- Running a full Dynare/MATLAB session from the language server
-- MCP/LSP surfaces that only wrapped those numerics
-- Structural block partitioning that needed numeric graph tools (Dulmage–Mendelsohn)
+The Rust analysis core is introduced, based on
+[LLMacro-Dynare-LSP](https://github.com/pdwhoward/LLMacro-Dynare-LSP), with
+shared editor and agent diagnostics. Numerical model solving remains with
+Dynare and MATLAB or Octave.
