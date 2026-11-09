@@ -64,7 +64,7 @@ function activity(type: string | MessageSignature, param: unknown, rootForDocume
   const method = typeof type === "string" ? type : type.method;
   if (method.startsWith("workspace/") && method !== "workspace/executeCommand") return undefined;
   if (method === "workspace/executeCommand" && record(param) && typeof param.command === "string") {
-    if (/^dynare\/(?:workspace|recheckWorkspace|cancelWorkspace|compare|validateComparison)/.test(param.command)) return undefined;
+    if (/^dynare\/(?:workspace|recheckWorkspace|cancelWorkspace|documentOwners|compare|validateComparison)/.test(param.command)) return undefined;
     const selected = Array.isArray(param.arguments) && param.arguments.length === 1 ? target(param.arguments[0], rootForDocument) : undefined;
     if (!selected) return undefined;
     const label = commands[param.command];

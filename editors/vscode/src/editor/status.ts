@@ -195,7 +195,7 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
       if (!root) {
         updateContent({
           text: "$(info) Dynare: model owner needed",
-          tooltip: "This file needs a model owner for model counts. Run Dygnosis: Choose model owner from the Command Palette. Open its parent model first if no owner is listed.",
+          tooltip: "This file needs a model owner for model counts. Run Dygnosis: Choose model owner from the Command Palette. Dygnosis can find owners from workspace checks.",
           accessibilityLabel: `Dynare model counts need a model owner. Run Dygnosis: Choose model owner from the Command Palette. ${outlineClickInstruction}`,
         });
         return;

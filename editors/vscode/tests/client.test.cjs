@@ -93,7 +93,8 @@ function service(options = {}) {
       const client = {
         initializeResult: { serverInfo: { name: "dygnosis", version: "one" }, capabilities: {
           experimental: { dygnosis: { modelInfo: { schema_version: 1 }, ...(options.analysis ? {analysisConfiguration:{schema_version:1}} : {}), ...(options.documentContext ? { documentContext: { schema_version: 1, command: "dynare/setDocumentContext" } } : {}) } }, documentSymbolProvider: true,
-          executeCommandProvider: { commands: ["dynare/modelInfo", "dynare/showEffectiveModel", ...(options.documentContext ? ["dynare/setDocumentContext"] : [])] },
+          executeCommandProvider: { commands: ["dynare/modelInfo", "dynare/showEffectiveModel", ...(options.documentContext ? ["dynare/setDocumentContext"] : []),
+            ...(options.documentOwners ? ["dynare/documentOwners"] : [])] },
         } },
         sendNotification: (method, params) => { host.notifications.push({ method, params }); return options.notify?.(method, params) ?? Promise.resolve(); },
         onNotification: (_method, listener) => { client.notify = listener; return new Disposable(); },
@@ -856,6 +857,56 @@ test("navigation capabilities advertise snapshot comparisons and effective-previ
   assert.deepEqual(capabilities.experimental.dygnosis.effectivePreview, { navigation_schema_version: 1, dependency_candidates: true });
   assert.equal(capabilities.experimental.dygnosis.modelInfo.schema_version, 1);
   assert.equal(capabilities.experimental.dygnosis.workspaceStatusChanged, true);
+});
+test("a completed workspace pass replaces stale owner results without requesting closed parent models", async () => {
+  reset();
+  const child = { uri: Uri.parse("file:///workspace/part.inc"), languageId: "dynare", version: 1 };
+  const first = "file:///workspace/a.mod", second = "file:///workspace/b.mod";
+  const previous = deferred(), requests = [];
+  host.documents.push(child);
+  const result = (owner_roots, workspace_coverage) => ({
+    schema_version: 1, document_uri: child.uri.toString(), document_version: child.version, owner_roots, workspace_coverage,
+  });
+  let response = result([], "pending");
+  const client = service({ documentOwners: true, request: (_method, params) => {
+    requests.push(params.command);
+    return response;
+  } });
+  try {
+    assert.deepEqual(await client.ownerChoices(child), []);
+    assert.match(client.noModelOwnersMessage(child.uri), /still running/);
+    client.workspaceOwnerPassChanged(1, "pending");
+    response = previous.promise;
+    const stale = client.ownerChoices(child);
+    await flush();
+    client.workspaceOwnerPassChanged(1, "complete");
+    response = result([first, second], "complete");
+    assert.deepEqual((await client.ownerChoices(child)).map(String), [first, second]);
+    previous.resolve(result([first], "pending"));
+    await stale;
+    assert.equal(client.sourceMenuFacts(child, client.knownOwners(child.uri)).hasModelOwnerChoice, true);
+    assert.deepEqual((await client.ownerChoices(child)).map(String), [first, second]);
+    client.workspaceOwnerPassChanged(2, "complete");
+    response = result([second], "complete");
+    assert.equal((await client.rootForDocument(child)).toString(), second);
+    assert.deepEqual(requests, Array(4).fill("dynare/documentOwners"));
+  } finally { await client.shutdown(); }
+});
+test("a transient workspace owner lookup failure reports its cause and allows a retry", async () => {
+  reset();
+  const child = { uri: Uri.parse("file:///workspace/part.inc"), languageId: "dynare", version: 1 };
+  host.documents.push(child);
+  let requests = 0;
+  const client = service({ documentOwners: true, request: () => ++requests === 1
+    ? Promise.reject(new Error("Test lookup failed"))
+    : { schema_version: 1, document_uri: child.uri.toString(), document_version: 1, owner_roots: [], workspace_coverage: "incomplete" } });
+  try {
+    assert.deepEqual(await client.ownerChoices(child), []);
+    assert.match(client.noModelOwnersMessage(child.uri), /Test lookup failed/);
+    assert.deepEqual(await client.ownerChoices(child), []);
+    assert.match(client.noModelOwnersMessage(child.uri), /checks are incomplete/);
+    assert.equal(requests, 2);
+  } finally { await client.shutdown(); }
 });
 test("chosen context reads only a proven selected owner and restores it on a separate model-info event", async () => {
   reset(); const client = service(); await client.ensureStarted();

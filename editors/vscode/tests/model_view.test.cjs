@@ -249,8 +249,11 @@ test("owner discovery can start the client before owner facts pin its instance",
   assert.equal(env.service.validations[0].instance, 2); env.registration.dispose();
 });
 test("no known owner explains recovery without selecting an arbitrary root", async () => {
-  const env = setup(document("file:///workspace/part.inc")); await env.run("chooseModelOwner");
-  assert.equal(env.host.messages.at(-1), "No known model owns this include. Open its model root first.");
+  const env = setup(document("file:///workspace/part.inc"));
+  const message = "Workspace checks are still running. Try choosing a model owner again when they finish.";
+  env.service.noModelOwnersMessage = current => { assert.equal(current, env.doc.uri); return message; };
+  await env.run("chooseModelOwner");
+  assert.equal(env.host.messages.at(-1), message);
   assert.equal(env.service.selected.size, 0); env.registration.dispose();
 });
 test("disposal removes commands and prevents pending or retained callbacks from acting", async () => {

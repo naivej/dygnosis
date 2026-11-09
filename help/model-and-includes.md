@@ -7,15 +7,18 @@ A **model root** is a top-level `.mod` or `.dyn` file. Included files (such as
 values and declarations from the parent model that includes them—their **model
 owner**.
 
-- **Single parent model**: Dygnosis links the included file to its owner
-  automatically. If an `.inc` helper is unlinked, open its parent `.mod` or
-  `.dyn` file once to connect them.
+- **Single parent model**: Dygnosis links the included file to its known owner
+  automatically.
 - **Shared across several models**: Run **Dygnosis: Choose model owner** from
   the Command Palette or editor context menu to pick which parent model
   provides context for diagnostics, **Outline**, navigation and macro expansion.
 - **Standalone `.mod` or `.dyn` file**: When a `.mod` or `.dyn` file is also
   included by another model, run **Dygnosis: Treat this file as a model root**
   from the Command Palette or editor context menu to check it on its own.
+
+Workspace checks find owners from saved models, so you can open an included
+`.mod`, `.dyn` or Dynare `.inc` file without opening its parents. If workspace
+checks are off or incomplete, open a parent model to connect the included file.
 
 Hover over an `@#include` path or a recognized parameter, data or
 external-function filename in the editor to open it through VS Code's document

@@ -475,6 +475,44 @@ impl Inner {
 }
 
 impl Backend {
+    pub(super) fn document_owners(&self, arguments: &[Value]) -> Value {
+        let Some(document) = arguments
+            .first()
+            .and_then(|value| value.get("document_uri"))
+            .and_then(Value::as_str)
+            .and_then(|value| Url::parse(value).ok())
+            .filter(|uri| matches!(uri.scheme(), "file" | "untitled"))
+        else {
+            return json!({"error":"Provide a file or untitled document URI to look up model owners.", "code":"INVALID_ARGUMENTS"});
+        };
+        let inner = self.lock_inner();
+        let checks = &inner.workspace_checks;
+        let coverage = if !inner.settings.workspace_diagnostics || inner.settings.folders.is_empty()
+        {
+            "unavailable"
+        } else if checks.cancelled {
+            "incomplete"
+        } else if !checks.finished() {
+            "pending"
+        } else if !checks.discovery_failures.is_empty()
+            || checks
+                .roots
+                .values()
+                .any(|entry| matches!(entry.state, "incomplete" | "failed"))
+        {
+            "incomplete"
+        } else {
+            "complete"
+        };
+        json!({
+            "schema_version": 1,
+            "document_uri": document,
+            "document_version": inner.document(&document).map(|doc| doc.version),
+            "owner_roots": inner.known_owner_roots(&document),
+            "workspace_coverage": coverage,
+        })
+    }
+
     pub fn workspace_status(&self) -> Value {
         let inner = self.lock_inner();
         inner

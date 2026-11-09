@@ -1,5 +1,6 @@
 // Check the rendered editor context menu in an isolated native VS Code host.
 const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
 const path = require("node:path");
 const vscode = require("vscode");
 const { nativeWorkbench } = require("./native_webview.cjs");
@@ -41,6 +42,100 @@ async function closeMenu() {
   });
 }
 
+// Guard discovery of saved model owners before any parent is opened in VS Code.
+async function checkColdOwners(service, workspaceRoot, evidence, waitFor) {
+  const settings = vscode.workspace.getConfiguration("dynare");
+  const previous = settings.inspect("workspaceDiagnostics")?.workspaceValue;
+  const folder = path.join(workspaceRoot, "menu-cold-owners");
+  const parentNames = ["cold-a.mod", "cold-b.dyn", "cold-single.mod"];
+  const parentPaths = parentNames.map(name => path.join(folder, name));
+  const sharedPath = path.join(folder, "cold-shared.mod");
+  const incPath = path.join(folder, "cold-shared.inc");
+  const singlePath = path.join(folder, "cold-single-include.mod");
+  let menuOpen = false;
+  try {
+    await settings.update("workspaceDiagnostics", false, vscode.ConfigurationTarget.Workspace);
+    await fs.mkdir(folder, { recursive: true });
+    await Promise.all([
+      fs.writeFile(sharedPath, "y=1; // cold-mod-site\n"),
+      fs.writeFile(incPath, "z=1; // cold-inc-site\n"),
+      fs.writeFile(singlePath, "q=1; // cold-single-site\n"),
+      ...parentPaths.slice(0, 2).map(file => fs.writeFile(file, 'var y z;\nmodel;\n@#include "cold-shared.mod"\n@#include "cold-shared.inc"\nend;\n')),
+      fs.writeFile(parentPaths[2], 'var q;\nmodel;\n@#include "cold-single-include.mod"\nend;\n'),
+    ]);
+    await settings.update("workspaceDiagnostics", true, vscode.ConfigurationTarget.Workspace);
+    await waitFor(async () => {
+      const status = await service.execute("dynare/workspaceStatus");
+      return status?.complete && parentPaths.every(file => status.roots.some(root => vscode.Uri.parse(root.root_uri).fsPath.toLowerCase() === file.toLowerCase() && root.state === "checked"));
+    }, "workspace checks complete for saved unopened parents");
+    const assertParentsClosed = () => assert.ok(parentPaths.every(file => !vscode.workspace.textDocuments.some(doc => doc.uri.fsPath.toLowerCase() === file.toLowerCase())), "cold owner parents remain unopened");
+    assertParentsClosed();
+    let incDocument;
+    for (const [filename, marker] of [[sharedPath, "cold-mod-site"], [incPath, "cold-inc-site"]]) {
+      const document = await vscode.workspace.openTextDocument(filename);
+      if (filename === incPath) incDocument = document;
+      await vscode.window.showTextDocument(document);
+      await waitFor(() => service.knownOwners(document.uri).filter(owner => parentPaths.slice(0, 2).some(file => owner.fsPath.toLowerCase() === file.toLowerCase())).length === 2, `${marker} receives two workspace owners`);
+      assertParentsClosed();
+      await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
+      await waitFor(async () => {
+        const rows = await openMenu(marker, waitFor); menuOpen = true;
+        const found = rows.some(row => row.text.includes("Choose model owner"));
+        await closeMenu(); menuOpen = false;
+        return found;
+      }, `${marker} native menu offers Choose model owner`);
+      // The isolated hidden host has unreliable menu-item pointer activation.
+      // Keep the real text right-click and use the command's documented URI.
+      let commandState = "pending", candidates, observedUi;
+      void vscode.commands.executeCommand("dygnosis.chooseModelOwner", document.uri).then(() => { commandState = "resolved"; }, error => { commandState = String(error); });
+      await waitFor(async () => {
+        observedUi = await evaluate(`(() => { const roots=[document,...[...document.querySelectorAll('.shadow-root-host')].map(e=>e.shadowRoot).filter(Boolean)]; return roots.flatMap(root=>[...root.querySelectorAll('.quick-input-widget,.notification-toast')]).filter(e=>e.getClientRects().length && getComputedStyle(e).display!=='none').map(e=>({text:e.innerText,placeholder:e.querySelector('input')?.placeholder,rows:[...e.querySelectorAll('.monaco-list-row')].map(r=>r.innerText)})); })()`);
+        candidates = observedUi.find(item => item.placeholder === "Choose the model that owns this include")?.rows;
+        return candidates?.some(row => row.includes("cold-a.mod")) && candidates?.some(row => row.includes("cold-b.dyn"));
+      }, `${marker} native owner picker lists both unopened parents`).catch(async error => {
+        error.message += `; command=${commandState}; candidates=${JSON.stringify(candidates)}; UI=${JSON.stringify(observedUi)}`;
+        throw error;
+      });
+      await nativeWorkbench(async send => {
+        await send("Input.insertText", { text: "cold-b.dyn" });
+        await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+        await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+      });
+      await waitFor(() => service.chosenRootForDocument(document)?.fsPath.toLowerCase() === parentPaths[1].toLowerCase(), `${marker} accepts the unopened .dyn parent`);
+      assertParentsClosed();
+      evidence.checks.push(`workspace discovery offers both unopened parents for ${path.extname(filename)}; the native picker selects the closed .dyn parent`);
+    }
+    assert.equal(service.chosenRootForDocument(incDocument)?.fsPath.toLowerCase(), parentPaths[1].toLowerCase(), "the include retains its explicit owner before parent removal");
+    const beforeRemoval = await service.execute("dynare/workspaceStatus");
+    await fs.writeFile(parentPaths[1], "var y; model; y=1; end;\n");
+    await waitFor(async () => {
+      const status = await service.execute("dynare/workspaceStatus");
+      const owners = service.knownOwners(vscode.Uri.file(sharedPath));
+      return status?.complete && status.pass_revision > beforeRemoval.pass_revision &&
+        owners.some(owner => owner.fsPath.toLowerCase() === parentPaths[0].toLowerCase()) &&
+        !owners.some(owner => owner.fsPath.toLowerCase() === parentPaths[1].toLowerCase());
+    }, "workspace recheck removes the former closed parent from owner choices");
+    assertParentsClosed();
+    evidence.checks.push("editing an unopened parent to remove an include removes that parent from current workspace owners");
+    const single = await vscode.workspace.openTextDocument(singlePath);
+    await vscode.window.showTextDocument(single);
+    await waitFor(() => service.knownOwners(single.uri).some(owner => owner.fsPath.toLowerCase() === parentPaths[2].toLowerCase()), "single model include receives its unopened workspace owner");
+    await waitFor(async () => (await service.rootForDocument(single))?.fsPath.toLowerCase() === parentPaths[2].toLowerCase(), "single workspace owner is selected");
+    await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
+    await waitFor(async () => {
+      const rows = await openMenu("cold-single-site", waitFor); menuOpen = true;
+      const found = rows.some(row => row.text.includes("Treat this file as a model root"));
+      await closeMenu(); menuOpen = false;
+      return found;
+    }, "single cold model include offers Treat this file as a model root");
+    assertParentsClosed();
+    evidence.checks.push("a model include with one unopened workspace owner offers Treat this file as a model root");
+  } finally {
+    try { if (menuOpen) await closeMenu(); }
+    finally { await settings.update("workspaceDiagnostics", previous, vscode.ConfigurationTarget.Workspace); }
+  }
+}
+
 // Guard against adding analysis or owner discovery to menu/caret events.
 async function traceLargeMenu(service, workspaceRoot, evidence, { waitFor, currentSnapshot, writeObservedInput }) {
   const filename = path.join(workspaceRoot, "menu-large-trace.mod");
@@ -50,24 +145,33 @@ async function traceLargeMenu(service, workspaceRoot, evidence, { waitFor, curre
   const editor = await vscode.window.showTextDocument(document);
   await currentSnapshot(service, document, () => service.modelInfo(document.uri), "large menu model snapshot");
   await waitFor(() => service.sourceMenuFacts(document, service.knownOwners(document.uri)).hasNamedEquation, "large model menu facts are warm");
+  if (vscode.workspace.getConfiguration("dynare").get("workspaceDiagnostics")) {
+    await waitFor(async () => {
+      const status = await service.execute("dynare/workspaceStatus");
+      return status?.complete && status.roots.some(root => vscode.Uri.parse(root.root_uri).fsPath.toLowerCase() === filename.toLowerCase() && root.state === "checked");
+    }, "large model workspace pass completes before the menu trace");
+  }
   editor.revealRange(new vscode.Range(502, 0, 502, 0), vscode.TextEditorRevealType.InCenter);
   await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
   await vscode.commands.executeCommand("notifications.clearAll");
-  // Let work already queued by opening and revealing the document finish before
-  // starting the measured interval. The wrappers count even cached modelInfo calls.
-  await new Promise(resolve => setTimeout(resolve, 500));
+  // The wrappers count even cached modelInfo calls. Wait for already queued
+  // owner and status work to settle before starting the measured interval.
   const calls = [], originals = new Map();
+  let lastCall = Date.now();
   for (const name of ["execute", "modelInfo", "ownerChoices"]) {
     const original = service[name];
     assert.equal(typeof original, "function", `${name} is available for the menu trace`);
     originals.set(name, original);
     service[name] = function (...args) {
       calls.push(name === "execute" ? `${name}:${args[0]}` : name);
+      lastCall = Date.now();
       return original.apply(this, args);
     };
   }
   let menuOpen = false;
   try {
+    await waitFor(() => Date.now() - lastCall >= 1000, "large model owner and status activity settles before tracing");
+    calls.length = 0;
     for (const index of [500, 501, 502]) {
       editor.selection = new vscode.Selection(index + 2, 0, index + 2, 0);
       const label = `trace_${String(index).padStart(4, "0")}`;
@@ -181,6 +285,7 @@ async function checkMenu(service, workspaceRoot, evidence, { waitFor, currentSna
     }, "shared source offers Choose model owner");
     evidence.checks.push("a shared model with two known owners offers Choose model owner in its text menu");
     await traceLargeMenu(service, workspaceRoot, evidence, { waitFor, currentSnapshot, writeObservedInput });
+    await checkColdOwners(service, workspaceRoot, evidence, waitFor);
     await vscode.window.showTextDocument(document);
     await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
     await settings.update("editorActions", ["toolbar"], vscode.ConfigurationTarget.Workspace);

@@ -8,14 +8,22 @@ import {
 } from "vscode-languageclient/node";
 import { Binary, resolveBinary } from "./binary";
 import { ClientLifecycle, ManagedClient } from "./lifecycle";
-import { analysisSettingsChanged, configurationSnapshot, serverSettingsChanged } from "./settings";
+import { analysisSettingsChanged, configurationSnapshot, serverSettingsChanged, workspaceDiagnosticsSetting } from "./settings";
 import { AnalysisConfiguration, AnalysisContext, PresetBinding, ModelInfo, parseAnalysisContext, parseModelInfo, record, timingModifiers, tokenRoles } from "./protocol";
 import type { Range } from "./protocol";
 import { renameSymbol } from "./rename";
-import { sameSourceUri as sameUri } from "./source_uri";
+import { sameSourceUri as sameUri, sourceUriKey } from "./source_uri";
 import { ModelActivity, RequestActivity } from "./activity";
 
 interface ClientProcess extends ManagedClient { readonly client: LanguageClient }
+type OwnerCoverage = "unavailable" | "pending" | "incomplete" | "complete";
+interface DocumentOwners {
+  version: number;
+  result: Promise<void>;
+  roots?: string[];
+  coverage?: OwnerCoverage;
+  error?: string;
+}
 export interface ClientDependencies {
   resolve?: typeof resolveBinary;
   create?: (binary: Binary, output: vscode.OutputChannel, middleware: Middleware, settings: unknown, capture: (params: InitializeParams) => void) => ClientProcess;
@@ -129,6 +137,8 @@ export class DygnosisClient implements vscode.Disposable {
   private readonly freshTails = new Map<string, Promise<void>>();
   private readonly cancelFreshRequests = new Map<() => void, string>();
   private readonly infos = new Map<string, ModelInfo>();
+  private readonly documentOwners = new Map<string, DocumentOwners>();
+  private workspaceOwnerPass: string | undefined;
   private readonly selectedOwners = new Map<string, string>();
   private readonly explicitOwnerDocuments = new Set<string>();
   private readonly ownedDocuments = new Set<string>();
@@ -275,6 +285,7 @@ export class DygnosisClient implements vscode.Disposable {
     ++this.instance;
     this.clearDocumentContexts();
     this.documentContextSupported = false;
+    this.workspaceOwnerPass = undefined;
     this.analysisSupported = false;
     this.analysisAttempts.clear(); this.acceptedAnalysis.clear();
     this.invalidateInputs({ reason: "lifecycle" });
@@ -290,6 +301,7 @@ export class DygnosisClient implements vscode.Disposable {
       if (affected(key.split("\n", 1)[0])) { request.cancellation.cancel(); request.cancellation.dispose(); this.cache.delete(key); }
     }
     for (const root of this.infos.keys()) if (affected(root)) this.infos.delete(root);
+    this.documentOwners.clear();
     this.invalidated.fire(event);
     this.changed.fire();
     this.scheduleRootRefresh();
@@ -610,16 +622,78 @@ export class DygnosisClient implements vscode.Disposable {
     }
   }
   knownOwners(document: vscode.Uri): vscode.Uri[] {
+    const workspaceOwners = this.usesWorkspaceOwners(document);
+    const known = workspaceOwners ? this.documentOwners.get(document.toString())?.roots ?? [] : [];
     const roots = [...this.infos.values()].flatMap(info => [
       ...(!sameUri(vscode.Uri.parse(info.root_uri), document) && this.executesDocument(info, document) ? [info.root_uri] : []),
-      ...(sameUri(vscode.Uri.parse(info.document_uri), document) ? info.owner_roots.filter(root => !sameUri(vscode.Uri.parse(root), document)) : []),
+      ...(!workspaceOwners && sameUri(vscode.Uri.parse(info.document_uri), document) ? info.owner_roots.filter(root => !sameUri(vscode.Uri.parse(root), document)) : []),
     ]);
-    return [...new Set(roots)].map(root => vscode.Uri.parse(root));
+    const owners = new Map<string, vscode.Uri>();
+    for (const root of [...known, ...roots]) {
+      const uri = vscode.Uri.parse(root);
+      if (!sameUri(uri, document)) owners.set(sourceUriKey(uri), uri);
+    }
+    return [...owners.values()];
+  }
+  private usesWorkspaceOwners(document: vscode.Uri): boolean {
+    return document.scheme === "file" && !!vscode.workspace.workspaceFolders?.length &&
+      workspaceDiagnosticsSetting(this.log) &&
+      this.client?.initializeResult?.capabilities.executeCommandProvider?.commands.includes("dynare/documentOwners") === true;
+  }
+  workspaceOwnerPassChanged(pass: number, phase: string): void {
+    if (!this.client?.initializeResult?.capabilities.executeCommandProvider?.commands.includes("dynare/documentOwners")) return;
+    const key = `${pass}:${phase}`;
+    if (this.workspaceOwnerPass === key) return;
+    this.workspaceOwnerPass = key;
+    this.documentOwners.clear();
+    this.changed.fire();
+  }
+  private async refreshDocumentOwners(document: vscode.TextDocument): Promise<void> {
+    if (document.isClosed || document.uri.scheme !== "file" || !vscode.workspace.workspaceFolders?.length ||
+        !workspaceDiagnosticsSetting(this.log)) return;
+    await this.ensureStarted();
+    if (this.closed || document.isClosed || !this.usesWorkspaceOwners(document.uri)) return;
+    const key = document.uri.toString(), version = document.version;
+    const cached = this.documentOwners.get(key);
+    if (cached?.version === version && cached.error === undefined) return cached.result;
+    const current = (): boolean => !this.closed && !document.isClosed && document.version === version && this.documentOwners.get(key) === request;
+    const result = this.execute("dynare/documentOwners", [{ document_uri: key }]).then(value => {
+      if (!current()) return;
+      if (!record(value) || value.schema_version !== 1 || value.document_uri !== key ||
+          !Array.isArray(value.owner_roots) || !value.owner_roots.every((root: unknown): root is string => typeof root === "string") ||
+          !["unavailable", "pending", "incomplete", "complete"].some(coverage => coverage === value.workspace_coverage)) {
+        throw new Error("Unsupported model owner information. Use the bundled binary or update dynare.serverPath.");
+      }
+      if (value.document_version !== version) { this.documentOwners.delete(key); return; }
+      const before = this.knownOwners(document.uri).map(root => root.toString()).join("\n");
+      request.roots = value.owner_roots;
+      request.coverage = value.workspace_coverage as OwnerCoverage;
+      if (before !== this.knownOwners(document.uri).map(root => root.toString()).join("\n")) this.changed.fire();
+    }).catch((error: unknown) => {
+      if (current()) {
+        request.error = failureText(error);
+        this.log(request.error);
+      }
+    });
+    const request: DocumentOwners = { version, result };
+    this.documentOwners.set(key, request);
+    return result;
+  }
+  noModelOwnersMessage(document: vscode.Uri): string {
+    const facts = this.documentOwners.get(document.toString());
+    if (facts?.error) return `Could not look up model owners. ${facts.error}`;
+    const coverage = facts?.coverage;
+    if (coverage === "pending") return "Workspace checks are still running. Try choosing a model owner again when they finish.";
+    if (coverage === "incomplete") return "No model owner was found. Workspace checks are incomplete. Check Dynare Workspace for details.";
+    if (coverage === "complete") return "Workspace checks found no model that includes this file in the current analysis.";
+    return "Workspace checks are unavailable. Enable workspace checks or open a model that includes this file.";
   }
   /** Document-scoped facts from an existing model information response. */
   sourceMenuFacts(document: vscode.TextDocument, owners: vscode.Uri[]): Record<string, boolean> {
     const uri = document.uri.toString(), selected = this.selectedOwners.get(uri);
-    const parent = !this.standaloneDocuments.has(uri) && owners.find(owner => owner.toString() === selected);
+    const selectedRoot = selected === undefined ? undefined : vscode.Uri.parse(selected);
+    const parent = selectedRoot && !this.standaloneDocuments.has(uri) &&
+      owners.some(owner => sameUri(owner, selectedRoot)) ? selectedRoot : undefined;
     const root = parent || (!this.standaloneDocuments.has(uri) && owners.length === 1 ? owners[0] : document.uri);
     const request = this.cache.get(`${root.toString()}\n${uri}`);
     const facts = request?.version === document.version && !request.cancellation.token.isCancellationRequested ? request.menuFacts : undefined;
@@ -661,17 +735,21 @@ export class DygnosisClient implements vscode.Disposable {
     // request owns cancellation; do not block actions on a second self-discovery
     // request before that action can create its cancellable result.
     const roots = new Set(vscode.workspace.textDocuments.filter(doc => isRootUri(doc.uri) && !sameUri(doc.uri, document.uri) && !this.ownedDocuments.has(doc.uri.toString())).map(doc => doc.uri.toString()));
-    for (const root of [...this.selectedOwners.values(), ...this.knownOwners(document.uri).map(owner => owner.toString())]) if (!sameUri(vscode.Uri.parse(root), document.uri)) roots.add(root);
+    const known = this.usesWorkspaceOwners(document.uri) ? [] : this.knownOwners(document.uri);
+    for (const root of [...this.selectedOwners.values(), ...known.map(owner => owner.toString())]) if (!sameUri(vscode.Uri.parse(root), document.uri)) roots.add(root);
     await Promise.all([...roots].map(root => {
       const uri = vscode.Uri.parse(root);
       return this.modelInfo(uri, uri, false, token);
     }));
+    if (!token?.isCancellationRequested) await this.refreshDocumentOwners(document);
     if (token?.isCancellationRequested) return [];
     return this.knownOwners(document.uri);
   }
   async rootForDocument(document: vscode.TextDocument, prompt = false, token?: vscode.CancellationToken): Promise<vscode.Uri | undefined> {
     if (!isAnalysisDocument(document) || token?.isCancellationRequested) return undefined;
     const key = document.uri.toString(), selected = this.selectedOwners.get(key);
+    if (selected || this.standaloneDocuments.has(key)) await this.refreshDocumentOwners(document);
+    if (token?.isCancellationRequested || this.selectedOwners.get(key) !== selected) return undefined;
     if (this.standaloneDocuments.has(key)) return document.uri;
     if (selected) {
       const root = vscode.Uri.parse(selected);

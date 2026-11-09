@@ -5,6 +5,7 @@ import type { ModelSnapshot } from "../client/client";
 import type { Equation, Location, Range } from "../client/protocol";
 import { fileLabel } from "../client/failure";
 import { captureSelection, commandEditor, containsSelection } from "../client/editor_target";
+import { sameSourceUri } from "../client/source_uri";
 
 export interface NavigationContext {
   document: vscode.TextDocument;
@@ -146,15 +147,20 @@ export function registerModelNavigation(service: DygnosisClient): vscode.Disposa
       const info = await service.modelInfo(root, document.uri);
       if (!current()) { if (!disposed) refuse("The document or server changed. Choose its model owner again."); return; }
       if (info && info.root_uri === root.toString() && info.document_uri === document.uri.toString() &&
-          info.document_version === version && info.client_instance === instance && info.owner_roots.includes(root.toString())) picks.push({ label: vscode.workspace.asRelativePath(root), description: root.fsPath, root, info });
+          info.document_version === version && info.client_instance === instance &&
+          info.owner_roots.some(owner => sameSourceUri(vscode.Uri.parse(owner), root))) {
+        picks.push({ label: vscode.workspace.asRelativePath(root), description: root.fsPath, root, info });
+      }
     }
-    if (picks.length === 0) { refuse("No known model owns this include. Open its model root first."); }
+    if (owners.length === 0) { refuse(service.noModelOwnersMessage(document.uri)); }
+    if (picks.length === 0) { refuse("The known models no longer include this file in the current analysis. Choose its model owner again."); }
     const pick = await vscode.window.showQuickPick(picks, { placeHolder: "Choose the model that owns this include" });
     if (!pick) return;
     if (!current()) { if (!disposed) refuse("The document or server changed. Choose its model owner again."); return; }
     const fresh = await service.revalidate(pick.root, pick.info.revision, pick.info.client_instance, document.uri);
     if (!fresh || fresh.root_uri !== pick.root.toString() || fresh.document_uri !== document.uri.toString() ||
-        fresh.document_version !== version || fresh.client_instance !== pick.info.client_instance || !fresh.owner_roots.includes(pick.root.toString()) ||
+        fresh.document_version !== version || fresh.client_instance !== pick.info.client_instance ||
+        !fresh.owner_roots.some(owner => sameSourceUri(vscode.Uri.parse(owner), pick.root)) ||
         !current()) {
       refuse("The model changed. Choose its owner again.");
     }

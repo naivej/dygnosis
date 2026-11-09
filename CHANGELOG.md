@@ -9,7 +9,8 @@ The editor context menu is redesigned to put Dygnosis actions together without
 a submenu. It adds actions to choose a model owner and filter analysis by
 equation. Configuration selection and macro preview refresh are removed from
 the menu; they remain in the editor title bar and Command Palette. Rename stays
-in its usual position and on F2.
+in its usual position and on F2. Workspace checks also make known model owners
+available when an included file is opened without its parent models.
 
 ## v0.11.49
 

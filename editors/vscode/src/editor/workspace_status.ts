@@ -42,6 +42,7 @@ export interface WorkspaceClientPort {
   ensureStarted(): Promise<void>;
   execute(command: string, args: unknown[], token?: vscode.CancellationToken): Promise<unknown>;
   chosenRootForDocument(document: vscode.TextDocument): vscode.Uri | undefined;
+  workspaceOwnerPassChanged?(pass: number, phase: string): void;
   log(message: string): void;
 }
 function integer(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
@@ -322,6 +323,12 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
   const current = (client: WorkspaceConnection, expectedInstance: number, expectedGeneration: number, expectedSnapshot: string): boolean =>
     !disposed && service.client === client && service.currentInstance === expectedInstance && connection === client &&
     generation === expectedGeneration && snapshot() === expectedSnapshot && (client.isRunning?.() ?? true);
+  const acceptStatus = (next: WorkspaceStatus): void => {
+    minPass = next.pass_revision; status = next; updateDependencyWatchers(); sendActiveRoot(); render();
+    const phase = !next.enabled ? "unavailable" : next.coverage_complete ? "complete" :
+      next.complete || next.cancelled ? "incomplete" : "pending";
+    service.workspaceOwnerPassChanged?.(next.pass_revision, phase);
+  };
   const refresh = async (command?: string): Promise<void> => {
     if (!connection && (!enabled() || !folders().length)) return;
     const startupGeneration = generation, startupResponse = response, startupInstance = service.currentInstance;
@@ -358,7 +365,7 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
           buffered.value.pass_revision >= Math.max(minPass, next.pass_revision) && buffered.value.enabled === enabled() &&
           (command !== supported.cancel_command || buffered.value.pass_revision > next.pass_revision || buffered.value.cancelled || !next.cancelled)) latest = buffered.value;
       if (!latest) return;
-      minPass = latest.pass_revision; status = latest; updateDependencyWatchers(); sendActiveRoot(); render();
+      acceptStatus(latest);
     } catch (error) {
       if (!cancellation.token.isCancellationRequested && serial === response && current(client, expectedInstance, expectedGeneration, expectedSnapshot)) {
         barrier = false; bufferedNotification = undefined; status = undefined; clearWatchers(dependencies);
@@ -457,7 +464,7 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
               bufferedNotification = { value: next, client: subscribedClient, instance: subscribedInstance, generation, settings: snapshot() };
             return;
           }
-          ++response; cancelRequest(); minPass = next.pass_revision; status = next; updateDependencyWatchers(); sendActiveRoot(); render();
+          ++response; cancelRequest(); acceptStatus(next);
         } catch (error) { bufferedNotification = undefined; status = undefined; clearWatchers(dependencies); service.log(String(error)); message("unavailable", "warning", String(error)); }
       });
       updateRootWatchers(); sendActiveRoot(); void refresh();

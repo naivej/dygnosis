@@ -3582,6 +3582,9 @@ impl LanguageServer for Backend {
         if params.command == "dynare/setDocumentContext" {
             return Ok(Some(self.set_document_context(&params.arguments).await));
         }
+        if params.command == "dynare/documentOwners" {
+            return Ok(Some(self.document_owners(&params.arguments)));
+        }
         if params.command == "dynare/setAnalysisConfiguration" {
             return Ok(Some(
                 self.set_analysis_configuration(&params.arguments).await,
@@ -3772,6 +3775,7 @@ pub fn initialize_result() -> InitializeResult {
                     "dynare/setAnalysisConfiguration".into(),
                     "dynare/sourceCandidates".into(),
                     "dynare/setDocumentContext".into(),
+                    "dynare/documentOwners".into(),
                     "dynare/workspaceStatus".into(),
                     "dynare/recheckWorkspace".into(),
                     "dynare/cancelWorkspace".into(),
@@ -3791,6 +3795,7 @@ pub fn initialize_result() -> InitializeResult {
                 "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true, "model_locals": true},
                 "modelInfoChanged": true,
                 "documentContext": {"command":"dynare/setDocumentContext", "schema_version":1},
+                "documentOwners": {"command":"dynare/documentOwners", "schema_version":1},
                 "analysisConfiguration": {"schema_version":1,"context_command":"dynare/analysisContext","set_command":"dynare/setAnalysisConfiguration","source_candidates_command":"dynare/sourceCandidates"},
                 "rename": {"command":"dynare/captureRename", "schema_version":1, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES},
                 "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
