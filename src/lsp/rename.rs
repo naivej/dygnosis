@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::engine::analysis::symbols::{self, Selector, SemanticModel};
+use crate::engine::workspace::include_resolver::normalize_uri;
 
 fn source_index(text: &str) -> LineIndex {
     LineIndex::new(&crate::engine::language::parser::normalize_newlines(text))
@@ -66,9 +67,13 @@ pub(super) fn decide(
         return Err("Rename requires a file or untitled source with a known model owner.".into());
     }
     // The displayed context selects the binding and its collision scope. Every
-    // known owner still has to accept edits to these same written bytes.
+    // distinct owner still has to accept edits to these same written bytes.
+    let mut root_identities: HashSet<_> = roots
+        .iter()
+        .map(|root| inner.workspace_checks.observed_identity(root))
+        .collect();
     for owner in inner.known_owner_roots(uri) {
-        if !roots.contains(&owner) {
+        if root_identities.insert(inner.workspace_checks.observed_identity(&owner)) {
             roots.push(owner);
         }
     }
@@ -144,7 +149,7 @@ pub(super) fn decide(
         for edit in &proposal.edits {
             let target_uri = naming_edit_url(inner, &roots[0], &edit.file).ok_or(MAPPING)?;
             for owner in inner.known_owner_roots(&target_uri) {
-                if !roots.contains(&owner) && !additional.contains(&owner) {
+                if root_identities.insert(inner.workspace_checks.observed_identity(&owner)) {
                     additional.push(owner);
                 }
             }
@@ -330,22 +335,29 @@ pub(super) fn capture_command(
     let DocumentChanges::Edits(documents) = edit.document_changes.as_ref().ok_or(SOURCE)? else {
         return Err(MAPPING.into());
     };
-    let mut source_uris: HashSet<Url> = documents
+    // An edited file keeps the URI used by its versioned text edit. Roots and
+    // includes can refer to it or to each other using a different spelling.
+    let mut source_uris: HashMap<String, Url> = documents
         .iter()
-        .map(|document| document.text_document.uri.clone())
+        .map(|document| {
+            let uri = &document.text_document.uri;
+            (normalize_uri(uri.as_str()), uri.clone())
+        })
         .collect();
     for root in &roots {
-        source_uris.insert(root.clone());
-        let identity = crate::engine::workspace::include_resolver::normalize_uri(root.as_str());
+        let identity = normalize_uri(root.as_str());
         for file in inner.workspace.input_stamps(root.as_str()).keys() {
             if inner.workspace.source_for_normalized_key(file).is_some()
                 && inner.workspace.owner_roots(file).contains(&identity)
+                && let std::collections::hash_map::Entry::Vacant(source) =
+                    source_uris.entry(file.clone())
             {
-                source_uris.insert(naming_edit_url(inner, root, file).ok_or(SOURCE)?);
+                source.insert(naming_edit_url(inner, root, file).ok_or(SOURCE)?);
             }
         }
+        source_uris.entry(identity).or_insert_with(|| root.clone());
     }
-    let mut source_uris: Vec<_> = source_uris.into_iter().collect();
+    let mut source_uris: Vec<_> = source_uris.into_values().collect();
     source_uris.sort_by(|left, right| left.as_str().cmp(right.as_str()));
     let mut sources = Vec::new();
     let mut bytes = 0usize;

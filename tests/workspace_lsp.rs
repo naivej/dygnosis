@@ -757,6 +757,91 @@ async fn legacy_client_uses_unique_owner_without_enabling_explicit_context_comma
     assert!(has_code(&wire.pull(&h).await, "E285"));
 }
 
+// A VS Code owner choice can use an encoded drive while workspace discovery
+// uses a file path URL. Each model and guarded source must occur once.
+#[cfg(windows)]
+#[tokio::test]
+async fn rename_capture_deduplicates_selected_owner_and_workspace_sources() {
+    for reform_include in ["shared.mod", "baseline.mod"] {
+        let files = Files::new();
+        let shared = "var y;\nmodel; y=1; end;\n";
+        let baseline = "@#include \"shared.mod\"\n";
+        let reform = format!("@#include \"{reform_include}\"\n");
+        files.write("shared.mod", shared);
+        files.write("baseline.mod", baseline);
+        files.write("reform.mod", &reform);
+        let h = files.uri("shared.mod");
+        let a = files.uri("baseline.mod");
+        let b = files.uri("reform.mod");
+        let path = a.trim_start_matches("file:///");
+        let alias = format!(
+            "file:///{}%3A{}",
+            path[..1].to_ascii_lowercase(),
+            &path[2..]
+        );
+        assert_ne!(a, alias);
+        let mut wire = Wire::new();
+        wire.start_context(&files, true).await;
+        wire.complete().await;
+        wire.open(&h, shared, 1);
+        let selected = wire.choose_context(&h, 1, &alias).await;
+        assert!(selected.get("error").is_none(), "{selected}");
+        wire.complete().await;
+
+        let params =
+            json!({"textDocument":{"uri":h},"position":{"line":0,"character":4},"newName":"y1"});
+        let offered = wire
+            .command_args("dynare/captureRename", params.clone())
+            .await;
+        assert!(offered.get("error").is_none(), "{offered}");
+        assert_eq!(offered["owners"].as_array().unwrap().len(), 2, "{offered}");
+        assert!(
+            offered["owners"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|owner| owner["root_uri"] == alias)
+        );
+        assert!(
+            offered["owners"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|owner| owner["root_uri"] == b)
+        );
+        assert_eq!(offered["sources"].as_array().unwrap().len(), 3, "{offered}");
+        let edits = offered["edit"]["documentChanges"].as_array().unwrap();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0]["textDocument"], json!({"uri":h,"version":1}));
+        assert_eq!(edits[0]["edits"].as_array().unwrap().len(), 2);
+        assert!(
+            edits[0]["edits"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|edit| edit["newText"] == "y1")
+        );
+
+        wire.open(&alias, baseline, 2);
+        wire.open(&b, &reform, 3);
+        let checked = wire.command_args("dynare/captureRename", params).await;
+        assert_eq!(checked["edit"], offered["edit"], "{checked}");
+        assert_eq!(checked["owners"].as_array().unwrap().len(), 2);
+        let sources = checked["sources"].as_array().unwrap();
+        assert_eq!(sources.len(), 3, "{checked}");
+        assert!(
+            sources
+                .iter()
+                .any(|source| source["uri"] == alias && source["version"] == 2)
+        );
+        assert!(
+            sources
+                .iter()
+                .any(|source| source["uri"] == b && source["version"] == 3)
+        );
+    }
+}
+
 // Guards collision checking in the displayed standalone helper as well as every
 // parent which would consume the same edited declaration.
 #[tokio::test]

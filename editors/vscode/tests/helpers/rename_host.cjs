@@ -199,10 +199,43 @@ async function staleNativeApplication(child, mutation, invoke, evidence, waitFor
   });
 }
 
+// Guards Windows URI aliases from duplicating a closed owner's capture and refusing F2.
+async function checkColdSharedRename(service, workspaceRoot, evidence, waitFor) {
+  const folder = path.join(workspaceRoot, "rename-cold-shared");
+  const baseline = "@#define OWNER_OFFSET = 10\n@#define USE_POLICY = false\n@#include \"shared.mod\"\n";
+  const reform = "@#define OWNER_OFFSET = 20\n@#define USE_POLICY = false\n@#include \"shared.mod\"\n";
+  const source = "@#ifndef OWNER_OFFSET\n  @#define OWNER_OFFSET = 0\n@#endif\n@#define USE_POLICY = true\n\nvar y z;\nparameters owner_offset;\nowner_offset = @{OWNER_OFFSET};\n\nmodel;\n  [name='demand'] y = z;\n@#if USE_POLICY\n  [name='policy', endogenous='z'] z = owner_offset;\n@#else\n  [name='policy', endogenous='z'] z = owner_offset + 1;\n@#endif\nend;\n";
+  const parents = [[path.join(folder, "baseline.mod"), baseline], [path.join(folder, "reform.mod"), reform]];
+  const settings = vscode.workspace.getConfiguration("dynare"), previous = settings.inspect("workspaceDiagnostics")?.workspaceValue;
+  try {
+    await fs.mkdir(folder, { recursive: true });
+    await Promise.all([...parents.map(([filename, text]) => fs.writeFile(filename, text)), fs.writeFile(path.join(folder, "shared.mod"), source)]);
+    await settings.update("workspaceDiagnostics", true, vscode.ConfigurationTarget.Workspace);
+    const document = await vscode.workspace.openTextDocument(path.join(folder, "shared.mod"));
+    await vscode.window.showTextDocument(document);
+    await waitFor(() => parents.every(([filename]) => service.knownOwners(document.uri).some(owner => owner.fsPath.toLowerCase() === filename.toLowerCase())), "closed shared-model parents are discovered");
+    assert.ok(parents.every(([filename]) => !vscode.workspace.textDocuments.some(open => open.uri.fsPath.toLowerCase() === filename.toLowerCase())), "both model parents start saved and closed");
+    const owner = service.knownOwners(document.uri).find(uri => uri.fsPath.toLowerCase() === parents[0][0].toLowerCase());
+    assert.ok(owner);
+    await service.applyOwner(document, vscode.Uri.parse(owner.toString()));
+    await enterRename(document, source.indexOf("var y") + 4, "y1", waitFor);
+    const expected = source.replace("var y z;", "var y1 z;").replace("[name='demand'] y = z;", "[name='demand'] y1 = z;");
+    await waitFor(() => document.getText() === expected, "native F2 renames the shared declaration and use with closed owners");
+    for (const [filename, text] of parents) {
+      const opened = vscode.workspace.textDocuments.find(candidate => candidate.uri.fsPath.toLowerCase() === filename.toLowerCase());
+      assert.ok(opened, "Rename loads each captured closed owner");
+      assert.equal(opened.getText(), text, "Rename preserves each captured parent document");
+      assert.equal(await fs.readFile(filename, "utf8"), text, "Rename preserves each saved parent file");
+    }
+    evidence.checks.push("native F2 renames a shared .mod from one open editor while both closed model owners remain unchanged");
+  } finally { await settings.update("workspaceDiagnostics", previous, vscode.ConfigurationTarget.Workspace); }
+}
+
 async function checkRename(service, workspaceRoot, evidence, helpers) {
   const { waitFor, currentSnapshot, writeObservedInput } = helpers;
   assert.ok(process.env.DYGNOSIS_HOST_CDP_PORT, "Rename acceptance requires the isolated native host CDP port");
   await waitFor(() => service.client && service.supportsModelInfo, "Rename language client startup");
+  await checkColdSharedRename(service, workspaceRoot, evidence, waitFor);
   const open = async (name, text) => {
     const filename = path.join(workspaceRoot, name);
     if (/\.(mod|dyn|inc)$/i.test(name)) await writeObservedInput(service, filename, text);
