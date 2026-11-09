@@ -11,6 +11,8 @@ equation. Configuration selection and macro preview refresh are removed from
 the menu; they remain in the editor title bar and Command Palette. Rename stays
 in its usual position and on F2. Workspace checks also make known model owners
 available when an included file is opened without its parent models.
+W011 no longer incorrectly warns on numeric macro substitutions or dependent
+parameter assignments whose values can be evaluated.
 
 ## v0.11.49
 

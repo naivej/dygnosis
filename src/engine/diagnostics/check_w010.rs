@@ -607,11 +607,11 @@ fn unused_decls<'a>(
 
 fn eval_expr(model: &Model, id: ExprId, known: &HashMap<Name, f64>) -> Option<f64> {
     match &model.exprs.get(id).kind {
-        ExprKind::Number => {
+        ExprKind::Number => model.numeric_literals.get(&id).copied().or_else(|| {
             let span = model.exprs.get(id).span;
             let raw = model.source.get(span.start as usize..span.end as usize)?;
             raw.parse().ok()
-        }
+        }),
         ExprKind::Ident { name, timing, .. } => {
             if *timing != 0 {
                 return None;

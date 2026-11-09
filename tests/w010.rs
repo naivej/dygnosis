@@ -230,6 +230,17 @@ fn w011_missing_in_expr() {
 }
 
 #[test]
+fn w011_uses_numeric_macro_values_in_parameter_assignments() {
+    let source = "@#define OWNER_OFFSET = 20\n\
+                  parameters owner_offset scaled;\n\
+                  owner_offset = @{OWNER_OFFSET};\n\
+                  scaled = 2 * owner_offset;\n";
+    let model = parse(source);
+    let warnings = check_w011(&model);
+    assert!(warnings.is_empty(), "{warnings:?}");
+}
+
+#[test]
 fn w011_latest_wins_before_steady() {
     let src = check_mod("w010/w011_later.mod");
     let got = rust_family(&src);
