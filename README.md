@@ -1,23 +1,24 @@
 ![Dygnosis](media/logo_s.png)
 
-Dygnosis adds Dynare language support to VS Code with zero dependency. 
+Dygnosis adds Dynare language support to VS Code and AI coding agents. Edit and analyze models without a separate Dynare, MATLAB or Octave installation.
 
-Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis) or download packages and standalone bundles from [GitHub Releases](https://github.com/naivej/dygnosis/releases). In VS Code, press `F1` and run **Dygnosis: Open Help**, or find **Dygnosis** in **Extensions** and choose **Open Help** from its gear or context menu.
+Install the extension in VS Code 1.102.0 or later from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis). Extension packages and standalone LSP and MCP bundles are also available from [GitHub Releases](https://github.com/naivej/dygnosis/releases). In VS Code, press `F1` and run **Dygnosis: Open Help**, or find **Dygnosis** in **Extensions** and choose **Open Help** from its gear or context menu.
 
 ## Highlights
 
-- **Catch errors before running MATLAB**: Reports official Dynare preprocessor errors alongside static modeling checks (equation/variable balance, unassigned or unused parameters, missing steady-state or `initval` entries, `varobs` vs. shock counts, and timing or bound issues) with Quick Fixes and linked source locations.
-- **Navigate across `@#include` trees**: Follow variables, parameters, `#` model-local variables, trends, and equations across root models and included files with **Go to Definition**, **Find All References**, **Show Call Hierarchy**, **Outline**, **Jump to equation...**, and safe cross-file **Rename symbol** (including `[endogenous=...]` and `[mcp=...]` tags).
-- **Preview macros and test configurations**: Expand `@#include` files, `@#for` loops, `@#if` branches, and `@{...}` substitutions side-by-side with jumps back to the written line. Switch **Analysis Configurations** to test `-D` macro inputs, override `@#define` values, preview conditional branches, or filter equations with `include_eqs` and `exclude_eqs` without editing your `.mod` file.
-- **Read models at a glance**: See `long_name` and TeX labels (`$\beta$`) in hover, completion, and **Outline**, inline evaluated parameter hints (`beta = 1 / 1.04`), semantic highlighting by symbol role and timing (`predetermined` vs. `forward-looking`), and customizable block shading.
-- **Write and refactor faster**: Get context-aware completion and option signature hints across Dynare commands and blocks (including heterogeneous-agent `heterogeneity_dimension`, semi-structural VAR/PAC, OccBin, Ramsey/discretionary policy, and method of moments), format documents, auto-generate commented `shocks` templates, and bulk-fill missing `[name='...']` tags or `long_name` labels.
-- **Compare models structurally**: Diff your working model against Git commits, branches, another `.mod` file, or another analysis configuration in **Dygnosis Changes**—grouped by equations, parameters, priors, and shocks rather than raw line diffs.
-- **Audit workspace models**: Monitor check status across all saved `.mod` and `.dyn` root models in your project from Explorer's **Dynare Workspace** view.
-- **Work with AI coding agents**: Connect GitHub Copilot and other MCP clients to Dygnosis's [MCP tools](https://github.com/naivej/dygnosis/blob/main/help/agents.md) and install the [`use-dynare` agent skill](https://github.com/naivej/dygnosis/blob/main/.agents/skills/use-dynare/SKILL.md) via `npx skills add naivej/dygnosis`.
+- **Catch source problems early.** Check for Dynare source errors and likely modeling mistakes as you edit, with guidance to investigate and fix issues.
+- **Follow models across files.** Navigate declarations, equations and their uses across a model and its included files in the context of the selected parent model.
+- **Explore model configurations.** Preview macro expansion and see how different macro inputs, branches and equation selections affect your analysis without changing the source.
+- **Read models at a glance.** Understand model structure, symbol roles and parameter values while reading your code.
+- **Write and refactor faster.** Get suggestions in model context and update related declarations and equations together.
+- **Review model changes.** See how equations and model setup differ between files, revisions or analysis configurations.
+- **Audit workspace models.** See which saved models across your workspace need attention in Explorer's **Dynare Workspace** view.
+
+AI coding agents can use Dygnosis's [MCP tools](https://github.com/naivej/dygnosis/blob/main/help/agents.md). Install the [`use-dynare` agent skill](https://github.com/naivej/dygnosis/blob/main/.agents/skills/use-dynare/SKILL.md) with `npx skills add naivej/dygnosis`.
 
 ## Running Models
 
-Dygnosis checks and analyzes model source files statically. Run official Dynare in MATLAB or Octave to compute steady states, verify Blanchard-Kahn conditions, and execute simulations or estimation. For MATLAB integration in VS Code, see the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit).
+Run official Dynare in MATLAB or Octave to compute steady states, verify Blanchard-Kahn conditions, and execute simulations or estimation. For MATLAB integration in VS Code, see the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit).
 
 **Compatibility**: Dynare 7.2
 
