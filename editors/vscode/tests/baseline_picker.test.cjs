@@ -11,7 +11,8 @@ class Event {
 }
 function deferred() { let resolve, reject; const promise = new Promise((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; }
 let picker;
-const vscode = { window: { createQuickPick() {
+const messages = [];
+const vscode = { window: { showInformationMessage(message) { messages.push(message); }, createQuickPick() {
   const value = new Event(), accept = new Event(), hide = new Event();
   let items = [], disposed = false;
   picker = {
@@ -30,8 +31,24 @@ const originalLoad = Module._load;
 Module._load = function (id, ...args) { return id === "vscode" ? vscode : originalLoad.call(this, id, ...args); };
 const { pickBaseline } = require(path.join(__dirname, "../out/comparison/baseline_picker.js"));
 Module._load = originalLoad;
+const { GitSourceError } = require(path.join(__dirname, "../out/comparison/git_source.js"));
 function cancellation() { const changed = new Event(); return { isCancellationRequested: false, onCancellationRequested: changed.subscribe,
   cancel() { this.isCancellationRequested = true; changed.fire(); } }; }
+
+test("unavailable Git leaves the first usable action focused", async () => {
+  const pending = deferred();
+  const action = { label: "Model file…", mode: "file" };
+  const result = pickBaseline("main.mod", [action], () => pending.promise, cancellation());
+  const before = messages.length;
+  assert.equal(picker.activeItems[0], action);
+  picker.type("HEAD");
+  pending.reject(new GitSourceError("repository_unavailable", "No repository"));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(picker.items.some(item => item.mode === "expression"), false);
+  assert.equal(messages.length, before);
+  picker.choose(action);
+  assert.equal(await result, action);
+});
 
 test("an available ref can be accepted while other Git reads remain pending", async () => {
   // Guards allowing a ready Git ref while history is still loading.
@@ -39,7 +56,7 @@ test("an available ref can be accepted while other Git reads remain pending", as
   const result = pickBaseline("Compare main.mod with", [{ label: "config…", mode: "config" }], (_more, update) => { publish = update; return pending.promise; }, token);
   assert.equal(picker.busy, true);
   const ref = { label: "main", mode: "ref", revision: { hash: "a".repeat(40) } };
-  publish([ref]);
+  publish([ref], true);
   picker.choose(picker.items.find(item => item.mode === "ref"));
   assert.equal(await result, ref);
   publish([{ label: "late history" }]);
@@ -51,8 +68,11 @@ test("an available ref can be accepted while other Git reads remain pending", as
 
 test("typing filters retained choices without starting more Git reads or a second input", async () => {
   // Guards a repository read on each typed prefix and accepting a stale typed ref.
-  const pending = deferred(); let reads = 0;
-  const result = pickBaseline("main.mod", [], () => { ++reads; return pending.promise; }, cancellation());
+  const pending = deferred(); let reads = 0, publish;
+  const result = pickBaseline("main.mod", [], (_more, update) => { ++reads; publish = update; return pending.promise; }, cancellation());
+  picker.type("HEAD");
+  assert.equal(picker.items.some(item => item.mode === "expression"), false);
+  publish([], true);
   for (const text of ["H", "HEAD", "HEAD~", "HEAD~2"]) picker.type(text);
   assert.equal(reads, 1);
   const row = picker.items.find(item => item.mode === "expression");
@@ -94,16 +114,22 @@ test("a failed older page keeps loaded choices and permits a successful retry", 
   const more = { label: "Load more commits…", action: "more" };
   const older = { label: "Older commit", mode: "revision", revision: { hash: "b".repeat(40) } };
   let attempts = 0;
+  const pendingPage = deferred();
   const result = pickBaseline("main.mod", [], async loadingMore => {
     if (!loadingMore) return [revision, more];
-    if (++attempts === 1) throw new Error("older page unavailable");
+    if (++attempts === 1) return pendingPage.promise;
     return [revision, older];
   }, cancellation());
   await new Promise(resolve => setImmediate(resolve));
-  picker.choose(more); await new Promise(resolve => setImmediate(resolve));
+  picker.choose(more);
+  assert.ok(picker.items.includes(revision));
+  assert.equal(picker.items.includes(more), false, "only usable choices appear while the page loads");
+  pendingPage.reject(new Error("older page unavailable"));
+  await new Promise(resolve => setImmediate(resolve));
   assert.ok(picker.items.includes(revision));
   assert.ok(picker.items.includes(more), "the failed page can be retried");
-  assert.equal(picker.items.find(item => item.label === "More commits unavailable").description, "older page unavailable");
+  assert.match(messages.at(-1), /Could not load more Git commits\. older page unavailable/);
+  assert.equal(picker.items.some(item => item.label === "More commits unavailable"), false);
   picker.choose(more); await new Promise(resolve => setImmediate(resolve));
   assert.equal(attempts, 2);
   assert.equal(picker.items.some(item => item.label === "More commits unavailable"), false);

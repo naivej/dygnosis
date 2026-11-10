@@ -8,7 +8,8 @@ import {
 } from "vscode-languageclient/node";
 import { Binary, resolveBinary } from "./binary";
 import { ClientLifecycle, ManagedClient } from "./lifecycle";
-import { analysisSettingsChanged, configurationSnapshot, serverSettingsChanged, workspaceDiagnosticsSetting } from "./settings";
+import { analysisSettingsChanged, configurationSnapshot, outlineActivitySetting, serverSettingsChanged, workspaceDiagnosticsSetting } from "./settings";
+import type { OutlineActivity } from "./settings";
 import { AnalysisConfiguration, AnalysisContext, PresetBinding, ModelInfo, parseAnalysisContext, parseModelInfo, record, timingModifiers, tokenRoles } from "./protocol";
 import type { Range } from "./protocol";
 import { renameSymbol } from "./rename";
@@ -16,6 +17,7 @@ import { sameSourceUri as sameUri, sourceUriKey } from "./source_uri";
 import { ModelActivity, RequestActivity } from "./activity";
 
 interface ClientProcess extends ManagedClient { readonly client: LanguageClient }
+const outlineActivityNotification = "dynare/outlineActivityChanged";
 type OwnerCoverage = "unavailable" | "pending" | "incomplete" | "complete";
 interface DocumentOwners {
   version: number;
@@ -143,6 +145,8 @@ export class DygnosisClient implements vscode.Disposable {
   private readonly documentOwners = new Map<string, DocumentOwners>();
   private workspaceOwnerPass: string | undefined;
   private readonly selectedOwners = new Map<string, string>();
+  private readonly outlineFilters = new Map<string, { root_uri: string; activity: OutlineActivity }>();
+  private outlineTabOwners = new Map<string, string>();
   private readonly explicitOwnerDocuments = new Set<string>();
   private readonly ownedDocuments = new Set<string>();
   private readonly standaloneDocuments = new Set<string>();
@@ -219,6 +223,7 @@ export class DygnosisClient implements vscode.Disposable {
       vscode.workspace.onDidCloseTextDocument(document => {
         if (isAnalysisDocument(document)) {
           const key = document.uri.toString();
+          this.pruneOutlineFilters(undefined, document.uri);
           this.clearDocumentContext(key); this.pruneSourceLinks(document.uri); this.invalidate(undefined, document.uri);
         }
       }),
@@ -236,12 +241,73 @@ export class DygnosisClient implements vscode.Disposable {
   get currentInstance(): number { return this.instance; }
   get supportsModelInfo(): boolean { return this.modelInfoSupported; }
   get supportsAnalysisConfiguration(): boolean { return this.analysisSupported; }
+  get supportsOutlineActivity(): boolean {
+    const capabilities: unknown = this.client?.initializeResult?.capabilities.experimental;
+    if (!record(capabilities) || !record(capabilities.dygnosis)) return false;
+    const capability = capabilities.dygnosis.outlineActivity;
+    return record(capability) && capability.schema_version === 1 && capability.notification === outlineActivityNotification;
+  }
+  outlineActivity(root: vscode.Uri, document: vscode.Uri): OutlineActivity {
+    return this.outlineFilters.get(sourceUriKey(root))?.activity ?? outlineActivitySetting(document, this.log);
+  }
+  async setOutlineActivity(root: vscode.Uri, activity: OutlineActivity): Promise<void> {
+    const client = this.client;
+    if (!client || !this.supportsOutlineActivity) refuse("This engine does not support temporary Outline filters. Use the bundled binary or update Server Path.");
+    const key = sourceUriKey(root);
+    const previous = this.outlineFilters.get(key);
+    const choice = { root_uri: root.toString(), activity };
+    this.outlineFilters.set(key, choice);
+    try {
+      await this.sendOutlineFilters(client);
+    } catch (error) {
+      if (this.outlineFilters.get(key) === choice) {
+        if (previous) this.outlineFilters.set(key, previous);
+        else this.outlineFilters.delete(key);
+      }
+      throw error;
+    }
+    if (client === this.client) this.refreshSymbols();
+  }
+  private sendOutlineFilters(client: LanguageClient): Promise<void> {
+    return client.sendNotification(outlineActivityNotification, { filters: [...this.outlineFilters.values()] });
+  }
+  private pruneOutlineFilters(open?: readonly vscode.Uri[], closing?: vscode.Uri): void {
+    if (!this.outlineFilters.size) return;
+    open ??= vscode.window.tabGroups.all.flatMap(group => group.tabs.flatMap(tab => textTabUris(tab.input)));
+    const roots = new Set<string>(), tabOwners = new Map<string, string>();
+    for (const uri of open) {
+      if (closing && sameUri(uri, closing) || uri.scheme !== "file" && uri.scheme !== "untitled") continue;
+      const document = uri.toString(), selected = this.selectedOwners.get(document);
+      const direct = sourceUriKey(selected ? vscode.Uri.parse(selected) : uri);
+      if (this.outlineFilters.has(direct)) { roots.add(direct); continue; }
+      if (selected || this.standaloneDocuments.has(document) || uri.scheme !== "file") continue;
+      const owners = this.knownOwners(uri);
+      if (owners.length > 1) continue;
+      // The root's document-close event can invalidate its proof before the tab event.
+      // Keep the last proved sole owner for tab lifetime only, never for symbol routing.
+      const previous = this.outlineTabOwners.get(document);
+      const owner = owners[0] ?? (previous && !this.infos.has(previous) ? vscode.Uri.parse(previous) : undefined);
+      if (!owner) continue;
+      const root = sourceUriKey(owner);
+      if (this.outlineFilters.has(root)) { roots.add(root); tabOwners.set(document, owner.toString()); }
+    }
+    this.outlineTabOwners = tabOwners;
+    let removed = false;
+    for (const key of this.outlineFilters.keys()) if (!roots.has(key)) removed = this.outlineFilters.delete(key);
+    const client = this.client;
+    if (removed && client && this.supportsOutlineActivity) {
+      void this.sendOutlineFilters(client).then(() => {
+        if (client === this.client) this.refreshSymbols();
+      }).catch(error => this.log(String(error)));
+    }
+  }
   modelActivity(document: vscode.Uri, root?: vscode.Uri): ModelActivity | undefined { return this.activity.forDocument(document, root); }
   private pruneSourceLinks(source: vscode.Uri, version?: number): void {
     for (const [key, link] of this.includeLinks) if (sameUri(link.source, source) && link.version !== version) this.includeLinks.delete(key);
   }
   private closeEditorTabs(closed: readonly vscode.Tab[]): void {
     const remaining = vscode.window.tabGroups.all.flatMap(group => group.tabs.flatMap(tab => textTabUris(tab.input)));
+    if (closed.length) this.pruneOutlineFilters(remaining);
     const documents = new Map<string, vscode.TextDocument>();
     for (const uri of closed.flatMap(tab => textTabUris(tab.input))) {
       if (remaining.some(open => sameUri(open, uri))) continue;
@@ -384,6 +450,8 @@ export class DygnosisClient implements vscode.Disposable {
         }), client.onDidChangeState(event => {
           if (client === this.client && event.newState === State.Stopped) { this.modelInfoSupported = false; this.invalidateLifecycle(); }
         }));
+        if (this.outlineFilters.size && this.supportsOutlineActivity) await this.sendOutlineFilters(client);
+        if (this.closed || generation !== this.startGeneration || client !== this.client) return;
         this.refreshSymbols();
         this.invalidate();
         if (!this.modelInfoSupported) this.log("This engine does not support model information. Update dynare.serverPath or use the bundled binary.");
@@ -895,15 +963,18 @@ export class DygnosisClient implements vscode.Disposable {
   private rememberOwner(document: vscode.Uri, root: vscode.Uri, explicit: boolean): void {
     if (document.toString() === root.toString()) return;
     const key = document.toString();
-    const changed = this.selectedOwners.get(key) !== root.toString() || this.explicitOwnerDocuments.has(key) !== explicit || this.standaloneDocuments.has(key);
+    const moved = this.selectedOwners.get(key) !== root.toString();
+    const changed = moved || this.explicitOwnerDocuments.has(key) !== explicit || this.standaloneDocuments.has(key);
     this.standaloneDocuments.delete(key);
     this.selectedOwners.set(key, root.toString()); this.ownedDocuments.add(key);
     if (explicit) this.explicitOwnerDocuments.add(key); else this.explicitOwnerDocuments.delete(key);
+    if (moved) this.pruneOutlineFilters();
     if (changed) this.changed.fire();
   }
   private rememberStandalone(document: vscode.Uri): void {
     const key = document.toString();
     this.selectedOwners.delete(key); this.explicitOwnerDocuments.delete(key); this.ownedDocuments.delete(key); this.standaloneDocuments.add(key);
+    this.pruneOutlineFilters();
     this.changed.fire(); this.scheduleRootRefresh();
   }
   treatAsRoot(document: vscode.Uri): void { this.clearDocumentContext(document.toString()); this.rememberStandalone(document); }
@@ -956,6 +1027,7 @@ export class DygnosisClient implements vscode.Disposable {
       for (const watcher of this.dependencyWatchers.values()) watcher.dispose();
       this.dependencyWatchers.clear(); this.rootCandidates.clear();
       this.includeLinks.clear();
+      this.outlineFilters.clear(); this.outlineTabOwners.clear();
     });
     return this.shutdownPromise;
   }

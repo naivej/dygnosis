@@ -465,6 +465,16 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
   const afterCommit = await git("rev-parse", "HEAD");
   await fs.writeFile(bodyPath, bodyText(3));
   const repository = await sources.repositoryFor(rootUri), before = await sources.resolve(repository, beforeCommit), after = await sources.resolve(repository, afterCommit);
+  const chooseCommit = async (commit, configuration) => {
+    const refs = await sources.refs(repository);
+    const { commits } = await sources.history(repository);
+    const index = commits.findIndex(revision => revision.hash === commit);
+    assert.ok(index >= 0, "the fixture commit is listed");
+    for (let step = 0; step < 1 + Number(configuration) + refs.length + index; step++) {
+      await vscode.commands.executeCommand("workbench.action.quickOpenSelectNext");
+    }
+    await vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem");
+  };
   assert.equal(before.hash, beforeCommit); assert.equal(after.hash, afterCommit);
   assert.equal((await sources.previous(repository)).revision.hash, afterCommit);
   assert.equal((await sources.previous(repository, afterCommit)).revision.hash, beforeCommit);
@@ -557,7 +567,7 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
       assert.deepEqual(selected[0], { root: rootUri.toString(), language: "plaintext" });
       assert.equal(vscode.window.activeTextEditor.document.uri.toString(), unrelated.uri.toString(), "the explicit SCM argument must not use the unrelated active editor");
       await new Promise(resolve => setTimeout(resolve, 800));
-      await vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem"); await openingFromScm;
+      await chooseCommit(afterCommit, true); await openingFromScm;
     } finally { service.selectOwner = selectOwner; }
     const adoptedBody = vscode.workspace.textDocuments.find(open => open.uri.toString() === body.uri.toString() && !open.isClosed);
     assert.equal(adoptedBody.languageId, "dynare"); assert.equal(adoptedBody.getText(), bodyText(4)); assert.equal(adoptedBody.isDirty, true);
@@ -624,25 +634,25 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
     if (process.env.DYGNOSIS_HOST_CDP_PORT) await hostDevtools(async send => {
       const response = await send("Runtime.evaluate", { expression: 'JSON.stringify({labels:Array.from(document.querySelectorAll(".quick-input-list .label-name")).filter(row => row.getClientRects().length > 0).map(row => row.textContent),placeholder:document.querySelector(".quick-input-widget input")?.placeholder})', returnByValue: true });
       const picker = JSON.parse(response.result.value);
-      assert.equal(picker.placeholder, "Choose a file, config, or Git revision");
-      assert.ok(picker.labels.includes("model file…"));
-      assert.ok(picker.labels.includes("config…"));
+      assert.equal(picker.placeholder, "Choose Before");
+      assert.ok(picker.labels.includes("Model file…"));
+      assert.equal(picker.labels.includes("Configuration…"), false);
       assert.equal(picker.labels.includes("With previous revision"), false);
       assert.ok(picker.labels.some(label => /^[0-9a-f]{7}$/.test(label)), "the picker shows local commit rows");
       assert.equal(picker.labels.includes("With revision…"), false);
       assert.equal(picker.labels.includes("With branch or tag…"), false);
     });
     await historyScreenshot("picker", evidence);
-    await vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem"); await opening;
+    await chooseCommit(beforeCommit, false); await opening;
     let opened;
     await waitFor(() => {
       const active = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
       if (!(active instanceof vscode.TabInputCustom) || active.viewType !== changesViewType) return false;
       opened = JSON.parse(active.uri.query);
       return opened.before.commit === beforeCommit && opened.after.commit === afterCommit && opened.after.root_file === "root.mod";
-    }, "Open changes from retained historical include anchors its historical owner and first parent");
+    }, "Open changes from retained historical include anchors its historical owner and selected revision");
     assert.equal(opened.anchor.commit, afterCommit);
-    evidence.checks.push("native Open changes on a retained historical include uses its model owner at that commit and historical first parent");
+    evidence.checks.push("native Open changes on a retained historical include uses its model owner at that commit and the explicitly selected parent");
     evidence.history = { beforeCommit, afterCommit, repository_root: repository.rootUri.toString(), git_api: 1, snapshot_schema: fixedWire.inputs.schema_version,
       navigation_schema: fixedWire.navigation.schema_version, source_requests: transport.filter(value => value?.state === "needs_sources").length,
       fixed_changes: fixed.snapshot.rows.length, native_mcp_agreement: true, historical_tabs_read_only: true };

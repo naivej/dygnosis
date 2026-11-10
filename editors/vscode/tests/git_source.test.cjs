@@ -39,15 +39,19 @@ function service(folder, limits) {
     getRepository(uri) { return repositories.find(value => uri.fsPath.startsWith(value.rootUri.fsPath)) ?? null; },
     async openRepository(uri) { const found = repository(uri.fsPath); repositories.push(found); return found; },
   };
-  return { sources: new GitSources(api, fileUri, limits), repository: repositories[0] };
+  return { sources: new GitSources(api, fileUri, limits), repository: repositories[0], api };
 }
-async function fixture(t) {
+async function temporaryFolder(t) {
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), "dygnosis-git-source-"));
   t.after(async () => {
     assert.equal(path.dirname(folder), path.resolve(os.tmpdir()));
     assert.match(path.basename(folder), /^dygnosis-git-source-/);
     await fs.rm(folder, { recursive: true, force: true });
   });
+  return folder;
+}
+async function fixture(t) {
+  const folder = await temporaryFolder(t);
   git(folder, "init", "-b", "main");
   git(folder, "config", "user.name", "Dygnosis source tests");
   git(folder, "config", "user.email", "test@dygnosis.invalid");
@@ -68,6 +72,14 @@ async function fixture(t) {
   const renamed = git(folder, "rev-parse", "HEAD");
   return { folder, initial, second, renamed, ...service(folder) };
 }
+
+test("repository discovery distinguishes an ordinary missing repository from a Git process failure", async t => {
+  const folder = await temporaryFolder(t), { sources, api } = service(folder);
+  const model = fileUri(path.join(folder, "main.mod"));
+  await assert.rejects(sources.repositoryFor(model), { code: "repository_unavailable" });
+  api.git.path = path.join(folder, "missing-git");
+  await assert.rejects(sources.repositoryFor(model), { code: "git_start_failed" });
+});
 
 test("captures a pinned tree and only requested regular blobs, without current-file fallback", async t => {
   const { folder, initial, second, sources, repository: repo } = await fixture(t);

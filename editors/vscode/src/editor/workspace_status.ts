@@ -3,6 +3,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { record } from "../client/protocol";
 import { analysisSettingsChanged, workspaceDiagnosticsSetting } from "../client/settings";
+import { automaticConfigurationName } from "../client/analysis_presentation";
 import type { ModelSnapshot } from "../client/client";
 
 const states = ["pending", "checking", "checked", "incomplete", "failed", "excluded"] as const;
@@ -12,6 +13,7 @@ export interface WorkspaceRoot {
   root_uri: string; state: RootState; revision: string | null;
   errors: number; warnings: number; failure: string | null; dependency_candidates: string[];
   cause?: string | null;
+  cause_message?: string | null;
   analysis?: {name: string | null; label?: string; preview: boolean; source: boolean};
 }
 export interface WorkspaceStatus {
@@ -68,13 +70,16 @@ export function parseWorkspaceStatus(value: unknown): WorkspaceStatus {
   const rootKeys = new Set<string>();
   const roots = value.roots.map((root: unknown): WorkspaceRoot => {
     if (!record(root) || !fileUri(root.root_uri) || !states.includes(root.state as RootState) || !nullableText(root.revision) ||
-        !integer(root.errors) || !integer(root.warnings) || !nullableText(root.failure) || !(root.cause === undefined || nullableText(root.cause)) || !Array.isArray(root.dependency_candidates) ||
+        !integer(root.errors) || !integer(root.warnings) || !nullableText(root.failure) ||
+        !(root.cause === undefined || nullableText(root.cause)) || !(root.cause_message === undefined || nullableText(root.cause_message)) ||
+        !Array.isArray(root.dependency_candidates) ||
         !root.dependency_candidates.every(fileUri)) return invalid();
     const key = identity(vscode.Uri.parse(root.root_uri));
     if (rootKeys.has(key)) return invalid(); rootKeys.add(key);
     if (root.analysis !== undefined && (!record(root.analysis) || !nullableText(root.analysis.name) || !(root.analysis.label === undefined || typeof root.analysis.label === "string") || typeof root.analysis.preview !== "boolean" || typeof root.analysis.source !== "boolean")) return invalid();
     return { root_uri: root.root_uri, state: root.state as RootState, revision: root.revision, errors: root.errors,
-      warnings: root.warnings, failure: root.failure, cause: root.cause, dependency_candidates: root.dependency_candidates, analysis: root.analysis as WorkspaceRoot["analysis"] };
+      warnings: root.warnings, failure: root.failure, cause: root.cause, cause_message: root.cause_message,
+      dependency_candidates: root.dependency_candidates, analysis: root.analysis as WorkspaceRoot["analysis"] };
   });
   if (states.some(state => roots.filter(root => root.state === state).length !== counts[state])) return invalid();
   if (value.non_default_roots !== undefined && (!integer(value.non_default_roots) || value.non_default_roots !== roots.filter(root => root.state !== "excluded" && root.analysis?.source === false).length)) return invalid();
@@ -204,14 +209,33 @@ function treeRows(status: WorkspaceStatus, currentFolders: readonly vscode.Works
       containingFolder(vscode.Uri.parse(root.root_uri), currentFolders) === folder);
     for (const root of roots) {
       const uri = vscode.Uri.parse(root.root_uri), label = path.basename(uri.fsPath);
-      const detail = `${root.state === "checked" ? "Checked" : root.state[0].toUpperCase() + root.state.slice(1)}${root.state === "checked" ? ` · ${diagnostics(root.errors, "Error")}, ${diagnostics(root.warnings, "Warning")}` : ""}`;
-      const item = new WorkspaceItem(keyFor(uri), label, root.state === "failed" || root.state === "incomplete" ? "warning" :
-        root.state === "checked" ? root.errors ? "error" : "check" : root.state === "checking" ? "sync~spin" : root.state === "excluded" ? "circle-slash" : "clock");
-      const analysis = root.analysis && !root.analysis.source ? ` · ${root.analysis.label ?? root.analysis.name ?? "Custom configuration"}` : "";
+      const key = keyFor(uri), checked = root.state === "checked";
+      const state = root.state[0].toUpperCase() + root.state.slice(1);
+      const analysis = root.analysis?.source === false ? root.analysis : undefined;
+      const configuration = analysis ? analysis.label ?? analysis.name ?? "Custom configuration" : "";
+      const name = analysis?.name;
+      const configurationDetail = name && !automaticConfigurationName(name) ? name : configuration;
       const cause = root.failure ?? (root.state === "incomplete" ? root.cause : undefined);
-      item.resourceUri = uri; item.description = detail + analysis + (cause ? ` — ${cause}` : "");
-      item.tooltip = `${uri.fsPath}\n${detail}${analysis}${cause ? `\n${cause}` : ""}`;
-      item.accessibilityInformation = { label: `${label}. ${detail}${analysis}${cause ? `. ${cause}` : ""}` };
+      const children: WorkspaceItem[] = [];
+      if (cause) {
+        const message = (root.failure ?? root.cause_message)?.split(/\r?\n/, 1)[0].trim() || "Check details";
+        const reason = new WorkspaceItem(`${key}:check-details`, message, "info");
+        reason.tooltip = cause;
+        reason.accessibilityInformation = { label: `Check details for ${label}. ${cause}` };
+        reason.command = { command: "dygnosis.openWorkspaceCheckDetails", title: "Open check details", arguments: [cause] };
+        children.push(reason);
+      }
+      const item = new WorkspaceItem(key, label, root.state === "failed" || root.state === "incomplete" ? "warning" :
+        checked ? root.errors ? "error" : root.warnings ? "warning" : "check" :
+          root.state === "checking" ? "sync~spin" : root.state === "excluded" ? "circle-slash" : "clock", children);
+      if (children.length && collapsed.has(key)) item.collapsibleState = vscode.TreeItemCollapsibleState.Collapsed;
+      const errors = diagnostics(root.errors, "Error"), warnings = diagnostics(root.warnings, "Warning");
+      const detail = [state, checked ? `${errors}, ${warnings}` : "", configurationDetail].filter(Boolean).join(" · ");
+      item.resourceUri = uri;
+      item.description = (checked ? [root.errors ? errors.toLowerCase() : "", root.warnings ? warnings.toLowerCase() : "", configuration] :
+        [state, configuration]).filter(Boolean).join(" · ");
+      item.tooltip = `${uri.fsPath}\n${detail}${cause ? `\n${cause}` : ""}`;
+      item.accessibilityInformation = { label: `${label}. ${detail}${cause ? `. ${cause}` : ""}` };
       item.command = { command: "vscode.open", title: "Open model", arguments: [uri] };
       addFile(uri, item);
     }
@@ -309,8 +333,13 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
       status.discovery_failures.length ? "Coverage and the file list are incomplete: folder discovery failed. Previous entries remain visible for folders that could not be read." :
       notFullyCheckedOnly && !affectedRoots.size && status.complete ? "No incomplete or failed checks." : undefined;
     view.message = [outcome, status.include_files === undefined ? "Include files are not listed by this engine. Use the bundled binary or update dynare.serverPath." : undefined].filter(Boolean).join("\n") || undefined;
-    view.description = notFullyCheckedOnly ? `${affectedRoots.size} not fully checked` :
-      `${status.counts.checked} checked${notFullyChecked ? ` · ${notFullyChecked} not fully checked` : ""}`;
+    const applicable = status.roots.length - status.counts.excluded;
+    const filteredSummary = [
+      status.counts.incomplete ? `${status.counts.incomplete} incomplete` : "",
+      status.counts.failed ? `${status.counts.failed} failed` : "",
+      affectedRoots.size > notFullyChecked ? `${affectedRoots.size - notFullyChecked} rechecking` : "",
+    ].filter(Boolean).join(" · ");
+    view.description = notFullyCheckedOnly ? filteredSummary || "0 affected" : `${status.counts.checked}/${applicable} checked`;
     tree.replace(treeRows(status, folders(), collapsed, notFullyCheckedOnly ? affectedRoots : undefined));
   };
   const filterModels = (only: boolean): Thenable<unknown> => {
@@ -558,6 +587,8 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
     vscode.workspace.onDidCloseTextDocument(documentChanged),
     vscode.workspace.onDidChangeConfiguration(event => { if (analysisSettingsChanged(event)) reconfigure(); }),
     vscode.commands.registerCommand("dygnosis.workspaceStatus", () => vscode.commands.executeCommand("dygnosis.workspace.focus")),
+    vscode.commands.registerCommand("dygnosis.openWorkspaceCheckDetails", (cause: string) =>
+      vscode.window.showInformationMessage("Workspace check details", { modal: true, detail: cause })),
     vscode.commands.registerCommand("dygnosis.showNotFullyCheckedModels", async () => { await filterModels(true); await vscode.commands.executeCommand("dygnosis.workspace.focus"); }),
     vscode.commands.registerCommand("dygnosis.showAllWorkspaceFiles", async () => { await filterModels(false); await vscode.commands.executeCommand("dygnosis.workspace.focus"); }),
     vscode.commands.registerCommand("dygnosis.recheckWorkspace", () => runCommand(service, () => runAction("recheck"), () => !disposed)),

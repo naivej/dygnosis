@@ -1,8 +1,7 @@
 # Inspect macro expansion
 
 With a model or included file active, run **Dygnosis: Expand macros** from the
-Command Palette, or click **Expand macros** in the editor title bar
-(`$(open-preview)`).
+Command Palette, or click **Expand macros** in the editor title bar.
 
 Dygnosis opens a read-only preview beside your file with `@#include` files,
 `@#for` loops, `@#if` branches and `@{...}` substitutions expanded before
@@ -98,6 +97,6 @@ filtering.
   You can also run **Dygnosis: Save analysis configuration** or **Dygnosis:
   Reset analysis configuration** from the Command Palette.
 - **Compare configurations**: Run **Dygnosis: Show model changes** and choose
-  **config…** to diff two configurations ([Review model
+  **Configuration…** to diff two configurations ([Review model
   changes](structural-diff.md)). For navigating inactive macro branches, see
   [Inactive source](navigate-code.md#inactive-source).

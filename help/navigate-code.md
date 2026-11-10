@@ -36,11 +36,10 @@ in Workspace...** to search analyzed models. Choose which groups appear in
 equation numbers in
 [Dynare › Outline: Equation Numbers](settings:dynare.outline.equationNumbers).
 
-Macro branches (`@#if`) and `@#for` loops follow the [selected analysis
-configuration](effective-model.md#choose-the-analysis-configuration); filter
-**Active**, **Inactive** or **Both** from the Outline toolbar, **Dygnosis:
-Filter Outline by macro activity...** in the Command Palette, or [Dynare ›
-Outline: Activity](settings:dynare.outline.activity).
+Macro branches (`@#if`) and `@#for` loops follow the selected analysis
+configuration. Use **Filter Outline by macro activity** in the Outline toolbar
+or Command Palette to show **Active**, **Inactive** or **Both** for the open
+model. Set the default in [Dynare › Outline: Activity](settings:dynare.outline.activity).
 
 ## Inactive source
 

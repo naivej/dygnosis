@@ -88,10 +88,11 @@ export function modelStatus(info: ModelInfo, counts: StatusCount[]): StatusConte
   const tooltip = configurationHover(info);
   if (!info.complete) {
     const { detail, leadingCause } = incompleteDetail(info);
+    const sentenceEnd = /[.!?…]$/.test(leadingCause) ? "" : ".";
     return {
       text: `$(info) ${label}: ${analysis?.state === "stale" ? "source only" : "incomplete"}`,
       tooltip: tooltip.appendMarkdown("\n\n").appendText(`${detail}\nCounts are unavailable.`),
-      accessibilityLabel: `${fileLabel(info.root_uri)}. ${spoken}: ${leadingCause}. Counts are unavailable. ${outlineClickInstruction}`,
+      accessibilityLabel: `${fileLabel(info.root_uri)}. ${spoken}: ${leadingCause}${sentenceEnd} Counts are unavailable. ${outlineClickInstruction}`,
     };
   }
   const groups = [

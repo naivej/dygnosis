@@ -6,6 +6,7 @@ const Module = require("node:module");
 const path = require("node:path");
 const { URL, pathToFileURL, fileURLToPath } = require("node:url");
 const { resourceQuery, resourceName, changesScheme, changesViewType, historyScheme } = require(compiledModule("changes_resource"));
+const { GitSourceError } = require(compiledModule("git_source"));
 
 class Disposable {
   constructor(callback) { this.callback = callback; }
@@ -264,7 +265,7 @@ function createHost() {
       host.captures.push({ resource, cancel, history });
       return host.capture ? host.capture(resource, cancel, history) : captured(resource, history, host, service.currentInstance);
     };
-    const { registerChanges } = load("changes_editor", vscode, { "git_source_host": { createGitSources: async () => { if (host.gitUnavailable) throw new Error("Git is unavailable"); return git; } }, "snapshot_compare": { captureComparison: capture, ComparisonFailure, freezeWorkingSelector, prepareAnalysisSide, validateCapturedInputs } });
+    const { registerChanges } = load("changes_editor", vscode, { "git_source_host": { createGitSources: async () => { if (host.gitUnavailable) throw new GitSourceError("git_unavailable", "Git is unavailable"); return git; } }, "snapshot_compare": { captureComparison: capture, ComparisonFailure, freezeWorkingSelector, prepareAnalysisSide, validateCapturedInputs } });
     host.registration = registerChanges(service, Uri.file(path.resolve(__dirname, "../.."))); return host.registration;
   };
   host.open = argument => host.commands.get("dygnosis.openChanges")(argument);

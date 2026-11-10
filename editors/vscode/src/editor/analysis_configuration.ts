@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { DygnosisClient } from "../client/client";
 import { AnalysisConfiguration, AnalysisContext, AnalysisMetadata, AnalysisOverride, EquationSelection, PresetBinding, analysisConfiguration, parseAnalysisMetadata, presetBinding, record } from "../client/protocol";
 import { CommandCancelled, refuse, runCommand } from "../client/refusal";
@@ -174,7 +175,7 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     if (!invocation.current()) refuse("The source or chosen root changed. Request the analysis action again.");
     await service.setAnalysisConfiguration(invocation.root, side.analysis, proof, side.include_paths, side.preset_bindings, () => invocation.current());
   };
-  type Choice = vscode.QuickPickItem & { side?: AnalysisSide; cause?: string; action?: "save" | "input" | "include" | "exclude" | "clearEquations" | "clearBranches"; index?: number };
+  type Choice = vscode.QuickPickItem & { side?: AnalysisSide; cause?: string; action?: "keep" | "save" | "input" | "include" | "exclude" | "clearEquations" | "clearBranches"; index?: number };
   const choose = async (invocation: Target, proof: AnalysisContext): Promise<Choice> => {
     const saved = presets(invocation.root);
     const entries: Choice[] = [
@@ -189,6 +190,26 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
         ? [{ label: "Clear branch previews", description: "Use source conditions", action: "clearBranches" as const }] : []),
       { label: "Save current configuration…", action: "save" },
     ];
+    // Match the complete applied side, not the display label. A changed preset,
+    // duplicate match or stale selection must never be reapplied by Enter.
+    const current = proof.analysis;
+    const normalized = (configuration: AnalysisConfiguration): AnalysisConfiguration => {
+      const value = structuredClone(configuration);
+      if (!value.defines?.length) delete value.defines;
+      if (!value.overrides?.length) delete value.overrides;
+      return value;
+    };
+    const matches = current.state === "selected" ? entries.filter(entry => {
+      if (!entry.side || entry.cause) return false;
+      return isDeepStrictEqual(normalized(entry.side.analysis), normalized(current.configuration)) &&
+        isDeepStrictEqual(entry.side.include_paths, current.include_paths) &&
+        (proof.preset_bindings === undefined || isDeepStrictEqual(entry.side.preset_bindings ?? [], proof.preset_bindings));
+    }) : [];
+    const selected = matches.length === 1 ? matches[0] : undefined;
+    if (selected) {
+      entries.splice(entries.indexOf(selected), 1);
+      entries.unshift({ ...selected, description: "Current", action: "keep" });
+    } else entries.unshift({ label: "Keep current", action: "keep" });
     const pick = await vscode.window.showQuickPick(entries, { placeHolder: "Choose an analysis configuration or edit its inputs", title: `Dynare: ${analysisLabel(proof.analysis)}` });
     if (!pick) throw new CommandCancelled();
     if (!invocation.current()) refuse("The source or chosen root changed. Open the selector again.");
@@ -307,6 +328,7 @@ export function registerAnalysisConfigurations(service: DygnosisClient, previews
     vscode.commands.registerCommand("dygnosis.selectAnalysisConfiguration", () => runCommand(service, async () => {
       const invocation = await target(), proof = await context(invocation);
       const selected = await choose(invocation, proof);
+      if (selected.action === "keep") return;
       if (selected.action === "save") await save(invocation);
       else if (selected.action === "input") await inputs(invocation, proof, selected.index!);
       else if (selected.action === "include" || selected.action === "exclude") await equations(invocation, proof, selected.action);

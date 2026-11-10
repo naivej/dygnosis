@@ -12,7 +12,8 @@ use tower_lsp::Client;
 use tower_lsp::lsp_types::{Diagnostic, Url, notification};
 
 use super::{
-    Backend, Inner, RootReport, file_url_from_path_key, is_model_root, prepare_root_report,
+    Backend, Inner, RootReport, WorkspaceCause, file_url_from_path_key, is_model_root,
+    prepare_root_report,
 };
 use crate::Workspace;
 use crate::engine::diagnostics::check_in_workspace_with_origins;
@@ -67,7 +68,7 @@ struct RootEntry {
     errors: usize,
     warnings: usize,
     failure: Option<String>,
-    cause: Option<String>,
+    cause: Option<WorkspaceCause>,
     stamps: InputStamps,
     force: bool,
     cached_report: Option<Arc<RootReport>>,
@@ -196,7 +197,8 @@ impl WorkspaceCheckState {
             *counts.entry(entry.state).or_default() += 1;
             let analysis = workspace.root_analysis_configuration(uri.as_str());
             if entry.selected && !analysis.is_source() { non_default_roots += 1; }
-            json!({"root_uri": uri, "state": entry.state, "revision": entry.revision, "errors": entry.errors, "warnings": entry.warnings, "failure": entry.failure,"cause":entry.cause,
+            json!({"root_uri": uri, "state": entry.state, "revision": entry.revision, "errors": entry.errors, "warnings": entry.warnings, "failure": entry.failure,
+                "cause": entry.cause.as_ref().map(|cause| &cause.detail), "cause_message": entry.cause.as_ref().map(|cause| &cause.message),
                 "analysis":{"name":analysis.name,"label":analysis.display_label(),"preview":analysis.is_preview(),"source":analysis.is_source()},
                 "dependency_candidates": entry.dependency_uris})
         }).collect();

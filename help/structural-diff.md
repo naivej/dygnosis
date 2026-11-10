@@ -3,8 +3,8 @@
 Compare your active model against a local Git revision (commit, branch or tag),
 another `.mod`/`.dyn` file, or another [analysis
 configuration](effective-model.md#choose-the-analysis-configuration)
-(`config…`). Run **Dygnosis: Show model changes** from the Command Palette, the
-editor title bar (`$(diff)`), or a model file's context menu in **Source
+(`Configuration…`). Run **Dygnosis: Show model changes** from the Command Palette, the
+editor title bar, or a model file's context menu in **Source
 Control**.
 
 In **Dygnosis Changes**, your active model appears under **After** and the
@@ -19,7 +19,7 @@ while the changes view is active. Configure default filters in
 
 Comparisons report structural changes—declarations, parameter values, shock
 setups and equations—rather than algebraic equivalence or numerical Dynare
-results. Comparing with **config…** shows how macro overrides or
+results. Comparing with **Configuration…** shows how macro overrides or
 `include_eqs`/`exclude_eqs` selections change the effective model even when the
 written `.mod` file is unchanged.
 

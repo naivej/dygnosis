@@ -69,11 +69,12 @@ use crate::engine::editing::refs::{
 use crate::engine::language::lexer::{TokenKind, tokenize};
 use crate::engine::language::model::{Decl, Equation, Model};
 use crate::engine::language::span::{LineIndex, Span};
+use crate::engine::workspace::include_resolver::normalize_uri;
 use crate::engine::workspace::{SourceDocument, Workspace};
 use crate::lsp::model_map::{WrittenView, common_leaves};
 use crate::lsp::names::{NameRole, NameSites, SemanticMapping};
 use crate::lsp::settings::{
-    CONFIGURATION_SCHEMA_VERSION, MODEL_INFO_SCHEMA_VERSION, PresentationSettings,
+    CONFIGURATION_SCHEMA_VERSION, MODEL_INFO_SCHEMA_VERSION, OutlineActivity, PresentationSettings,
     ResourceSettings, SettingsStore,
 };
 use crate::{Severity, VERSION};
@@ -95,10 +96,27 @@ struct RootReport {
     revision: String,
     errors: usize,
     warnings: usize,
-    incomplete_cause: Option<String>,
+    incomplete_cause: Option<WorkspaceCause>,
     reusable: bool,
     stamps: crate::engine::workspace::InputStamps,
     owner_files: HashSet<String>,
+}
+
+#[derive(Clone)]
+struct WorkspaceCause {
+    detail: String,
+    message: String,
+}
+
+#[derive(serde::Deserialize)]
+struct OutlineFilters {
+    filters: Vec<OutlineFilter>,
+}
+
+#[derive(serde::Deserialize)]
+struct OutlineFilter {
+    root_uri: Url,
+    activity: OutlineActivity,
 }
 
 #[derive(Clone)]
@@ -190,6 +208,7 @@ struct Inner {
     parameter_hints: HashMap<Url, Arc<parameter_hints::Entry>>,
     source_inspection_notices: HashMap<Url, String>,
     settings: SettingsStore,
+    outline_filters: HashMap<String, OutlineActivity>,
     tracked_roots: HashMap<Url, String>,
     model_info_notifications: bool,
     document_context_enabled: bool,
@@ -218,6 +237,7 @@ impl Default for Inner {
             parameter_hints: HashMap::new(),
             source_inspection_notices: HashMap::new(),
             settings: SettingsStore::default(),
+            outline_filters: HashMap::new(),
             tracked_roots: HashMap::new(),
             model_info_notifications: false,
             document_context_enabled: false,
@@ -1167,15 +1187,22 @@ impl Backend {
         Some(hover)
     }
 
-    fn doc_symbols(&self, uri: &Url) -> Option<Vec<DocumentSymbol>> {
+    fn doc_symbols(&self, uri: &Url, use_outline_filter: bool) -> Option<Vec<DocumentSymbol>> {
         use crate::engine::analysis::source_inventory::SourceItemKind;
 
         let mut inner = self.lock_inner();
         let source = inner.source_document(uri)?;
         let text = source.source();
-        let preferences = inner.presentation_for(uri);
+        let mut preferences = inner.presentation_for(uri);
         let inventory = inner.workspace.source_inventory(uri.as_str())?;
         let roots = inner.context_roots(uri);
+        if use_outline_filter
+            && !inner.outline_filters.is_empty()
+            && let [root] = roots.as_slice()
+            && let Some(activity) = inner.outline_filters.get(&normalize_uri(root.as_str()))
+        {
+            preferences.outline.activity = *activity;
+        }
         let projected = source_intelligence::file(&mut inner, uri);
         let availability: HashMap<_, _> = projected
             .as_ref()
@@ -1254,7 +1281,7 @@ impl Backend {
         let mut out = Vec::new();
         let uris: Vec<_> = self.lock_inner().docs.keys().cloned().collect();
         for uri in uris {
-            let Some(nested) = self.doc_symbols(&uri) else {
+            let Some(nested) = self.doc_symbols(&uri, false) else {
                 continue;
             };
             flatten_workspace_symbols(&uri, &nested, None, &q, &mut out);
@@ -3324,7 +3351,7 @@ impl LanguageServer for Backend {
         self.wait_document_analysis(Some(&params.text_document.uri))
             .await;
         let result = self
-            .doc_symbols(&params.text_document.uri)
+            .doc_symbols(&params.text_document.uri, true)
             .map(DocumentSymbolResponse::Nested);
         self.report_source_inspection(&params.text_document.uri)
             .await;
@@ -3796,6 +3823,7 @@ pub fn initialize_result() -> InitializeResult {
                 "modelInfoChanged": true,
                 "documentContext": {"command":"dynare/setDocumentContext", "schema_version":1},
                 "documentOwners": {"command":"dynare/documentOwners", "schema_version":1},
+                "outlineActivity": {"notification":"dynare/outlineActivityChanged", "schema_version":1},
                 "analysisConfiguration": {"schema_version":1,"context_command":"dynare/analysisContext","set_command":"dynare/setAnalysisConfiguration","source_candidates_command":"dynare/sourceCandidates"},
                 "rename": {"command":"dynare/captureRename", "schema_version":1, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES},
                 "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
@@ -3888,7 +3916,7 @@ fn prepare_root_report(
             .1
             .push(diagnostic);
     }
-    let mut incomplete_cause: Option<(u8, String)> = None;
+    let mut incomplete_cause: Option<(u8, WorkspaceCause)> = None;
     let configuration_label = analysis.display_label();
     let routes = files
         .into_iter()
@@ -3911,15 +3939,18 @@ fn prepare_root_report(
                     {
                         incomplete_cause = Some((
                             rank,
-                            format!(
-                                "{}:{} — {}",
-                                uri.path().rsplit('/').next().unwrap_or("model"),
-                                item.range.start.line + 1,
-                                item.message
-                            )
-                            .chars()
-                            .take(512)
-                            .collect(),
+                            WorkspaceCause {
+                                detail: format!(
+                                    "{}:{} — {}",
+                                    uri.path().rsplit('/').next().unwrap_or("model"),
+                                    item.range.start.line + 1,
+                                    item.message
+                                )
+                                .chars()
+                                .take(512)
+                                .collect(),
+                                message: item.message.chars().take(160).collect(),
+                            },
                         ));
                     }
                     if !analysis.is_source() {
@@ -4924,6 +4955,10 @@ pub fn new_service() -> (LspService<Backend>, ClientSocket) {
     LspService::build(Backend::new)
         .custom_method("dynare/activeModelChanged", Backend::active_model_changed)
         .custom_method(
+            "dynare/outlineActivityChanged",
+            Backend::outline_activity_changed,
+        )
+        .custom_method(
             "dynare/effectivePreviewHover",
             Backend::effective_preview_hover,
         )
@@ -4932,6 +4967,18 @@ pub fn new_service() -> (LspService<Backend>, ClientSocket) {
             Backend::effective_preview_closed,
         )
         .finish()
+}
+
+impl Backend {
+    async fn outline_activity_changed(&self, params: OutlineFilters) {
+        ordering::ready().await;
+        self.lock_inner().outline_filters = params
+            .filters
+            .into_iter()
+            .filter(|filter| is_model_root(&filter.root_uri))
+            .map(|filter| (normalize_uri(filter.root_uri.as_str()), filter.activity))
+            .collect();
+    }
 }
 
 /// Run the language server over stdin/stdout.

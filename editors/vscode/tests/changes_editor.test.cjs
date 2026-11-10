@@ -7,7 +7,12 @@ const { createHost, load, captured, snapshotResponse, deferred, flush, working, 
 const { resourceData, resourceQuery, resourceName, selector } = require(compiledModule("changes_resource"));
 
 function setup(t) { const env = createHost(); env.host.install(); t.after(() => env.host.registration.dispose()); return env; }
-const baselineActions = ["model file…", "config…"];
+function supportSourceConfiguration(service) {
+  service.supportsAnalysisConfiguration = true;
+  service.analysisContext = async () => ({ analysis: { configuration: {}, include_paths: [] } });
+}
+const capturedSource = uri => ({ ...working(uri), analysis: {}, search_paths: [] });
+const baselineActions = ["Model file…", "Configuration…"];
 function activateHost(env) {
   const { host, service, vscode } = env; host.registeredChanges = 0;
   const registrations = { "changes_editor": { registerChanges: value => { assert.equal(value, service); host.registeredChanges++; return new Disposable(); } },
@@ -40,31 +45,57 @@ test("Diff webviews load assets from the extension installation", async t => {
 });
 
 test("Open changes offers file and configuration actions beside ordinary Git history, then retains the Working anchor", async t => {
-  const { host, vscode } = setup(t); await host.open();
+  const { host, vscode, service } = setup(t); supportSourceConfiguration(service); await host.open();
   assert.deepEqual(host.calls.find(call => call.id === "vscode.openWith").args[2], { viewColumn: vscode.ViewColumn.Active, preview: false });
   const choices = host.picks[0].items;
   assert.deepEqual(choices.filter(item => item.mode === "file" || item.mode === "config").map(item => item.label), baselineActions);
   assert.equal(host.nativePickers[0].options.title, "Compare main.mod with");
-  assert.equal(host.nativePickers[0].options.placeHolder, "Choose a file, config, or Git revision");
+  assert.equal(host.nativePickers[0].options.placeHolder, "Choose Before");
   assert.equal(host.previous, undefined, "opening the chooser does not make a separate previous-revision lookup");
   assert.ok(choices.some(item => item.mode === "revision" && item.revision.hash === commits.opened), "recent commits are rows in the same picker");
   assert.ok(choices.some(item => item.mode === "ref" && item.label === "release"), "branches and tags are rows in the same picker");
   assert.deepEqual(host.captures[0].resource.before, historical(commits.head, "main.mod", "main"));
-  assert.deepEqual(host.captures[0].resource.after, working()); assert.deepEqual(host.captures[0].resource.anchor, working());
+  assert.deepEqual(host.captures[0].resource.after, capturedSource()); assert.deepEqual(host.captures[0].resource.anchor, capturedSource());
   assert.equal(host.last().status, "ready"); assert.equal(host.viewType, changesViewType);
   assert.deepEqual(host.last().inputNames, { before: "main.mod", after: "main.mod" });
   assert.equal(host.providerOptions.supportsMultipleEditorsPerDocument, true);
   assert.equal(host.panels[0].webview.options.enableCommandUris, false); assert.match(host.panels[0].webview.html, /default-src 'none'/);
 });
 
-test("unavailable Git keeps all choices visible and file comparison uses selected Before and anchored After", async t => {
-  const { host } = setup(t); host.gitUnavailable = true; host.pick = items => items.find(item => item.mode === "file");
+test("unavailable Git leaves usable choices and file comparison uses selected Before and anchored After", async t => {
+  const { host, service } = setup(t); supportSourceConfiguration(service); host.gitUnavailable = true; host.pick = items => items.find(item => item.mode === "file");
   await host.open(); const choices = host.picks[0]?.items;
   assert.ok(choices, JSON.stringify({ picks: host.picks.length, failures: host.failures, notifications: host.notifications }));
-  assert.ok(choices.some(item => item.label === "model file…")); assert.ok(choices.some(item => item.label === "config…"));
-  assert.ok(choices.some(item => /Git revisions unavailable/.test(item.label)), "unavailable Git is explained without hiding file/config options");
-  assert.deepEqual(host.captures[0].resource.before, working(baselineUri));
-  assert.deepEqual(host.captures[0].resource.after, working()); assert.match(host.dialogs[0].title, /Before.*After/);
+  assert.ok(choices.some(item => item.label === "Model file…")); assert.ok(choices.some(item => item.label === "Configuration…"));
+  assert.equal(choices.some(item => /Git revisions unavailable/.test(item.label)), false, "unavailable Git is omitted");
+  assert.deepEqual(host.notifications, [], "ordinary Git unavailability needs no notification");
+  assert.deepEqual(host.captures[0].resource.before, capturedSource(baselineUri));
+  assert.deepEqual(host.captures[0].resource.after, capturedSource()); assert.match(host.dialogs[0].title, /Before.*After/);
+});
+
+test("comparison explains Git read failures and keeps usable choices", async t => {
+  for (const [operation, available, failed] of [
+    ["repositoryFor", "file", "open the Git repository"],
+    ["history", "ref", "load Git commit history"],
+    ["refs", "revision", "load Git branches and tags"],
+  ]) {
+    const { host, git } = setup(t);
+    git[operation] = async () => { throw new Error("Permission denied."); };
+    host.pick = items => items.find(item => item.mode === available);
+    await host.open();
+    assert.equal(host.last().status, "ready", operation);
+    assert.equal(host.notifications.length, 1, operation);
+    assert.ok(host.notifications[0].includes(`Could not ${failed}. Permission denied.`), operation);
+    assert.ok(host.notifications[0].includes("You can still use"), operation);
+  }
+});
+
+test("unsupported configuration comparison is omitted", async t => {
+  const { host, service } = setup(t);
+  service.supportsAnalysisConfiguration = false;
+  host.pick = items => items.find(item => item.mode === "file");
+  await host.open();
+  assert.equal(host.picks[0].items.some(item => item.mode === "config"), false);
 });
 
 test("the retained old historical anchor survives revision, ref and file choices while HEAD points elsewhere", async t => {
@@ -183,7 +214,7 @@ test("superseded baseline and typed-revision pickers receive cancellation and ca
   }
 });
 
-test("baseline picker cancels pending repository discovery on hide or file choice, but keeps typed revisions alive", async t => {
+test("baseline picker cancels pending discovery on hide or file choice and enables typed revisions after discovery", async t => {
   for (const closeMode of ["hide", "file"]) {
     const { host, git } = createHost(); host.install(); t.after(() => host.registration.dispose());
     const pendingRepository = deferred(); let discoverySignal;
@@ -202,18 +233,21 @@ test("baseline picker cancels pending repository discovery on hide or file choic
   }
 
   const { host, git } = createHost(); host.install(); t.after(() => host.registration.dispose());
-  const pendingRepository = deferred(); let discoverySignal;
+  const pendingRepository = deferred(), pendingHistory = deferred(); let discoverySignal;
   git.repositoryFor = (_uri, signal) => { discoverySignal = signal; return pendingRepository.promise; };
+  git.history = () => pendingHistory.promise;
   const opening = host.open(); await flush();
   const picker = host.nativePickers.at(-1)?.picker;
   assert.ok(picker, "native baseline picker is visible while Git discovery is pending");
   picker.value = "HEAD~1";
-  const expression = picker.items.find(item => item.mode === "expression");
-  assert.ok(expression, "typed revision is offered before repository discovery completes");
-  picker.accept(expression);
-  await flush();
-  assert.equal(discoverySignal.aborted, false, "accepting a typed revision keeps required repository discovery alive");
+  assert.equal(picker.items.some(item => item.mode === "expression"), false);
+  assert.equal(discoverySignal.aborted, false, "typing keeps repository discovery alive");
   pendingRepository.resolve({ rootUri });
+  await flush();
+  const expression = picker.items.find(item => item.mode === "expression");
+  assert.ok(expression, "typed revision is available before history finishes");
+  picker.accept(expression);
+  pendingHistory.resolve({ commits: [] });
   await opening; await flush();
   assert.equal(discoverySignal.aborted, true, "discovery signal is cleaned up after repository resolution");
   assert.equal(host.captures.length, 1);
@@ -586,6 +620,32 @@ test("comparison selectors survive reload without source bodies and invalid sele
   assert.equal(selector({ kind: "working", root_uri: "untitled:/draft.mod" }), true);
 });
 
+test("comparison tab names both different files", () => {
+  const resource = comparison({ kind: "working", root_uri: "file:///models/alternative.mod" }, working());
+  assert.match(resourceName(resource), /^alternative\.mod → main\.mod\.dygnosis-changes$/);
+  const sameNames = comparison(working(Uri.file("/scenarios/shared/main.mod")), working(Uri.file("/calibration/shared/main.mod")));
+  assert.match(resourceName(sameNames), /^main\.mod \(scenarios\) → main\.mod \(calibration\)\.dygnosis-changes$/);
+});
+
+test("a configuration name with path separators keeps the full comparison caption in one URI segment", async t => {
+  const { host } = setup(t);
+  const before = { ...working(baselineUri), analysis: { name: "Policy/A\\B" } };
+  await host.openSaved(comparison(before, working()));
+  const caption = host.panels[0].document.uri.path.split("/").at(-1);
+  assert.match(caption, /^baseline\.mod · Policy∕A∖B → main\.mod/);
+  assert.equal(host.panels[0].document.resource.before.analysis.name, before.analysis.name);
+});
+
+test("opening the same selectors reuses a restored tab with the old caption", async t => {
+  const { host, vscode } = setup(t);
+  const resource = comparison(working(baselineUri), working());
+  const uri = Uri.from({ scheme: "dygnosis-changes", path: "/main.mod · Working → Working.dygnosis-changes", query: resourceQuery(resource) });
+  await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType);
+  await host.file();
+  assert.equal(host.panels.length, 1);
+  assert.equal(host.calls.filter(call => call.id === "vscode.openWith").at(-1).args[0].toString(), uri.toString());
+});
+
 test("analysis selectors retain independent choices and paths across resource reload", () => {
   const left = { ...working(), analysis: { name: "Policy A", defines: [{ name: "N", expression: "1" }] }, search_paths: ["/models/a"] };
   const right = { ...working(), analysis: {}, search_paths: ["/models/b"] };
@@ -628,7 +688,7 @@ test("config comparison fixes the current unsaved configuration as After and cho
   const saved = resourceData(JSON.parse(host.panels[0].document.uri.query));
   assert.deepEqual(saved.before.analysis.defines, [{ name: "N", expression: "1" }]);
   assert.deepEqual(saved.after.analysis.defines, [{ name: "N", expression: "2" }]);
-  assert.deepEqual(host.picks[0].items.filter(item => item.mode === "file" || item.mode === "config").map(item => item.label), ["model file…", "config…"]);
+  assert.deepEqual(host.picks[0].items.filter(item => item.mode === "file" || item.mode === "config").map(item => item.label), ["Model file…", "Configuration…"]);
 });
 
 test("explicit comparison choices can complete while the live root is incomplete", async t => {

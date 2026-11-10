@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 
-function reader(saved) {
+function reader(saved, isNarrow = false) {
   class Element {
     constructor() { this.children = []; this.handlers = {}; this.dataset = {}; this.value = ''; }
     addEventListener(name, run) { this.handlers[name] = run; }
@@ -17,7 +17,8 @@ function reader(saved) {
   }
   const controls = new Map(), messages = [], events = {};
   let state;
-  const window = { scrollY: 0, scrollTo() {}, addEventListener: (name, run) => { events[name] = run; } };
+  const media = { matches: isNarrow, addEventListener: (_name, run) => { media.change = run; } };
+  const window = { matchMedia: () => media, scrollY: 0, scrollTo() {}, addEventListener: (name, run) => { events[name] = run; } };
   const document = { getElementById: id => {
     if (!controls.has(id)) controls.set(id, new Element());
     return controls.get(id);
@@ -27,7 +28,7 @@ function reader(saved) {
       getState: () => saved, setState: next => { state = JSON.parse(JSON.stringify(next)); }, postMessage: message => messages.push(message),
     }),
   });
-  return { controls, messages, state: () => state, receive: data => events.message({ data }), back: () => controls.get('back').handlers.click() };
+  return { controls, media, messages, state: () => state, receive: data => events.message({ data }), back: () => controls.get('back').handlers.click() };
 }
 const topics = ['get-started', 'reference', 'diagnostics'].map(id => ({ id, title: id, html: id, markdown: id, keywords: [] }));
 
@@ -47,4 +48,16 @@ test('reading history preserves each active-engine explanation and edition acros
   restored.receive({ type: 'bundle', topics, version: '0.11.7', historyExtras });
   assert.equal(restored.controls.get('article').innerHTML, extra.html);
   assert.equal(restored.controls.get('edition').textContent, extra.edition);
+});
+
+// Guards against the topic list covering the article after selection or resize.
+test('narrow topics close after selection and wide navigation returns on resize', () => {
+  const live = reader(undefined, true); live.receive({ type: 'bundle', topics, version: '0.12.0' });
+  const disclosure = live.controls.get('topics');
+  assert.equal(disclosure.open, false); disclosure.open = true;
+  live.controls.get('contents').children[2].handlers.click();
+  assert.equal(disclosure.open, false);
+  assert.equal(live.controls.get('article').innerHTML, 'diagnostics');
+  live.media.matches = false; live.media.change(); assert.equal(disclosure.open, true);
+  live.media.matches = true; live.media.change(); assert.equal(disclosure.open, false);
 });

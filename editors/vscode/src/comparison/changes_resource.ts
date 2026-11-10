@@ -40,9 +40,34 @@ export function resourceData(value: unknown): ComparisonResource {
 }
 export function resourceQuery(resource: ComparisonResource): string { return JSON.stringify(resourceData(resource)); }
 export function resourceName(resource: ComparisonResource): string {
-  const base = resource.after.kind === "git" ? resource.after.root_file.split("/").at(-1)! : decodeURIComponent(new URL(resource.after.root_uri).pathname.split("/").at(-1)!);
-  const version = (input: ModelSelector): string => `${input.kind === "git" ? input.commit.slice(0, 7) : "Working"}${input.analysis ? ` (${configurationLabel(input.analysis)})` : ""}`;
-  return `${base} · ${version(resource.before)} → ${version(resource.after)}.dygnosis-changes`;
+  const segments = (input: ModelSelector): string[] => {
+    const uri = new URL(input.kind === "git" ? input.repository_uri : input.root_uri);
+    return [uri.protocol === "untitled:" ? "Untitled" : uri.host, ...decodeURIComponent(uri.pathname).split("/"),
+      ...(input.kind === "git" ? input.root_file.split("/") : [])].filter(Boolean);
+  };
+  const beforePath = segments(resource.before), afterPath = segments(resource.after);
+  const before = beforePath.at(-1)!, after = afterPath.at(-1)!;
+  const version = (input: ModelSelector): string => {
+    // A tab caption is one URI path segment, even when a configuration name contains a slash.
+    const configuration = input.analysis ? configurationLabel(input.analysis).replaceAll("/", "∕").replaceAll("\\", "∖") : undefined;
+    if (input.kind === "working") return configuration ?? "Working";
+    return [input.commit.slice(0, 7), configuration].filter(Boolean).join(" · ");
+  };
+  if (beforePath.join("/") === afterPath.join("/")) {
+    return `${after} · ${version(resource.before)} → ${version(resource.after)}.dygnosis-changes`;
+  }
+  let beforeLabel = before, afterLabel = after;
+  if (before === after) {
+    let depth = 2;
+    while (beforePath.at(-depth) === afterPath.at(-depth)) depth++;
+    beforeLabel = `${before} (${beforePath.at(-depth) ?? "Root"})`;
+    afterLabel = `${after} (${afterPath.at(-depth) ?? "Root"})`;
+  }
+  const side = (input: ModelSelector, label: string): string => {
+    const detail = version(input);
+    return input.kind === "git" || detail !== "Source" && detail !== "Working" ? `${label} · ${detail}` : label;
+  };
+  return `${side(resource.before, beforeLabel)} → ${side(resource.after, afterLabel)}.dygnosis-changes`;
 }
 export function configurationLabel(analysis: AnalysisConfiguration): string {
   return configurationSummary(analysis);

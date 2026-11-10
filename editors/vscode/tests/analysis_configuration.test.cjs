@@ -68,6 +68,8 @@ test("source and expanded selectors use one root and never apply saved startup c
   await env.run("selectAnalysisConfiguration");
   assert.equal(env.service.calls[0][0].toString(), env.document.uri.toString());
   assert.equal(env.service.calls[0][1].name, "Alternative");
+  env.proof.analysis.configuration = { name: "Alternative", defines: [{ name: "FLAG", expression: "1" }] };
+  env.proof.analysis.selection.name = "Alternative";
   const expanded = { uri: uri("dygnosis-effective:/1/main.mod"), version: 1, isClosed: false };
   env.sessions.set(expanded.uri.toString(), { root: env.document.uri }); host.editor = { document: expanded };
   host.answers.push(items => {
@@ -534,4 +536,32 @@ test("baseline picker always offers written source and saved choices without cha
   assert.equal(env.service.calls.length, 0, "choosing Before does not change the active After configuration");
   assert.equal(analysisLabel({ ...metadata(), state: "stale", selection: { ...metadata().selection, name: "Alternative", preview: true } }), "Alternative (stale)");
   env.registration.dispose();
+});
+
+// Enter must preserve the selected side without reapplying it.
+test("initial picker choice keeps Source, exact saved, changed, temporary and stale selections", async () => {
+  for (const mode of ["source", "saved", "changed", "temporary", "stale", "duplicate"]) {
+    const env = setup();
+    const preset = { name: "Low", root: "main.mod", analysis: { defines: [{ name: "N", expression: "1" }] } };
+    if (mode !== "source") {
+      host.saved = [preset];
+      env.proof.analysis.configuration = { name: "Low", defines: [{ name: "N", expression: mode === "changed" ? "2" : "1" }] };
+      env.proof.analysis.selection.name = "Low";
+      if (mode === "temporary") { env.proof.analysis.configuration.name = "Custom"; env.proof.analysis.selection.name = "Custom"; }
+      if (mode === "stale") env.proof.analysis.state = "stale";
+      if (mode === "duplicate") host.saved.push(globalThis.structuredClone(preset));
+    }
+    host.answers.push(items => {
+      assert.equal(items[0].label, mode === "source" ? "Source" : mode === "saved" ? "Low" : "Keep current", mode);
+      return items[0];
+    });
+    await env.run("selectAnalysisConfiguration");
+    assert.equal(env.service.calls.length, 0, mode);
+    if (mode !== "source") {
+      host.answers.push(items => items.find(item => item.label === "Source"));
+      await env.run("selectAnalysisConfiguration");
+      assert.deepEqual(env.service.calls[0][1], {}, "Source remains an explicit reset");
+    }
+    env.registration.dispose();
+  }
 });

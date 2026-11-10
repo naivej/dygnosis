@@ -5,8 +5,12 @@
   const saved = api.getState();
   const history = Array.isArray(saved?.history) ? saved.history.filter(entry => typeof entry?.destination === 'string').slice(-100).map(entry => ({ destination: entry.destination, scroll: Number.isFinite(entry.scroll) && entry.scroll >= 0 ? entry.scroll : 0, explanation: entry.explanation })) : [];
   const state = { history: history.length ? history : [{ destination: 'get-started', scroll: 0 }], index: Number.isInteger(saved?.index) && saved.index >= 0 && saved.index < history.length ? saved.index : 0, query: typeof saved?.query === 'string' ? saved.query.slice(0, 300) : '' };
-  const controls = Object.fromEntries(['edition', 'back', 'forward', 'permalink', 'search', 'clear', 'contents', 'main', 'breadcrumb', 'results', 'article', 'notice', 'enlarged', 'close-image'].map(id => [id, document.getElementById(id)]));
+  const controls = Object.fromEntries(['edition', 'back', 'forward', 'permalink', 'search', 'clear', 'contents', 'topics', 'main', 'breadcrumb', 'results', 'article', 'notice', 'enlarged', 'close-image'].map(id => [id, document.getElementById(id)]));
   let topics = [], version = '';
+  const narrow = window.matchMedia('(max-width: 700px)');
+  const updateTopicsLayout = () => { controls.topics.open = !narrow.matches; };
+  updateTopicsLayout();
+  narrow.addEventListener('change', updateTopicsLayout);
   const node = (tag, text) => { const result = document.createElement(tag); result.textContent = text; return result; };
   const remember = () => api.setState({ ...state, history: state.history.map(({ destination, scroll, explanation }) => ({ destination, scroll, explanation })) });
   const current = () => state.history[state.index];
@@ -83,7 +87,7 @@
     if (message.type === 'bundle') {
       topics = message.topics; version = message.version; controls.contents.replaceChildren();
       for (const [index, entry] of state.history.entries()) entry.extra = message.historyExtras?.[index];
-      for (const topic of topics.filter(topic => !topic.id.includes(':'))) { const button = node('button', topic.title); button.type = 'button'; button.dataset.topic = topic.id; button.addEventListener('click', () => open(topic.id)); controls.contents.append(button); }
+      for (const topic of topics.filter(topic => !topic.id.includes(':'))) { const button = node('button', topic.title); button.type = 'button'; button.dataset.topic = topic.id; button.addEventListener('click', () => { if (narrow.matches) controls.topics.open = false; open(topic.id); }); controls.contents.append(button); }
       render();
     } else if (message.type === 'open') open(message.destination, message.extra);
     else if (message.type === 'notice') controls.notice.textContent = message.text;

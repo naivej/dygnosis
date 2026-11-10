@@ -7,6 +7,7 @@ button:disabled { opacity: .5; cursor: default; }
 a { color: var(--vscode-textLink-foreground); }
 :focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .layout { display: grid; grid-template-columns: 15rem minmax(0, 1fr); }
+summary { display: none; }
 nav { padding: 1rem; border-right: 1px solid var(--vscode-panel-border); }
 nav button { display: block; width: 100%; text-align: left; color: var(--vscode-editor-foreground); background: transparent; padding: .35rem; }
 nav button[aria-current] { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
@@ -22,4 +23,4 @@ table { border-collapse: collapse; width: 100%; } th, td { padding: .45rem; bord
 #results button { display: block; width: 100%; text-align: left; margin: .6rem 0; }
 dialog { max-width: 95vw; max-height: 95vh; color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); border: 1px solid var(--vscode-focusBorder); }
 dialog img { display: block; } dialog::backdrop { background: #0009; }
-@media (max-width: 700px) { .layout { grid-template-columns: 1fr; } nav { display: flex; flex-wrap: wrap; gap: .2rem; border-right: 0; } nav button { width: auto; } main { padding: 1rem; } }
+@media (max-width: 700px) { .layout { grid-template-columns: 1fr; } summary { display: list-item; cursor: pointer; padding: .5rem 1rem; } nav { padding: 0 1rem .5rem; border-right: 0; } main { padding: 1rem; } }

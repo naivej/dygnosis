@@ -196,6 +196,7 @@ fn changes_input(request: &Request) -> bool {
             | "workspace/didChangeConfiguration"
             | "workspace/didChangeWorkspaceFolders"
             | "dynare/activeModelChanged"
+            | "dynare/outlineActivityChanged"
     ) || (request.method() == "workspace/executeCommand"
         && request
             .params()

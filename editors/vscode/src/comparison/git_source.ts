@@ -99,12 +99,12 @@ export class GitSources {
     if (!api.git?.path) throw new GitSourceError("git_unavailable", "The built-in Git extension has no Git executable.");
   }
 
-  private run(folder: string, args: string[], maxBytes: number, signal?: AbortSignal): Promise<Buffer> {
+  private run(folder: string, args: string[], maxBytes: number, signal?: AbortSignal, purpose?: "discover repository"): Promise<Buffer> {
     cancelled(signal);
     return new Promise((resolve, reject) => {
       const child = spawn(this.api.git.path, ["-C", folder, ...args], {
         shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" },
+        env: { ...process.env, GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", ...(purpose ? { LC_ALL: "C" } : {}) },
       });
       const chunks: Buffer[] = [];
       let bytes = 0, stderr = "", done = false, pendingError: Error | undefined;
@@ -117,7 +117,7 @@ export class GitSources {
       const abort = (): void => fail(new GitSourceError("cancelled", "Source capture was cancelled."));
       const timer = setTimeout(() => fail(new GitSourceError("source_timeout", "The local Git read timed out.")), this.limits.timeoutMs);
       signal?.addEventListener("abort", abort, { once: true });
-      child.on("error", () => fail(new GitSourceError("git_unavailable", "Cannot start the Git executable from the built-in Git extension.")));
+      child.on("error", () => fail(new GitSourceError("git_start_failed", "Cannot start the Git executable from the built-in Git extension.")));
       child.stdout.on("data", (data: Buffer) => {
         if (done || pendingError) return;
         bytes += data.length;
@@ -127,8 +127,13 @@ export class GitSources {
       child.on("close", code => {
         if (done) return;
         if (pendingError) finish(pendingError);
-        else if (code !== 0) finish(new GitSourceError("missing_object", `The requested Git revision or object is unavailable locally.${stderr.trim() ? ` ${stderr.trim()}` : ""}`));
-        else finish(undefined, Buffer.concat(chunks, bytes));
+        else if (code === 0) finish(undefined, Buffer.concat(chunks, bytes));
+        else {
+          const detail = stderr.trim();
+          if (!purpose) finish(new GitSourceError("missing_object", `The requested Git revision or object is unavailable locally.${detail ? ` ${detail}` : ""}`));
+          else if (detail.startsWith("fatal: not a git repository")) finish(new GitSourceError("repository_unavailable", "No local repository contains this model source."));
+          else finish(new GitSourceError("repository_discovery_failed", detail || "Git could not locate the repository."));
+        }
       });
     });
   }
@@ -137,17 +142,21 @@ export class GitSources {
     if (uri.scheme !== "file") throw new GitSourceError("repository_unavailable", "This source has no local repository history.");
     let folder = uri.fsPath;
     for (;;) {
-      try { if (!(await stat(folder)).isDirectory()) folder = path.dirname(folder); else break; }
-      catch { const parent = path.dirname(folder); if (parent === folder) throw new GitSourceError("repository_unavailable", "No repository contains this model source."); folder = parent; }
+      try { if ((await stat(folder)).isDirectory()) break; }
+      catch (error) {
+        const { code } = error as NodeJS.ErrnoException;
+        if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+      }
+      const parent = path.dirname(folder);
+      if (parent === folder) throw new GitSourceError("repository_unavailable", "No repository contains this model source.");
+      folder = parent;
     }
-    let root: string;
-    try { root = (await this.run(folder, ["rev-parse", "--show-toplevel"], 32 * 1024, signal)).toString("utf8").trim(); }
-    catch (error) { if (error instanceof GitSourceError && error.code === "cancelled") throw error; throw new GitSourceError("repository_unavailable", "No locally available repository contains this model source."); }
+    const root = (await this.run(folder, ["rev-parse", "--show-toplevel"], 32 * 1024, signal, "discover repository")).toString("utf8").trim();
     const rootUri = this.fileUri(root);
     let repository = this.api.repositories.find(item => path.resolve(item.rootUri.fsPath) === path.resolve(root));
     repository ??= (await this.api.openRepository(rootUri)) ?? undefined;
     cancelled(signal);
-    if (!repository || repository.rootUri.scheme !== "file") throw new GitSourceError("repository_unavailable", "The built-in Git extension cannot open this repository.");
+    if (!repository || repository.rootUri.scheme !== "file") throw new GitSourceError("repository_open_failed", "The built-in Git extension cannot open this repository.");
     return repository;
   }
 

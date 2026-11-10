@@ -60,20 +60,14 @@ async function revealRow(label, waitFor) {
   }, `native workspace tree scrolls ${label} into view`);
 }
 async function enlargeWorkspaceTreePane() {
-  const layout = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare Workspace')); if(!pane) return undefined; const box=pane.getBoundingClientRect(); const sashes=[...document.querySelectorAll('.monaco-sash')].map(sash=>{const rect=sash.getBoundingClientRect();return {rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},classes:sash.className};}); return {pane:{x:box.x,y:box.y,width:box.width,height:box.height},sashes}; })()`);
-  assert.ok(layout?.pane, "native workspace checks pane has a measurable layout");
-  const sash = layout.sashes.map(value => ({ ...value, centerY: value.rect.y + value.rect.height / 2 }))
-    .filter(value => Math.abs(value.centerY - layout.pane.y) < 24)
-    .sort((left, right) => Math.abs(left.centerY - layout.pane.y) - Math.abs(right.centerY - layout.pane.y))[0];
-  if (!sash) return;
-  const x = sash.rect.x + Math.max(2, sash.rect.width / 2), fromY = sash.centerY;
-  const toY = Math.max(80, fromY - 500);
-  await nativeWorkbench(async send => {
-    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y: fromY });
-    await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y: fromY, button: "left", clickCount: 1 });
-    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y: toY, button: "left", buttons: 1 });
-    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y: toY, button: "left", clickCount: 1 });
-  });
+  const paneFound = await nativeValue(`(() => {
+    const panes=[...document.querySelectorAll('.explorer-viewlet .pane')];
+    const workspace=panes.find(pane=>pane.querySelector('.pane-header')?.textContent.includes('Dynare Workspace'));
+    if(!workspace) return false;
+    for(const pane of panes) if(pane!==workspace && pane.classList.contains('expanded')) pane.querySelector('.pane-header')?.click();
+    return true;
+  })()`);
+  assert.equal(paneFound, true, "native Explorer gives the workspace checks pane room");
 }
 async function expandFolder(label, waitFor) {
   await revealRow(label, waitFor);
@@ -157,12 +151,14 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   assert.ok(process.env.DYGNOSIS_HOST_CDP_PORT, "Workspace acceptance requires the isolated native host CDP port");
   await waitFor(() => service.client && service.supportsModelInfo, "workspace status language client startup");
 
+  const policyName = "policy.dyn";
+  const policyKey = `models/variants/${policyName}`;
   const files = new Map([
     ["root.mod", "var root_y; model; root_y=1; end;\n"],
     ["root.dyn", "var root_x; model; root_x=1; end;\n"],
     ["alpha/same.mod", 'var a; model;\n@#include "../includes/shared.inc"\nend;\n'],
     ["beta/same.mod", 'var b; model;\n@#include "../includes/shared.inc"\nend;\n'],
-    ["models/variants/policy.dyn", "var policy_y; model; policy_y=1; end;\n"],
+    [policyKey, "var policy_y; model; policy_y=1; end;\n"],
     ["includes/shared.inc", "// Shared saved include.\n"],
     ["includes/calibration.inc", "// Unreferenced saved include.\n"],
     ["only-includes/standalone.inc", "// Include-only folder.\n"],
@@ -194,7 +190,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   for (const folder of ["alpha", "beta", "includes", "models", "only-includes"])
     await expandFolder(folder, waitFor);
   await expandFolder("variants", waitFor);
-  for (const name of ["root.mod", "root.dyn", "policy.dyn", "shared.inc", "calibration.inc", "standalone.inc"])
+  for (const name of ["root.mod", "root.dyn", policyName, "shared.inc", "calibration.inc", "standalone.inc"])
     await revealRow(name, waitFor);
   await scrollWorkspaceTreeToTop(waitFor);
   await waitFor(async () => {
@@ -207,7 +203,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   assert.equal(rows.filter(row => row.label === "same.mod").length, 2,
     "same-name models remain separate rows under sibling directories");
   assert.ok(!rowTextIncludes(rows, "alpha/same.mod"), "model labels use basenames while folders carry paths");
-  for (const name of ["root.mod", "root.dyn", "policy.dyn", "shared.inc", "calibration.inc", "standalone.inc"]) {
+  for (const name of ["root.mod", "root.dyn", policyName, "shared.inc", "calibration.inc", "standalone.inc"]) {
     await revealRow(name, waitFor);
     const fileRow = (await findRows(name))[0];
     assert.ok(fileRow, `native workspace tree shows ${name}`);
@@ -246,7 +242,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   rows = await treeRows();
   assert.equal(rows.filter(row => row.label === "same.mod" || row.text === "same.mod").length, 1,
     "collapsed alpha hides its own model while beta remains visible");
-  for (const name of ["root.mod", "policy.dyn", "calibration.inc"]) {
+  for (const name of ["root.mod", policyName, "calibration.inc"]) {
     await revealRow(name, waitFor);
     assert.ok(rowTextIncludes(await treeRows(), name), `${name} remains visible while alpha is collapsed`);
   }
@@ -299,7 +295,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   evidence.checks.push("saved include creation, rename and deletion refresh the tree; opening an include targets its exact URI");
 
   // The filter must reveal a model under a collapsed branch and restore that branch afterwards.
-  const policyPath = path.join(workspaceRoot, "models/variants/policy.dyn");
+  const policyPath = path.join(workspaceRoot, policyKey);
   await fs.writeFile(policyPath, '@#include "missing-workspace-check.inc"\n');
   await waitFor(async () => {
     workspaceStatus = await status(service);
@@ -307,16 +303,51 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   }, "missing include produces one model that is not fully checked");
   const incompletePolicy = workspaceStatus.roots.find(root => vscode.Uri.parse(root.root_uri).fsPath.toLowerCase() === policyPath.toLowerCase());
   assert.ok(incompletePolicy, "the incomplete root uses the policy file identity");
-  assert.match(incompletePolicy.cause, /policy\.dyn:1.*missing-workspace-check\.inc/);
+  const causeLocation = `${policyName}:1`;
+  assert.ok(incompletePolicy.cause.includes(causeLocation) && incompletePolicy.cause.includes("missing-workspace-check.inc"));
+  if (incompletePolicy.cause_message != null) assert.match(incompletePolicy.cause_message, /missing-workspace-check\.inc/);
   const clickFilter = async title => {
     const clicked = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare Workspace')); const action=[...pane.querySelectorAll('.pane-header .action-label')].find(value=>(value.getAttribute('aria-label')||value.title||'').includes(${JSON.stringify(title)})); if(!action) return false; action.click(); return true; })()`);
     assert.equal(clicked, true, `native workspace toolbar contains ${title}`);
   };
   await clickFilter("Show not fully checked models");
   await scrollWorkspaceTreeToTop(waitFor);
-  await waitFor(async () => rowTextIncludes(await treeRows(), "policy.dyn"), "filter expands the path to the affected model");
+  await waitFor(async () => rowTextIncludes(await treeRows(), policyName), "filter expands the path to the affected model");
   const filteredRows = await treeRows();
   assert.ok(rowTextIncludes(filteredRows, "missing-workspace-check.inc"), "the affected row identifies the failed include without another model query");
+  const reason = filteredRows.find(row => row.label.includes("missing-workspace-check.inc"));
+  assert.ok(reason && Number(reason.level) > Number(filteredRows.find(row => row.label === policyName).level), "the cause has a separate child row");
+  assert.ok(reason.ariaLabel.includes(causeLocation) && reason.ariaLabel.includes("missing-workspace-check.inc"));
+  const selector = await rowSelector(reason.label);
+  const point = await nativeValue(`(() => { const box=${selector}.querySelector('.label-name').getBoundingClientRect(); return {x:box.x+5,y:box.y+box.height/2}; })()`);
+  await nativeWorkbench(send => send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point }));
+  await waitFor(() => nativeValue(`Array.from(document.querySelectorAll('.monaco-hover')).some(hover=>hover.textContent.includes(${JSON.stringify(causeLocation)}))`),
+    "hover shows the full cause and its written location");
+  await nativeWorkbench(async send => {
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", buttons: 1, clickCount: 1, ...point });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", buttons: 0, clickCount: 1, ...point });
+  });
+  // The extension test host suppresses dialogs. Its refusal identifies the
+  // invoked command. The provider test verifies the exact detail payload.
+  const invoked = () => nativeValue("Array.from(document.querySelectorAll('.notification-list-item-message')).some(item=>item.textContent.includes('refused to show dialog in tests. Contents: Workspace check details'))");
+  const press = (key, number) => nativeWorkbench(async send => {
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: number });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: number });
+  });
+  await waitFor(invoked, "click invokes the check details command");
+  await vscode.commands.executeCommand("notifications.clearAll");
+  await waitFor(async () => !await invoked(), "the test host notice clears");
+  const focused = () => nativeValue(`${selector}.classList.contains('focused')`);
+  await nativeValue(`${selector}.closest('.monaco-list').focus()`);
+  if (!await focused()) {
+    await press("Home", 36);
+    for (let row = 0; row < filteredRows.length && !await focused(); row++) await press("ArrowDown", 40);
+  }
+  assert.equal(await focused(), true, "keyboard focus reaches the cause row");
+  await press("Enter", 13);
+  await waitFor(invoked, "Enter invokes the same check details command");
+  await vscode.commands.executeCommand("notifications.clearAll");
+  evidence.checks.push("reason child row shows the cause on hover and activates by click and Enter");
   assert.ok(rowTextIncludes(filteredRows, "models") && rowTextIncludes(filteredRows, "variants"));
   for (const name of ["root.mod", "root.dyn", "same.mod", "shared.inc", "Open Dygnosis Help"])
     assert.ok(!rowTextIncludes(filteredRows, name), `${name} is absent from the affected-model list`);
@@ -325,7 +356,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab.isPreview, true, "first model is a preview tab");
   await currentSnapshot(service, firstPreview.document, () => service.modelInfo(firstPreview.document.uri), "first preview model reaches the language server");
   await waitFor(async () => (await status(service))?.complete, "first preview model finishes updating");
-  await waitFor(async () => rowTextIncludes(await treeRows(), "policy.dyn"), "affected model remains visible before opening its preview");
+  await waitFor(async () => rowTextIncludes(await treeRows(), policyName), "affected model remains visible before opening its preview");
   const closedPreviews = [];
   const closeSubscription = vscode.window.tabGroups.onDidChangeTabs(event => {
     for (const tab of event.closed) if (tab.input?.uri) closedPreviews.push(tab.input.uri.fsPath.toLowerCase());
@@ -335,7 +366,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
     const trace={removed:false};
     trace.observer=new MutationObserver(()=>{
       const names=[...pane.querySelectorAll('.monaco-list-row .label-name')].map(value=>value.textContent.trim());
-      if(!names.includes('policy.dyn')) trace.removed=true;
+      if(!names.includes(${JSON.stringify(policyName)})) trace.removed=true;
     });
     trace.observer.observe(pane,{childList:true,subtree:true});
     globalThis.dygnosisWorkspacePreviewTrace=trace;
@@ -357,7 +388,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   await clickFilter("Show all workspace files");
   await revealRow("models", waitFor);
   await waitFor(async () => (await findRows("models"))[0]?.expanded === "false", "clearing the filter restores the collapsed models folder");
-  await fs.writeFile(policyPath, files.get("models/variants/policy.dyn"));
+  await fs.writeFile(policyPath, files.get(policyKey));
   await waitFor(async () => {
     workspaceStatus = await status(service);
     return workspaceStatus?.coverage_complete;
@@ -376,6 +407,20 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   await revealRow("standalone.inc", waitFor);
   evidence.checks.push(`Ignore this folder on alpha writes ${alphaPattern} at workspace-folder scope, excludes its model, and retains include entries`);
   evidence.checks.push("Ignore this folder on the workspace row writes **, excludes every selected model root, and retains the complete include inventory");
+
+  const configPath = path.join(workspaceRoot, ".mcp.json");
+  await fs.writeFile(configPath, '{\r\n  "mcpServers": { "other": {"type":"stdio","command":"keep"}, "dygnosis": {"command":"old"} }\r\n}\r\n');
+  const editor = vscode.window.activeTextEditor;
+  const setup = vscode.commands.executeCommand("dygnosis.setupWorkspaceMcp");
+  await waitFor(async () => JSON.parse(await fs.readFile(configPath, "utf8")).mcpServers.dygnosis.type === "stdio",
+    "workspace MCP setup directly saves a different existing entry");
+  await setup;
+  const config = await fs.readFile(configPath, "utf8");
+  assert.match(config, /"other": \{"type":"stdio","command":"keep"\}/);
+  assert.equal(config.replaceAll("\r\n", "").includes("\n"), false, "setup keeps the file's CRLF line endings");
+  assert.match(JSON.parse(config).mcpServers.dygnosis.command, /dygnosis-mcp\.exe$/i);
+  assert.equal(vscode.window.activeTextEditor, editor);
+  evidence.checks.push("workspace MCP setup saves a conflicting CRLF configuration in place and preserves the other entry");
 }
 
 module.exports = { checkWorkspaceHost };

@@ -78,6 +78,44 @@ async function checkHelpAccess(evidence, waitFor) {
   }, "Extensions menu opens the general Help topic");
   assert.equal(vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(isHelp).length, 1);
   evidence.checks.push("native Command Palette and Dygnosis Extensions context menu each open one Help panel with no model open");
+
+  const readHelp = expression => nativeHelp(({ evaluate }) => evaluate(expression)).catch(error => {
+    if (error.code === "NATIVE_FRAME_PENDING") return undefined;
+    throw error;
+  });
+  const initialWidth = await readHelp("innerWidth");
+  for (let side = 0; side < 2; side++) {
+    const scratch = await vscode.workspace.openTextDocument({ language: "plaintext", content: "" });
+    await vscode.window.showTextDocument(scratch, { viewColumn: vscode.ViewColumn.Beside });
+  }
+  await vscode.commands.executeCommand("workbench.action.focusFirstEditorGroup");
+  await waitFor(() => readHelp("innerWidth <= 700 && !document.getElementById('topics').open"), "split Help shows one closed Topics control");
+  const disclosure = await readHelp("(() => { const control=document.querySelector('#topics summary'); control.focus(); return control===document.activeElement; })()");
+  assert.equal(disclosure, true, "the native Topics disclosure takes keyboard focus");
+  await readHelp("document.querySelector('#topics summary').click()");
+  await waitFor(() => readHelp("document.getElementById('topics').open"), "Topics opens in the split Help panel");
+  await readHelp("document.querySelector('[data-topic=workspace-checks]').click()");
+  await waitFor(() => readHelp("!document.getElementById('topics').open && document.querySelector('#article h1')?.textContent === 'Check workspace models' && document.activeElement.id === 'main'"),
+    "selecting a topic closes the list and focuses the article");
+  if (initialWidth > 700) {
+    await vscode.commands.executeCommand("workbench.action.joinAllGroups");
+    await waitFor(() => readHelp("innerWidth > 700 && document.getElementById('topics').open"), "wide Help restores topic navigation");
+  }
+  evidence.checks.push("split Help uses a focusable native Topics control and focuses the selected article");
+
+  await vscode.commands.executeCommand("workbench.action.openSettings", "@ext:CoconutWater.dygnosis block tint");
+  let settings;
+  await waitFor(async () => {
+    settings = await nativeWorkbench(async send => {
+      const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+        "Array.from(document.querySelectorAll('.setting-item-contents[data-key^=\"dynare.blockTint.\"]')).map(row=>({key:row.getAttribute('data-key'),text:row.textContent}))" });
+      return result.result.value;
+    });
+    return settings?.length > 1;
+  }, "native Settings shows block tint controls");
+  assert.equal(settings[0].key, "dynare.blockTint.enabled", "the master switch is first");
+  assert.match(settings[0].text, /When off, all block tints are disabled/);
+  evidence.checks.push("native Settings shows the master tint switch before block options");
 }
 
 module.exports = { checkHelpAccess };

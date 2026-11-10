@@ -9,7 +9,7 @@ const vscode = {
   commands: { registerCommand: (_id, callback) => { host.run = callback; return { dispose() {} }; } },
   window: {
     get activeTextEditor() { return host.editor; },
-    showQuickPick: async (items, options) => { host.picker = { items, options }; return items.find(item => item.activity === host.answer); },
+    showQuickPick: async (items, options) => { host.picker = { items, options }; host.onPick?.(); return items.find(item => item.activity === host.answer); },
     showInformationMessage: async message => host.messages.push(message),
   },
   workspace: {
@@ -29,24 +29,41 @@ Module._load = function (id, ...args) {
 const { registerOutlineFilter } = require(compiledModule("outline"));
 Module._load = originalLoad;
 function setup() {
-  host = { editor: { document: { languageId: "dynare", uri: { scheme: "file" } } }, folder: {}, current: "both", updates: [], messages: [] };
-  registerOutlineFilter({ log() {} });
+  const document = name => ({ languageId: "dynare", uri: { scheme: "file", path: "/" + name, toString() { return this.path; } }, version: 1, isClosed: false });
+  const first = document("first.mod"), second = document("second.mod");
+  host = { editor: { document: first }, first, second, updates: [], messages: [], filters: new Map(), instance: 1, owner: "owner" };
+  host.client = { log() {}, ensureStarted: async () => {}, get currentInstance() { return host.instance; }, supportsOutlineActivity: true,
+    chosenRootForDocument: doc => doc.uri, rootForDocument: async () => undefined, documentContextIdentity: () => host.owner,
+    outlineActivity: root => host.filters.get(root.path) ?? "both",
+    setOutlineActivity: async (root, activity) => { host.filters.set(root.path, activity); host.updates.push({ root: root.path, activity }); } };
+  registerOutlineFilter(host.client);
 }
-test("filter writes the chosen mode for the current folder and marks the current choice", async () => {
-  setup(); host.answer = "inactive";
-  await host.run();
-  assert.deepEqual(host.picker.items.map(item => item.label), ["Both", "Active", "Inactive"]);
-  assert.equal(host.picker.items[0].description, "Current");
-  assert.deepEqual(host.updates, [{ scope: host.editor.document.uri, args: ["outline.activity", "inactive", 3] }]);
+test("current choice is first and Enter or dismissal changes nothing", async () => {
+  setup(); host.filters.set("/first.mod", "inactive"); host.answer = "inactive"; await host.run();
+  assert.equal(host.picker.items[0].label, "Inactive"); assert.equal(host.picker.items[0].description, "Current");
+  assert.match(host.picker.options.title, /first.mod/); assert.deepEqual(host.updates, []);
+  host.answer = undefined; await host.run(); assert.deepEqual(host.updates, []);
 });
-test("loose files use the user setting and cancel or unchanged choices write nothing", async () => {
-  setup(); host.folder = undefined; host.answer = "active";
-  await host.run(); assert.equal(host.updates[0].args[2], 1);
-  for (const answer of [undefined, "both"]) {
-    setup(); host.answer = answer; await host.run(); assert.deepEqual(host.updates, []);
+test("Outline choice follows each model and returns with its current choice", async () => {
+  setup(); host.answer = "active"; await host.run();
+  host.editor = { document: host.second }; host.answer = "inactive"; await host.run();
+  host.editor = { document: host.first }; host.answer = "active"; await host.run();
+  assert.equal(host.picker.items[0].label, "Active");
+  assert.deepEqual(host.updates, [{ root: "/first.mod", activity: "active" }, { root: "/second.mod", activity: "inactive" }]);
+});
+test("ambiguous owner and older engine explain why no filter was applied", async () => {
+  setup(); host.client.chosenRootForDocument = () => undefined; await host.run();
+  assert.match(host.messages[0], /Choose model owner/); assert.deepEqual(host.updates, []);
+  setup(); host.client.supportsOutlineActivity = false; await host.run();
+  assert.match(host.messages[0], /engine does not support temporary Outline filters/); assert.deepEqual(host.updates, []);
+});
+test("stale selection cannot apply to another source or owner", async () => {
+  for (const change of [() => { host.editor = { document: host.second }; }, () => { ++host.first.version; }, () => { host.owner = "other"; }]) {
+    setup(); host.answer = "active"; host.onPick = change; await host.run();
+    assert.match(host.messages[0], /source or model changed/); assert.deepEqual(host.updates, []);
   }
 });
-test("unsupported editors explain the filter outcome without changing settings", async () => {
-  setup(); host.editor.document.languageId = "plaintext";
-  await host.run(); assert.equal(host.messages.length, 1); assert.deepEqual(host.updates, []);
+test("unsupported editors explain the filter outcome", async () => {
+  setup(); host.editor.document.languageId = "plaintext"; await host.run();
+  assert.match(host.messages[0], /Open a Dynare source file/); assert.deepEqual(host.updates, []);
 });

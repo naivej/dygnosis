@@ -984,7 +984,7 @@ async fn written_intelligence_shares_inventory_without_accepting_dormant_model_f
         .unwrap();
     PARSE_EXPANDED_BUILDS.with(|builds| builds.set(0));
     assert!(server.folding_ranges(&uri).is_some());
-    let rows = server.doc_symbols(&uri).unwrap();
+    let rows = server.doc_symbols(&uri, true).unwrap();
     fn find<'a>(rows: &'a [DocumentSymbol], name: &str) -> Option<&'a DocumentSymbol> {
         rows.iter().find_map(|row| {
             if row.name == name {
@@ -1010,6 +1010,28 @@ async fn written_intelligence_shares_inventory_without_accepting_dormant_model_f
         Some("inactive")
     );
     assert_eq!(find(&rows, "FLAG").unwrap().detail, None);
+    // The temporary view must filter document symbols and preserve workspace search.
+    server
+        .outline_activity_changed(OutlineFilters {
+            filters: vec![OutlineFilter {
+                root_uri: uri.clone(),
+                activity: OutlineActivity::Active,
+            }],
+        })
+        .await;
+    let active = server.doc_symbols(&uri, true).unwrap();
+    assert!(find(&active, "live").is_some());
+    assert!(find(&active, "dormant").is_none());
+    assert!(
+        server
+            .workspace_symbols("dormant")
+            .iter()
+            .any(|symbol| symbol.name == "dormant")
+    );
+    server
+        .outline_activity_changed(OutlineFilters { filters: vec![] })
+        .await;
+    assert!(find(&server.doc_symbols(&uri, true).unwrap(), "dormant").is_some());
     let byte = source.find("dormant=1").unwrap() as u32 + 8;
     let context = server
         .lock_inner()

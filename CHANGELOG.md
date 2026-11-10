@@ -3,6 +3,19 @@
 Each entry describes the release at the time. Feature names and interfaces can
 change in later releases; see Dygnosis Help for current guidance.
 
+## v0.12.0
+
+VS Code makes model checks and comparisons easier to read. Workspace checks
+show why a model could not be checked, and comparison tabs name the files or
+versions on both sides.
+
+The analysis configuration picker focuses the current choice. The Outline
+activity filter applies to the open model, with a default in Settings. Help
+keeps the article in view beside the editor, and Settings uses shorter labels.
+
+Workspace MCP setup saves its entry in `.mcp.json` directly. If that file has
+unsaved edits, save them before running setup again.
+
 ## v0.11.50
 
 The editor context menu groups Dygnosis actions directly below navigation,

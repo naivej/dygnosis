@@ -172,7 +172,10 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       const anchor = resource.anchor === resource.after ? after : resource.anchor === resource.before ? before : resource.anchor;
       resource = { ...resource, before, after, anchor };
     } finally { cancel?.dispose(); cancellation.dispose(); }
-    const uri = vscode.Uri.from({ scheme: changesScheme, path: `/${resourceName(resource)}`, query: resourceQuery(resource) });
+    const query = resourceQuery(resource);
+    // A restored tab can still use the caption from an earlier release.
+    const existing = [...documents.values()].find(document => document.uri.query === query);
+    const uri = existing?.uri ?? vscode.Uri.from({ scheme: changesScheme, path: `/${resourceName(resource)}`, query });
     if (choices) remembered.set(uri.toString(), { ...choices });
     await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: column ?? vscode.ViewColumn.Active, preview: false });
   };
@@ -299,18 +302,15 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       return { sources, repository };
     })();
     let commits: PinnedCommit[] = [], refs: RevisionRef[] = [], cursor: HistoryCursor | undefined;
-    let historyCause = "", refsCause = "";
     const revisionRows = (): BaselinePick[] => [
       ...refs.map(ref => ({ label: ref.name, description: `${ref.kind === "remote" ? "Remote-tracking branch" : ref.kind === "tag" ? "Tag" : "Branch"} · ${ref.revision.hash.slice(0, 7)}`, mode: "ref" as const, revision: ref.revision })),
       ...commits.map(revision => ({ label: revision.hash.slice(0, 7), description: revision.message.split("\n")[0], detail: (revision.commitDate ?? revision.authorDate)?.toLocaleDateString(), mode: "revision" as const, revision })),
       ...(cursor && commits.length < 4096 ? [{ label: "Load more commits…", action: "more" as const }] : []),
-      ...(cursor && commits.length >= 4096 ? [{ label: "History display limit reached", description: "Showing 4,096 commits. Type a local revision to select an older commit." }] : []),
-      ...(historyCause ? [{ label: "Recent commits unavailable", description: historyCause }] : []),
-      ...(refsCause ? [{ label: "Branches and tags unavailable", description: refsCause }] : []),
     ];
     const pickerWork = new AbortController(), pickerSignal = AbortSignal.any([signal, pickerWork.signal]);
-    const load = async (more: boolean, publish: (items: BaselinePick[]) => void): Promise<BaselinePick[]> => {
+    const load = async (more: boolean, publish: (items: BaselinePick[], gitAvailable?: boolean) => void): Promise<BaselinePick[]> => {
       const { sources, repository } = await repositoryReady();
+      publish(revisionRows(), true);
       if (pickerSignal.aborted) throw new ComparisonFailure("CANCELLED", "Baseline selection was cancelled.");
       if (more) {
         if (cursor && commits.length < 4096) {
@@ -321,24 +321,32 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
         const results = await Promise.allSettled([
           sources.history(repository, undefined, pickerSignal).then(page => {
             commits = page.commits.map(pickerRevision); cursor = page.next; publish(revisionRows());
-          }, (error: unknown) => { historyCause = String(error); publish(revisionRows()); throw error; }),
+          }),
           sources.refs(repository, pickerSignal).then(value => {
             refs = value.map(ref => ({ ...ref, revision: pickerRevision(ref.revision) })); publish(revisionRows());
-          }, (error: unknown) => { refsCause = String(error); publish(revisionRows()); throw error; }),
+          }),
         ]);
-        const failures = results.flatMap(result => result.status === "rejected" ? [String(result.reason)] : []);
-        if (failures.length && !pickerSignal.aborted) service.log(`Comparison baseline choices: ${failures.join("; ")}`);
+        const lists = ["Git commit history", "Git branches and tags"];
+        const failures = results.flatMap((result, index) => result.status === "rejected"
+          ? [{ list: lists[index], cause: failureText(result.reason) }] : []);
+        if (failures.length && !pickerSignal.aborted) {
+          const missing = failures.map(failure => failure.list).join(" or ");
+          const causes = new Set(failures.map(failure => failure.cause));
+          void explainFailure(service, `Could not load ${missing}. ${[...causes].join("\n")}\nYou can still use loaded choices or enter a revision.`);
+        }
       }
       checkSelection(token);
       return revisionRows();
     };
     let choice: BaselinePick | undefined;
     try {
+      if (!fileOnly && anchor.kind === "working") await service.ensureStarted().catch(error => service.log(`Configuration comparison unavailable: ${String(error)}`));
+      checkSelection(token);
       const modelName = sourceName(modelUri(anchor).path);
       const title = `Compare ${modelName}${anchor.kind === "git" ? ` (${anchor.commit.slice(0, 7)})` : ""} with`;
       choice = fileOnly ? { mode: "file", label: "model file…" } : await pickBaseline(title, [
-        { label: "model file…", mode: "file" },
-        { label: "config…", mode: "config", description: anchor.kind === "working" ? "Same model · current configuration is After" : "Open the written model to compare configurations" },
+        { label: "Model file…", mode: "file" },
+        ...(anchor.kind === "working" && service.supportsAnalysisConfiguration ? [{ label: "Configuration…", mode: "config" as const, description: "Same model · current configuration is After" }] : []),
       ], load, token);
     } finally {
       pickerWork.abort();
@@ -461,15 +469,16 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     const textAvailable = (file: SourceFile): boolean => (["before", "after"] as const).every(side => !file[side] ||
       file[side].exact_text_available && Object.hasOwn(doc.result!.texts[side], file[side].file_key));
     if (files.length === 1 && textAvailable(files[0])) { await openCaptured(doc, files[0]); return; }
-    const selected = await vscode.window.showQuickPick(files.map(file => {
+    const names = files.map(file => sourceName(file.after?.file_key ?? file.before!.file_key));
+    const selected = await vscode.window.showQuickPick(files.map((file, index) => {
       const available = textAvailable(file);
       return {
-        label: sourceName(file.after?.file_key ?? file.before!.file_key),
-        description: available ? `${file.change}${file.correspondence === "unpaired" ? " · file correspondence not established" : ""}` : "Text diff unavailable: complete captured text is missing",
+        label: names[index],
+        description: available ? `${names.filter(name => name === names[index]).length > 1 ? `${(file.after?.file_key ?? file.before!.file_key).split("/").slice(0, -1).join("/") || "."} · ` : ""}${file.change}${file.correspondence === "unpaired" ? " · file correspondence not established" : ""}` : "Text diff unavailable: complete captured text is missing",
         detail: `Before: ${file.before?.file_key ?? "absent"} → After: ${file.after?.file_key ?? "absent"}`,
         file, available,
       };
-    }), { placeHolder: "Choose a changed captured file for text diff" });
+    }), { placeHolder: "Choose a changed file for text diff" });
     if (!selected || !current(doc, generation, instance)) return;
     if (!selected.available) { refuse(`Text diff for ${selected.label} was not opened: complete captured text is unavailable.`, "CAPTURED_TEXT_UNAVAILABLE"); }
     await openCaptured(doc, selected.file);

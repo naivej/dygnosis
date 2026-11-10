@@ -120,8 +120,12 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   const document = await vscode.workspace.openTextDocument(rootPath);
   await vscode.window.showTextDocument(document);
   const context = () => service.analysisContext(document.uri);
-  await waitFor(async () => (await context())?.analysis.state === "selected", "Source analysis startup");
-  assert.equal((await context()).analysis.selection.preview, false);
+  let startup;
+  await waitFor(async () => {
+    startup = await context();
+    return startup?.analysis.state === "selected";
+  }, "Source analysis startup");
+  assert.equal(startup.analysis.selection.preview, false);
   const hasExpansion = () => vscode.workspace.textDocuments.some(document => document.uri.scheme === "dygnosis-effective");
   assert.equal(hasExpansion(), false, "written source intelligence starts without an expanded view");
   const dormantPosition = document.positionAt(source.indexOf("dormant_p"));
@@ -338,8 +342,24 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   evidence.checks.push("Source and expanded native selectors share one root and successful refresh replaces the URI and configuration title");
 
   const frozenGeneration = (await context()).analysis.selection_generation;
+  const keeping = vscode.commands.executeCommand("dygnosis.selectAnalysisConfiguration");
+  // The hidden list can still contain a focused row from the previous picker.
+  await waitFor(async () => nativeWorkbench(async send => {
+    const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+      "(() => { const input=document.querySelector('.quick-input-widget input'), row=document.querySelector('.quick-input-list .monaco-list-row.focused'); return input===document.activeElement && !!row?.getClientRects().length && row.querySelector('.label-name')?.textContent==='Else preview' && row.textContent.includes('Current'); })()" });
+    return result.result.value;
+  }), "the exact current saved configuration receives focus");
+  await press("Enter", "Enter", 13);
+  await waitFor(async () => nativeWorkbench(async send => {
+    const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+      "!document.querySelector('.quick-input-widget')?.getClientRects().length" });
+    return result.result.value;
+  }), "Enter closes the configuration picker");
+  await keeping;
+  assert.equal((await context()).analysis.selection_generation, frozenGeneration, "Enter keeps the current saved configuration");
+  evidence.checks.push("Enter on the focused saved configuration keeps its generation and selection");
   const comparing = vscode.commands.executeCommand("dygnosis.openChanges");
-  await chooseAnyPicker("config…", waitFor);
+  await chooseAnyPicker("Configuration…", waitFor);
   await choose("Written source", waitFor, false, "Choose written source or a saved configuration"); await comparing;
   await waitFor(() => vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input?.viewType === "dygnosis.changes")), "analysis comparison opens existing Model Diff");
   await waitFor(async () => {

@@ -92,7 +92,7 @@ function service(options = {}) {
       const initialized = deferred();
       const client = {
         initializeResult: { serverInfo: { name: "dygnosis", version: "one" }, capabilities: {
-          experimental: { dygnosis: { modelInfo: { schema_version: 1 }, ...(options.analysis ? {analysisConfiguration:{schema_version:1}} : {}), ...(options.documentContext ? { documentContext: { schema_version: 1, command: "dynare/setDocumentContext" } } : {}) } }, documentSymbolProvider: true,
+          experimental: { dygnosis: { modelInfo: { schema_version: 1 }, ...(options.analysis ? {analysisConfiguration:{schema_version:1}} : {}), ...(options.outline ? { outlineActivity: { schema_version: 1, notification: "dynare/outlineActivityChanged" } } : {}), ...(options.documentContext ? { documentContext: { schema_version: 1, command: "dynare/setDocumentContext" } } : {}) } }, documentSymbolProvider: true,
           executeCommandProvider: { commands: ["dynare/modelInfo", "dynare/showEffectiveModel", ...(options.documentContext ? ["dynare/setDocumentContext"] : []),
             ...(options.documentOwners ? ["dynare/documentOwners"] : [])] },
         } },
@@ -129,6 +129,51 @@ test("Outline presentation changes retain model snapshots and still refresh symb
     assert.ok(host.symbols > symbols);
     assert.equal(host.notifications.at(-1).params.settings.dynare.configuration.loose.outline.activity, "inactive");
   } finally { await client.shutdown(); }
+});
+
+test("temporary Outline filter resets only after the last model tab closes", async () => {
+  // Guards retaining a temporary choice after closing all views of its model.
+  reset(); const client = service({ outline: true }); await client.ensureStarted();
+  const root = Uri.parse("file:///workspace/root.mod"), first = { input: new TabInputText(root) }, second = { input: new TabInputText(root) };
+  host.tabGroups = [{ tabs: [first, second] }];
+  try {
+    await client.setOutlineActivity(root, "active");
+    host.tabGroups = [{ tabs: [second] }]; host.tabsChanged.fire({ closed: [first], opened: [], changed: [] }); await flush();
+    assert.equal(client.outlineActivity(root, root), "active");
+    host.tabGroups = []; host.tabsChanged.fire({ closed: [second], opened: [], changed: [] }); await flush();
+    assert.equal(client.outlineActivity(root, root), "both");
+    assert.deepEqual(host.notifications.filter(value => value.method === "dynare/outlineActivityChanged").at(-1).params.filters, []);
+  } finally { await client.shutdown(); }
+});
+
+test("an open sole-owner include keeps the temporary Outline filter when the model tab closes", async () => {
+  for (const documentClosesFirst of [true, false]) {
+    reset(); const client = service({ outline: true }); await client.ensureStarted();
+    const root = { uri: Uri.parse("file:///workspace/root.mod"), languageId: "dynare", version: 1 };
+    const include = { uri: Uri.parse("file:///workspace/written.inc"), languageId: "dynare", version: 1 };
+    const [modelTab, includeTab, otherTab] = [root.uri, include.uri, Uri.parse("file:///workspace/other.mod")].map(uri => ({ input: new TabInputText(uri) }));
+    host.documents.push(root, include);
+    host.tabGroups = [{ tabs: [modelTab, includeTab, otherTab] }];
+    client.client.sendRequest = async () => model(root.uri.toString(), [{ kind: "include", filename: "written.inc", resolved: true, path: include.uri.fsPath }]);
+    const closeDocument = () => { root.isClosed = true; host.close.fire(root); };
+    const closeTab = (closed, remaining) => {
+      host.tabGroups = [{ tabs: remaining }]; host.tabsChanged.fire({ closed: [closed], opened: [], changed: [] });
+    };
+    try {
+      await client.modelInfo(root.uri);
+      assert.deepEqual(client.knownOwners(include.uri).map(uri => uri.toString()), [root.uri.toString()]);
+      await client.setOutlineActivity(root.uri, "inactive");
+      if (documentClosesFirst) closeDocument();
+      closeTab(modelTab, [includeTab, otherTab]);
+      if (!documentClosesFirst) closeDocument();
+      closeTab(otherTab, [includeTab]);
+      assert.equal(client.outlineActivity(root.uri, include.uri), "inactive");
+      closeTab(includeTab, []);
+      await flush();
+      assert.equal(client.outlineActivity(root.uri, include.uri), "both");
+      assert.deepEqual(host.notifications.filter(value => value.method === "dynare/outlineActivityChanged").at(-1).params.filters, []);
+    } finally { await client.shutdown(); }
+  }
 });
 
 test("editing one root retains an independent cache and cancels unproven pending inputs", async () => {

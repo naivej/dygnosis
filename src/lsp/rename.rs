@@ -454,7 +454,7 @@ mod read_tests {
         };
         let root_targets = expected(root, source);
         assert_eq!(definition, root_targets[0]);
-        assert!(!server.doc_symbols(root).unwrap().is_empty());
+        assert!(!server.doc_symbols(root, true).unwrap().is_empty());
         let highlights = server.ident_highlights(&pos).unwrap();
         assert_eq!(highlights.len(), root_targets.len());
         for highlight in &highlights {

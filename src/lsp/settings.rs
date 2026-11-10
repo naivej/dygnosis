@@ -39,7 +39,8 @@ pub struct OutlinePreferences {
     pub activity: OutlineActivity,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum OutlineActivity {
     #[default]
     Both,

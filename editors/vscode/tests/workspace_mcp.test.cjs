@@ -41,7 +41,7 @@ const vscode = {
   window: {
     showTextDocument: document => { host.opened.push(document); return Promise.resolve({ document }); },
     showQuickPick: items => { host.picks.push(items); return Promise.resolve(host.cancelPick ? undefined : items[host.pickIndex ?? 0]); },
-    showInformationMessage: message => { host.messages.push(message); return Promise.resolve(undefined); },
+    showInformationMessage: message => { host.messages.push(message); return host.informationResult ?? Promise.resolve(undefined); },
     showWarningMessage: message => { host.messages.push(message); return Promise.resolve(host.reviewAnswer); },
     showErrorMessage: message => { host.errors.push(message); return Promise.resolve(undefined); },
   },
@@ -277,20 +277,12 @@ test("dead owner is recovered, live owner and malformed lock time out without un
   }
 });
 
-test("dirty buffer review preserves unsaved keys and saves exactly the approved merge", async t => {
+test("dirty buffer is left intact when setup needs a write", async t => {
   reset(); const folder = await directory(t), uri = Uri.file(path.join(folder, ".mcp.json"));
-  await fs.writeFile(uri.fsPath, '{"disk":true}');
-  const document = makeDocument(uri, '{"unsaved":42,"mcpServers":{"other":{"command":"keep","args":[]}}}', true); host.documents.push(document);
-  let reviewed;
-  assert.equal(await writeWorkspaceConfig(uri, path.resolve("engine"), async (before, after) => { assert.equal(before, document.text); reviewed = after; return true; }), "saved");
-  assert.equal(await fs.readFile(uri.fsPath, "utf8"), reviewed); assert.equal(document.text, reviewed); assert.equal(document.isDirty, false);
-  assert.equal(JSON.parse(reviewed).unsaved, 42); assert.equal(JSON.parse(reviewed).mcpServers.other.command, "keep"); assert.equal(host.saved, 1);
-});
-test("cancelled conflict/dirty review does not touch buffer or disk", async t => {
-  reset(); const folder = await directory(t), uri = Uri.file(path.join(folder, ".mcp.json")), disk = '{"mcpServers":{"dygnosis":{"command":"old"}}}';
-  await fs.writeFile(uri.fsPath, disk); const document = makeDocument(uri, disk, true); host.documents.push(document);
-  assert.equal(await writeWorkspaceConfig(uri, path.resolve("engine"), async () => false), "cancelled");
-  assert.equal(document.text, disk); assert.equal(await fs.readFile(uri.fsPath, "utf8"), disk); assert.equal(host.saved, 0); assert.equal(document.version, 7);
+  const disk = '{"disk":true}', source = '{"unsaved":42}'; await fs.writeFile(uri.fsPath, disk);
+  const document = makeDocument(uri, source, true); host.documents.push(document);
+  await assert.rejects(writeWorkspaceConfig(uri, path.resolve("engine")), /Save .mcp.json, then run setup again/);
+  assert.equal(await fs.readFile(uri.fsPath, "utf8"), disk); assert.equal(document.text, source); assert.equal(host.saved, 0);
 });
 test("identical dirty entry is a no-op and never saves unrelated unsaved text", async t => {
   reset(); const folder = await directory(t), uri = Uri.file(path.join(folder, ".mcp.json")), command = path.resolve("engine");
@@ -299,24 +291,10 @@ test("identical dirty entry is a no-op and never saves unrelated unsaved text", 
   assert.equal(await writeWorkspaceConfig(uri, command, async () => { assert.fail("no review needed"); }), "identical");
   assert.equal(await fs.readFile(uri.fsPath, "utf8"), "{}"); assert.equal(document.isDirty, true); assert.equal(host.saved, 0);
 });
-test("buffer edits and disk edits during review abort before applying or saving", async t => {
-  for (const kind of ["buffer", "disk", "close"]) {
-    reset(); const folder = await directory(t), uri = Uri.file(path.join(folder, ".mcp.json")), source = '{"mcpServers":{"dygnosis":{}}}';
-    await fs.writeFile(uri.fsPath, source); const document = makeDocument(uri, source, true); host.documents.push(document);
-    await assert.rejects(writeWorkspaceConfig(uri, path.resolve("engine"), async () => {
-      if (kind === "disk") await fs.writeFile(uri.fsPath, '{"concurrent":true}');
-      else if (kind === "buffer") { document.text = '{"concurrent":true}'; ++document.version; }
-      else document.isClosed = true;
-      return true;
-    }), /changed/);
-    assert.equal(host.saved, 0); assert.equal(document.version, kind === "buffer" ? 8 : 7);
-    assert.equal(await fs.readFile(uri.fsPath, "utf8"), kind === "disk" ? '{"concurrent":true}' : source);
-  }
-});
 test("edits at apply/save boundary withhold the save and leave current buffer for review", async t => {
   for (const kind of ["buffer", "disk"]) {
     reset(); const folder = await directory(t), uri = Uri.file(path.join(folder, ".mcp.json")), source = '{"mcpServers":{"dygnosis":{}}}';
-    await fs.writeFile(uri.fsPath, source); const document = makeDocument(uri, source, true); host.documents.push(document);
+    await fs.writeFile(uri.fsPath, source); const document = makeDocument(uri, source, false); host.documents.push(document);
     host.afterEdit = async value => { if (kind === "buffer") { value.text += " "; ++value.version; } else await fs.writeFile(uri.fsPath, '{"concurrent":true}'); };
     await assert.rejects(writeWorkspaceConfig(uri, path.resolve("engine"), async () => true), /changed while applying/);
     assert.equal(host.saved, 0); assert.equal(await fs.readFile(uri.fsPath, "utf8"), kind === "disk" ? '{"concurrent":true}' : source);
@@ -342,7 +320,7 @@ test("missing config is atomically created and opened; competing setup writes pr
   assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
   assert.equal(results.filter(result => result.status === "rejected").length, 1);
   assert.ok([path.resolve("first"), path.resolve("second")].includes(JSON.parse(await fs.readFile(uri.fsPath, "utf8")).mcpServers.dygnosis.command));
-  assert.equal(host.opened.length, 1);
+  assert.equal(host.opened.length, 0);
 });
 
 test("an external config creator at the atomic commit boundary is never overwritten", async t => {
@@ -437,12 +415,20 @@ test("public Git root is used; explicit override remains at its user path and is
   await assert.rejects(fs.stat(path.join(child, ".mcp.json")), { code: "ENOENT" }); await assert.rejects(fs.stat(storage), { code: "ENOENT" });
   assert.ok(host.messages.some(message => message.includes(path.join(folder, ".mcp.json")))); registration.dispose();
 });
-test("conflicting command shows a native read-only diff, cancellation preserves config", async t => {
+test("conflicting command saves directly without opening a diff", async t => {
   reset(); const folder = await directory(t), configPath = path.join(folder, ".mcp.json"), source = '{"mcpServers":{"dygnosis":{"command":"old"}},"keep":42}'; await fs.writeFile(configPath, source);
-  host.folders = [{ name: "workspace", uri: Uri.file(folder) }]; host.reviewAnswer = undefined;
+  host.folders = [{ name: "workspace", uri: Uri.file(folder) }];
+  host.informationResult = new Promise(() => {}); // The toast can stay open after setup completes.
   const registration = registerWorkspaceMcp({ extensionPath: folder, globalStorageUri: Uri.file(path.join(folder, "storage")), extension: { packageJSON: {} } });
-  await host.commands.get("dygnosis.setupWorkspaceMcp")(); assert.equal(await fs.readFile(configPath, "utf8"), source);
-  const [id, before, after, title] = host.executed[0]; assert.equal(id, "vscode.diff"); assert.ok(title.includes(configPath));
-  const provider = host.providers.get("dygnosis-mcp-review"); assert.equal(provider.provideTextDocumentContent(before), source); assert.equal(JSON.parse(provider.provideTextDocumentContent(after)).keep, 42);
-  registration.dispose();
+  await host.commands.get("dygnosis.setupWorkspaceMcp")();
+  const result = JSON.parse(await fs.readFile(configPath, "utf8")); assert.equal(result.keep, 42); assert.equal(result.mcpServers.dygnosis.command, host.binary.path);
+  assert.equal(host.executed.length, 0); assert.equal(host.opened.length, 0); assert.equal(host.messages.length, 1); registration.dispose();
+});
+test("merges preserve line endings and unrelated properties", () => {
+  for (const eol of ["\n", "\r\n"]) for (const existing of [false, true]) {
+    const source = existing ? ['{', '  "mcpServers": {"other": {"command":"keep"}, "dygnosis": {"command":"old"}},', '  "keep": 42', '}', ''].join(eol) : ['{', '  "keep": 42', '}', ''].join(eol);
+    const result = mergeWorkspaceConfig(source, path.resolve("engine")).text;
+    assert.equal(result.replaceAll(eol, "").includes("\n"), false); assert.equal(JSON.parse(result).keep, 42);
+    if (existing) assert.equal(JSON.parse(result).mcpServers.other.command, "keep");
+  }
 });

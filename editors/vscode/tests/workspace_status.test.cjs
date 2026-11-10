@@ -47,7 +47,7 @@ const vscode = {
   RelativePattern: class { constructor(baseUri, pattern) { this.baseUri = baseUri; this.pattern = pattern; } },
   ConfigurationTarget: { WorkspaceFolder: 3 },
   window: {
-    showInformationMessage: async message => { host.notifications.push(message); },
+    showInformationMessage: async (message, options) => { host.notifications.push(message); host.notificationOptions.push(options); },
     get activeTextEditor() { return host.editor; },
     createStatusBarItem: (id, alignment, priority) => {
       const item = { id, alignment, priority, visible: false, disposed: false, show() { this.visible = true; }, hide() { this.visible = false; }, dispose() { this.disposed = true; } };
@@ -124,7 +124,7 @@ function connection(result = initializeResult()) {
 }
 function setup(options = {}) {
   host = { folders: options.folders ?? [folder()], settings: options.settings ?? {}, resources: new Map(), scopes: [],
-    editor: options.editor, items: [], views: [], watchers: [], picks: [], choices: [], inputs: [], inputValues: [], updates: [], executed: [], relativePaths: [], commands: new Map(), notifications: [],
+    editor: options.editor, items: [], views: [], watchers: [], picks: [], choices: [], inputs: [], inputValues: [], updates: [], executed: [], relativePaths: [], commands: new Map(), notifications: [], notificationOptions: [],
     collapsed: new Emitter(), expanded: new Emitter(), active: new Emitter(), folderChanged: new Emitter(), configured: new Emitter(), edited: new Emitter(), closed: new Emitter() };
   const changed = new Emitter(), updated = new Emitter();
   const service = { client: options.client, currentInstance: 1, starts: 0, queries: [], logged: [], status: options.status ?? facts(), onDidChange: changed.event,
@@ -225,7 +225,7 @@ test("default-on folder-only startup uses native coverage and folder tree withou
   assert.match(env.host.items[0].accessibilityInformation.label, /Dynare Workspace/);
   assert.equal(env.host.views[0].id, "dygnosis.workspace");
   assert.equal(rows(env)[0].label, "workspace"); assert.equal(rows(env)[0].contextValue, "dygnosis.workspaceFolder");
-  assert.equal(rows(env)[0].children[0].description, "Checked · 0 Errors, 0 Warnings");
+  assert.equal(rows(env)[0].children[0].description, "");
   assert.equal(rows(env)[0].children[0].command.command, "vscode.open");
   assert.ok(env.service.queries.every(query => query.args.length === 0));
   await env.host.commands.get("dygnosis.workspaceStatus")(); assert.equal(env.host.executed.at(-1).name, "dygnosis.workspace.focus");
@@ -248,7 +248,7 @@ test("nested model and include rows use basenames, sorted folders and exact open
   const top = rows(env)[0];
   assert.deepEqual(top.children.map(item => item.label), ["includes", "models", "sibling", "main.mod"]);
   const variant = child(child(child(top, "models"), "deep"), "variant.dyn");
-  assert.equal(variant.description, "Checked · 1 Error, 0 Warnings");
+  assert.equal(variant.description, "1 error");
   assert.equal(variant.command.arguments[0].toString(), `${workspace}/models/deep/variant.dyn`);
   const include = child(child(top, "includes"), "unused.inc");
   assert.equal(include.description, "Include file");
@@ -317,7 +317,7 @@ test("folder discovery failure cannot make another folder's successful roots loo
     { coverage_complete: false, discovery_failures: [{ folder_uri: other, failure: "Permission denied" }] }) });
   const registration = registerWorkspaceStatus(env.service); await flush();
   assert.equal(env.host.items[0].text, "$(warning) Dynare Workspace: 1/1 checked"); assert.match(env.host.views[0].message, /discovery failed/);
-  assert.equal(rows(env).length, 2); assert.equal(rows(env)[0].children[0].description, "Checked · 2 Errors, 0 Warnings");
+  assert.equal(rows(env).length, 2); assert.equal(rows(env)[0].children[0].description, "2 errors");
   assert.equal(rows(env)[1].children[0].label, "Discovery failed"); assert.equal(rows(env)[1].children[0].tooltip, "Permission denied");
   registration.dispose();
 });
@@ -333,6 +333,41 @@ test("workspace outcomes use the toolbar Help instead of an extra tree row", asy
     registration.dispose();
   }
 });
+test("check detail rows expose causes and retain their collapse state", async () => {
+  // Guards losing the readable cause or keyboard action and collapsing it on refresh.
+  const configurationName = "Low persistence with separate productivity assumptions for households and firms";
+  const configurationLabel = `${configurationName.slice(0, 70)}…`;
+  const entries = [root("incomplete", { cause: "main.mod:1: Cannot open missing.inc\nSearched the model folder",
+    cause_message: "Cannot open missing.inc\nSearched the model folder" }),
+    root("incomplete", { root_uri: workspace + "/legacy.mod", cause: "legacy.mod:2: Missing include" }),
+    root("failed", { root_uri: workspace + "/failed.mod", failure: "Could not read model" }),
+    root("checked", { root_uri: workspace + "/configured.mod", errors: 1, warnings: 2,
+      analysis: { source: false, preview: false, name: configurationName, label: configurationLabel } }),
+    root("checked", { root_uri: workspace + "/preview.mod", warnings: 75,
+      analysis: { source: false, preview: true, name: "Macro inputs", label: "Flag=true" } })];
+  const env = setup({ status: facts(entries) }); const registration = registerWorkspaceStatus(env.service); await flush();
+  const model = child(rows(env)[0], "main.mod"), reason = model.children[0];
+  assert.equal(model.command.command, "vscode.open"); assert.equal(model.collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
+  assert.equal(reason.label, "Cannot open missing.inc"); assert.equal(reason.tooltip, entries[0].cause);
+  assert.match(reason.accessibilityInformation.label, /main.mod.*Cannot open missing.inc/);
+  assert.equal(reason.command.command, "dygnosis.openWorkspaceCheckDetails");
+  await env.host.commands.get(reason.command.command)(...reason.command.arguments);
+  assert.equal(env.host.notificationOptions.at(-1).detail, entries[0].cause);
+  assert.equal(child(rows(env)[0], "legacy.mod").children[0].label, "Check details");
+  assert.equal(child(rows(env)[0], "legacy.mod").children[0].tooltip, entries[1].cause);
+  assert.equal(child(rows(env)[0], "failed.mod").children[0].label, entries[2].failure);
+  // A clipped configuration must leave the counts first and the full name in the hover.
+  const configured = child(rows(env)[0], "configured.mod");
+  assert.equal(configured.description, `1 error · 2 warnings · ${configurationLabel}`);
+  assert.ok(configured.tooltip.endsWith(configurationName));
+  const preview = child(rows(env)[0], "preview.mod");
+  assert.equal(preview.description, "75 warnings · Flag=true");
+  assert.ok(preview.tooltip.endsWith("Flag=true"));
+  env.host.collapsed.fire({ element: model }); env.service.client.notify(facts(entries, { pass_revision: 2 }));
+  assert.equal(child(rows(env)[0], "main.mod").collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+  registration.dispose();
+});
+
 test("not fully checked filter reveals affected paths and restores full-tree collapse choices", async () => {
   // Guards hiding affected models beneath collapsed folders or mixing queued/diagnostic-error models into the filter.
   const entries = [root("incomplete", { root_uri: `${workspace}/models/deep/partial.mod` }),
@@ -345,7 +380,7 @@ test("not fully checked filter reveals affected paths and restores full-tree col
   const branch = child(rows(env)[0], "models");
   env.host.collapsed.fire({ element: rows(env)[0] }); env.host.collapsed.fire({ element: branch });
   const queries = env.service.queries.length;
-  assert.equal(env.host.views[0].description, "1 checked · 2 not fully checked");
+  assert.equal(env.host.views[0].description, "1/5 checked");
   assert.equal(env.host.views[0].message, undefined);
   await env.host.commands.get("dygnosis.showNotFullyCheckedModels")();
   assert.deepEqual(rows(env).map(row => row.label), ["workspace", "other"]);
@@ -358,7 +393,7 @@ test("not fully checked filter reveals affected paths and restores full-tree col
   const failed = rows(env)[1].children[0];
   assert.equal(failed.label, "broken.dyn"); assert.match(failed.tooltip, /Could not read model/);
   assert.match(failed.accessibilityInformation.label, /Could not read model/);
-  assert.equal(env.host.views[0].description, "2 not fully checked");
+  assert.equal(env.host.views[0].description, "1 incomplete · 1 failed");
   assert.equal(env.host.executed.findLast(call => call.name === "setContext").args[1], true);
   await env.host.commands.get("dygnosis.showAllWorkspaceFiles")();
   assert.equal(rows(env)[0].collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
@@ -377,7 +412,7 @@ test("filtered results follow current status and retain unreadable-folder failur
   await env.host.commands.get("dygnosis.showNotFullyCheckedModels")();
   env.service.client.notify(facts([root()]));
   assert.deepEqual(rows(env), []);
-  assert.equal(env.host.views[0].description, "0 not fully checked");
+  assert.equal(env.host.views[0].description, "0 affected");
   assert.equal(env.host.views[0].message, "No incomplete or failed checks.");
   assert.match(env.host.items[0].text, /1\/1 checked/);
   env.service.client.notify(facts([], { coverage_complete: false,
@@ -387,7 +422,7 @@ test("filtered results follow current status and retain unreadable-folder failur
   assert.match(env.host.views[0].message, /folder discovery failed/);
   env.service.client.notify(facts([root("failed", { root_uri: `${workspace}/new.dyn`, failure: "Read failed" })]));
   assert.equal(rows(env)[0].children[0].label, "new.dyn");
-  assert.equal(env.host.views[0].description, "1 not fully checked");
+  assert.equal(env.host.views[0].description, "1 failed");
   registration.dispose();
 });
 
@@ -496,9 +531,9 @@ test("newer notifications and passes reject obsolete query responses", async () 
   env.service.client.notify(facts([root("checked", { errors: 4 })], { pass_revision: 3 }));
   pending.resolve(facts([root("pending")], { pass_revision: 1 })); await flush();
   assert.match(env.host.items[0].text, /1\/1 checked/);
-  assert.equal(rows(env)[0].children[0].description, "Checked · 4 Errors, 0 Warnings");
+  assert.equal(rows(env)[0].children[0].description, "4 errors");
   env.service.client.notify(facts([root("pending")], { pass_revision: 2 }));
-  assert.equal(rows(env)[0].children[0].description, "Checked · 4 Errors, 0 Warnings");
+  assert.equal(rows(env)[0].children[0].description, "4 errors");
   registration.dispose();
 });
 for (const action of ["edit", "Recheck", "settings"]) {
@@ -515,7 +550,7 @@ for (const action of ["edit", "Recheck", "settings"]) {
     env.service.client.notify(facts([root("checked", { errors: 4 })], { pass_revision: 2 }));
     pending.resolve(facts([root("pending")], { pass_revision: 2 })); await flush();
     assert.match(env.host.items[0].text, /1\/1 checked/);
-    assert.equal(rows(env)[0].children[0].description, "Checked · 4 Errors, 0 Warnings");
+    assert.equal(rows(env)[0].children[0].description, "4 errors");
     assert.doesNotMatch(env.host.items[0].text, /0\/1 finished/);
     const later = deferred(); env.service.execute = async () => later.promise; await trigger();
     env.service.client.notify(facts([root("checked", { errors: 99 })], { pass_revision: 2 }));
@@ -566,7 +601,7 @@ test("cancel reply defeats a same-pass pre-cancel notification while retaining a
     if (newerCancelled) env.service.client.notify(facts([root("checked", { errors: 99 })]));
     pending.resolve(facts([root("pending")], { cancelled: true })); await flush();
     assert.match(env.host.items[0].text, /cancelled/);
-    assert.equal(rows(env)[0].children[0].description, newerCancelled ? "Checked · 4 Errors, 0 Warnings" : "Pending");
+    assert.equal(rows(env)[0].children[0].description, newerCancelled ? "4 errors" : "Pending");
     registration.dispose();
   }
 });
@@ -582,7 +617,7 @@ test("folder and settings changes reject replies captured under old inputs and c
     first.resolve(facts([root("checked", { errors: 99 })])); await flush(); assert.equal(rows(env).length, 0);
     second.resolve(facts([root("checked", { root_uri: `${env.host.folders[0].uri.toString()}/main.mod`, errors: 2 })], { pass_revision: 2 })); await flush();
     assert.match(env.host.items[0].text, /1\/1 checked/);
-    assert.equal(rows(env)[0].children[0].description, "Checked · 2 Errors, 0 Warnings"); registration.dispose();
+    assert.equal(rows(env)[0].children[0].description, "2 errors"); registration.dispose();
   }
 });
 test("disabling queued work clears the workspace contribution and cannot be undone by a late enabled reply", async () => {
@@ -664,7 +699,7 @@ test("rapid overlay edits coalesce a status query and close refreshes saved cove
   env.service.status = facts([root("checked", { errors: 1 })], { pass_revision: 3 }); doc.isClosed = true; env.host.closed.fire(doc);
   assert.match(env.host.items[0].text, /updating/); await new Promise(resolve => setTimeout(resolve, 90)); await flush();
   assert.match(env.host.items[0].text, /1\/1 checked/);
-  assert.equal(rows(env)[0].children[0].description, "Checked · 1 Error, 0 Warnings"); registration.dispose();
+  assert.equal(rows(env)[0].children[0].description, "1 error"); registration.dispose();
 });
 test("per-folder exclusion controls write only the chosen resource and reset its override", async () => {
   const env = setup({ folders: [folder(), folder(other, "other")] }); env.host.resources.set(other, { workspaceExcludePaths: ["old/**"] });

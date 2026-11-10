@@ -85,7 +85,7 @@ Module._load = function(id, ...args) {
 const { dimensionOverrides, inactiveRanges, registerColors, tintPreferences, tintRanges } = require(compiledModule("color"));
 Module._load = originalLoad;
 const manifest = require("../package.json").contributes;
-const colorContributions = { ...manifest, configuration: manifest.configuration.find(group => group.title === "Dygnosis: Appearance") };
+const colorContributions = { ...manifest, configuration: manifest.configuration.find(group => group.properties["dynare.blockTint.enabled"]) };
 
 // This fixture guards native settings against the engine's category/default contract.
 const tintCategoryDefaults = [
