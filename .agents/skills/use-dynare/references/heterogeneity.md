@@ -146,8 +146,7 @@ shocks, the stationary distribution and the aggregate values. Dynare gets it in 
      `time_iteration_solver_tolx` (1e-10), `time_iteration_solver_factor` (100),
      `time_iteration_solver_max_iter` (1000), `time_iteration_solver_stop_on_error`,
      `forward_max_iter` (10000), `forward_tol` (1e-10), `forward_check_every` (100),
-     `forward_verbosity` (1). Dygnosis `dynare_list_options` lists the valid options of the installed
-     version.
+     `forward_verbosity` (1). Use [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics) to list option names.
    - It updates `M_.params` with the calibrated values.
 
 After the steady state:

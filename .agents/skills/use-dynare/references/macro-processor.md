@@ -20,7 +20,8 @@ See the expanded text:
   output (manual, "Running Dynare").
 - Dygnosis: `dynare_expand` returns the text after include and macro expansion, before Dynare's
   transformations, with a `complete` flag; when expansion is incomplete it withholds the counts.
-  `dynare_related_files` lists the include targets and companion files and whether each one resolved.
+  `dynare_model_info` with `sections: ["sources"]` on a map or disk source lists the include targets
+  and companion files and whether each one resolved.
   See `references/dygnosis-workflow.md`.
 
 Language (R1): macro directives and macro expressions are ASCII keywords. Identifiers that macros

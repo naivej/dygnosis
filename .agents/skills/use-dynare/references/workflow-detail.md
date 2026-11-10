@@ -291,9 +291,9 @@ Write the `shocks` block and the experiment command:
   `ramsey_model` with `stoch_simul` (`ramsey_policy` is deprecated, W150); `discretionary_policy`;
   `osr`. Read the task reference that SKILL.md "Route the task" names.
 
-Static check: `dynare_diagnose` (for example W060 IRF with no written shock size, W120 stochastic command
-with no stochastic exogenous variable, E215 or E235 for `discretionary_policy`). `dynare_list_options`
-lists the valid options of a command.
+Run `dynare_diagnose` before the experiment. For example, look for W060 (IRF with no written shock
+size), W120 (stochastic command with no stochastic exogenous variable), or E215 or E235 for
+`discretionary_policy`. Check options with [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics).
 
 Numerical run (Dynare). Pass: the Blanchard-Kahn conditions hold, the command finishes, and the IRFs
 are finite. Wrong numbers with no error: debugging.md "Wrong numbers without an error". Fail: for a
@@ -332,9 +332,9 @@ that it was not run.
 
 Before the report:
 
-1. Static: run `dynare_diagnose` on the finished file (`dynare_workspace_diagnose` for a project of
-   several files). No Error. Fix each Warning, or say in the report why it stays. Information I208
-   and I209 shows missing metadata (R1).
+1. Run `dynare_diagnose` on the finished model. For several roots, use
+   [`batch`](dygnosis-workflow.md#supply-the-model). Fix all Errors. Fix each Warning or say in the
+   report why it stays. I208 and I209 identify missing metadata (R1).
 2. Go through the final checklist in debugging.md.
 3. A model with several agents: the equation that Walras's law makes redundant is not in the model
    block (Stage 1, check 2).

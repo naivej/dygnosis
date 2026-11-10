@@ -130,7 +130,7 @@ end;
 ## Solver options
 
 - `stack_solve_algo=0` (default, sparse Newton on the stacked system), `1` (LBJ, less memory), or
-  another documented block or iterative solver. Confirm the number with `dynare_list_options`.
+  another documented block or iterative solver. Confirm the number with [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics).
 - `maxit`, `tolf`, `tolx`.
 - `no_homotopy` turns off the automatic homotopy (on failure, Dynare shrinks the shock and steps it
   back up).

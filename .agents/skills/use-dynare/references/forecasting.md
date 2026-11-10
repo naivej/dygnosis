@@ -123,4 +123,4 @@ Two patterns that are easy to miss:
    `rbc_basic_recursive_estimation.mod`.
 
 Also: `Smets_Wouters_2007` in the programming library (posterior forecast). Manual: "Forecasting".
-Check options with `dynare_list_options`.
+Check options with [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics).

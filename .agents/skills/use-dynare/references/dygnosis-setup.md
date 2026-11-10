@@ -33,10 +33,8 @@ project that the host does not trust, and a configuration that needs a reload or
 Use the first route that works.
 
 1. **Reuse a compatible executable.** Candidates: a path that the user gives, `dygnosis-mcp` on `PATH`, the
-   command of an existing `.mcp.json` entry, or the copy that the VS Code extension manages. The
-   extension command **Dygnosis: Set up MCP for this workspace** creates that copy at `bin/dygnosis-mcp.exe`
-   (Windows) or `bin/dygnosis-mcp` (macOS, Linux) in the extension's global storage. Run
-   `<path> --version`. The executable must run on the machine that runs the agent.
+   command of an existing `.mcp.json` entry, or the copy that the VS Code extension manages.
+   Run `<path> --version`. The executable must run on the machine that runs the agent.
 2. **Download a release.** Open [GitHub Releases](https://github.com/naivej/dygnosis/releases). Choose
    the asset for the OS and architecture of the machine that runs the agent. Release targets:
    `win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`.
@@ -63,10 +61,17 @@ Rules for every host:
 | Host | Configuration | Check |
 |---|---|---|
 | VS Code with the Dygnosis extension | No file needed: the extension registers a native **Dygnosis** server. Start it from **MCP: List Servers**. | **MCP: List Servers**, the server's Output |
-| Claude Code | `claude mcp add --scope project dygnosis -- <absolute-path>` writes `.mcp.json` at the project root. In VS Code, **Dygnosis: Set up MCP for this workspace** writes the same format. | `claude mcp list`, `claude mcp get dygnosis`, `/mcp` |
+| Claude Code | `claude mcp add --scope project dygnosis -- <absolute-path>` writes `.mcp.json` at the project root. | `claude mcp list`, `claude mcp get dygnosis`, `/mcp` |
 | Codex | Project `.codex/config.toml` (trusted projects only) or `~/.codex/config.toml`, below. Or `codex mcp add dygnosis -- <absolute-path>`. | `codex mcp list`, `/mcp` |
 | Cursor | Project `.cursor/mcp.json` or `~/.cursor/mcp.json`, below. | Output panel, channel "MCP Logs"; the server toggle in the settings |
 | Other hosts | Use the host's own format with the same command and no arguments. | The host's MCP status |
+
+For external clients, VS Code's **Dygnosis: Set up MCP for this workspace** saves `.mcp.json`
+directly in the selected trusted workspace folder's Git root when VS Code finds one. Otherwise it
+uses the selected folder. Save unsaved `.mcp.json` edits first. When the user or machine
+`dynare.serverPath` override is set, the command uses the MCP executable beside that LSP executable.
+The MCP filename is `dygnosis-mcp.exe` on Windows and `dygnosis-mcp` on macOS and Linux. For the
+bundled server, the command uses a managed copy in `bin/` under the extension's global storage.
 
 `.mcp.json` (Claude Code) and `.cursor/mcp.json` (Cursor):
 

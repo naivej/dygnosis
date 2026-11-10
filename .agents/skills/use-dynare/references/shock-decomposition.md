@@ -108,8 +108,9 @@ estimation, or `calib_smoother(datafile=…)` for a calibrated model. Data colum
 `varobs`. Check that the contributions in `oo_.shock_decomposition` add up (shocks plus the initial
 condition are close to the realized value).
 
-`dynare_list_options` lists the options of these commands. An observed variable that is not endogenous
-is E090. More observed variables than shock sources is W092, a static count, not a smoother result.
+Check command options with [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics).
+An observed variable that is not endogenous is E090. More observed variables than shock sources
+is W092, a static count, not a smoother result.
 Dygnosis does not compute the decomposition.
 
 Reference implementations: `Smets_Wouters_2007` in the programming library

@@ -25,13 +25,25 @@ A known unique name selects Symbol Info, Equations or Rename directly. Use
 Symbol Info first when the task needs its definition or uses. Ambiguous names
 return binding candidates; use their typed selector and original revision.
 
-For syntax, context and parent have distinct meanings:
+## Look up syntax and diagnostics
+
+Use `context` for where a form can be written. Use `parent` for the command
+or construct that owns it.
 
 ```jsonl
 {"name":"pac_model"}
 {"name":"diff","context":"model_expression"}
 {"name":"irf","kind":"option","parent":"stoch_simul"}
+{"parent":"estimation","option":"mode_compute","name":"4"}
+{"parent":"estimation","slot":"optim.NumgradAlgorithm","name":"2"}
 ```
+
+Use `parent` and `kind: "option"` to list option names. For value lookups,
+use `option` for a command option or `slot` for a position such as a nested
+setting or equation tag. Use the exact case for a slot path. Omit `name` to
+list choices, or give the value as a string to select one. Check the returned
+applicability conditions, open rules and coverage gaps. A nested query can
+return rules in `slot_domains` even when `forms` is empty.
 
 Diagnostic Info accepts an exact `code` for its explanation or search filters
 for summaries. Its `shared`, `added` and `skipped` classifications describe
@@ -139,10 +151,13 @@ selects a returned identity or zero-based scoped row:
 {"equation":{"kind":"index","scope":"dimension","dimension":"households","index":0}}
 ```
 
-Expansion selects an equation identity or text range. Inclusive `line_range`
-and exclusive-end `expanded_range` refer to expanded text. Returned navigation
-points to verified written source. Edit that written source with its actual
-file and macro context.
+Use `dynare_expand` to find a generated name. Then call `dynare_symbol_info`
+with the same `source` and `analysis` and the generated spelling, for example
+`symbol: {"kind":"name","name":"GDP_US"}`.
+
+To limit expansion, select an equation identity or text range. Inclusive
+`line_range` and exclusive-end `expanded_range` refer to expanded text. Use
+verified written locations from Expand for edits in their file and macro context.
 
 ## Read and continue results
 

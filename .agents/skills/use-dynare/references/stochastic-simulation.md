@@ -45,8 +45,8 @@ end;
 
 ## `stoch_simul` options
 
-The list below gives the options that this skill uses, with the Dynare 7.2 defaults. To list all
-options of a command, use `dynare_list_options`.
+The list below gives the options that this skill uses, with the Dynare 7.2 defaults.
+Look up other options with [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics).
 
 - `order = 1|2|3`: order of the Taylor approximation. Default 2 (after `estimation`, the order of
   the estimation). `order>=3` implies `k_order_solver`. At `order=3`, theoretical moments need

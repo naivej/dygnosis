@@ -89,7 +89,7 @@ method_of_moments(
   `additional_optimizer_steps`, `optim`, `first_obs`, `nobs`, `prefilter`, `logdata`). Use `logdata`
   together with `model(loglinear)` only when the whole model is logged. Prefer helper variables
   (`log_y = log(y);`) to logging every equation.
-- Check every option with `dynare_list_options` before you write it. Do not invent one.
+- Check option names with [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics) before writing them.
 
 ## IRF matching
 

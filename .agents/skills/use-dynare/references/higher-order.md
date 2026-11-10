@@ -33,7 +33,8 @@ stoch_simul(order=2, pruning, irf=0) y c rp_ann;
   Theoretical moments then use the pruned state space. Without pruning, the second moments are only
   the linear approximation. See [stochastic-simulation.md](stochastic-simulation.md).
 - `conditional_variance_decomposition` is not available at the orders and pruning settings Dynare
-  refuses. Check `dynare_list_options` for `stoch_simul` before you write the option.
+  refuses. Check [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics) for `stoch_simul`
+  before you write the option.
 - Skewed innovations at higher order: programming library `Andreasen_2012`, `Born_Pfeifer_2014`.
 
 ## 3. Objects that exist only at higher order

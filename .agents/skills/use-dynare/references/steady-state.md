@@ -26,7 +26,8 @@ steady state exists. Static checks that apply:
 - W052: an endogenous variable is missing from `initval` (Dynare assumes zero).
 - E065: an exogenous variable inside the `steady_state()` operator (Dynare refuses).
 - E208 / E209: `[static]` and `[dynamic]` counts differ, or the tags are used with Ramsey or discretion.
-- `dynare_related_files` shows whether a `<model>_steadystate.m` companion file exists and resolves.
+- `dynare_model_info` with `sections: ["sources"]` on a map or disk source shows whether a
+  `<model>_steadystate.m` companion file exists and resolves.
 
 See `references/dygnosis-workflow.md` for the tools.
 
@@ -234,8 +235,8 @@ static checks.
 
 Other options: `maxit` (default 50), `tolf` (default `eps^(1/3)`), `tolx` (default `eps^(2/3)`),
 `nocheck`, `noprint` (useful in loops), `non_zero`, `fsolve_options` (only with `solve_algo=0`),
-`homotopy_mode`, `homotopy_steps`, `homotopy_force_continue`. Dygnosis `dynare_list_options` lists the
-valid options.
+`homotopy_mode`, `homotopy_steps`, `homotopy_force_continue`.
+Check options with [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics).
 
 ## Two forms of a steady-state file
 

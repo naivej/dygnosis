@@ -16,7 +16,8 @@ Dynare recomputes the steady state at every parameter draw. Write a `steady_stat
 
 Dygnosis checks the written form. It does not compute a posterior. Relevant codes: E227 (no data
 file), E090 (an observed variable is not endogenous), E258 (more than one `varobs`), E244–E248
-(duplicates and values used inside `estimated_params`). Check option names with `dynare_list_options`.
+(duplicates and values used inside `estimated_params`).
+Check option names with [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics).
 
 ## Observed variables and observation equations
 
@@ -111,7 +112,7 @@ estimation(
 ) y_obs pi_obs r_obs;
 ```
 
-Confirm each number with `dynare_list_options` for `estimation`. The groups:
+Confirm fixed values with [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics).
 
 - Data: `datafile`, `first_obs`, `nobs`, `xls_sheet`, `xls_range`, `presample`, `prefilter`,
   `loglinear`, `logdata`.

@@ -39,10 +39,12 @@ want Dynare's own equation count.
 
 ### 1. Static check first
 
-Before the first numerical run, run `dynare_diagnose` on the root file. Pass its includes and companion
-files (`dynare_related_files` finds them). Fix every Error: Dynare would refuse the file before MATLAB.
+Before the first numerical run, run `dynare_diagnose` on the root file. For a map source, supply the
+required files. To check which includes and companions resolve, use `dynare_model_info` with
+`sections: ["sources"]` on a map or disk source. Fix every Error before running Dynare.
 Read the Warnings and decide on each one. Information diagnostics are metadata notes (R1).
-`dynare_auto_fix` applies the stored fixes for some codes. Details: `references/dygnosis-workflow.md`.
+Use `dynare_actions` with `fixes: true` to propose verified fixes. Review and apply the proposal
+as described in `references/dygnosis-workflow.md`.
 
 If Dygnosis is not connected, follow `references/dygnosis-setup.md`. If setup is blocked, say in the
 report that the static check was not run, and continue.
@@ -150,8 +152,8 @@ means no tool decides it.
 11. **Form (R8).** Static: W140 (nonlinear operator in a linear model).
 12. **Experiment set,** one family: `stoch_simul`, `perfect_foresight_setup` with
     `perfect_foresight_solver`, `estimation`, `method_of_moments`, `ramsey_model`,
-    `discretionary_policy`, `osr`, or the `heterogeneity_*` commands. Static: `dynare_list_options`
-    lists the valid options of a command.
+    `discretionary_policy`, `osr`, or the `heterogeneity_*` commands.
+    Check the command's options with [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics).
 13. **Redundant equation by Walras' law removed** (check every model with several agents). If the model
     has a household budget constraint, goods market clearing and asset market clearing, one of them is a
     linear combination of the others. Mark it as redundant in section 4 of the derivation note and do

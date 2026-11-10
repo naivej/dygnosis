@@ -113,4 +113,4 @@ Read `cochrane_toy.mod` before a long chain, and check that your `varobs` can id
 you estimate (`forward_looking_varobs_x.mod`).
 
 Also: `Smets_Wouters_2007` in the programming library. Manual: "Sensitivity and identification
-analysis". Check options with `dynare_list_options`.
+analysis". Check options with [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics).

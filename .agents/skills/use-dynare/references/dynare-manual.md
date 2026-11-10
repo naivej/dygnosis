@@ -1,8 +1,7 @@
 # Dynare manual
 
 Read this when you need the meaning of a Dynare command, option, or block.
-`dynare_list_options` lists the option names a command accepts. This manual states
-what a name means.
+Use [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics) for a quick syntax lookup.
 
 ## Which copy
 

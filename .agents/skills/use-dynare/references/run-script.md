@@ -31,9 +31,8 @@ hand-written steady-state file needs that file next to the `.mod`. A comparison 
 solves and saves each model in turn. Build the script from the five steps below. Choose the outputs
 by experiment type. Use the project's own names and paths, not the example names.
 
-To find the parts, use Dygnosis (see dygnosis-workflow.md). `dynare_related_files` lists the includes
-and the steady-state and helper files of a `.mod`. `dynare_model_info` gives the exact variable and
-shock names for the plot calls.
+Use `dynare_model_info` on a map or disk source. Select `sources` for includes and companion files.
+Select `structure` for the variable and shock names used in plot calls.
 
 ## The five steps
 

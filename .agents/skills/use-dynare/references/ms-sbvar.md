@@ -106,4 +106,4 @@ Run official Dynare under MATLAB (`SKILL.md` "Numerical runs", via the
 Start with a small `mh_replic` to check the setup, then raise it. Read `oo_.ms`.
 
 Examples: `<dynare-root>/examples/` and Dynare's `tests/ms-sbvar`. Manual: "Markov-switching SBVAR".
-Check option names with `dynare_list_options` and that manual section. Do not invent an option.
+Check option names with [`dynare_syntax`](dygnosis-workflow.md#look-up-syntax-and-diagnostics) and that manual section.

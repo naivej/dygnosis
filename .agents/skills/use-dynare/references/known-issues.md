@@ -181,7 +181,7 @@ for example `rstar(-1)` in a Taylor rule with an implementation lag.
   `swff_params.inc`, which `swff.mod` includes.
 - **Scope:** Dynare refusal; the 7.2 preprocessor has the same message. Dygnosis reports it as E275
   (Error). Generate `model_params.inc` before you run Dygnosis or Dynare; a missing include is E061.
-  A qualified function call such as `pkg.foo(1)` is a different form (see `dynare_explain` for E275).
+  A qualified function call such as `pkg.foo(1)` is a different form (see `dynare_diagnostic_info` with `code: "E275"`).
 
 ## Linear Smets-Wouters-type estimated models: IRFs 100 times too large
 
