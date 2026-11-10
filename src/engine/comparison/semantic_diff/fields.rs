@@ -106,6 +106,11 @@ fn parameters(
     values_after: &AssignedNumbers<'_>,
     diff: &mut ModelDiff,
 ) {
+    let changed: BTreeMap<_, _> = diff
+        .changed_parameter_values
+        .iter()
+        .map(|change| (change.name.as_str(), change))
+        .collect();
     for (index, change) in diff.changed_parameter_values.iter().enumerate() {
         let mut row = SemanticRow::new(
             SemanticFamily::Parameters,
@@ -144,6 +149,23 @@ fn parameters(
             row.facets.push(ChangeFacet::ParameterValue);
         }
         row.fields = vec![expression, value];
+        if normalize_expr(&change.old_raw) == normalize_expr(&change.new_raw)
+            && change.old_value.is_some()
+            && change.new_value.is_some()
+            && parameter_value_changed(change.old_value, change.new_value)
+            && let Some(parent) = values_before.direct_producer(before, &change.name)
+            && parent != change.name
+            && values_after.direct_producer(after, &change.name) == Some(parent)
+            && let Some(parent_change) = changed.get(parent)
+            && normalize_expr(&parent_change.old_raw) != normalize_expr(&parent_change.new_raw)
+        {
+            row.fields.push(FieldChange::new(
+                "dependent_on",
+                "Dependent on",
+                FieldState::text(parent),
+                FieldState::text(parent),
+            ));
+        }
         diff.semantic.push_row(row);
     }
 }

@@ -361,22 +361,33 @@ async function checkAnalysisConfigurations(service, workspaceRoot, evidence, hel
   const comparing = vscode.commands.executeCommand("dygnosis.openChanges");
   await chooseAnyPicker("Configuration…", waitFor);
   await choose("Written source", waitFor, false, "Choose written source or a saved configuration"); await comparing;
-  await waitFor(() => vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input?.viewType === "dygnosis.changes")), "analysis comparison opens existing Model Diff");
+  await waitFor(() => vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input?.viewType === "dygnosis.changes")), "analysis comparison opens Changes");
   await waitFor(async () => {
     try {
-      const state = await nativeChanges(async ({ evaluate }) => evaluate('({status:document.getElementById("status").className, sides:[...document.querySelectorAll(".input-side")].map(row=>({heading:[...row.querySelector(".input-heading").children].map(child=>child.textContent),detail:row.querySelector(".analysis-detail")?.textContent,title:row.title}))})'));
+      const state = await nativeChanges(async ({ evaluate }) => evaluate(`({
+        status:document.getElementById("status").className,
+        sides:[...document.querySelectorAll(".input-side")].map(input=>({
+          heading:[...input.querySelector(".input-heading").children].map(child=>child.textContent),open:input.open
+        }))
+      })`));
       evidence.analysis_comparison = state;
       return state.status === "ready";
     } catch (error) { if (error.code === "NATIVE_FRAME_PENDING") return false; throw error; }
   }, "frozen comparison summaries are rendered");
-  assert.deepEqual(evidence.analysis_comparison.sides.map(side => [side.heading, side.detail]), [
-    [["Before", path.basename(rootPath)], "Source"], [["After", path.basename(rootPath)], "Branch: @#if FLAG → @#else"],
+  assert.deepEqual(evidence.analysis_comparison.sides, [
+    { heading: ["Before", path.basename(rootPath), "Source"], open: false },
+    { heading: ["After", path.basename(rootPath), "Else preview"], open: false },
   ]);
-  assert.ok(evidence.analysis_comparison.sides.every(side => side.title.includes("1 endogenous · 1 equation")),
-    "captured model counts remain available in each input-side hover title");
-  assert.match(evidence.analysis_comparison.sides[1].title, /Else preview/);
+  const details = await nativeChanges(async ({ evaluate }) => evaluate(`[...document.querySelectorAll(".input-side")].map(input=>{
+    input.querySelector("summary").click();
+    return {visible:input.querySelector(".input-details").getBoundingClientRect().height>0,
+      entries:[...input.querySelectorAll(".analysis-detail")].map(entry=>entry.textContent)};
+  })`));
+  assert.ok(details.every(side => side.visible && side.entries.includes("1 endogenous · 1 equation")));
+  assert.ok(details[1].entries.includes("Branch: @#if FLAG → @#else"));
+  evidence.analysis_comparison.details = details;
   assert.equal((await context()).analysis.selection_generation, frozenGeneration, "comparison never sets a live choice");
-  evidence.checks.push("native two-side analysis comparison uses the existing frozen Model Diff without changing live selection");
+  evidence.checks.push("native Changes summarizes two frozen configurations and discloses their choices and model counts");
 
   await vscode.window.showTextDocument(document);
   const edit = new vscode.WorkspaceEdit();

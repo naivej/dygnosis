@@ -11,6 +11,18 @@ const vscode = require("vscode");
 const { nativeChanges, nativeWorkbench } = require("./native_webview.cjs");
 const { resourceName, resourceQuery, changesViewType } = require(compiledModule("changes_resource"));
 
+// Open one compact row before checking its lazily rendered details.
+async function openFirstRow(evaluate) {
+  await evaluate('(() => {const row=document.querySelector("article[data-row-id]"); if (!row) throw new Error("Missing change row"); if (!row.querySelector(".side")) row.querySelector(".change-row").click();})()');
+}
+
+async function workbenchInsets(evaluate, send) {
+  const expression = "({width:innerWidth,height:innerHeight})";
+  const frame = await evaluate(expression);
+  const outer = await send("Runtime.evaluate", { expression, returnByValue: true });
+  return { width: outer.result.value.width - frame.width, height: outer.result.value.height - frame.height };
+}
+
 async function captureFailure(evidence) {
   evidence.semantic_tabs = vscode.window.tabGroups.all.map(group => ({
     active: group.activeTab?.label,
@@ -40,6 +52,8 @@ async function checkSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     await checkEquationSurgerySource(service, workspaceRoot, evidence, waitFor);
     await checkForecastSource(service, workspaceRoot, evidence, waitFor);
     await runSemanticDiff(service, workspaceRoot, evidence, waitFor);
+    await checkRegionalInputs(service, workspaceRoot, evidence, waitFor);
+    await checkFrbDependencies(service, workspaceRoot, evidence, waitFor);
     await checkHistoryCardSource(service, workspaceRoot, evidence, waitFor);
   } finally {
     for (const [key, value] of Object.entries(saved)) await config.update(key, value, vscode.ConfigurationTarget.Workspace);
@@ -67,12 +81,13 @@ async function checkEquationSurgerySource(service, workspaceRoot, evidence, wait
       if (evidence.semantic_surgery_state.failureCode === "INPUT_CHANGED" && !evidence.semantic_surgery_refreshed) {
         evidence.semantic_surgery_refreshed = true; await evaluate('document.getElementById("refresh").click()');
       }
-      return evidence.semantic_surgery_state.status === "ready" && Boolean(evidence.semantic_surgery_state.code);
+      return evidence.semantic_surgery_state.status === "ready" && evidence.semantic_surgery_state.groups.length > 0;
     }); }
     catch (error) { if (error.code === "NATIVE_FRAME_PENDING") { evidence.semantic_surgery_discovery = error.discovery; return false; } throw error; }
   }, "written replacement card");
   await nativeChanges(async ({ evaluate, send }) => {
     assert.deepEqual(await evaluate('[...document.querySelectorAll(".group-button > span:first-child")].map(node=>node.textContent)'), ["Operations"]);
+    await openFirstRow(evaluate);
     assert.equal(await evaluate('document.querySelector(".side.after .expression").textContent'), instruction.replace("  // retain original spacing and comments\n", ""));
     assert.equal(await evaluate('document.querySelectorAll("article [data-field]").length'), 0, "operation records do not become displayed model syntax");
     const screenshot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
@@ -106,6 +121,7 @@ async function checkForecastSource(service, workspaceRoot, evidence, waitFor) {
     assert.equal(await evaluate('document.querySelector("#kinds summary").textContent'), "Type of changes");
     assert.equal(await evaluate('[...document.querySelectorAll(".token.added,.token.removed")].some(node=>node.textContent.includes("name=drivers"))'), false);
     await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="Forecast").click()');
+    await openFirstRow(evaluate);
     assert.equal(await evaluate('document.querySelector(".side.after .expression").textContent'), "conditional_forecast_paths;\nvar y;\nperiods 1 2 3;\nvalues 0.2 0.25 0.1;\nend;");
     assert.deepEqual(await evaluate('[...document.querySelectorAll(".side.after .token.added")].map(node=>node.textContent)'), ["0.2"]);
     assert.equal(await evaluate('document.querySelectorAll("article [data-field]").length'), 0);
@@ -140,6 +156,7 @@ async function checkStateSource(service, workspaceRoot, evidence, waitFor) {
   }, "written history state cards");
   await nativeChanges(async ({ evaluate, send }) => {
     await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="State").click()');
+    await openFirstRow(evaluate);
     assert.equal(await evaluate('document.querySelectorAll("article").length'), 1);
     assert.equal(await evaluate('document.querySelector(".side.after .expression").textContent'), "histval;\ny(0) = 0.2;\ny(-1) = -0.05;\nend;");
     assert.equal(await evaluate('document.querySelector(".side.before .expression").textContent'), "histval;\ny(0) = 0.1;\ny(-1) = 0.05;\nend;");
@@ -172,7 +189,7 @@ async function checkHistoryCardSource(service, workspaceRoot, evidence, waitFor)
   const uri = vscode.Uri.from({ scheme: "dygnosis-changes", path: `/${resourceName(resource)}`, query: resourceQuery(resource) });
   await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
   const ready = () => waitFor(async () => {
-    try { return await nativeChanges(async ({ evaluate }) => evaluate('document.getElementById("status").className === "ready" && Boolean(document.querySelector(".side.before .source-link:not(:disabled)"))')); }
+    try { return await nativeChanges(async ({ evaluate }) => { if (!await evaluate('document.getElementById("status").className === "ready" && Boolean(document.querySelector("article[data-row-id]"))')) return false; await openFirstRow(evaluate); return evaluate('Boolean(document.querySelector(".side.before .source-link:not(:disabled)"))'); }); }
     catch (error) { if (error.code === "NATIVE_FRAME_PENDING") return false; throw error; }
   }, "HEAD/Working Before source is enabled");
   try {
@@ -191,7 +208,7 @@ async function checkHistoryCardSource(service, workspaceRoot, evidence, waitFor)
       assert.equal(await evaluate('document.querySelector(".side.after").textContent.includes("Written declaration kind")'), false);
       assert.equal(await evaluate('document.querySelectorAll("article[data-row-id]").length'), 1, "the convention belongs to the symbol card");
       assert.equal(await evaluate('document.querySelector(".side.after").textContent.includes("Predetermined convention")'), true);
-      assert.equal(await evaluate('document.querySelector(".side.after .refs").textContent.includes("after convention")'), false);
+      assert.equal(await evaluate('document.querySelector(".side.after .refs")?.textContent.includes("after convention") ?? false'), false);
       assert.equal(await evaluate('[...document.querySelectorAll(".side.after .expression .token.added")].map(token=>token.textContent).join("")'), "xxx");
       assert.equal(await evaluate('[...document.querySelectorAll(".group-button")].some(button=>button.textContent.includes("Model-local variables"))'), true);
       assert.equal(await evaluate('[...document.querySelectorAll(".group-button")].some(button=>button.textContent.includes("Commands"))'), false, "local insertion leaves no separator-only Commands row");
@@ -207,15 +224,18 @@ async function checkHistoryCardSource(service, workspaceRoot, evidence, waitFor)
     await nativeChanges(async ({ evaluate, send }) => {
       await evaluate('const all=document.querySelector("[data-change-type=all]"); if (!all.checked) all.click();');
       await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="Model-local variables").click()');
+      await openFirstRow(evaluate);
       assert.equal(await evaluate('[...document.querySelectorAll(".side.after .expression .token.added")].map(token=>token.textContent).join("")'), "# helper = 2;");
       await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="Equations").click()');
       assert.equal(await evaluate('document.querySelector(".group-rows").textContent.includes("after convention")'), false);
       await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="Shock setup").click()');
+      await openFirstRow(evaluate);
       assert.equal(await evaluate('document.querySelectorAll("article[data-row-id]").length'), 2);
       assert.equal(await evaluate('document.querySelectorAll("article [data-field]").length'), 0);
       assert.equal(await evaluate('document.querySelector(".side.before .expression").textContent.includes("var e=.1;")'), true);
       assert.equal(await evaluate('document.querySelector(".side.after .expression").textContent.includes("var e=.3;")'), true);
       assert.equal(await evaluate('[...document.querySelectorAll(".expression .token.added, .expression .token.removed")].some(token=>/shocks|\\bend\\b/.test(token.textContent))'), false);
+      await evaluate('document.querySelectorAll("article[data-row-id] .change-row")[1].click()');
       assert.equal(await evaluate('[...document.querySelectorAll(".expression .token.removed")].some(token=>token.textContent.includes("var u=.2;"))'), true);
       const screenshot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
       const image = path.join(path.dirname(process.env.DYGNOSIS_HOST_RESULT), `semantic-shocks-${vscode.version}.png`);
@@ -224,6 +244,169 @@ async function checkHistoryCardSource(service, workspaceRoot, evidence, waitFor)
     evidence.semantic_shock_cards = true;
     evidence.semantic_head_source = true;
   } catch (error) { await captureFailure(evidence); throw error; }
+}
+
+// A long configuration should leave the changed equations in the first viewport.
+async function checkRegionalInputs(service, workspaceRoot, evidence, waitFor) {
+  await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+  await vscode.commands.executeCommand("workbench.action.joinAllGroups");
+  const directory = path.join(workspaceRoot, "regional-comparison");
+  await fs.mkdir(directory, { recursive: true });
+  const root = path.join(directory, "regional.mod");
+  await fs.writeFile(root, '@#ifndef SCALE\n@#define SCALE = 1\n@#endif\nvar y_n y_s;\nmodel;\n@#for region in ["n", "s"]\n@#include "region.inc"\n@#endfor\nend;\n');
+  await fs.writeFile(path.join(directory, "region.inc"), "[name='Regional @{region}'] y_@{region} = @{SCALE};\n");
+  const document = await vscode.workspace.openTextDocument(root);
+  await vscode.window.showTextDocument(document);
+  await waitFor(async () => (await service.modelInfo(document.uri))?.complete, "regional source model facts");
+  const rootUri = document.uri.toString();
+  const before = { kind: "working", root_uri: rootUri, analysis: { defines: [] } };
+  const after = { ...before, analysis: { defines: [{ name: "SCALE", expression: "2" },
+    ...Array.from({ length: 11 }, (_, index) => ({ name: "OPTION_" + index, expression: "1" }))] } };
+  const resource = { schema_version: 1, before, after, anchor: after, context_uri: rootUri };
+  const uri = vscode.Uri.from({ scheme: "dygnosis-changes", path: `/${resourceName(resource)}`, query: resourceQuery(resource) });
+  await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
+  await waitFor(async () => {
+    try { return await nativeChanges(async ({ evaluate }) => evaluate('document.getElementById("status").className === "ready"')); }
+    catch (error) { if (error.code === "NATIVE_FRAME_PENDING") return false; throw error; }
+  }, "regional Changes");
+  await nativeChanges(async ({ evaluate, send }) => {
+    const chrome = await workbenchInsets(evaluate, send);
+    try {
+      await send("Emulation.setDeviceMetricsOverride", { width: 540 + chrome.width, height: 803 + chrome.height, deviceScaleFactor: 1, mobile: false });
+      await waitFor(() => evaluate("Math.abs(innerWidth - 540) <= 2"), "regional split viewport");
+      await evaluate('document.querySelector("[aria-label^=\'Equations,\']").click()');
+      const result = await evaluate(`(() => {
+        const after=document.getElementById("input-after"), viewport=document.getElementById("reviewContent").getBoundingClientRect();
+        const rows=[...document.querySelectorAll(".group-rows .change-row")];
+        return {width:innerWidth,summary:after.textContent,expanded:after.parentElement.open,
+          status:document.getElementById("status").textContent,rows:rows.map(row=>row.querySelector(".row-label").textContent),
+          visible:rows.every(row=>{const rect=row.getBoundingClientRect();return rect.top>=viewport.top && rect.bottom<=viewport.bottom;})};
+      })()`);
+      assert.match(result.summary, /12 macro inputs/);
+      assert.equal(result.expanded, false);
+      assert.match(result.status, /captured file text is identical/);
+      assert.deepEqual(result.rows.sort(), ["Regional n", "Regional s"]);
+      assert.equal(result.visible, true);
+      evidence.semantic_regional_inputs = result;
+    } finally { await send("Emulation.clearDeviceMetricsOverride"); }
+  });
+}
+
+// A real FRB-US assignment must group only its verified direct reads.
+async function checkFrbDependencies(service, workspaceRoot, evidence, waitFor) {
+  await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+  const fixture = path.resolve(__dirname, "../../../../.agents/skills/use-dynare/references/examples/US_FRB08mx_rep.mod");
+  const original = await fs.readFile(fixture, "utf8");
+  const edited = original.replace(/(tayp0\s*=\s*)0\.125;/, (_, prefix) => `${prefix}0.15;`);
+  assert.notEqual(edited, original, "FRB-US fixture must contain the expected assignment");
+  const directory = path.join(workspaceRoot, "frb-comparison");
+  await fs.mkdir(directory, { recursive: true });
+  const beforeFile = path.join(directory, "before.mod"), afterFile = path.join(directory, "after.mod");
+  await fs.writeFile(beforeFile, original); await fs.writeFile(afterFile, edited);
+  const openChanges = async filename => {
+    const document = await vscode.workspace.openTextDocument(filename);
+    await vscode.window.showTextDocument(document);
+    await waitFor(async () => (await service.modelInfo(document.uri))?.complete, "FRB-US model facts");
+    const after = { kind: "working", root_uri: document.uri.toString() };
+    const resource = { schema_version: 1, before: { kind: "working", root_uri: vscode.Uri.file(beforeFile).toString() }, after, anchor: after, context_uri: after.root_uri };
+    const uri = vscode.Uri.from({ scheme: "dygnosis-changes", path: `/${resourceName(resource)}`, query: resourceQuery(resource) });
+    await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
+    await waitFor(async () => {
+      try { return await nativeChanges(async ({ evaluate }) => evaluate('document.getElementById("status").className === "ready" && Boolean(document.querySelector("article[data-row-id]"))')); }
+      catch (error) { if (error.code === "NATIVE_FRAME_PENDING") return false; throw error; }
+    }, "FRB-US Changes");
+  };
+  await openChanges(afterFile);
+  await nativeChanges(async ({ evaluate, send }) => {
+    const parameters = await evaluate('(() => {const button=[...document.querySelectorAll(".group-button")].find(b=>b.querySelector("span").textContent==="Parameters"); if (!button) throw new Error("Missing Parameters group"); button.click(); return button.textContent;})()');
+    assert.match(parameters, /4/, "all four parameter changes count, including collapsed dependents");
+    assert.equal(await evaluate('document.querySelectorAll("article[data-row-id]").length'), 1, "one primary parameter row is shown initially");
+    assert.match(await evaluate('document.querySelector("article .change-row").textContent'), /tayp0/);
+    assert.match(await evaluate('document.querySelector("button.dependent-toggle").textContent'), /3 dependent values/);
+    await evaluate('document.querySelector("button.dependent-toggle").click()');
+    const rows = await evaluate('[...document.querySelectorAll("article[data-row-id] .change-row")].map(row=>row.textContent)');
+    assert.equal(rows.length, 4);
+    for (const name of ["tayp0", "tayp1", "tayp2", "tayp3"]) assert.ok(rows.some(row => row.includes(name)), name);
+    await evaluate('(() => {const search=document.getElementById("search");search.value="tayp2";search.dispatchEvent(new Event("input",{bubbles:true}));})()');
+    const filtered = await evaluate('({rows:[...document.querySelectorAll("article[data-row-id] .change-row")].map(row=>row.textContent),counts:document.getElementById("counts").textContent})');
+    assert.equal(filtered.rows.length, 2, "search retains the parent as context and the matching child");
+    assert.ok(filtered.rows[0].includes("tayp0") && filtered.rows[1].includes("tayp2"));
+    assert.match(filtered.counts, /1/);
+    try {
+      for (const width of [390, 540, 790]) {
+        await send("Emulation.setDeviceMetricsOverride", { width, height: 803, deviceScaleFactor: 1, mobile: false });
+        await waitFor(() => evaluate(`window.innerWidth <= ${width} && window.innerWidth > ${width - 100}`), `FRB-US ${width}px viewport`);
+        assert.equal(await evaluate('document.getElementById("reviewContent").scrollWidth <= document.getElementById("reviewContent").clientWidth + 1'), true, "Changes fits the split editor");
+      }
+    } finally { await send("Emulation.clearDeviceMetricsOverride"); }
+    evidence.semantic_frb_dependencies = { rows, filtered, widths: [390, 540, 790] };
+  });
+
+  // Exercise the density target and visible equation name in a real, large result.
+  let changed = 0;
+  const wide = original.replace(/^([ \t]*[A-Za-z_]\w*[ \t]*=[ \t]*)([+-]?(?:\d+\.\d*|\.\d+)(?:[eE][+-]?\d+)?)([ \t]*;)/gm, (match, prefix, literal, end) => {
+    const value = Number(literal);
+    if (!value || changed === 120) return match;
+    changed++;
+    return prefix + (value * 1.01) + end;
+  }).replace(/(xgap2[ \t]*=[ \t]*)100\*/, (_, prefix) => prefix + "101*");
+  assert.equal(changed, 120);
+  assert.match(wide, /^xgap2\s*=\s*101\*/m);
+  const wideFile = path.join(directory, "after-wide.mod");
+  await fs.writeFile(wideFile, wide);
+  await openChanges(wideFile);
+  await nativeChanges(async ({ evaluate, send }) => {
+    await evaluate('document.querySelector("[aria-label^=\'Parameters,\']").click()');
+    assert.equal(await evaluate('document.getElementById("counts").textContent'), "124 changes");
+    const appearance = vscode.workspace.getConfiguration("workbench");
+    const previousTheme = appearance.inspect("colorTheme")?.workspaceValue;
+    const chrome = await workbenchInsets(evaluate, send);
+    const viewports = [];
+    try {
+      for (const [theme, themeClass] of [
+        ["Default Dark Modern", "vscode-dark"], ["Default Light Modern", "vscode-light"], ["Default High Contrast", "vscode-high-contrast"],
+      ]) {
+        await appearance.update("colorTheme", theme, vscode.ConfigurationTarget.Workspace);
+        await waitFor(() => evaluate(`document.body.classList.contains(${JSON.stringify(themeClass)})`), theme);
+        for (const width of [390, 540, 788]) {
+          await send("Emulation.setDeviceMetricsOverride", { width: width + chrome.width, height: 803 + chrome.height, deviceScaleFactor: 1, mobile: false });
+          await waitFor(() => evaluate(`Math.abs(innerWidth - ${width}) <= 2 && Math.abs(innerHeight - 803) <= 2`), `FRB-US ${theme}, ${width}px viewport`);
+          const layout = await evaluate(`(() => {
+            const panel=document.getElementById("reviewContent"), view=panel.getBoundingClientRect();
+            const visible=[...panel.querySelectorAll(".change-item")].filter(row=>{
+              const r=row.getBoundingClientRect();return r.top>=view.top && r.bottom<=view.bottom;
+            }).length;
+            const selected=document.querySelector(".group-button.selected");
+            return {width:innerWidth,height:innerHeight,visible,fits:panel.scrollWidth<=panel.clientWidth+1,
+              selectedBorder:getComputedStyle(selected).borderTopColor};
+          })()`);
+          assert.ok(layout.fits && layout.visible > 0, JSON.stringify(layout));
+          if (width === 788) assert.ok(layout.visible >= 12, JSON.stringify(layout));
+          if (themeClass === "vscode-high-contrast") assert.notEqual(layout.selectedBorder, "rgba(0, 0, 0, 0)");
+          viewports.push({ theme, ...layout });
+          if (width === 788 && themeClass === "vscode-dark") {
+            const screenshot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+            const image = path.join(path.dirname(process.env.DYGNOSIS_HOST_RESULT), `semantic-frb-wide-${vscode.version}.png`);
+            await fs.writeFile(image, Buffer.from(screenshot.data, "base64"));
+            evidence.semantic_frb_wide_screenshot = image;
+          }
+        }
+      }
+      const find = query => evaluate(`(() => {
+        const search=document.getElementById("search");search.value=${JSON.stringify(query)};
+        search.dispatchEvent(new Event("input",{bubbles:true}));
+        return {id:document.querySelector("[data-row-id]")?.getAttribute("data-row-id"),count:document.getElementById("counts").textContent};
+      })()`);
+      const expression = await find("xgap2"), equation = await find("Equation 2");
+      assert.ok(equation.id);
+      assert.equal(equation.count, "1 of 124 changes");
+      assert.deepEqual(expression, equation);
+      evidence.semantic_frb_wide = { viewports, equation };
+    } finally {
+      await send("Emulation.clearDeviceMetricsOverride");
+      await appearance.update("colorTheme", previousTheme, vscode.ConfigurationTarget.Workspace);
+    }
+  });
 }
 
 async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
@@ -283,10 +466,10 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
         evidence.semantic_context_discovery = error.discovery; return false;
       }
     }, "native Changes frame after editor action");
-    const key = async (name, code, virtualKey) => {
+    const key = async (name, code, virtualKey, modifiers = 0) => {
       const text = name === "Enter" ? "\r" : name === " " ? " " : undefined;
-      await send("Input.dispatchKeyEvent", { type: "keyDown", key: name, code, windowsVirtualKeyCode: virtualKey, ...(text ? { text, unmodifiedText: text } : {}) });
-      await send("Input.dispatchKeyEvent", { type: "keyUp", key: name, code, windowsVirtualKeyCode: virtualKey });
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: name, code, windowsVirtualKeyCode: virtualKey, modifiers, ...(text ? { text, unmodifiedText: text } : {}) });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: name, code, windowsVirtualKeyCode: virtualKey, modifiers });
     };
     const click = selector => evaluate(`(() => {
       const control = document.querySelector(${JSON.stringify(selector)});
@@ -314,27 +497,39 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
 
     assert.equal(await evaluate('Boolean(document.getElementById("presentation") || document.getElementById("layout") || document.getElementById("expansion") || document.querySelector("[role=tablist], .change-tree, .selected-detail"))'), false);
     assert.equal(await evaluate('Boolean(document.getElementById("comparisonLimits"))'), false);
-    const header = await evaluate('({cards:[...document.querySelectorAll("#models .input-side")].map(card=>({label:card.querySelector("small").textContent,name:card.querySelector("code").textContent,title:card.title})),kinds:document.getElementById("kinds").tagName,checkboxes:document.querySelectorAll("input[type=checkbox],fieldset").length,legend:[...document.querySelectorAll("footer .change-mark")].map(mark=>mark.parentElement.textContent.trim())})');
-    assert.deepEqual(header.cards.map(card => [card.label, card.name]), [["Before", "root.mod"], ["After", "root.mod"]]);
-    assert.ok(header.cards[0].title.includes(decodeURIComponent(new URL(roots.before.toString()).pathname)));
-    assert.ok(header.cards[1].title.includes(decodeURIComponent(new URL(roots.after.toString()).pathname)));
+    const header = await evaluate('({cards:[...document.querySelectorAll("#models details.input-side")].map(card=>({summary:card.querySelector("summary").textContent,open:card.open})),kinds:document.getElementById("kinds").tagName,checkboxes:document.querySelectorAll("input[type=checkbox],fieldset").length,legend:[...document.querySelectorAll("footer .change-mark")].map(mark=>mark.parentElement.textContent.trim())})');
+    assert.equal(header.cards.length, 2);
+    for (const [index, side] of ["Before", "After"].entries()) {
+      assert.ok(header.cards[index].summary.includes(side) && header.cards[index].summary.includes("root.mod"));
+      assert.equal(header.cards[index].open, false, "input details start collapsed");
+    }
+    await evaluate('document.querySelectorAll("#models details.input-side > summary").forEach(summary=>summary.click())');
+    const inputDetails = await evaluate('[...document.querySelectorAll("#models details.input-side")].map(card=>card.textContent)');
+    assert.ok(inputDetails[0].includes(decodeURIComponent(new URL(roots.before.toString()).pathname)));
+    assert.ok(inputDetails[1].includes(decodeURIComponent(new URL(roots.after.toString()).pathname)));
+    await evaluate('document.querySelectorAll("#models details.input-side > summary").forEach(summary=>summary.click())');
     assert.equal(header.kinds, "DETAILS"); assert.equal(header.checkboxes, 4);
-    const placement = await evaluate('({models:document.getElementById("models").getBoundingClientRect().right,change:document.getElementById("changeComparison").getBoundingClientRect().x,swap:document.getElementById("swap").getBoundingClientRect().right,refresh:document.getElementById("refresh").getBoundingClientRect().x})');
+    const placement = await evaluate('({models:document.getElementById("models").getBoundingClientRect().bottom,change:document.getElementById("changeComparison").getBoundingClientRect().top,swap:document.getElementById("swap").getBoundingClientRect().right,refresh:document.getElementById("refresh").getBoundingClientRect().x})');
     assert.ok(placement.change >= placement.models && placement.refresh > placement.swap);
     assert.deepEqual(header.legend, ["+ Added", "− Removed", "~ Replaced"]);
     assert.equal(await evaluate('document.querySelector("[data-change-type=all]").indeterminate'), true);
     const selectTypes = selected => evaluate(`(() => { const selected=${JSON.stringify(selected)}; for (const kind of ["added","removed","changed"]) { const input=document.querySelector('[data-change-type="'+kind+'"]'); if (input.checked !== selected.includes(kind)) input.click(); } })()`);
     await selectTypes(["changed"]);
-    assert.equal(await evaluate('[...document.querySelectorAll("article[data-row-id]")].every(row=>row.classList.contains("changed"))'), true);
+    assert.equal(await evaluate('[...document.querySelectorAll("article[data-row-id]")].every(row=>Boolean(row.querySelector(".change-mark.changed")))'), true);
     await selectTypes(["added", "changed"]);
-    assert.equal(await evaluate('Boolean(document.querySelector("article.removed"))'), false);
+    assert.equal(await evaluate('Boolean(document.querySelector("article .change-mark.removed"))'), false);
     await evaluate('document.querySelector("[data-change-type=all]").click()');
     await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="Parameters").click()');
     assert.equal(await evaluate('document.querySelectorAll("article[data-row-id]").length'), 1);
     assert.equal(await evaluate('Boolean(document.getElementById("scope") || document.getElementById("sectionFilter") || document.getElementById("section-all"))'), false);
-    assert.match(await evaluate('document.getElementById("counts").textContent'), /15 of 15 model rows match filters/);
-    const pairedCards = () => evaluate('[...document.querySelectorAll("article[data-row-id]")].map(row=>{const before=row.querySelector(".side.before").getBoundingClientRect(),after=row.querySelector(".side.after").getBoundingClientRect();return {bx:before.x,by:before.y,bw:before.width,ax:after.x,ay:after.y,aw:after.width};})');
-    const checkPairedCards = async () => { const cards = await pairedCards(), count = await evaluate('Number(document.querySelector(".group-button.selected .group-count").textContent)'); assert.equal(cards.length, count); for (const card of cards) { assert.equal(card.by, card.ay); assert.ok(card.ax > card.bx && card.bw > 0 && card.aw > 0); } return cards; };
+    assert.equal(await evaluate('document.getElementById("counts").textContent'), "15 changes");
+    const checkPairedCards = async () => {
+      await openFirstRow(evaluate);
+      const card = await evaluate('(() => {const before=document.querySelector(".side.before").getBoundingClientRect(),after=document.querySelector(".side.after").getBoundingClientRect();return {bx:before.x,by:before.y,bw:before.width,ax:after.x,ay:after.y,aw:after.width};})()');
+      assert.ok(card.bw > 0 && card.aw > 0);
+      assert.ok((card.by === card.ay && card.ax > card.bx) || (card.ay > card.by && Math.abs(card.ax - card.bx) < 2), "details are paired horizontally or stacked Before then After");
+      return [card];
+    };
     const group = label => evaluate(`(() => {const button=[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent===${JSON.stringify(label)});if (!button) throw new Error("Missing change group");button.click();})()`);
     const groupLabels = await evaluate('[...document.querySelectorAll(".group-button")].map(button=>button.querySelector("span").textContent)');
     const visited = [];
@@ -352,7 +547,6 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     evidence.semantic_saved_filters = true;
     const legend = await evaluate('(() => {const content=document.getElementById("reviewContent"),footer=document.querySelector("footer"),before=footer.getBoundingClientRect().top;content.scrollTop=content.scrollHeight;return {before,after:footer.getBoundingClientRect().top,bottom:footer.getBoundingClientRect().bottom,height:innerHeight,scroll:content.scrollTop};})()');
     assert.equal(legend.before, legend.after);
-    assert.ok(legend.scroll > 0, "the legend check scrolls real change rows");
     assert.ok(Math.abs(legend.bottom - legend.height) < 1, "the legend stays at the viewport bottom");
     await evaluate('document.getElementById("reviewContent").scrollTop=0');
     evidence.semantic_frozen_legend = legend;
@@ -363,9 +557,22 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     await key("Enter", "Enter", 13);
     assert.equal(await evaluate('document.querySelector(".group-button.selected > span").textContent'), "Parameters", "native keyboard selects a whole group");
     await group("Model-local variables");
-    const localId = await evaluate('(() => {const row=[...document.querySelectorAll("article[data-row-id]")].find(row=>row.querySelector("h2").textContent === "forecast");if (!row) throw new Error("Missing local definition");return row.getAttribute("data-row-id");})()');
+    const localId = await evaluate('(() => {const row=[...document.querySelectorAll("article[data-row-id]")].find(row=>row.querySelector(".change-row").textContent.includes("forecast"));if (!row) throw new Error("Missing local definition");return row.getAttribute("data-row-id");})()');
     const localSelector = `article[data-row-id=${JSON.stringify(localId)}]`;
     const localQuery = selector => JSON.stringify(localSelector + " " + selector);
+    // Use the real focused controls so a re-render cannot hide a lost keyboard target.
+    await evaluate('document.getElementById("search").focus()');
+    await send("Input.insertText", { text: "forecast" });
+    assert.equal(await evaluate('document.activeElement.value'), "forecast");
+    await evaluate(`document.querySelector(${localQuery(".change-row")}).focus()`);
+    await key("Enter", "Enter", 13);
+    assert.equal(await evaluate('document.activeElement.getAttribute("aria-expanded")'), "true");
+    await key("Escape", "Escape", 27);
+    assert.equal(await evaluate('document.activeElement.getAttribute("aria-expanded")'), "false");
+    await evaluate('document.getElementById("search").focus()');
+    await key("a", "KeyA", 65, process.platform === "darwin" ? 4 : 2);
+    await key("Backspace", "Backspace", 8);
+    assert.equal(await evaluate('document.activeElement.value'), "");
     const sideBySide = await checkPairedCards();
     await evaluate('document.getElementById("search").focus()'); await key("Tab", "Tab", 9);
     const focus = await evaluate('({style:getComputedStyle(document.activeElement).outlineStyle,width:getComputedStyle(document.activeElement).outlineWidth})');
@@ -420,6 +627,7 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
       evidence.semantic_custom_configuration = { ...vscode.workspace.getConfiguration("workbench").get("colorCustomizations") };
       assert.equal(evidence.semantic_custom_configuration["dynare.diff.changedForeground"], "#2266aa");
       await group("Priors");
+      await openFirstRow(evaluate);
       const fills = await evaluate('({added:[...document.querySelectorAll(".detail .token.added")].map(token=>getComputedStyle(token).backgroundColor),removed:[...document.querySelectorAll(".detail .token.removed")].map(token=>getComputedStyle(token).backgroundColor)})');
       assert.ok(fills.added.length > 0 && fills.removed.length > 0, "native diff fill checks use actual added and removed expression tokens");
       assert.ok(fills.added.every(color => color.startsWith("rgba(34, 136, 68,")));
@@ -434,14 +642,29 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
       assert.equal(await evaluate('document.getElementById("reviewContent").scrollWidth <= document.getElementById("reviewContent").clientWidth + 1'), true, "narrow controls and cards keep text readable");
       evidence.semantic_narrow = await evaluate('({width:window.innerWidth,height:window.innerHeight})');
       for (const label of groupLabels) { await group(label); await checkPairedCards(); }
+      const offscreen = await evaluate(`(() => {
+        const list=document.querySelector(".group-list"), last=list.lastElementChild;
+        list.scrollLeft=0;
+        const hidden=last.getBoundingClientRect().right>list.getBoundingClientRect().right;
+        list.scrollLeft=list.scrollWidth;
+        last.focus({preventScroll:true});
+        return hidden;
+      })()`);
+      assert.equal(offscreen, true, "narrow fixture has a group beyond the initial viewport");
+      await key("Enter", "Enter", 13);
+      const narrowGroup = await evaluate(`(() => {
+        const list=document.querySelector(".group-list"), last=list.lastElementChild, area=list.getBoundingClientRect(), button=last.getBoundingClientRect();
+        return {name:last.querySelector("span").textContent,selected:last.getAttribute("aria-pressed")==="true",
+          focused:document.activeElement===last,visible:button.left>=area.left-1 && button.right<=area.right+1};
+      })()`);
+      assert.deepEqual(narrowGroup, { name: groupLabels.at(-1), selected: true, focused: true, visible: true });
+      evidence.semantic_narrow_group = narrowGroup;
       const viewports = [];
       for (const width of [1024, 1600]) {
         await send("Emulation.setDeviceMetricsOverride", { width, height: 1000, deviceScaleFactor: 1, mobile: false });
         await waitFor(() => evaluate(`window.innerWidth > ${width - 100} && window.innerWidth <= ${width}`), `native ${width}-pixel viewport`);
         assert.equal(await evaluate('document.getElementById("reviewContent").scrollWidth <= document.getElementById("reviewContent").clientWidth + 1'), true);
         for (const label of groupLabels) { await group(label); await checkPairedCards(); }
-        const navigation = await evaluate('document.querySelector(".group-list").getBoundingClientRect().width');
-        assert.ok(Math.abs(navigation - 190) < 0.6, "the groups stay in a compact left panel");
         viewports.push(await evaluate('({width:window.innerWidth,height:window.innerHeight})'));
       }
       evidence.semantic_viewports = viewports;
@@ -455,6 +678,8 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     }
     const filename = path.join(path.dirname(process.env.DYGNOSIS_HOST_RESULT), `semantic-${vscode.version}.png`);
     await group("Model-local variables");
+    await openFirstRow(evaluate);
+    await evaluate('document.querySelectorAll("button.reference-toggle").forEach(button=>{if(button.getAttribute("aria-expanded")!=="true") button.click()})');
     assert.equal(await evaluate(`Boolean(document.querySelector(${localQuery(".reference")}))`), true, "local row retains direct counted-equation references");
     assert.equal(await evaluate('Array.from(document.querySelectorAll(".reference")).every(ref=>Boolean(ref.closest(".side")))'), true);
     await vscode.commands.executeCommand("notifications.clearAll");
@@ -464,14 +689,20 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     await fs.writeFile(filename, Buffer.from(screenshot.data, "base64"));
     evidence.semantic_diff = { checks, screenshot: filename, required_visual: true };
     await group("Model-local variables");
+    await openFirstRow(evaluate);
+    await evaluate('document.querySelectorAll("button.reference-toggle").forEach(button=>{if(button.getAttribute("aria-expanded")!=="true") button.click()})');
     const referencedFile = path.join(path.dirname(roots.after.fsPath), "body.mod");
     for (const side of ["before", "after"]) {
       const writtenFile = path.join(path.dirname(roots[side].fsPath), "body.mod");
-      await click(`${localSelector} .side.${side} .side-title button.source-link`);
+      const source = `.side.${side} .side-title button.source-link`;
+      await evaluate(`document.querySelector(${localQuery(source)}).focus()`);
+      await key("Enter", "Enter", 13);
       await waitFor(() => vscode.window.activeTextEditor?.document.uri.fsPath === writtenFile && vscode.window.activeTextEditor.selection.start.line === 1, `native ${side} card opens its own written include`);
-      await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
+      await key("w", "KeyW", 87, process.platform === "darwin" ? 4 : 2);
       await regainChanges();
+      await waitFor(() => evaluate(`document.activeElement === document.querySelector(${localQuery(source)})`), `native focus returns to the ${side} source link`);
     }
+    await evaluate('document.querySelectorAll("button.reference-toggle").forEach(button=>{if(button.getAttribute("aria-expanded")!=="true") button.click()})');
     evidence.semantic_card_sources = true;
     await click(`${localSelector} .reference button[aria-label^="Open After reference:"]`);
     await waitFor(() => vscode.window.activeTextEditor?.document.uri.fsPath === referencedFile && vscode.window.activeTextEditor.selection.start.line === 2, "native direct reference opens the captured include target and selects the counted equation");
@@ -487,6 +718,8 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     await vscode.window.tabGroups.close(capturedDiffTab);
     await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
     await regainChanges();
+    await openFirstRow(evaluate);
+    await evaluate('document.querySelectorAll("button.reference-toggle").forEach(button=>{if(button.getAttribute("aria-expanded")!=="true") button.click()})');
     const rootDocument = await vscode.workspace.openTextDocument(roots.after);
     const edit = new vscode.WorkspaceEdit();
     edit.insert(roots.after, rootDocument.positionAt(rootDocument.getText().length), "// Native refresh control\n");

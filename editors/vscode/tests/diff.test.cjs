@@ -123,23 +123,25 @@ class Element {
   setAttribute(name, value) { this.attributes[name] = value; }
   getAttribute(name) { return this.attributes[name]; }
   focus() { this.focused = true; }
-  fire(name) { this.listeners[name]?.(); }
+  fire(name, event) { this.listeners[name]?.(event); }
 }
 function descendants(element) { return [element, ...element.children.flatMap(descendants)]; }
-function webview() {
-  const elements = Object.fromEntries(["models", "status", "search", "scope", "kinds", "sections", "counts", "results", "refresh", "help"].map(id => [id, new Element(id)]));
+function webview(saved) {
+  const elements = Object.fromEntries(["models", "status", "search", "kinds", "counts", "results", "refresh", "help", "reviewContent", "limitsStatus"].map(id => [id, new Element(id)]));
   const events = {}, posted = [], states = [];
   const sandbox = { document: { getElementById: id => elements[id] ?? descendants(elements.results).find(element => element.id === id), createElement: tag => new Element(tag), querySelectorAll: () => descendants(elements.results).filter(element => element.attributes["data-group"]) }, window: { addEventListener: (name, callback) => events[name] = callback },
-    acquireVsCodeApi: () => ({ getState: () => undefined, setState: value => states.push(value), postMessage: message => posted.push(message) }) };
+    acquireVsCodeApi: () => ({ getState: () => saved, setState: value => states.push(globalThis.structuredClone(value)), postMessage: message => posted.push(message) }) };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../media/diff_view.js"), "utf8"), sandbox);
-  const render = (extra = {}) => events.message({ data: { type: "render", key: "view", token: 4, before, after, rows: parseCurrent(fixture()).rows,
+  const render = (extra = {}) => events.message({ data: { type: "render", key: "view", token: 4, captureId: "retained", before, after, rows: parseCurrent(fixture()).rows,
     status: "ready", message: "Current comparison", choices: normalizeChoices({}, defaults), ...extra } });
-  return { elements, posted, states, render };
+  const open = id => descendants(elements.results).find(element => element.id === "row-" + id).fire("click");
+  return { elements, posted, states, render, open };
 }
 test("webview uses text nodes, labels source sides and disables missing/stale locations", () => {
   const env = webview(); const rows = parseCurrent(fixture()).rows; rows[0].label = "<img src=x onerror=bad()>";
   env.render({ rows }); assert.match(env.elements.results.textContent, /<img src=x onerror=bad\(\)>/);
   assert.equal(descendants(env.elements.results).some(element => element.tag === "img"), false);
+  env.open(rows[0].id);
   const buttons = descendants(env.elements.results).filter(element => element.tag === "button" && element.attributes["aria-label"]?.startsWith("Open")); assert.equal(buttons[0].disabled, true); assert.equal(buttons[1].disabled, false);
   buttons[1].fire("click"); assert.equal(env.posted.at(-1).side, "after"); assert.equal(env.posted.at(-1).rowId, "/added_endogenous/0");
   env.render({ status: "stale", message: "Out of date" }); assert.ok(descendants(env.elements.results).filter(element => element.tag === "button" && element.attributes["aria-label"]?.startsWith("Open")).every(button => button.disabled));
@@ -150,7 +152,12 @@ test("comparison headers summarize choices, abnormal receipts and heterogeneous 
   const analysis = { selection: { name: "Policy <A>", preview: true }, configuration: { defines: [{ name: "N", expression: "2" }], equation_selection: { mode: "include", tag: "name", values: ["policy"] }, overrides: [{ kind: "definition", target: { file: "main.mod" }, expression: "1" }] }, model_complete: true,
     overrides: [{ operation: { kind: "definition", target: { file: "main.mod" }, expression: "1" }, name: "x", application: "not_reached", known_execution_count: 0, execution_count: 0, cause: "The parent branch was not reached." }] };
   env.render({ before: "/before/main.mod @ HEAD · abc1234 · Source", inputNames: { before: "main.mod", after: "variant.mod" }, analysisSummaries: { before: { analysis: { ...analysis, configuration: { ...analysis.configuration, equation_selection: { mode: "exclude", tag: "name", values: ["policy"] } } }, counts: { n_equations: 1, n_endogenous: 1, heterogeneity_dimensions: [{ dimension: "households", n_equations: 2, n_endogenous: 3 }] }, search_paths: ["includes"] }, after: { analysis: { ...analysis, selection: { name: null, preview: false }, configuration: {}, overrides: [] } } } });
+  const [beforeCard, afterCard] = env.elements.models.children;
   const text = env.elements.models.textContent;
+  assert.equal(beforeCard.open, false);
+  assert.equal(afterCard.open, false);
+  assert.match(beforeCard.children[0].textContent, /Beforemain\.modPolicy <A>/);
+  assert.doesNotMatch(beforeCard.children[0].textContent, /Macro:|Include paths|endogenous/);
   assert.match(text, /Macro: N=2/);
   assert.match(text, /Equation: name='policy' \(excluded\)/);
   assert.match(text, /Macro: x=1/);
@@ -158,23 +165,20 @@ test("comparison headers summarize choices, abnormal receipts and heterogeneous 
   assert.match(text, /Macro: x=1 \(not reached\).*parent branch was not reached/);
   assert.match(text, /Model counts are unavailable for this captured input/);
   assert.match(text, /Beforemain\.mod/);
-  assert.doesNotMatch(text, /abc1234|HEAD|Policy <A>|endogenous ·|equations/);
-  assert.match(env.elements.models.children[0].title, /Policy <A>/);
-  assert.match(env.elements.models.children[0].title, /Aggregate model: 1 endogenous · 1 equation/);
-  assert.match(env.elements.models.children[0].title, /Heterogeneous model: households · 3 endogenous · 2 equations/);
-  assert.match(env.elements.models.children[0].title, /\/before\/main\.mod @ HEAD · abc1234 · Source/);
-  assert.match(env.elements.models.children[1].textContent, /Source/);
+  assert.match(beforeCard.children[1].textContent, /Aggregate model: 1 endogenous · 1 equation/);
+  assert.match(beforeCard.children[1].textContent, /Heterogeneous model: households · 3 endogenous · 2 equations/);
+  assert.match(beforeCard.children[1].textContent, /\/before\/main\.mod @ HEAD · abc1234 · Source/);
+  assert.match(afterCard.children[0].textContent, /Source/);
   assert.doesNotMatch(text, /Complete|Completeness unavailable|Initial macro inputs|applied \d+ times/);
 });
 test("captured branch labels keep each application result on its own choice", () => {
   const env = webview(), operations = ["first", "second"].map(site_id => ({ kind: "branch", target: { file: "main.mod", site_id, source_revision: "captured" }, branch_id: "else" }));
   const analysis = { selection: { name: null, preview: true }, configuration: { overrides: operations }, overrides: operations.map((operation, index) => ({ operation, branch_label: index ? "@#if ela1" : "@#if ela → @#else", application: index ? "not_reached" : "applied", cause: index ? "The parent was not reached." : null })) };
   env.render({ analysisSummaries: { before: { analysis, counts: { n_endogenous: 1, n_equations: 1, heterogeneity_dimensions: [] } } } });
-  const model = env.elements.models.children[0], choices = model.children.filter(child => child.className === "analysis-detail");
+  const model = env.elements.models.children[0], choices = descendants(model).filter(child => child.className === "analysis-detail");
   assert.equal(choices[0].textContent, "Branch: @#if ela → @#else");
   assert.equal(choices[1].textContent, "Branch: @#if ela1 (not reached) — The parent was not reached.");
   assert.doesNotMatch(model.textContent, /Forced branch|Branch preview in|application unknown/);
-  assert.match(model.title, /@#if ela1 \(not reached\)/);
 });
 
 test("captured repeated macro names identify their own definition lines", () => {
@@ -184,7 +188,7 @@ test("captured repeated macro names identify their own definition lines", () => 
   const analysis = { selection: { name: null, preview: true }, configuration: { overrides: operations },
     overrides: operations.map((operation, index) => ({ operation, name: "FLAG", source_line: [12, 40][index], application: "applied", cause: null })) };
   env.render({ analysisSummaries: { before: { analysis, counts: { n_endogenous: 1, n_equations: 1, heterogeneity_dimensions: [] } } } });
-  const choices = env.elements.models.children[0].children.filter(child => child.className === "analysis-detail");
+  const choices = descendants(env.elements.models.children[0]).filter(child => child.className === "analysis-detail" && child.textContent.startsWith("Skip "));
   assert.deepEqual(choices.map(choice => choice.textContent), ["Skip FLAG definition · settings.inc:12", "Skip FLAG definition · settings.inc:40"]);
 });
 
@@ -201,14 +205,14 @@ test("incomplete comparison headers keep both choices and explain unavailable co
   assert.equal(text.split(unavailableOverride).length - 1, 1);
   assert.match(text, /Macro: 1 · main\.mod · application unavailable/);
   assert.doesNotMatch(text, /Definition override in main\.mod = 1/);
-  assert.match(env.elements.models.children[0].title, /Policy A/);
-  assert.match(env.elements.models.children[1].title, /Policy B/);
+  assert.match(env.elements.models.children[0].children[0].textContent, /Policy A/);
+  assert.match(env.elements.models.children[1].children[0].textContent, /Policy B/);
   assert.match(text, /Comparison stopped before counting the models/); assert.match(text, /active include missing.inc is unavailable/);
   assert.match(text, /The source operation could not be matched/);
   assert.doesNotMatch(text, /Complete|Completeness unavailable|Initial macro inputs|Analysis preview|Macro inputs/);
   assert.doesNotMatch(text, /0 equations|0 endogenous/);
 });
-test("every model change renders its own Before and After cards in its group", () => {
+test("compact rows open one Before and After detail and keep its source targets", () => {
   const env = webview(), rows = parseCurrent(fixture()).rows; env.render();
   const groups = descendants(env.elements.results).filter(element => element.attributes["data-group"]).map(element => element.attributes["data-group"]);
   assert.deepEqual(groups.filter(group => group.startsWith("equations:")), ["equations:Equations"]);
@@ -221,8 +225,11 @@ test("every model change renders its own Before and After cards in its group", (
     assert.equal(descendants(env.elements.results).find(element => element.attributes["data-group"] === group).focused, true);
     for (const article of articles) {
       const row = rows.find(row => row.id === article.attributes["data-row-id"]);
-      const cards = descendants(article).filter(element => element.className?.startsWith("side "));
+      env.open(row.id);
+      const open = descendants(env.elements.results).find(element => element.attributes["data-row-id"] === row.id);
+      const cards = descendants(open).filter(element => element.className?.startsWith("side "));
       assert.deepEqual(cards.map(card => card.className), ["side before", "side after"]);
+      assert.equal(descendants(env.elements.results).filter(element => element.className === "detail").length, 1);
       for (const [index, side] of ["before", "after"].entries()) {
         const button = descendants(cards[index]).find(element => element.className === "source-link");
         if (!button.disabled) { button.fire("click"); assert.equal(env.posted.at(-1).rowId, row.id); assert.equal(env.posted.at(-1).side, side); }
@@ -234,19 +241,39 @@ test("every model change renders its own Before and After cards in its group", (
   assert.equal(env.states.at(-1).choices.group, groups.at(-1));
 });
 test("webview text and kind filters preserve state and choose a visible group", () => {
-  const env = webview(); env.render(); assert.match(env.elements.counts.textContent, /11 of 11 model rows match filters/);
-  env.elements.search.value = "goods"; env.elements.search.fire("input"); assert.match(env.elements.counts.textContent, /1 of 11 model rows match filters/);
+  const env = webview(); env.render(); assert.equal(env.elements.counts.textContent, "11 changes");
+  env.elements.search.value = "goods"; env.elements.search.fire("input"); assert.equal(env.elements.counts.textContent, "1 of 11 changes");
   assert.equal(env.states.at(-1).choices.group, "equations:Equations");
-  env.elements.search.value = ""; env.elements.search.fire("input"); assert.match(env.elements.counts.textContent, /11 of 11 model rows match filters/);
+  env.elements.search.value = ""; env.elements.search.fire("input"); assert.equal(env.elements.counts.textContent, "11 changes");
   const all = descendants(env.elements.kinds).find(element => element.attributes["data-change-type"] === "all"); all.checked = false; all.fire("change");
   const removed = descendants(env.elements.kinds).find(element => element.attributes["data-change-type"] === "removed"); removed.checked = true; removed.fire("change");
-  assert.match(env.elements.counts.textContent, /2 of 11 model rows match filters/);
+  assert.equal(env.elements.counts.textContent, "2 of 11 changes");
+  env.elements.search.value = "no such symbol"; env.elements.search.fire("input");
+  descendants(env.elements.results).find(element => element.className === "reset-filters").fire("click");
+  assert.equal(env.elements.counts.textContent, "11 changes");
 });
 test("side labels retain unmapped heterogeneous shock rows without a scope filter", () => {
   const result = fixture(), nav = result.navigation.rows.find(row => row.id === "/shock_setup_changes/0");
   nav.before = null; nav.after = null; nav.dimension = "households";
   const rows = parseCurrent(result).rows.filter(row => row.id === nav.id), env = webview(); env.render({ rows });
   assert.match(env.elements.results.textContent, /Dimension: households/);
-  assert.match(env.elements.counts.textContent, /1 of 1 model rows match filters/);
-  assert.ok(descendants(env.elements.results).filter(element => element.className === "source-link").every(button => button.disabled));
+  assert.equal(env.elements.counts.textContent, "1 change");
+  env.open(rows[0].id);
+  const actions = descendants(env.elements.results).filter(element => element.className === "source-link");
+  assert.equal(actions.length, 2);
+  assert.ok(actions.every(button => button.disabled));
+});
+
+test("returning to source restores the same captured row and discards reused IDs on a new capture", () => {
+  const env = webview(), id = "/added_endogenous/0";
+  env.render();
+  env.open(id);
+  env.elements.reviewContent.scrollTop = 81;
+  descendants(env.elements.results).find(element => element.id === "source-after-" + id).fire("click");
+  const saved = env.states.at(-1), restored = webview(saved);
+  restored.render({ choices: saved.choices });
+  assert.equal(restored.elements.reviewContent.scrollTop, 81);
+  assert.equal(descendants(restored.elements.results).find(element => element.id === "source-after-" + id).focused, true);
+  restored.render({ captureId: "new" });
+  assert.equal(descendants(restored.elements.results).some(element => element.className === "detail"), false);
 });

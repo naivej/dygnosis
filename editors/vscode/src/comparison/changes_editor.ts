@@ -1,6 +1,7 @@
 import { refuse, explainFailure, runCommand } from "../client/refusal";
 import * as vscode from "vscode";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
 import { DygnosisClient } from "../client/client";
 import { diffHtml, diffPreferences } from "./diff";
 import { ComparisonResource, changesScheme, changesViewType, GitSelector, historyScheme, inputLabel, ModelSelector, resourceData, resourceName, resourceQuery } from "./changes_resource";
@@ -54,7 +55,7 @@ class ChangesDocument implements vscode.CustomDocument {
   readonly onDidDispose = this.closed.event;
   generation = 0; instance = 0; disposed = false;
   status: ViewStatus = "loading"; message = "Loading comparison…";
-  result?: CapturedComparison; capture?: vscode.CancellationTokenSource; loading?: Promise<void>;
+  result?: CapturedComparison; captureId?: string; capture?: vscode.CancellationTokenSource; loading?: Promise<void>;
   failureSide?: DiffSide;
   failureCode?: string;
   analysisSummaries?: Record<DiffSide, AnalysisSummary>;
@@ -99,16 +100,25 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     !disposed && !doc.disposed && doc.generation === generation && service.currentInstance === instance;
   const send = (doc: ChangesDocument): void => {
     for (const view of doc.views) void view.panel.webview.postMessage({ type: "render", key: doc.uri.toString(), token: doc.generation,
+      captureId: doc.captureId, active: view.panel.active,
       before: inputLabel(doc.resource.before), after: inputLabel(doc.resource.after), status: doc.status, message: doc.message,
       canChoosePath: ["ROOT_NOT_FOUND", "REPOSITORY_CHANGED", "FILE_NOT_FOUND", "ROOT_OUTSIDE_REPOSITORY"].includes(doc.failureCode ?? ""),
       failureCode: doc.failureCode,
       inputNames: Object.fromEntries((["before", "after"] as const).map(side => [side, sourceName(modelUri(doc.resource[side]).path)])),
+      inputRevisions: Object.fromEntries((["before", "after"] as const).map(side => {
+        const input = doc.resource[side];
+        return [side, input.kind === "git" ? input.commit.slice(0, 7) : undefined];
+      })),
       rows: doc.result?.snapshot.rows.map(row => ({ ...row, sourceFiles: { before: cardSourceFiles(doc.result!, row, "before"), after: cardSourceFiles(doc.result!, row, "after") } })) ?? [], choices: view.choices,
       defaults: diffPreferences(vscode.Uri.parse(doc.resource.context_uri), service.log), semantic: doc.result?.snapshot.semantic,
       sourceChanges: doc.result?.snapshot.sourceChanges, coverage: doc.result?.snapshot.coverage, references: doc.result?.snapshot.references,
       analysisSummaries: doc.result ? Object.fromEntries((["before", "after"] as const).map(side => [side, { analysis: doc.result!.inputs[side].analysis, complete: doc.result!.inputs[side].complete, counts: doc.result!.inputs[side].counts ?? null, search_paths: doc.result!.inputs[side].search_paths }])) : doc.analysisSummaries });
   };
-  const release = (doc: ChangesDocument): void => { if (doc.result) { history.release(doc.result.holder); capturedText.release(doc.result.holder); } doc.result = undefined; };
+  const release = (doc: ChangesDocument): void => {
+    if (doc.result) { history.release(doc.result.holder); capturedText.release(doc.result.holder); }
+    doc.result = undefined;
+    doc.captureId = undefined;
+  };
   const stale = (doc: ChangesDocument, cause = "Comparison inputs changed."): void => {
     if (doc.disposed || doc.status === "stale") return;
     ++doc.generation; doc.capture?.cancel(); doc.status = "stale"; doc.message = `${cause} Previous comparison retained; refresh to update it and enable source links.`; send(doc);
@@ -146,8 +156,8 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
         finally { cancel.dispose(); }
       });
       if (!current(doc, generation, result.instance) || token.token.isCancellationRequested) { history.release(result.holder); return; }
-      doc.instance = result.instance; doc.result = result; doc.status = "ready";
-      doc.message = result.snapshot.rows.length ? "Current comparison" : result.snapshot.sourceChanges.files.length ? "No model changes. File text differs; use Text diff." : "No model changes shown.";
+      doc.instance = result.instance; doc.result = result; doc.captureId = randomUUID(); doc.status = "ready";
+      doc.message = "Current comparison";
       watchInputs(doc); send(doc);
     } catch (error) {
       if (!current(doc, generation, service.currentInstance)) return;

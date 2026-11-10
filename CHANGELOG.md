@@ -3,6 +3,26 @@
 Each entry describes the release at the time. Feature names and interfaces can
 change in later releases; see Dygnosis Help for current guidance.
 
+## v0.12.1
+
+In VS Code, run **Dygnosis: Show model changes** to compare the active Dynare
+model with another `.mod` or `.dyn` file, a local Git revision, or another
+analysis configuration. The **Dygnosis Changes** view now lists model changes
+in compact rows. When a parameter is assigned directly from an edited
+parameter, its value change can appear under the edited parameter. Open a row
+for **Before**, **After**, and links to the model source. The two sides stack
+vertically when the view is narrow.
+
+Expand either side in the header to see its file path and configuration.
+**Text diff** in the toolbar opens VS Code's file comparison.
+
+Dygnosis no longer supplies a separate file icon theme. If you selected it, run
+**Preferences: File Icon Theme** to choose Seti or another theme. Seti can show
+the blue Dynare icon for `.mod`, `.inc` and `.dyn` files.
+
+The bundled `use-dynare` skill uses the current MCP tools and guides agents
+through OccBin simulations in Dynare 7.2.
+
 ## v0.12.0
 
 In VS Code, **Dynare Workspace** shows why a model could not be checked.

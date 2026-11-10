@@ -9,7 +9,9 @@ Control**.
 
 In **Dygnosis Changes**, your active model appears under **After** and the
 selected baseline under **Before**. Browse structural categories such as
-**Equations** and **Parameters**, follow source links, or click **Text diff**
+**Equations** and **Parameters**, and open a row for its details and source
+links. A changed parameter can group its verified direct dependent values.
+Open either input for its configuration and model details. Click **Text diff**
 for VS Code's side-by-side file comparison. To select another file, run
 **Dygnosis: Show model changes with model file…** from the Command Palette
 while the changes view is active. Configure default filters in

@@ -1294,6 +1294,9 @@ pub struct Model {
     pub parameters: Vec<Decl>,
     pub predetermined: Vec<Decl>,
     pub param_assignments: Vec<Assignment>,
+    /// Parse-time execution-barrier epoch for each recorded parameter assignment.
+    pub(crate) parameter_assignment_epochs: Vec<usize>,
+    pub(crate) comparison_barrier_epoch: usize,
     pub helper_assignments: Vec<Assignment>,
     pub equations: Vec<Equation>,
     /// SUM argument role when the call was parsed; later removal cannot invalidate that earlier role check.

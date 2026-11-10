@@ -654,6 +654,33 @@ mod tests {
     }
 
     #[test]
+    fn dependent_parent_survives_a_page_without_the_parent_row() {
+        // The parent identity is a name, not a local pointer into another page.
+        let mut args = json!({"comparison":{"kind":"sources",
+            "before":{"kind":"text","text":"parameters p q; p=1; q=p;"},
+            "after":{"kind":"text","text":"parameters p q; p=2; q=p;"}},
+            "families":["parameters"], "page_size":1});
+        let first = call(args.clone());
+        assert_eq!(first["data"]["semantic"]["rows"][0]["name"], "p");
+        args["continuation"] = first["selection"]["continuation"].clone();
+        args["expected_revision_a"] = first["inputs"][0]["revision"].clone();
+        args["expected_revision_b"] = first["inputs"][1]["revision"].clone();
+        let second = call(args);
+        let row = &second["data"]["semantic"]["rows"][0];
+        assert_eq!(row["name"], "q");
+        let parent = row["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|field| field["name"] == "dependent_on")
+            .unwrap();
+        assert_eq!(parent["before"]["value"]["value"], "p");
+        assert_eq!(parent["after"], parent["before"]);
+        assert_eq!(parent["changed"], false);
+        check_pointers(&second["data"]);
+    }
+
+    #[test]
     fn default_context_does_not_expand_high_fanout_or_select_more_sections_with_full_detail() {
         // One calibration row must not serialize every usage under a one-row page.
         let equations = (0..300)

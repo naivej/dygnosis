@@ -6,7 +6,9 @@
   const kinds = ["added", "removed", "changed"], marks = { added: "+", removed: "−", changed: "~" };
   const changeLabel = kind => kind === "changed" ? "Replaced" : titleCase(kind);
   const controls = Object.fromEntries(["models", "status", "search", "kinds", "counts", "results", "refresh"].map(id => [id, document.getElementById(id)]));
-  let payload, choices, references = new Map();
+  let payload, choices, groupList, references = new Map(), groups = new Map();
+  let presentation = saved?.presentation ?? {};
+  const scrollArea = document.getElementById("reviewContent");
   const node = (tag, text, className) => { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (className) element.className = className; return element; };
   const titleCase = text => text.replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase());
   const scopeLabel = value => value === "aggregate" ? "Aggregate" : value === "global" ? "Global" : "Dimension: " + value;
@@ -22,8 +24,13 @@
   };
   const contextScopes = row => row.scopes.filter(scope => scope !== "aggregate" && scope !== "global" || row.sideScopes.before !== null && row.sideScopes.after !== null && row.sideScopes.before !== row.sideScopes.after);
   const post = (type, args = {}) => api.postMessage({ type, token: payload.token, ...args });
-  const remember = () => { api.setState({ key: payload.key, choices }); api.postMessage({ type: "choices", key: payload.key, choices }); };
-  function update() { renderRows(); remember(); }
+  const persist = () => api.setState({ key: payload.key, choices, presentation });
+  const remember = () => { persist(); api.postMessage({ type: "choices", key: payload.key, choices }); };
+  function update(focusId) { renderRows(focusId); remember(); }
+  function rememberSource(button, rowId) {
+    presentation.returnFocus = { id: button.id, rowId, scrollTop: scrollArea?.scrollTop ?? 0 };
+    persist();
+  }
   function renderControls() {
     controls.search.value = choices.search;
     const focused = document.activeElement?.getAttribute("data-change-type"), selected = choices.changeKinds;
@@ -45,16 +52,22 @@
     controls.kinds.replaceChildren(summary, options);
     if (focused) document.getElementById("change-type-" + focused)?.focus();
   }
-  function action(label, type, args, reason) {
+  function action(label, type, args, reason, rowId) {
     const button = node("button", label); button.type = "button"; button.disabled = !!reason;
     button.setAttribute("aria-label", reason ? label + " unavailable: " + reason : label); if (reason) button.title = reason;
-    button.addEventListener("click", () => { if (!button.disabled) post(type, args); }); return button;
+    button.addEventListener("click", () => {
+      if (button.disabled) return;
+      rememberSource(button, rowId);
+      post(type, args);
+    });
+    return button;
   }
   function sourceAction(row, side) {
     const target = row.navigation[side] ?? row.navigation.block_openers?.[side], files = row.sourceFiles?.[side] ?? [];
     const locations = target?.written_locations ?? [];
     const reason = payload.status !== "ready" ? "Refresh to open source links." : !locations.length && !files.length ? "The source for this side is unavailable." : "";
-    const button = action("Open " + titleCase(side) + " source", "openSource", { rowId: row.id, side }, reason);
+    const button = action("Open " + titleCase(side) + " source", "openSource", { rowId: row.id, side }, reason, row.id);
+    button.id = "source-" + side + "-" + row.id;
     button.textContent = locations.length === 1 ? basename(locations[0].uri) + ":" + (locations[0].range.start.line + 1) : files.length === 1 ? basename(files[0]) : "Open source" + (locations.length > 1 || files.length > 1 ? "…" : "");
     button.className = "source-link";
     if (!reason) button.title = [...locations.map(location => location.uri), ...files].join("\n");
@@ -169,6 +182,7 @@
     const statement = writtenStatement(detail);
     const expressions = visibleExpressions(detail);
     return detail.fields.filter(field => {
+      if (field.name === "dependent_on") return false;
       if (observableDeclaration(detail) && field.comparison_availability === "complete") {
         if (field.name === "role" || field.name === "target" && ["before", "after"].every(side => !detail[side] || textField(detail, "target", side) === detail[side].name)) return false;
         if (field.name === "captured_kind" && ["before", "after"].every(side => !detail[side] || textField(detail, "captured_kind", side) === (observableKeyword(detail, side) === "varobs" ? "var" : "varexo"))) return false;
@@ -235,26 +249,55 @@
         value.append(text); if (!available) value.append(node("p", "This value could not be compared.", "source-note")); panel.append(value);
       }
     }
-    if (row.semantic) {
-      const ownRefs = row.semantic.references.map(pointer => references.get(pointer)).filter(ref => ref?.side === side);
-      if (ownRefs.length) {
-        const refs = node("section", undefined, "refs"); refs.append(node("h3", "Direct equation references"));
-        const seenEquations = new Set();
-        for (const ref of ownRefs) {
-          // The wire retains each symbol use; the card lists its equations.
-          const equationKey = JSON.stringify([ref.scope.domain, ref.scope.dimension, ref.equation_index]);
-          if (seenEquations.has(equationKey)) continue;
-          seenEquations.add(equationKey);
-          const line = node("p", undefined, "reference"), target = ref.navigation[side];
-          const button = action(ref.label, "openReference", { pointer: ref.pointer, side }, payload.status !== "ready" ? "Refresh to open this equation." : !target?.written_locations.length ? "The source line for this equation is unavailable." : "");
-          button.setAttribute("aria-label", "Open " + titleCase(side) + " reference: " + ref.label + (button.disabled ? ". " + button.title : ""));
-          const context = ref.scope.dimension && (!scopeShown || ref.scope.dimension !== scope) ? scopeLabel(ref.scope.dimension) : "";
-          line.append(button); if (context) line.append(node("span", context, "source-note")); refs.append(line);
-        }
-        panel.append(refs);
-      }
-    }
+    const refs = referenceDisclosure(row, side, scopeShown ? scope : null);
+    if (refs) panel.append(refs);
     return panel;
+  }
+  function referenceDisclosure(row, side, shownScope) {
+    const equations = new Map();
+    for (const pointer of row.semantic?.references ?? []) {
+      const ref = references.get(pointer);
+      if (ref?.side !== side) continue;
+      // Each written use is retained; this list opens each equation once.
+      const key = JSON.stringify([ref.scope.domain, ref.scope.dimension, ref.equation_index]);
+      if (!equations.has(key)) equations.set(key, ref);
+    }
+    if (!equations.size) return null;
+
+    const section = node("section", undefined, "refs");
+    const toggle = node("button", equations.size + (equations.size === 1 ? " equation reference" : " equation references"), "reference-toggle");
+    toggle.type = "button";
+    toggle.id = "reference-toggle-" + side + "-" + row.id;
+    toggle.setAttribute("aria-label", titleCase(side) + ": " + toggle.textContent);
+    const list = node("div");
+    list.id = "references-" + side + "-" + row.id;
+    toggle.setAttribute("aria-controls", list.id);
+    const render = () => {
+      const open = presentation.referenceSides.includes(side);
+      toggle.setAttribute("aria-expanded", String(open));
+      list.hidden = !open;
+      list.replaceChildren();
+      if (!open) return;
+      for (const ref of equations.values()) {
+        const line = node("p", undefined, "reference"), target = ref.navigation[side];
+        const reason = payload.status !== "ready" ? "Refresh to open this equation." : !target?.written_locations.length ? "The source line for this equation is unavailable." : "";
+        const button = action("Open " + titleCase(side) + " reference: " + ref.label, "openReference", { pointer: ref.pointer, side }, reason, row.id);
+        button.id = "reference-" + ref.pointer;
+        button.textContent = ref.label;
+        line.append(button);
+        if (ref.scope.dimension && ref.scope.dimension !== shownScope) line.append(node("span", scopeLabel(ref.scope.dimension), "source-note"));
+        list.append(line);
+      }
+    };
+    toggle.addEventListener("click", () => {
+      const sides = presentation.referenceSides;
+      presentation.referenceSides = sides.includes(side) ? sides.filter(value => value !== side) : [...sides, side];
+      render();
+      persist();
+    });
+    section.append(toggle, list);
+    render();
+    return section;
   }
   function valueText(value) {
     if (!value) return "Unknown";
@@ -273,15 +316,15 @@
     return node("pre", text, "field-value " + className);
   }
   function rowDetail(row) {
-    const article = node("article", undefined, "detail change " + row.kind), header = node("div", undefined, "detail-heading");
-    article.setAttribute("data-row-id", row.id);
-    article.setAttribute("aria-label", changeLabel(row.kind) + " " + rowLabel(row) + ", " + row.scopes.map(scopeLabel).join(" · "));
-    header.append(node("span", marks[row.kind], "change-mark " + row.kind), node("h2", rowLabel(row))); article.append(header);
-    const sides = node("div", undefined, "sides"); sides.append(sidePanel(row, "before"), sidePanel(row, "after")); article.append(sides);
+    const detail = node("div", undefined, "detail");
+    const sides = node("div", undefined, "sides");
+    sides.append(sidePanel(row, "before"), sidePanel(row, "after"));
+    detail.append(sides);
     const instruction = row.semantic?.expressions.find(expression => expression.field === "statement_text");
-    if (row.semantic?.family === "operations" && instruction?.before && instruction.after && instruction.before.text === instruction.after.text && row.semantic.fields.some(field => field.changed && !["role", "order"].includes(field.name))) article.append(node("p", "The text is the same, but the resulting changes to the model differ.", "source-note"));
-    const notes = rowNotes(row); if (notes) article.append(notes);
-    return article;
+    if (row.semantic?.family === "operations" && instruction?.before && instruction.after && instruction.before.text === instruction.after.text && row.semantic.fields.some(field => field.changed && !["role", "order"].includes(field.name))) detail.append(node("p", "The same instruction changes the model in different ways.", "source-note"));
+    const notes = rowNotes(row);
+    if (notes) detail.append(notes);
+    return detail;
   }
   function sliceRuns(expression, start, end) {
     let offset = 0;
@@ -306,11 +349,18 @@
       const key = JSON.stringify([target, row.kind, ...["before", "after"].map(side => [detail[side]?.context, row.navigation[side]?.occurrence_id, row.navigation[side]?.written_locations.map(location => location.uri), parts[side]?.header, parts[side]?.footer])]);
       const existing = groups.get(key);
       if (!existing) {
-        const card = { ...row, semantic: { ...detail, expressions: [{ ...statement, ...Object.fromEntries(["before", "after"].map(side => [side, statement[side] && { ...statement[side], runs: [...statement[side].runs] }])) }] } };
-        groups.set(key, { card, parts }); cards.push(card); continue;
+        const card = { ...row };
+        groups.set(key, { card, parts, statement });
+        cards.push(card);
+        continue;
       }
       existing.card.label = target;
-      const combined = existing.card.semantic.expressions[0];
+      if (existing.card.id !== presentation.detailId) continue;
+      if (!existing.combined) {
+        existing.combined = { ...existing.statement };
+        existing.card.semantic = { ...existing.card.semantic, expressions: [existing.combined] };
+      }
+      const combined = existing.combined;
       for (const side of ["before", "after"]) {
         if (!combined[side]) continue;
         const own = combined[side], footer = existing.parts[side].footer;
@@ -385,113 +435,409 @@
     const notes = node("aside", undefined, "group-notes"), list = node("ul", undefined, "limits"); notes.setAttribute("aria-label", "Comparison limits");
     for (const text of unique) list.append(node("li", text)); notes.append(list); return notes;
   }
-  function searchText(row) { return [row.label, row.group, row.before ?? "", row.after ?? "", ...(row.semantic?.facets ?? []).map(titleCase), ...(row.semantic?.expressions ?? []).flatMap(expression => [expression.before?.text ?? "", expression.after?.text ?? ""]), ...(row.semantic?.fields ?? []).flatMap(field => [field.label, fieldText(field.before), fieldText(field.after)])].join("\n").toLocaleLowerCase(); }
-  function modelRows() {
-    const groupKey = row => row.section + ":" + row.group;
-    const available = payload.rows, query = choices.search.trim().toLocaleLowerCase();
-    const matches = row => choices.changeKinds.includes(row.kind) && (!query || searchText(row).includes(query));
-    const shown = available.filter(matches);
-    const breakdown = kinds.map(kind => shown.filter(row => row.kind === kind).length + " " + changeLabel(kind).toLowerCase()).join(" · ");
-    controls.counts.textContent = shown.length + " of " + available.length + " model rows match filters · " + breakdown;
-    const groups = new Map();
-    for (const row of [...payload.rows].sort((a, b) => Object.keys(names).indexOf(a.section) - Object.keys(names).indexOf(b.section))) {
-      const key = groupKey(row);
-      if (!groups.has(key)) groups.set(key, { label: row.group, rows: [] });
-      if (matches(row)) groups.get(key).rows.push(row);
+  function searchText(row) {
+    const fields = row.semantic?.fields.filter(field => field.name !== "dependent_on") ?? [];
+    return [rowLabel(row), row.group, row.before ?? "", row.after ?? "", ...contextScopes(row).map(scopeLabel),
+      ...(row.semantic?.facets ?? []).map(titleCase),
+      ...(row.semantic?.expressions ?? []).flatMap(expression => [expression.before?.text ?? "", expression.after?.text ?? ""]),
+      ...fields.flatMap(field => [field.label, fieldText(field.before), fieldText(field.after)])].join("\n").toLocaleLowerCase();
+  }
+
+  const parameterField = (row, name) => row.semantic?.fields.find(field => field.name === name && field.comparison_availability === "complete");
+  const pairedParameter = row => row.kind === "changed" && row.semantic?.family === "parameters" && row.semantic.count_unit === "final_fact";
+  const valueOnly = row => pairedParameter(row) && parameterField(row, "evaluated_value")?.changed && parameterField(row, "expression")?.changed === false;
+  function parameterParents(rows) {
+    const candidates = new Map(), parents = new Map();
+    for (const row of rows) {
+      if (!pairedParameter(row)) continue;
+      const name = row.semantic.name;
+      candidates.set(name, candidates.has(name) ? null : row);
     }
-    if (groups.size && !groups.get(choices.group)?.rows.length) choices.group = [...groups].find(([, group]) => group.rows.length)?.[0] ?? null;
-    const grid = node("div", undefined, "grouped"), list = node("nav", undefined, "group-list"); list.setAttribute("aria-label", "Change groups");
+    for (const row of rows) {
+      if (!valueOnly(row)) continue;
+      const proof = parameterField(row, "dependent_on"), before = proof?.before, after = proof?.after;
+      if (!proof || proof.changed || before.state !== "present" || after.state !== "present" ||
+          before.value?.kind !== "text" || after.value?.kind !== "text" || before.value.value !== after.value.value) continue;
+      const parent = candidates.get(before.value.value);
+      if (parent && parent !== row && parameterField(parent, "expression")?.changed) parents.set(row.id, parent.id);
+    }
+    return parents;
+  }
+  function indexGroups(rows) {
+    const indexed = new Map(), sections = Object.keys(names);
+    for (const row of rows) {
+      const key = row.section + ":" + row.group;
+      if (!indexed.has(key)) indexed.set(key, { key, label: row.group, section: row.section, rows: [] });
+      indexed.get(key).rows.push(row);
+    }
+    const ordered = [...indexed.values()].sort((left, right) => sections.indexOf(left.section) - sections.indexOf(right.section));
+    for (const group of ordered) group.parents = group.section === "parameters" ? parameterParents(group.rows) : new Map();
+    return new Map(ordered.map(group => [group.key, group]));
+  }
+
+  function changeSummary(row) {
+    if (pairedParameter(row)) {
+      const value = parameterField(row, "evaluated_value");
+      if (value?.changed) {
+        const before = fieldText(value.before), after = fieldText(value.after);
+        if (before && after) return before + " → " + after;
+      }
+      const expression = parameterField(row, "expression");
+      if (expression?.changed) return "Expression changed";
+    }
+    if (row.kind !== "changed") return "";
+    if (row.semantic?.facets.includes("expression")) return "Expression changed";
+    if (row.semantic?.facets.includes("timing")) return "Timing changed";
+    if (row.semantic?.facets.includes("tags")) return "Tags changed";
+    return "";
+  }
+  function toggleRow(id) {
+    presentation.detailId = presentation.detailId === id ? null : id;
+    presentation.referenceSides = [];
+    presentation.returnFocus = null;
+    update("row-" + id);
+  }
+  function compactRow(row, { child = false, context = false, dependents = [] } = {}) {
+    const article = node("article", undefined, "change-item" + (child ? " dependent-row" : ""));
+    article.setAttribute("data-row-id", row.id);
+    const open = presentation.detailId === row.id, title = rowLabel(row), summary = changeSummary(row);
+    const line = node("div", undefined, "change-line"), heading = node("h2", undefined, "row-heading");
+    const toggle = node("button", undefined, "change-row");
+    toggle.type = "button";
+    toggle.id = "row-" + row.id;
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.setAttribute("aria-controls", "detail-" + row.id);
+    const mark = node("span", marks[row.kind], "change-mark " + row.kind);
+    mark.setAttribute("aria-hidden", "true");
+    const twisty = node("span", undefined, "twisty");
+    twisty.setAttribute("aria-hidden", "true");
+    toggle.append(twisty, mark, node("span", changeLabel(row.kind) + " ", "sr-only"), node("span", title, "row-label"));
+    const scope = contextScopes(row).map(scopeLabel).join(" · ");
+    if (scope) toggle.append(node("span", scope, "row-scope"));
+    if (summary) toggle.append(node("span", summary, "row-summary"));
+    if (!child && valueOnly(row)) toggle.append(node("span", "Value only", "row-note"));
+    toggle.addEventListener("click", () => toggleRow(row.id));
+    heading.append(toggle);
+    line.append(heading);
+    article.append(line);
+    const detail = open ? rowDetail(row) : node("div");
+    detail.id = "detail-" + row.id;
+    detail.hidden = !open;
+    article.append(detail);
+    if (dependents.length) {
+      const id = "dependents-" + row.id;
+      const count = dependents.length + (dependents.length === 1 ? " dependent value" : " dependent values");
+      const expanded = context || presentation.openDependents.includes(row.id);
+      const children = node("div", undefined, "dependent-list");
+      children.id = id;
+      children.hidden = !expanded;
+      if (context) line.append(node("span", count, "dependent-context"));
+      else {
+        const disclosure = node("button", undefined, "dependent-toggle");
+        disclosure.type = "button";
+        disclosure.id = "dependents-toggle-" + row.id;
+        disclosure.setAttribute("aria-expanded", String(expanded));
+        disclosure.setAttribute("aria-controls", id);
+        disclosure.setAttribute("aria-label", title + ": " + count);
+        const arrow = node("span", undefined, "twisty");
+        arrow.setAttribute("aria-hidden", "true");
+        disclosure.append(arrow, node("span", count));
+        disclosure.addEventListener("click", () => {
+          presentation.openDependents = expanded ? presentation.openDependents.filter(id => id !== row.id) : [...presentation.openDependents, row.id];
+          if (expanded && dependents.some(item => item.id === presentation.detailId)) {
+            presentation.detailId = null;
+            presentation.referenceSides = [];
+          }
+          update(disclosure.id);
+        });
+        line.append(disclosure);
+      }
+      if (expanded) for (const item of dependents) children.append(compactRow(item, { child: true }));
+      article.append(children);
+    }
+    return article;
+  }
+  function appendRows(container, group, shown) {
+    if (!group.parents.size) {
+      for (const row of historyCards(shown)) container.append(compactRow(row));
+      return;
+    }
+    const matched = new Set(), children = new Map();
+    for (const row of shown) {
+      matched.add(row.id);
+      const parent = group.parents.get(row.id);
+      if (!parent) continue;
+      if (!children.has(parent)) children.set(parent, []);
+      children.get(parent).push(row);
+    }
+    for (const row of group.rows) {
+      if (group.parents.has(row.id)) continue;
+      const context = !matched.has(row.id), dependents = children.get(row.id);
+      if (!context || dependents) container.append(compactRow(row, { context, dependents }));
+    }
+  }
+  function countText(count) { return count + (count === 1 ? " change" : " changes"); }
+  function revealGroup(list, button, scrollLeft, scrollTop) {
+    const { offsetLeft, offsetTop, offsetWidth, offsetHeight } = button;
+    const left = Math.min(offsetLeft, Math.max(scrollLeft, offsetLeft + offsetWidth - list.clientWidth));
+    const top = Math.min(offsetTop, Math.max(scrollTop, offsetTop + offsetHeight - list.clientHeight));
+    if (left) list.scrollLeft = left;
+    if (top) list.scrollTop = top;
+  }
+  function renderRows(focusId = document.activeElement?.id) {
+    if (!payload || !choices) return;
+    const query = choices.search.trim().toLocaleLowerCase(), filtered = new Map();
+    let total = 0;
     for (const [key, group] of groups) {
-      const button = node("button", undefined, "group-button" + (key === choices.group ? " selected" : "")); button.type = "button";
-      button.disabled = !group.rows.length;
-      button.append(node("span", group.label), node("span", String(group.rows.length), "group-count"));
-      button.setAttribute("aria-label", group.label + ", " + group.rows.length + " changes"); button.setAttribute("aria-pressed", String(key === choices.group)); button.setAttribute("data-group", key);
-      button.addEventListener("click", () => { choices.group = key; update(); [...document.querySelectorAll("[data-group]")].find(element => element.getAttribute("data-group") === key)?.focus(); });
+      const rows = group.rows.filter(row => choices.changeKinds.includes(row.kind) && (!query || searchText(row).includes(query)));
+      filtered.set(key, rows);
+      total += rows.length;
+    }
+    const { available, incompleteRows } = payload;
+    controls.counts.hidden = !available && !incompleteRows;
+    controls.counts.textContent = incompleteRows ? countText(total) + " shown" : total === available ? countText(total) : total + " of " + available + " changes";
+    const scrollLeft = groupList?.scrollLeft ?? 0, scrollTop = groupList?.scrollTop ?? 0;
+    groupList = null;
+    controls.results.className = "results";
+    controls.results.replaceChildren();
+    if (!available) return;
+    if (!total) {
+      const empty = node("div", undefined, "empty"), reset = node("button", "Clear filters", "reset-filters");
+      reset.type = "button";
+      reset.addEventListener("click", () => {
+        choices.search = "";
+        choices.changeKinds = [...kinds];
+        choices.customChangeKinds = [...kinds];
+        renderControls();
+        update("search");
+      });
+      empty.append(node("p", "No changes match these filters."), reset);
+      controls.results.append(empty);
+      return;
+    }
+    if (!filtered.get(choices.group)?.length) choices.group = [...filtered].find(([, rows]) => rows.length)?.[0] ?? null;
+    const grid = node("div", undefined, "grouped"), list = node("nav", undefined, "group-list");
+    list.setAttribute("aria-label", "Change groups");
+    let selectedButton;
+    for (const [key, group] of groups) {
+      const count = filtered.get(key).length, selected = key === choices.group;
+      const button = node("button", undefined, "group-button" + (selected ? " selected" : ""));
+      button.type = "button";
+      button.id = "group-" + key;
+      button.disabled = !count;
+      button.append(node("span", group.label), node("span", String(count), "group-count"));
+      button.setAttribute("aria-label", group.label + ", " + countText(count));
+      button.setAttribute("aria-pressed", String(selected));
+      button.setAttribute("data-group", key);
+      if (selected) selectedButton = button;
+      button.addEventListener("click", () => {
+        choices.group = key;
+        if (scrollArea) scrollArea.scrollTop = 0;
+        update(button.id);
+      });
       list.append(button);
     }
-    const selected = groups.get(choices.group), rows = node("section", undefined, "group-rows"); rows.setAttribute("aria-label", selected?.label ?? "Model changes");
-    if (selected) {
-      for (const row of historyCards(selected.rows)) rows.append(rowDetail(row));
+    const selected = groups.get(choices.group), rows = node("section", undefined, "group-rows");
+    rows.setAttribute("aria-label", selected.label);
+    appendRows(rows, selected, filtered.get(choices.group));
+    grid.append(list, rows);
+    controls.results.append(grid);
+    groupList = list;
+    const focus = focusId && document.getElementById(focusId);
+    revealGroup(list, focus?.parentElement === list && !focus.disabled ? focus : selectedButton, scrollLeft, scrollTop);
+    if (focus && !focus.disabled) focus.focus({ preventScroll: true });
+  }
+  function inputDetails(message, side) {
+    const label = titleCase(side), input = message[side];
+    const model = node("details", undefined, "input-side"), heading = node("summary", undefined, "input-heading");
+    heading.id = "input-" + side;
+    const content = node("div", undefined, "input-details");
+    const sourceLabel = message.inputNames?.[side] ?? basename(input.split(" · ")[0]);
+    const summary = message.analysisSummaries?.[side], analysis = summary?.analysis;
+    const configuration = analysis?.configuration ?? summary?.requested_analysis;
+    const equation = configuration?.equation_selection, defines = configuration?.defines ?? [];
+    const receipts = analysis?.overrides ?? [], overrides = configuration?.overrides ?? [];
+    const preset = analysis?.selection?.name ?? configuration?.name;
+    const hasNamedPreset = preset && !/^(?:Analysis preview|Macro inputs)(?: \(modified\))?$/.test(preset);
+    const choiceCount = defines.length + (receipts.length || overrides.length);
+    const compact = [];
+    if (hasNamedPreset) compact.push(preset);
+    else if (choiceCount) compact.push(choiceCount + (choiceCount === 1 ? " macro input" : " macro inputs"));
+    else if (equation) compact.push("Equation selection");
+    else if (configuration) compact.push("Source");
+    const revision = message.inputRevisions?.[side];
+    if (revision) compact.unshift(revision);
+    heading.append(node("small", label), node("code", sourceLabel));
+    if (compact.length) heading.append(node("span", compact.join(" · "), "input-summary"));
+
+    content.append(node("p", input, "model-path"));
+    for (const define of defines) content.append(node("p", "Macro: " + define.name + "=" + define.expression, "analysis-detail"));
+    for (const value of equation?.values ?? []) content.append(node("p", "Equation: " + (equation.tag ?? "name") + "='" + value + "' (" + (equation.mode === "include" ? "included" : "excluded") + ")", "analysis-detail"));
+    const names = new Map();
+    for (const receipt of receipts) if (receipt.name) names.set(receipt.name, (names.get(receipt.name) ?? 0) + 1);
+    const overrideLabel = (operation, name, branch) => {
+      if (operation.kind === "definition") return "Macro: " + (name ? name + "=" : "") + operation.expression;
+      if (operation.kind === "skip_definition") return "Skip " + (name ?? "macro") + " definition";
+      return "Branch: " + (branch ?? (operation.branch_id === null ? "No branch" : "selected"));
+    };
+    if (receipts.length) {
+      for (const receipt of receipts) {
+        let choice = overrideLabel(receipt.operation, receipt.name, receipt.branch_label);
+        if (names.get(receipt.name) > 1) choice += " · " + basename(receipt.operation.target.file ?? "unnamed model") + (receipt.source_line ? ":" + receipt.source_line : "");
+        if (receipt.application !== "applied" || receipt.cause) {
+          const state = receipt.application === "not_reached" ? "not reached" : receipt.application === "unknown" ? "application unknown" : "applied";
+          choice += " (" + state + ")" + (receipt.cause ? " — " + receipt.cause : "");
+        }
+        content.append(node("p", choice, "analysis-detail"));
+      }
     } else {
-      const text = ["failure", "incomplete", "loading"].includes(payload.status) ? "" : payload.rows.length ? "No changes match these filters." : payload.sourceChanges?.files.length ? "No model changes. File text differs; use Text diff." : payload.coverage?.availability !== "complete" && payload.semantic ? "No model changes shown. Some details could not be compared." : payload.status === "ready" ? "No model changes found. File text may still differ." : "Refresh to compare current files.";
-      if (text) rows.append(node("p", text, "empty"));
+      for (const operation of overrides) {
+        const file = operation.target.file === null ? "unnamed model" : basename(operation.target.file);
+        content.append(node("p", overrideLabel(operation) + " · " + file + " · application unavailable", "analysis-detail"));
+      }
     }
-    grid.append(list, rows); controls.results.append(grid);
+    if (summary?.search_paths?.length) content.append(node("p", "Include paths: " + summary.search_paths.join(", "), "analysis-detail"));
+    if (summary?.counts) {
+      const counts = value => value.n_endogenous + " endogenous · " + value.n_equations + (value.n_equations === 1 ? " equation" : " equations");
+      const dimensions = summary.counts.heterogeneity_dimensions;
+      content.append(node("p", (dimensions.length ? "Aggregate model: " : "") + counts(summary.counts), "analysis-detail"));
+      for (const dimension of dimensions) content.append(node("p", "Heterogeneous model: " + dimension.dimension + " · " + counts(dimension), "analysis-detail"));
+    } else if (summary) content.append(node("p", summary.counts_cause || "Model counts are unavailable for this captured input.", "analysis-detail"));
+    if (summary?.cause?.message && summary.cause.message !== summary.counts_cause) content.append(node("p", summary.cause.message, "analysis-detail"));
+
+    model.title = input;
+    model.open = presentation.inputDetails.includes(side);
+    model.append(heading, content);
+    model.addEventListener("toggle", () => {
+      if (!model.isConnected) return;
+      const open = presentation.inputDetails;
+      if (open.includes(side) === model.open) return;
+      presentation.inputDetails = model.open ? [...open, side] : open.filter(value => value !== side);
+      persist();
+    });
+    return model;
   }
-  function renderRows() {
-    if (!payload || !choices) return;
-    controls.results.className = "results"; controls.results.replaceChildren();
-    modelRows();
+
+  function comparisonLimits(message) {
+    const semantic = message.semantic?.limits ?? [];
+    const coverage = message.coverage;
+    const workLimit = /_(?:tree_(?:node|materialization)|selector_(?:visit|token)|text_materialization)_limit$/;
+    const hasWorkLimit = limits => limits.some(limit => workLimit.test(limit.code));
+    const workLimited = hasWorkLimit(semantic) || hasWorkLimit(coverage?.limits ?? []) ||
+      coverage?.families?.some(family => hasWorkLimit(family.limits));
+    const omitted = codes => semantic.filter(limit => codes.includes(limit.code)).reduce((total, limit) => total + (limit.omitted ?? 0), 0);
+    const rows = omitted(["serialized_output_limit"]);
+    const refs = omitted(["reference_limit", "reference_output_limit", "reference_target_output_limit"]);
+    let hunks = 0, sourceDetailLimited = false, pairedFiles = false, unpairedFiles = false;
+    for (const file of message.sourceChanges?.files ?? []) {
+      hunks += file.omitted_hunks ?? 0;
+      sourceDetailLimited ||= file.limits.some(limit => ["source_materialization_limit", "source_alignment_limit"].includes(limit.code));
+      if (file.before && file.after) pairedFiles = true;
+      else unpairedFiles = true;
+    }
+    const clauses = [];
+    if (rows) clauses.push(rows + (rows === 1 ? " model change detail" : " model change details"));
+    if (refs) clauses.push(refs + (refs === 1 ? " equation reference" : " equation references"));
+    if (hunks) clauses.push(hunks + (hunks === 1 ? " section of file differences" : " sections of file differences"));
+    const notices = [];
+    if (clauses.length) notices.push("Comparison limits omitted " + clauses.join(", ") + ".");
+    else if (semantic.some(limit => ["token_alignment_limit", "occurrence_token_alignment_limit"].includes(limit.code))) notices.push("Some highlights were omitted because the comparison reached its limit.");
+    else if (coverage?.limits?.some(limit => limit.code === "detail_output_partial")) notices.push("Some details were omitted because the comparison reached its limit.");
+    if (sourceDetailLimited) notices.push("Some file difference details were omitted because the comparison reached its limit. Use Text diff to review the files.");
+    if (workLimited) notices.push("Some model changes may be missing because the comparison reached its work limit.");
+    return { incompleteRows: Boolean(rows || workLimited), pairedFiles, unpairedFiles, text: notices.join(" ") };
   }
+  function resultMessage(message, limits) {
+    if (message.status !== "ready") return message.message;
+    const files = message.sourceChanges;
+    const identical = files?.availability === "complete" && !files.files.length &&
+      message.coverage?.source_boundary && message.coverage.source_boundary !== "parsed_models_only";
+    if (message.rows.length) return identical ? "The captured file text is identical." : "";
+    const model = limits.incompleteRows ? "No model changes shown." : "No model changes found.";
+    return model + (limits.pairedFiles ? " The file text changed." : "") +
+      (limits.unpairedFiles ? " Some files could not be matched between inputs." : "") +
+      (identical ? " The captured file text is identical." : "");
+  }
+  function renderOutcome(message, limits) {
+    controls.status.textContent = resultMessage(message, limits);
+    controls.status.className = message.status;
+    controls.status.hidden = !controls.status.textContent;
+    controls.status.setAttribute("data-code", message.failureCode ?? "");
+    controls.refresh.disabled = message.status === "loading";
+    const limit = document.getElementById("limitsStatus");
+    if (limit) {
+      limit.textContent = limits.text;
+      limit.hidden = !limit.textContent;
+    }
+    const choosePath = document.getElementById("choosePath");
+    if (choosePath) choosePath.hidden = message.status !== "failure" || !message.canChoosePath;
+    const boundary = document.getElementById("sourceBoundary");
+    if (boundary) {
+      const scope = message.coverage?.source_boundary;
+      boundary.hidden = !scope;
+      boundary.textContent = !scope ? "" : scope === "parsed_models_only" ? "File text is unavailable" : scope.startsWith("supplied_") ? "Provided model files and the includes they use" : "Model files and the includes they use";
+    }
+    const hasFiles = Boolean(message.sourceChanges?.files.length);
+    for (const [id, hidden] of [["rootTextDiff", hasFiles], ["capturedTextDiff", !hasFiles]]) {
+      const button = document.getElementById(id);
+      if (!button) continue;
+      button.hidden = hidden;
+      button.disabled = message.status !== "ready";
+      button.title = !button.disabled ? "" : message.status === "loading" ? "Wait for the comparison to finish." : "Refresh to compare the current file text.";
+    }
+  }
+
   controls.refresh.addEventListener("click", () => post("refresh"));
   for (const name of ["changeComparison", "swap", "rootTextDiff", "capturedTextDiff", "choosePath", "help"]) document.getElementById(name)?.addEventListener("click", () => post(name));
-  controls.search.addEventListener("input", () => { choices.search = controls.search.value; update(); });
-  controls.kinds.addEventListener("keydown", event => { if (event.key === "Escape") { controls.kinds.open = false; controls.kinds.children[0]?.focus(); } });
-  document.addEventListener?.("pointerdown", event => { if (!controls.kinds.contains(event.target)) controls.kinds.open = false; });
+  controls.search.addEventListener("input", () => {
+    choices.search = controls.search.value;
+    if (scrollArea) scrollArea.scrollTop = 0;
+    update();
+  });
+  controls.kinds.addEventListener("keydown", event => {
+    if (event.key === "Escape") { controls.kinds.open = false; controls.kinds.children[0]?.focus(); }
+  });
+  controls.results.addEventListener("keydown", event => {
+    const id = presentation.detailId;
+    if (event.key !== "Escape" || !id) return;
+    if (event.target.id !== "row-" + id && !document.getElementById("detail-" + id)?.contains(event.target)) return;
+    event.preventDefault();
+    toggleRow(id);
+  });
+  document.addEventListener?.("pointerdown", event => {
+    if (!controls.kinds.contains(event.target)) controls.kinds.open = false;
+  });
   window.addEventListener("message", event => {
-    const message = event.data; if (!message || message.type !== "render" || !Array.isArray(message.rows)) return;
-    payload = message; references = new Map((message.references ?? []).map(reference => [reference.pointer, reference])); choices = message.choices;
-    controls.models.replaceChildren();
-    for (const [side, label, input] of [["before", "Before", message.before], ["after", "After", message.after]]) {
-      const model = node("div", undefined, "input-side"), parts = input.split(" · ");
-      const heading = node("div", undefined, "input-heading");
-      const sourceLabel = message.inputNames?.[side] ?? basename(parts[0]);
-      heading.append(node("small", label), node("code", sourceLabel)); model.append(heading);
-      const summary = message.analysisSummaries?.[side], analysis = summary?.analysis;
-      if (summary) {
-        const configuration = analysis?.configuration ?? summary.requested_analysis;
-        const names = new Map();
-        for (const receipt of analysis?.overrides ?? []) if (receipt.name) names.set(receipt.name, (names.get(receipt.name) ?? 0) + 1);
-        const overrideChoice = (operation, name, branchLabel) => {
-          const label = operation.kind === "definition" ? `Macro: ${name ? `${name}=` : ""}${operation.expression}`
-            : operation.kind === "skip_definition" ? `Skip ${name ?? "macro"} definition` : `Branch: ${branchLabel ?? (operation.branch_id === null ? "No branch" : "selected")}`;
-          if (analysis) return label;
-          const file = operation.target.file === null ? "unnamed model" : basename(operation.target.file.replaceAll("\\", "/"));
-          return `${label} · ${file} · application unavailable`;
-        };
-        const overrideChoices = analysis?.overrides?.length
-          ? analysis.overrides.map((receipt, index) => {
-            let choice = overrideChoice(receipt.operation, receipt.name, receipt.branch_label ?? analysis.override_branch_labels?.[index]);
-            if (receipt.name && names.get(receipt.name) > 1) choice += ` · ${basename(receipt.operation.target.file ?? "unnamed model")}${receipt.source_line ? `:${receipt.source_line}` : ""}`;
-            if (receipt.application === "applied" && !receipt.cause) return choice;
-            const state = receipt.application === "not_reached" ? "not reached" : receipt.application === "unknown" ? "application unknown" : "applied";
-            return `${choice} (${state})${receipt.cause ? ` — ${receipt.cause}` : ""}`;
-          })
-          : (configuration?.overrides ?? []).map((operation, index) => overrideChoice(operation, analysis?.override_names?.[index], analysis?.override_branch_labels?.[index]));
-        const choiceLines = [
-          ...(configuration?.defines ?? []).map(input => `Macro: ${input.name}=${input.expression}`),
-          ...(configuration?.equation_selection ? configuration.equation_selection.values.map(value => `Equation: ${configuration.equation_selection.tag ?? "name"}='${value}' (${configuration.equation_selection.mode === "include" ? "included" : "excluded"})`) : []),
-          ...overrideChoices,
-        ];
-        const presetName = analysis?.selection?.name ?? configuration?.name;
-        const usefulPresetName = presetName && !/^(?:Analysis preview|Macro inputs)(?: \(modified\))?$/.test(presetName) ? presetName : undefined;
-        const hoverLines = [input];
-        hoverLines.push(...choiceLines);
-        if (choiceLines.length) for (const choice of choiceLines) model.append(node("p", choice, "analysis-detail"));
-        else if (configuration) model.append(node("p", "Source", "analysis-detail"));
-        else if (!analysis) model.append(node("p", "Analysis unavailable", "analysis-detail"));
-        if (usefulPresetName) hoverLines.push(usefulPresetName);
-        if (summary.search_paths?.length) model.append(node("p", `Include paths: ${summary.search_paths.join(", ")}`, "analysis-detail"));
-        if (summary.search_paths?.length) hoverLines.push(`Include paths: ${summary.search_paths.join(", ")}`);
-        if (summary.counts) {
-          const counts = value => `${value.n_endogenous} endogenous · ${value.n_equations} ${value.n_equations === 1 ? "equation" : "equations"}`;
-          hoverLines.push(`${summary.counts.heterogeneity_dimensions.length ? "Aggregate model: " : ""}${counts(summary.counts)}`);
-          for (const dimension of summary.counts.heterogeneity_dimensions) hoverLines.push(`Heterogeneous model: ${dimension.dimension} · ${counts(dimension)}`);
-        } else model.append(node("p", summary.counts_cause || "Model counts are unavailable for this captured input.", "analysis-detail"));
-        if (summary.cause?.message && summary.cause.message !== summary.counts_cause) model.append(node("p", summary.cause.message, "analysis-detail"));
-        model.title = hoverLines.join("\n");
-      } else model.title = input;
-      controls.models.append(model);
+    const message = event.data;
+    if (!message || message.type !== "render" || !Array.isArray(message.rows)) return;
+
+    const sameCapture = message.captureId && message.captureId === payload?.captureId;
+    if (!message.captureId || message.captureId !== presentation.captureId || !presentation.referenceSides) {
+      presentation = { captureId: message.captureId, detailId: null, openDependents: [], referenceSides: [], inputDetails: [], returnFocus: null };
+      groupList = null;
+      if (scrollArea) scrollArea.scrollTop = 0;
     }
-    controls.status.textContent = message.message; controls.status.className = message.status; controls.refresh.disabled = message.status === "loading";
-    controls.status.setAttribute("data-code", message.failureCode ?? "");
-    controls.status.hidden = message.status === "ready" && message.message === "Current comparison";
-    const path = document.getElementById("choosePath"); if (path) path.hidden = message.status !== "failure" || !message.canChoosePath;
-    const boundary = document.getElementById("sourceBoundary"); if (boundary) { boundary.hidden = !message.coverage; boundary.textContent = !message.coverage ? "" : message.coverage.source_boundary === "parsed_models_only" ? "File text is unavailable" : message.coverage.source_boundary.startsWith("supplied_") ? "Provided model files and the includes they use" : "Model files and the includes they use"; }
-    const hasFiles = !!message.sourceChanges?.files.length;
-    const root = document.getElementById("rootTextDiff"); if (root) { root.disabled = message.status !== "ready"; root.hidden = hasFiles; }
-    const captured = document.getElementById("capturedTextDiff"); if (captured) { captured.disabled = message.status !== "ready" || !hasFiles; captured.hidden = !hasFiles; }
-    renderControls(); renderRows(); remember();
+    if (!sameCapture) {
+      groups = indexGroups(message.rows);
+      references = new Map((message.references ?? []).map(reference => [reference.pointer, reference]));
+    }
+    const limits = comparisonLimits(message);
+    payload = { key: message.key, token: message.token, status: message.status, captureId: message.captureId,
+      available: message.rows.length, semantic: Boolean(message.semantic), incompleteRows: limits.incompleteRows };
+    choices = message.choices;
+    const returning = message.active !== false && presentation.returnFocus;
+    const focused = message.active === false ? "" : document.activeElement?.id;
+    controls.models.replaceChildren(inputDetails(message, "before"), inputDetails(message, "after"));
+    renderOutcome(message, limits);
+    renderControls();
+    renderRows(returning?.id || focused);
+    if (returning) {
+      if (scrollArea) scrollArea.scrollTop = returning.scrollTop;
+      const target = document.getElementById(returning.id);
+      if (!target || target.disabled) document.getElementById("row-" + returning.rowId)?.focus({ preventScroll: true });
+      presentation.returnFocus = null;
+    }
+    remember();
   });
   api.postMessage({ type: "ready", key: saved?.key, choices: saved?.choices });
 })();

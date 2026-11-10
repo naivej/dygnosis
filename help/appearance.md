@@ -6,9 +6,9 @@ in VS Code's Settings editor.
 
 ## File icons
 
-Run **Preferences: File Icon Theme** and select **Dygnosis** for dy icons:
-blue for `.mod`, amber for `.inc` and violet for `.dyn`. Other file icon
-themes can show the same blue Dynare icon for all three extensions.
+Your selected file icon theme determines the icons for Dynare files. Seti can
+show a blue Dynare icon for `.mod`, `.inc` and `.dyn`. Run **Preferences: File
+Icon Theme** to choose a theme.
 
 ## Name details
 

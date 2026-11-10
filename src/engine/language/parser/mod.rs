@@ -1670,6 +1670,23 @@ impl Parser<'_> {
         } else {
             StatementKind::Command
         };
+        // Match the assignment-value execution barriers without another walk
+        // during comparison. This receipt does not change parsing or values.
+        if let Some(crate::engine::language::model::AssignmentIndex::Parameter(index)) = assignment
+        {
+            self.model
+                .parameter_assignment_epochs
+                .resize(index + 1, usize::MAX);
+            self.model.parameter_assignment_epochs[index] = self.model.comparison_barrier_epoch;
+        } else if assignment.is_none()
+            && kind != StatementKind::Declaration
+            && kind != StatementKind::Dimension
+            && !(kind == StatementKind::Block
+                && ["model", "model_replace", "steady_state_model"].contains(&name.as_str()))
+        {
+            self.model.comparison_barrier_epoch =
+                self.model.comparison_barrier_epoch.saturating_add(1);
+        }
         let opener_end = if block {
             let mut depth = 0;
             (from..self.i)

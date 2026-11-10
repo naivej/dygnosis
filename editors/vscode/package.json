@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -17,8 +17,7 @@
     "node": "^22.13.0 || >=24"
   },
   "categories": [
-    "Programming Languages",
-    "Themes"
+    "Programming Languages"
   ],
   "extensionKind": [
     "workspace"
@@ -77,13 +76,6 @@
           "light": "./media/file-icons/dynare-mod-light.svg",
           "dark": "./media/file-icons/dynare-mod-dark.svg"
         }
-      }
-    ],
-    "iconThemes": [
-      {
-        "id": "dygnosis",
-        "label": "Dygnosis",
-        "path": "./media/file-icons/dygnosis-icon-theme.json"
       }
     ],
     "grammars": [

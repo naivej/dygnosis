@@ -108,19 +108,21 @@ pub(crate) fn arithmetic_number(
 /// Final values from the legacy parameter-then-helper walk, not execution traces.
 pub fn assigned_number(model: &Model, name: &str) -> Option<f64> {
     let name = model.intern.lookup(name)?;
-    legacy_assigned_values(model, NumberMode::Legacy, |_| {})
+    legacy_assigned_values(model, NumberMode::Legacy, |_, _, _| {})
         .get(&name)
         .copied()
 }
 
 pub(crate) fn hover_assigned_number_values(model: &Model) -> HashMap<Name, f64> {
-    legacy_assigned_values(model, NumberMode::Hover, |_| {})
+    legacy_assigned_values(model, NumberMode::Hover, |_, _, _| {})
 }
 
 #[derive(Default)]
 pub(crate) struct AssignedNumbers<'a> {
     values: HashMap<Name, f64>,
     assignments: HashMap<Name, &'a Assignment>,
+    producers: HashMap<Name, (Name, &'a Assignment)>,
+    final_producers: HashMap<Name, (&'a Assignment, usize)>,
 }
 
 impl<'a> AssignedNumbers<'a> {
@@ -131,6 +133,25 @@ impl<'a> AssignedNumbers<'a> {
     pub(crate) fn assignment(&self, model: &Model, name: &str) -> Option<&'a Assignment> {
         self.assignments.get(&model.intern.lookup(name)?).copied()
     }
+
+    pub(crate) fn direct_producer<'m>(&self, model: &'m Model, name: &str) -> Option<&'m str> {
+        // The legacy walk does not execute native code or interleave helpers.
+        // Without that evidence it cannot prove a producer across such work.
+        if !model.opaque_tokens.is_empty() || !model.helper_assignments.is_empty() {
+            return None;
+        }
+        let child = model.intern.lookup(name)?;
+        let (parent, producer) = self.producers.get(&child)?;
+        let displayed_child = self.assignments.get(&child)?;
+        let displayed_parent = self.assignments.get(parent)?;
+        if !std::ptr::eq(*displayed_child, self.final_producers.get(&child)?.0)
+            || !std::ptr::eq(*displayed_parent, *producer)
+            || !std::ptr::eq(*displayed_parent, self.final_producers.get(parent)?.0)
+        {
+            return None;
+        }
+        Some(model.name(*parent))
+    }
 }
 
 #[cfg(test)]
@@ -140,12 +161,53 @@ thread_local! {
 
 pub(crate) fn assigned_numbers(model: &Model) -> AssignedNumbers<'_> {
     let mut assignments = HashMap::new();
-    let values = legacy_assigned_values(model, NumberMode::Legacy, |assignment| {
-        assignments.insert(assignment.name, assignment);
-    });
+    let mut producers = HashMap::new();
+    let mut final_producers = HashMap::new();
+    let values = legacy_assigned_values(
+        model,
+        NumberMode::Legacy,
+        |assignment, parameter_index, value| {
+            if let Some(index) = parameter_index {
+                assignments.insert(assignment.name, assignment);
+                producers.remove(&assignment.name);
+                if value.is_some()
+                    && let Some(id) = assignment.expr
+                    && model
+                        .assignment_syntax
+                        .get(&id)
+                        .is_some_and(|syntax| syntax.full_rhs)
+                    && let crate::engine::language::expr::ExprKind::Ident {
+                        name,
+                        timing: 0,
+                        timing_span: None,
+                        ..
+                    } = model.exprs.get(id).kind
+                    && let Some((producer, producer_epoch)) = final_producers.get(&name).copied()
+                    && let Some(&epoch) = model.parameter_assignment_epochs.get(index)
+                    && epoch != usize::MAX
+                    && epoch == producer_epoch
+                {
+                    producers.insert(assignment.name, (name, producer));
+                }
+            }
+            final_producers.remove(&assignment.name);
+            if let Some(index) = parameter_index
+                && value.is_some()
+            {
+                let epoch = model
+                    .parameter_assignment_epochs
+                    .get(index)
+                    .copied()
+                    .unwrap_or(usize::MAX);
+                final_producers.insert(assignment.name, (assignment, epoch));
+            }
+        },
+    );
     AssignedNumbers {
         values,
         assignments,
+        producers,
+        final_producers,
     }
 }
 
@@ -154,7 +216,7 @@ pub(crate) fn assigned_numbers(model: &Model) -> AssignedNumbers<'_> {
 fn legacy_assigned_values<'a>(
     model: &'a Model,
     mode: NumberMode,
-    mut parameter: impl FnMut(&'a Assignment),
+    mut observe: impl FnMut(&'a Assignment, Option<usize>, Option<f64>),
 ) -> HashMap<Name, f64> {
     #[cfg(test)]
     ASSIGNED_NUMBER_PASSES.with(|count| count.set(count.get() + 1));
@@ -168,12 +230,14 @@ fn legacy_assigned_values<'a>(
         if crate::engine::control::cancelled() {
             break;
         }
-        if index < model.param_assignments.len() {
-            parameter(a);
-        }
         let value = a
             .expr
             .and_then(|id| arithmetic_number(model, id, &known, mode));
+        observe(
+            a,
+            (index < model.param_assignments.len()).then_some(index),
+            value.filter(|v| v.is_finite()),
+        );
         match value {
             Some(v) if v.is_finite() => {
                 known.insert(a.name, v);

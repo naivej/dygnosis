@@ -47,6 +47,87 @@ fn comparison_shares_final_values_for_changed_and_one_sided_parameters() {
     }
 }
 
+// A value match cannot establish which assignment supplied a direct read.
+#[test]
+fn direct_parameter_producer_requires_the_displayed_assignment_on_both_sides() {
+    fn parent(before: &str, after: &str, child: &str) -> Option<String> {
+        let diff = compare_models(&parse(before), &parse(after));
+        row(&diff, SemanticFamily::Parameters, child)
+            .fields
+            .iter()
+            .find(|field| field.name == "dependent_on")
+            .and_then(|field| match &field.before.value {
+                Some(FieldValue::Text(value)) => Some(value.clone()),
+                _ => None,
+            })
+    }
+    let header = "parameters p q r; ";
+    assert_eq!(
+        parent(
+            &format!("{header}p=1; q=p; r=2*p;"),
+            &format!("{header}p=2; q=p; r=2*p;"),
+            "q"
+        ),
+        Some("p".into())
+    );
+    assert_eq!(
+        parent(
+            &format!("{header}p=1; q=p; r=2*p;"),
+            &format!("{header}p=2; q=p; r=2*p;"),
+            "r"
+        ),
+        None
+    );
+    assert_eq!(
+        parent(
+            &format!("{header}p=1; q=p; p=1;"),
+            &format!("{header}p=2; q=p; p=2;"),
+            "q"
+        ),
+        None
+    );
+    assert_eq!(
+        parent(
+            &format!("{header}p=1; q=p;"),
+            &format!("{header}p=2; q=p; p=2;"),
+            "q"
+        ),
+        None
+    );
+    assert_eq!(
+        parent(
+            &format!("{header}p=1; steady; q=p;"),
+            &format!("{header}p=2; steady; q=p;"),
+            "q"
+        ),
+        None
+    );
+    assert_eq!(
+        parent(
+            &format!("{header}p=1; q=p; steady;"),
+            &format!("{header}p=2; q=p; steady;"),
+            "q"
+        ),
+        Some("p".into())
+    );
+}
+
+#[test]
+fn frbus_direct_calibration_reads_are_groupable() {
+    let before = include_str!(
+        "../../../../.agents/skills/use-dynare/references/examples/US_FRB08mx_rep.mod"
+    );
+    let after = before.replacen("tayp0   =       0.125", "tayp0   =       0.15", 1);
+    assert_ne!(before, after, "fixture assignment must be changed");
+    let diff = compare_models(&parse(before), &parse(&after));
+    for name in ["tayp1", "tayp2", "tayp3"] {
+        assert_eq!(
+            field(row(&diff, SemanticFamily::Parameters, name), "dependent_on").before,
+            FieldState::text("tayp0")
+        );
+    }
+}
+
 #[test]
 fn parameter_expression_value_and_finite_difference_are_separate() {
     let before = parse("parameters p; p=1;");

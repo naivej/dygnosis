@@ -255,6 +255,12 @@ counts mean unavailable work, not a zero-equation model. It provides no diff
 or source navigation until both sides can be compared.
 
 Follow navigation with its side, input identity, captured source and commit.
+When a parameter's evaluated value changes and its assigned expression stays
+the same, the optional `dependent_on` field can name the edited parameter
+whose displayed assignment it reads directly on both sides. That parameter
+can appear on another page. Group rows only when the field proves the link.
+For example, group `tayp1`, `tayp2` and `tayp3` under `tayp0` when each row
+names it. Preserve each row and the reported counts.
 Comparison reports retained source/fact changes, not algebraic or numerical
 equivalence. Coverage can remain partial for retained-history limits even when
 both source captures are complete.
