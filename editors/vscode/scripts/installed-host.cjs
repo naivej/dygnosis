@@ -4,6 +4,7 @@ const path = require("node:path");
 const vscode = require("vscode");
 const { binaryName, mcpBinaryName, model, probeMcp, sha256, writeJson } = require("./common.cjs");
 const { probeNativeMcp } = require("./native-mcp-host.cjs");
+const { nativeWorkbench } = require("../tests/helpers/native_webview.cjs");
 const samePath = (left, right) => process.platform === "win32"
   ? path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase()
   : path.resolve(left) === path.resolve(right);
@@ -16,6 +17,84 @@ async function waitFor(predicate, description) {
   }
   throw new Error(`Timed out: ${description}`);
 }
+
+async function checkTintTable(extension) {
+  // Guard the installed Settings editor falling back to text fields or
+  // omitting block names, including keys with dots.
+  const id = "dynare.blockTint.styles";
+  const table = extension.packageJSON.contributes.configuration.find(group => Object.hasOwn(group.properties, id)).properties[id];
+  const names = Object.keys(table.properties);
+  const portFile = path.join(process.env.DYGNOSIS_PACKAGE_PROFILE, "DevToolsActivePort");
+  process.env.DYGNOSIS_HOST_CDP_PORT = await waitFor(async () => {
+    const entry = await fs.readFile(portFile, "utf8").catch(error => {
+      if (error.code === "ENOENT") return "";
+      throw error;
+    });
+    return /^\d+/.exec(entry)?.[0];
+  }, "installed Settings editor DevTools port");
+  const read = expression => nativeWorkbench(async send => {
+    const result = await send("Runtime.evaluate", { expression, returnByValue: true });
+    assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
+    return result.result.value;
+  });
+  const openTable = async setting => {
+    const row = `document.querySelector('.setting-item-contents[data-key="${setting}"]')`;
+    await vscode.commands.executeCommand("workbench.action.openSettings", `@id:${setting}`);
+    await waitFor(() => read(`Boolean(${row}?.querySelector('.setting-list-addButton'))`), `${setting} native table`);
+    return row;
+  };
+  const addItem = row => read(`${row}.querySelector('.setting-list-addButton').click()`);
+  const choicesOf = row => read(`Array.from(${row}.querySelectorAll('select'), select => Array.from(select.options, option => option.label))`);
+  const styles = ["Off", "Subtle", "Standard"];
+  const row = await openTable(id);
+  await addItem(row);
+  const choices = await choicesOf(row);
+  assert.deepEqual(choices[0]?.slice().sort(), names.slice().sort());
+  assert.deepEqual(choices[1], styles);
+  const block = names.find(name => name.includes("."));
+  assert.ok(block, "the tint table needs a dotted key to check its persistence");
+  await read(`(() => {
+    const row = ${row};
+    const key = row.querySelector('select');
+    key.value = ${JSON.stringify(block)}; key.dispatchEvent(new Event('change', { bubbles: true }));
+    const value = row.querySelectorAll('select')[1];
+    value.value = 'Standard'; value.dispatchEvent(new Event('change', { bubbles: true }));
+    row.querySelector('.setting-list-ok-button').click();
+  })()`);
+  const config = uri => vscode.workspace.getConfiguration("dynare", uri);
+  await waitFor(() => config().inspect("blockTint.styles")?.globalValue?.[block] === "Standard", "native tint table saves a dotted key");
+  const dimensionKey = "blockTint.heterogeneousModels";
+  const dimensionId = `dynare.${dimensionKey}`;
+  const dimension = await openTable(dimensionId);
+  await addItem(dimension);
+  await read(`(() => {
+    const key = ${dimension}.querySelector('.setting-list-object-input-key input');
+    key.value = 'households'; key.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await waitFor(async () => (await choicesOf(dimension)).length, "native dimension style dropdown");
+  assert.deepEqual(await choicesOf(dimension), [styles]);
+  await read(`(() => {
+    const row = ${dimension};
+    const value = row.querySelector('select');
+    value.value = 'Subtle'; value.dispatchEvent(new Event('change', { bubbles: true }));
+    row.querySelector('.setting-list-ok-button').click();
+  })()`);
+  await waitFor(() => config().inspect(dimensionKey)?.globalValue?.households === "Subtle", "native table saves a dimension override");
+  await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+  const reopened = await openTable(dimensionId);
+  await waitFor(() => read(`${reopened}.textContent.includes('households') && ${reopened}.textContent.includes('Subtle')`), "reopened table shows the saved dimension style");
+  const reopenedBlock = await openTable(id);
+  await waitFor(() => read(`${reopenedBlock}.textContent.includes(${JSON.stringify(block)}) && ${reopenedBlock}.textContent.includes('Standard')`), "reopened table shows the saved block style");
+  const [first, second] = vscode.workspace.workspaceFolders;
+  assert.ok(first && second, "the tint check requires two workspace folders");
+  await config(first.uri).update("blockTint.styles", { [block]: "Off" }, vscode.ConfigurationTarget.WorkspaceFolder);
+  assert.equal(config(first.uri).get("blockTint.styles")[block], "Off");
+  assert.equal(config(second.uri).get("blockTint.styles")[block], "Standard");
+  await config(first.uri).update("blockTint.styles", undefined, vscode.ConfigurationTarget.WorkspaceFolder);
+  await config().update("blockTint.styles", undefined, vscode.ConfigurationTarget.Global);
+  await config().update(dimensionKey, undefined, vscode.ConfigurationTarget.Global);
+}
+
 exports.run = async function run() {
   const source = JSON.parse(process.env.DYGNOSIS_PACKAGE_SOURCE);
   const evidence = { runId: process.env.DYGNOSIS_PACKAGE_RUN_ID, vscode: vscode.version, platform: process.platform, arch: process.arch, target: source.target, version: source.version, commit: source.commit, checks: [], passed: false };
@@ -60,6 +139,9 @@ exports.run = async function run() {
     await vscode.commands.executeCommand("dygnosis.openHelp", "check:E001");
     assert.equal(vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab => tab.label === "Dygnosis Help").length, 1, "Help reuses one panel");
     evidence.checks.push("installed Help before a model, exact-code route and one panel");
+    await checkpoint("installed native block tint table");
+    await checkTintTable(extension);
+    evidence.checks.push("installed native tint tables offer all block names and three styles, save a dotted block key and dimension override, and resolve folder precedence");
     const launchLogs = [];
     const originalAppendLine = service.output.appendLine.bind(service.output);
     service.output.appendLine = message => { launchLogs.push(message); originalAppendLine(message); };

@@ -8,9 +8,9 @@ const fs = require("node:fs/promises");
 const childProcess = require("node:child_process");
 const os = require("node:os");
 const path = require("node:path");
-const globals = { searchPaths: ["user"], formatIndent: 2, "nameDetails.tex": false };
-const workspace = { searchPaths: ["workspace"], formatIndent: 6, "outline.sections": ["blocks", "blocks", "invented"] };
-const defaults = { searchPaths: [], formatIndent: "tab" };
+const globals = { searchPaths: ["user"], "nameDetails.tex": false };
+const workspace = { searchPaths: ["workspace"], "outline.sections": ["blocks", "blocks", "invented"] };
+const defaults = { searchPaths: [] };
 const folderOverrides = new Map();
 const vscode = { workspace: {
   workspaceFolders: [{ uri: { scheme: "file", toString: () => "file:///folder" } }],
@@ -29,7 +29,6 @@ test("loose files use user defaults while folders receive complete workspace set
   const logged = [];
   const snapshot = configurationSnapshot(message => logged.push(message)).dynare.configuration;
   assert.deepEqual(snapshot.loose.searchPaths, ["user"]);
-  assert.equal(snapshot.loose.formatIndent, 2);
   // Guards a client fallback that silently overrides the advertised default.
   const manifest = require("../package.json");
   const workDefault = Object.assign({}, ...manifest.contributes.configuration.map(group => group.properties))["dynare.macroWorkLimit"].default;
@@ -37,7 +36,6 @@ test("loose files use user defaults while folders receive complete workspace set
   assert.equal(snapshot.folders[0].settings.macroWorkLimit, workDefault);
   assert.equal(snapshot.loose.nameDetails.tex, false);
   assert.deepEqual(snapshot.folders[0].settings.searchPaths, ["workspace"]);
-  assert.equal(snapshot.folders[0].settings.formatIndent, 6);
   assert.deepEqual(snapshot.folders[0].settings.outline.sections, ["blocks"]);
   assert.ok(logged.length > 0);
 });

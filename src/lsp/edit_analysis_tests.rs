@@ -4,6 +4,96 @@ use super::*;
 use crate::engine::language::parser::PARSE_EXPANDED_BUILDS;
 
 #[tokio::test]
+async fn formatting_uses_request_indentation_for_documents_and_selections() {
+    // Guards the formatter ignoring LSP options in either entry point.
+    let uri = Url::parse("untitled:indentation.mod").unwrap();
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    let source = "var y;\nmodel;\ny=0;\nend;\ndisp(1);\n";
+    open_source(server, &uri, source.into(), 1).await;
+    let document = TextDocumentIdentifier { uri };
+    let options = FormattingOptions {
+        tab_size: 3,
+        insert_spaces: true,
+        ..Default::default()
+    };
+    let document_edits = server
+        .formatting(DocumentFormattingParams {
+            text_document: document.clone(),
+            options: options.clone(),
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let expected = "var y;\nmodel;\n   y = 0;\nend;\ndisp(1);\n";
+    assert_eq!(document_edits[0].new_text, expected);
+    assert_eq!(
+        crate::mcp::dynare_format(source, Some(&json!(3))).unwrap()["formatted_text"],
+        expected
+    );
+    for (tab_size, insert_spaces, expected) in [
+        (3, true, "   y = 0;"),
+        (0, true, "    y = 0;"),
+        (33, true, "    y = 0;"),
+        (4, false, "\ty = 0;"),
+    ] {
+        let range_edits = server
+            .range_formatting(DocumentRangeFormattingParams {
+                text_document: document.clone(),
+                range: Range::new(Position::new(2, 0), Position::new(3, 0)),
+                options: FormattingOptions {
+                    tab_size,
+                    insert_spaces,
+                    ..options.clone()
+                },
+                work_done_progress_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(range_edits[0].new_text, expected);
+    }
+}
+
+#[tokio::test]
+async fn native_tint_maps_mixed_lines_and_verbatim_bodies() {
+    // Guards tint leaking onto Dynare prefixes, verbatim delimiters or macro directives.
+    let uri = Url::parse("untitled:native-tint.mod").unwrap();
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    let source = "var y; disp(1);\ncalibration = sum([1,2]);\nverbatim;\ndisp('hello');\nend;\nmodel;\ny=0;\nend;\n";
+    open_source(server, &uri, source.into(), 1).await;
+    let result = server.model_info_command(&[json!({"root_uri":uri})]);
+    let ranges: Vec<Range> = serde_json::from_value(result["native_ranges"].clone()).unwrap();
+    assert_eq!(
+        ranges,
+        vec![
+            Range::new(Position::new(0, 7), Position::new(0, 15)),
+            Range::new(Position::new(1, 0), Position::new(1, 25)),
+            Range::new(Position::new(2, 9), Position::new(4, 0)),
+        ]
+    );
+    // Native regions can stop between CR and LF. Editor columns exclude CR.
+    change_source(server, &uri, source.replace('\n', "\r\n"), 2).await;
+    let result = server.model_info_command(&[json!({"root_uri":uri})]);
+    let windows_ranges: Vec<Range> =
+        serde_json::from_value(result["native_ranges"].clone()).unwrap();
+    assert_eq!(windows_ranges, ranges);
+    let changed = "@#for i in 1:2\n@#if i==1\nverbatim;\n@#endif\nsteady;\n@#if i==1\nend;\n@#endif\n@#endfor\n";
+    change_source(server, &uri, changed.into(), 3).await;
+    let result = server.model_info_command(&[json!({"root_uri":uri})]);
+    assert!(
+        !result["native_ranges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|range| range["start"]["line"] == 4),
+        "{result}"
+    );
+}
+
+#[tokio::test]
 async fn inactive_named_command_keyword_keeps_catalog_help() {
     // Guards an inactive PAC name losing written declaration help while its keyword keeps the same catalog help.
     let uri = Url::parse("untitled:inactive-pac-syntax.mod").unwrap();

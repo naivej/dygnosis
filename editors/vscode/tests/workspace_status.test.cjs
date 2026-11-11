@@ -97,7 +97,7 @@ const vscode = {
 };
 const originalLoad = Module._load;
 Module._load = function(id, ...args) { if (id === "vscode") return vscode; return originalLoad.call(this, id, ...args); };
-const { parseWorkspaceStatus, parseWorkspaceCapability, workspaceStatusContent, registerWorkspaceStatus } = require(compiledModule("workspace_status"));
+const { parseWorkspaceStatus, parseWorkspaceCapability, workspaceStatusContent, registerWorkspaceStatus: register } = require(compiledModule("workspace_status"));
 Module._load = originalLoad;
 
 function root(state = "checked", extra = {}) {
@@ -122,10 +122,13 @@ function connection(result = initializeResult()) {
     notify(status) { this.subscriptions.get(capability.status_notification)?.fire(status); } };
   return value;
 }
+function registerWorkspaceStatus(service) { return register(service, host.workspaceState); }
 function setup(options = {}) {
+  const stored = options.stored ?? new Map();
   host = { folders: options.folders ?? [folder()], settings: options.settings ?? {}, resources: new Map(), scopes: [],
     editor: options.editor, items: [], views: [], watchers: [], picks: [], choices: [], inputs: [], inputValues: [], updates: [], executed: [], relativePaths: [], commands: new Map(), notifications: [], notificationOptions: [],
     collapsed: new Emitter(), expanded: new Emitter(), active: new Emitter(), folderChanged: new Emitter(), configured: new Emitter(), edited: new Emitter(), closed: new Emitter() };
+  host.workspaceState = { get: key => stored.get(key), update: async (key, value) => { stored.set(key, value); } };
   const changed = new Emitter(), updated = new Emitter();
   const service = { client: options.client, currentInstance: 1, starts: 0, queries: [], logged: [], status: options.status ?? facts(), onDidChange: changed.event,
     log: message => service.logged.push(message), onDidUpdateModelInfo: updated.event,
@@ -136,6 +139,22 @@ function setup(options = {}) {
   const configure = (key, value) => { host.settings[key] = value; host.configured.fire({ affectsConfiguration: section => section === "dynare" || `dynare.${key}`.startsWith(section) }); };
   return { host, service, changed, updated, configure };
 }
+test("the workspace filter restores the last choice and toolbar state after activation", async () => {
+  // Guards persisting only the toolbar or only the tree during a reload.
+  const stored = new Map();
+  const env = setup({ client: connection(), stored });
+  const first = registerWorkspaceStatus(env.service);
+  await env.host.commands.get("dygnosis.showNotFullyCheckedModels")();
+  first.dispose();
+  const reopened = setup({ client: connection(), stored });
+  const second = registerWorkspaceStatus(reopened.service);
+  try {
+    await flush();
+    assert.ok(reopened.host.executed.some(({ name, args }) => name === "setContext" && args[0] === "dygnosis.workspaceNotFullyCheckedOnly" && args[1] === true));
+    assert.equal(reopened.host.views[0].description, "0 affected");
+  } finally { second.dispose(); }
+});
+
 test("Outline filters retain workspace status and dependency watchers", async () => {
   // Guards a presentation-only setting replacing checked rows with a pending workspace pass.
   const env = setup({ client: connection() });

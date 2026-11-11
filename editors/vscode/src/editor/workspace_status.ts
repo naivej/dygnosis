@@ -268,13 +268,14 @@ function treeRows(status: WorkspaceStatus, currentFolders: readonly vscode.Works
 }
 
 /** Presentation and watcher adapter only; analysis stays in the server. */
-export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Disposable {
+export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceState: vscode.Memento): vscode.Disposable {
   const item = vscode.window.createStatusBarItem("dygnosis.workspaceCoverage", vscode.StatusBarAlignment.Left, 39);
   item.name = "Dynare workspace coverage"; item.command = "dygnosis.workspaceStatus";
   const tree = new WorkspaceTree(), view = vscode.window.createTreeView("dygnosis.workspace", { treeDataProvider: tree, showCollapseAll: true });
   const collapsed = new Set<string>();
   const affectedRoots = new Set<string>();
-  let notFullyCheckedOnly = false;
+  const filterKey = "workspaceNotFullyCheckedOnly";
+  let notFullyCheckedOnly = workspaceState.get(filterKey) === true;
   let retainedStatus: WorkspaceStatus | undefined;
   let disposed = false, connection: WorkspaceConnection | undefined, instance = -1;
   let capability: WorkspaceCapability | undefined, status: WorkspaceStatus | undefined, generation = 0, response = 0, minPass = 0;
@@ -342,12 +343,18 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
     view.description = notFullyCheckedOnly ? filteredSummary || "0 affected" : `${status.counts.checked}/${applicable} checked`;
     tree.replace(treeRows(status, folders(), collapsed, notFullyCheckedOnly ? affectedRoots : undefined));
   };
-  const filterModels = (only: boolean): Thenable<unknown> => {
-    if (disposed) return Promise.resolve();
+  const filterModels = async (only: boolean): Promise<void> => {
+    if (disposed) return;
     notFullyCheckedOnly = only;
     if (!status && retainedStatus) tree.replace(treeRows(retainedStatus, folders(), collapsed, only ? affectedRoots : undefined));
     if (status || retainedStatus) render();
-    return vscode.commands.executeCommand("setContext", "dygnosis.workspaceNotFullyCheckedOnly", only);
+    const saved = Promise.resolve(workspaceState.update(filterKey, only)).catch((error: unknown) => {
+      const detail = `The filter was applied for this session. VS Code could not save it for this workspace. ${String(error)}`;
+      service.log(detail);
+      void vscode.window.showWarningMessage(detail);
+    });
+    await vscode.commands.executeCommand("setContext", "dygnosis.workspaceNotFullyCheckedOnly", only);
+    await saved;
   };
   const current = (client: WorkspaceConnection, expectedInstance: number, expectedGeneration: number, expectedSnapshot: string): boolean =>
     !disposed && service.client === client && service.currentInstance === expectedInstance && connection === client &&
@@ -597,7 +604,7 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort): vscode.Di
     vscode.commands.registerCommand("dygnosis.ignoreWorkspaceFolder", (target: unknown) => runCommand(service, () => ignoreFolder(target), () => !disposed)),
   ];
   if (service.onDidReady) subscriptions.push(service.onDidReady(synchronize));
-  void vscode.commands.executeCommand("setContext", "dygnosis.workspaceNotFullyCheckedOnly", false);
+  void vscode.commands.executeCommand("setContext", "dygnosis.workspaceNotFullyCheckedOnly", notFullyCheckedOnly);
   synchronize(); startFolders();
   return new vscode.Disposable(() => {
     disposed = true; ++generation; ++response; cancelRequest(); notification?.dispose();

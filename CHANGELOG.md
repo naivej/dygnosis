@@ -3,6 +3,20 @@
 Each entry describes the release at the time. Feature names and interfaces can
 change in later releases; see Dygnosis Help for current guidance.
 
+## v0.12.2
+
+**Dygnosis: Open Settings** puts editing, appearance, and workspace checks
+first. In Appearance, **Block Tint: Styles** sets shading by Dynare block,
+**MATLAB/Octave Tint** shades embedded code, and **Tint Palette** selects
+the colors for both. Enter custom per-block choices again in **Block Tint:
+Styles** and use **Off**, **Subtle**, or **Standard** for dimension overrides.
+
+**Format Document** and **Format Selection** follow VS Code indentation.
+If you used **Format Indent**, set the indentation for Dynare files in VS
+Code. Choose the model counts and their order in **Status Bar: Counts** or
+clear the list to hide the item. **Dynare Workspace** remembers its filter
+when you reopen the workspace.
+
 ## v0.12.1
 
 In VS Code, run **Dygnosis: Show model changes** to compare the active Dynare

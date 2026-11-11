@@ -38,9 +38,8 @@ or hover to inspect per-dimension counts and the active
 [analysis configuration](effective-model.md#choose-the-analysis-configuration)
 (**Source** vs. **Current config**).
 
-Toggle the status bar item with [Dynare › Status Bar:
-Enabled](settings:dynare.statusBar.enabled) and choose which counts appear (and
-their order) in [Dynare › Status Bar: Counts](settings:dynare.statusBar.counts).
+Choose which counts appear and their order in [Dynare › Status Bar:
+Counts](settings:dynare.statusBar.counts). Clear the list to hide the item.
 
 ## Equations
 

@@ -17,14 +17,21 @@ TeX label (such as `$\beta$`). Toggle them with [Dynare › Name Details: Long
 Name](settings:dynare.nameDetails.longName) and [Dynare › Name Details:
 Tex](settings:dynare.nameDetails.tex).
 
-## Block backgrounds
+## Background tints
 
 Toggle block shading with [Dynare › Block Tint:
-Enabled](settings:dynare.blockTint.enabled) and adjust individual block types in
-Settings. For [heterogeneous-agent models](https://www.dynare.org/manual/the-model-file.html#heterogeneity)
+Enabled](settings:dynare.blockTint.enabled). Adjust individual blocks in
+[Dynare › Block Tint: Styles](settings:dynare.blockTint.styles). For
+[heterogeneous-agent models](https://www.dynare.org/manual/the-model-file.html#heterogeneity)
 (`heterogeneity=`), use [Dynare › Block Tint: Heterogeneous
-Models](settings:dynare.blockTint.heterogeneousModels) to set shading per
-`heterogeneity_dimension` (for example `{"households": "off"}`).
+Models](settings:dynare.blockTint.heterogeneousModels) at the User, Workspace,
+or Folder scope. Enter a `heterogeneity_dimension` name such as `households`
+and choose **Off**, **Subtle**, or **Standard**.
+
+[Dynare: MATLAB/Octave Tint](settings:dynare.MATLAB/OctaveTint) shades embedded
+MATLAB or Octave, including the contents of `verbatim`. You can turn it on
+with Dynare block shading off. [Dynare: Tint Palette](settings:dynare.tintPalette)
+sets the colors for both tints.
 
 ## Inactive source
 
@@ -45,10 +52,16 @@ Semantic highlighting distinguishes Dynare symbol roles and follows your theme
 plus `editor.semanticHighlighting.enabled`. Native MATLAB lines and `verbatim`
 blocks keep their own highlighting.
 
-Run **Dygnosis: Edit in settings.json** to customize colors:
+Run **Preferences: Open User Settings (JSON)** to customize colors. With
+**Theme Default** selected in **Tint Palette**, use `workbench.colorCustomizations`
+to set the Subtle and Standard tint colors.
 
 ```json
 {
+  "workbench.colorCustomizations": {
+    "dynare.blockTint.subtleBackground": "#569CD608",
+    "dynare.blockTint.modelBackground": "#569CD61A"
+  },
   "editor.semanticTokenColorCustomizations": {
     "rules": {
       "dynareParameter:dynare": "#D19A66"

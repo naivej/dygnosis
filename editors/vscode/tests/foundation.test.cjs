@@ -80,11 +80,12 @@ test("preview schemes and user-only executable scope are manifest constraints", 
   const manifest = require("../package.json");
   assert.equal(manifest.engines.vscode, "^1.102.0");
   assert.deepEqual(manifest.extensionKind, ["workspace"]);
-  assert.equal(manifest.contributes.configuration[0].properties["dynare.serverPath"].scope, "machine");
+  const settings = Object.assign({}, ...manifest.contributes.configuration.map(group => group.properties));
+  assert.equal(settings["dynare.serverPath"].scope, "machine");
   assert.equal(manifest.contributes.mcpServerDefinitionProviders[0].id, "dygnosis");
   assert.equal(manifest.activationEvents.includes("onStartupFinished"), true);
   // Guards Settings accepting simple presets without bindings and rejecting overrides without evidence.
-  const schema = manifest.contributes.configuration.flatMap(group => Object.entries(group.properties)).find(([key]) => key === "dynare.analysisConfigurations")[1];
+  const schema = settings["dynare.analysisConfigurations"];
   const validate = new (require("ajv"))({ logger: false }).compile(schema);
   const simple = { name: "Alternative", root: "main.mod", analysis: { defines: [{ name: "FLAG", expression: "1" }] } };
   assert.equal(validate([simple]), true);

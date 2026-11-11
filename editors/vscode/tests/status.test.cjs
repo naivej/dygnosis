@@ -377,7 +377,7 @@ test("default status opens Outline and retains the Current config hover link", a
   assert.equal(item.color, undefined);
   registration.dispose();
 });
-test("resource settings choose count order, live disable, empty list, and reset", async () => {
+test("resource settings choose count order, hide on an empty list, and reset", async () => {
   const env = setup();
   env.configure("statusBar.counts", ["equations", "endogenous"], env.doc.uri.toString());
   const registration = registerStatus(env.service);
@@ -385,12 +385,6 @@ test("resource settings choose count order, live disable, empty list, and reset"
   const item = env.host.items[0];
   assert.equal(item.text, "Source: $(symbol-operator) 93  $(symbol-variable) 104");
   assert.ok(env.host.scopes.every(value => value.section === "dynare" && value.scope.languageId === "dynare" && value.scope.uri === env.doc.uri));
-  env.configure("statusBar.enabled", false);
-  assert.equal(item.visible, false);
-  assert.equal(item.text, "");
-  env.configure("statusBar.enabled", true);
-  await flush();
-  assert.equal(item.visible, true);
   env.configure("statusBar.counts", [], env.doc.uri.toString());
   assert.equal(item.visible, false);
   env.host.resourceSettings.delete(env.doc.uri.toString());
@@ -401,12 +395,10 @@ test("resource settings choose count order, live disable, empty list, and reset"
 });
 test("invalid settings are safely filtered or fall back with an Output explanation", async () => {
   const env = setup();
-  env.configure("statusBar.enabled", "yes");
   env.configure("statusBar.counts", ["equations", "equations", "invented", 1]);
   const registration = registerStatus(env.service);
   await flush();
   assert.equal(env.host.items[0].text, "Source: $(symbol-operator) 93");
-  assert.ok(env.service.logged.some(message => message.includes("Invalid dynare.statusBar.enabled")));
   assert.ok(env.service.logged.some(message => message.includes("invalid or repeated entries ignored")));
   registration.dispose();
 });
@@ -527,14 +519,14 @@ test("settings disabled during a request and disposal prevent late item updates"
   env.service.modelInfo = () => pending.promise;
   const registration = registerStatus(env.service);
   await flush();
-  env.configure("statusBar.enabled", false);
+  env.configure("statusBar.counts", []);
   pending.resolve(facts(env.doc));
   await flush();
   const item = env.host.items[0];
   assert.equal(item.visible, false);
   const afterDispose = deferred();
   env.service.modelInfo = () => afterDispose.promise;
-  env.configure("statusBar.enabled", true);
+  env.configure("statusBar.counts", ["equations"]);
   await flush();
   registration.dispose();
   afterDispose.resolve(facts(env.doc));

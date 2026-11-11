@@ -111,19 +111,20 @@ pub(crate) fn verbatim_opener(src: &str, start: usize) -> bool {
 /// First byte after the pinned `end[[:space:]]*;` raw-block terminator.
 /// The rule is case-insensitive and has no word, quote, or comment boundary.
 /// EOF accepts the remaining verbatim text without a terminator.
-pub(crate) fn verbatim_region_end(src: &str, start: usize) -> usize {
+/// The second result gives the start of an explicit terminator.
+pub(crate) fn verbatim_bounds(src: &str, start: usize) -> (usize, Option<usize>) {
     let bytes = src.as_bytes();
     let mut i = start.min(bytes.len());
     while i + 3 <= bytes.len() {
         if bytes[i..i + 3].eq_ignore_ascii_case(b"end") {
             let separator = skip_flex_space(bytes, i + 3);
             if bytes.get(separator) == Some(&b';') {
-                return separator + 1;
+                return (separator + 1, Some(i));
             }
         }
         i += 1;
     }
-    bytes.len()
+    (bytes.len(), None)
 }
 
 #[derive(Clone)]

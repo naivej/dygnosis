@@ -750,6 +750,7 @@ exports.run = async function run() {
     }
     if (scope === "presentation") {
       await require("./helpers/presentation_host.cjs").checkPresentation(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, currentSnapshot, writeObservedInput });
+      await require("./helpers/color_host.cjs").checkBlockTintEditing(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, writeObservedInput });
       await service.shutdown();
       evidence.artifacts_after = await historyArtifacts();
       assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "the engine and compiled extension must remain unchanged throughout the host gate");

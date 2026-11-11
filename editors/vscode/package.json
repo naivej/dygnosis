@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -521,14 +521,680 @@
     },
     "configuration": [
       {
-        "title": "Engine",
+        "title": "Editing",
+        "order": 1,
         "properties": {
-          "dynare.serverPath": {
-            "type": "string",
-            "default": "",
-            "scope": "machine",
-            "description": "Absolute path to a custom Dygnosis LSP executable. Empty uses the bundled LSP. MCP uses dygnosis-mcp beside the selected LSP executable. Set only in user/machine settings."
+          "dynare.editorActions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "toolbar",
+                "contextMenu"
+              ]
+            },
+            "uniqueItems": true,
+            "default": [
+              "toolbar",
+              "contextMenu"
+            ],
+            "scope": "window",
+            "description": "Locations for model actions. Commands remain in the Command Palette. An empty list hides toolbar and context-menu actions.",
+            "order": 1
           },
+          "dynare.diagnosticActions.ignore": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Offer Ignore this check in diagnostic quick fixes. Hidden checks can still be restored with Show a hidden check or Show all hidden checks.",
+            "order": 2
+          }
+        }
+      },
+      {
+        "title": "Appearance",
+        "order": 2,
+        "properties": {
+          "dynare.blockTint.enabled": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "order": 1,
+            "description": "Shade recognized Dynare blocks. When off, all Dynare block tints are disabled."
+          },
+          "dynare.MATLAB/OctaveTint": {
+            "type": "string",
+            "enum": [
+              "Off",
+              "Subtle",
+              "Standard"
+            ],
+            "default": "Off",
+            "scope": "resource",
+            "description": "Shade MATLAB or Octave code embedded in a Dynare file, including verbatim contents.",
+            "order": 2
+          },
+          "dynare.tintPalette": {
+            "type": "string",
+            "enum": [
+              "theme",
+              "amber",
+              "violet",
+              "slate"
+            ],
+            "enumItemLabels": [
+              "Theme Default",
+              "Amber",
+              "Violet",
+              "Slate"
+            ],
+            "default": "theme",
+            "scope": "window",
+            "description": "Choose the background colors for Dynare blocks and embedded MATLAB or Octave code.",
+            "order": 3
+          },
+          "dynare.blockTint.styles": {
+            "type": "object",
+            "scope": "resource",
+            "default": {},
+            "properties": {
+              "model.aggregate": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for aggregate model blocks."
+              },
+              "model.heterogeneous": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for heterogeneous model blocks."
+              },
+              "model_replace": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for model_replace blocks."
+              },
+              "steady_state_model": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for steady_state_model blocks."
+              },
+              "initval": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for initval blocks."
+              },
+              "endval.standard": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for endval blocks."
+              },
+              "endval.learnt_in": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for endval(learnt_in) blocks."
+              },
+              "histval": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for histval blocks."
+              },
+              "filter_initial_state": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for filter_initial_state blocks."
+              },
+              "shocks.standard": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for shocks blocks."
+              },
+              "shocks.surprise": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for shocks(surprise) blocks."
+              },
+              "shocks.learnt_in": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for shocks(learnt_in) blocks."
+              },
+              "shocks.heterogeneous": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for shocks(heterogeneity) blocks."
+              },
+              "mshocks.standard": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for mshocks blocks."
+              },
+              "mshocks.learnt_in": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for mshocks(learnt_in) blocks."
+              },
+              "heteroskedastic_shocks": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for heteroskedastic_shocks blocks."
+              },
+              "shock_paths.standard": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for shock_paths blocks."
+              },
+              "shock_paths.learnt_in": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for shock_paths(learnt_in) blocks."
+              },
+              "perfect_foresight_controlled_paths.standard": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for perfect_foresight_controlled_paths blocks."
+              },
+              "perfect_foresight_controlled_paths.learnt_in": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for perfect_foresight_controlled_paths(learnt_in) blocks."
+              },
+              "conditional_forecast_paths": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for conditional_forecast_paths blocks."
+              },
+              "estimated_params": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for estimated_params blocks."
+              },
+              "estimated_params_init": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for estimated_params_init blocks."
+              },
+              "estimated_params_bounds": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for estimated_params_bounds blocks."
+              },
+              "estimated_params_remove": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for estimated_params_remove blocks."
+              },
+              "observation_trends": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for observation_trends blocks."
+              },
+              "deterministic_trends": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for deterministic_trends blocks."
+              },
+              "matched_moments": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for matched_moments blocks."
+              },
+              "matched_irfs": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for matched_irfs blocks."
+              },
+              "matched_irfs_weights": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for matched_irfs_weights blocks."
+              },
+              "generate_irfs": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for generate_irfs blocks."
+              },
+              "irf_calibration": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for irf_calibration blocks."
+              },
+              "moment_calibration": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for moment_calibration blocks."
+              },
+              "optim_weights": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for optim_weights blocks."
+              },
+              "osr_params_bounds": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for osr_params_bounds blocks."
+              },
+              "ramsey_constraints": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for ramsey_constraints blocks."
+              },
+              "homotopy_setup": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for homotopy_setup blocks."
+              },
+              "occbin_constraints": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for occbin_constraints blocks."
+              },
+              "svar_identification": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for svar_identification blocks."
+              },
+              "shock_groups": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for shock_groups blocks."
+              },
+              "init2shocks": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for init2shocks blocks."
+              },
+              "pac_target_info": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for pac_target_info blocks."
+              },
+              "epilogue": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for epilogue blocks."
+              },
+              "verbatim": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for verbatim blocks."
+              },
+              "priors": {
+                "type": "string",
+                "enum": [
+                  "Off",
+                  "Subtle",
+                  "Standard"
+                ],
+                "description": "Background style for priors blocks."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Choose a style for individual Dynare blocks. Blocks without an entry use their default style.",
+            "order": 4
+          },
+          "dynare.blockTint.heterogeneousModels": {
+            "type": "object",
+            "default": {},
+            "scope": "resource",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "Off",
+                "Subtle",
+                "Standard"
+              ]
+            },
+            "propertyNames": {
+              "minLength": 1
+            },
+            "description": "Choose a style by written heterogeneous model dimension. A dimension entry takes priority over the heterogeneous model block style.",
+            "order": 5
+          },
+          "dynare.inactiveCode.enabled": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Dim source excluded by the selected analysis configuration, including branch previews.",
+            "order": 6
+          },
+          "dynare.effectiveModel.macroTint": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Shade macro-expanded text in the macro expansion preview with a faint background. Resolved against the preview's chosen root.",
+            "order": 7
+          },
+          "dynare.nameDetails.longName": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Show written long_name in hover, completion and Outline.",
+            "order": 8
+          },
+          "dynare.nameDetails.tex": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Show written TeX as literal text in hover, completion and Outline.",
+            "order": 9
+          },
+          "dynare.parameterValueHints": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Show proven expression values at top-level assignments. Also respects native editor inlay-hint visibility.",
+            "order": 10
+          }
+        }
+      },
+      {
+        "title": "Workspace checks",
+        "order": 3,
+        "properties": {
+          "dynare.workspaceDiagnostics": {
+            "type": "boolean",
+            "default": true,
+            "scope": "window",
+            "description": "Check unopened saved .mod and .dyn models in workspace folders. Turning this off cancels background work and clears its workspace reports.",
+            "order": 1
+          },
+          "dynare.workspaceExcludePaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "scope": "resource",
+            "description": "Skip paths during background checks of unopened models in this folder. Open files and dependencies are still checked. Use *, ?, **, or a directory ending with /.",
+            "order": 2
+          }
+        }
+      },
+      {
+        "title": "Outline and status bar",
+        "order": 4,
+        "properties": {
+          "dynare.outline.sections": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "declarations",
+                "blocks",
+                "commands",
+                "dimensions",
+                "equations"
+              ]
+            },
+            "uniqueItems": true,
+            "default": [
+              "declarations",
+              "blocks",
+              "commands",
+              "dimensions",
+              "equations"
+            ],
+            "scope": "resource",
+            "description": "Sections shown in Outline, breadcrumbs and quick outline. Empty hides all sections.",
+            "order": 1
+          },
+          "dynare.outline.equationNumbers": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Show Dygnosis equation numbers before transformation in Outline.",
+            "order": 2
+          },
+          "dynare.outline.activity": {
+            "type": "string",
+            "enum": [
+              "both",
+              "active",
+              "inactive"
+            ],
+            "enumDescriptions": [
+              "Show active and inactive entries.",
+              "Show active entries.",
+              "Show inactive entries."
+            ],
+            "default": "both",
+            "scope": "resource",
+            "description": "Default macro activity filter for Outline and breadcrumbs. Use Filter Outline by macro activity for an open model. Mixed and unknown entries remain visible in each mode.",
+            "order": 3
+          },
+          "dynare.statusBar.counts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "endogenous",
+                "exogenous",
+                "equations"
+              ]
+            },
+            "uniqueItems": true,
+            "default": [
+              "endogenous",
+              "exogenous",
+              "equations"
+            ],
+            "scope": "resource",
+            "description": "Choose the model counts and their order in the status bar. An empty list hides the model status item.",
+            "order": 4
+          }
+        }
+      },
+      {
+        "title": "Changes",
+        "order": 5,
+        "properties": {
+          "dynare.diff.defaultChangeKinds": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "added",
+                "removed",
+                "changed"
+              ],
+              "enumItemLabels": [
+                "Added",
+                "Removed",
+                "Replaced"
+              ]
+            },
+            "default": [
+              "added",
+              "removed",
+              "changed"
+            ],
+            "scope": "resource",
+            "description": "Choose which changes a new Changes view shows first. Uses the model that opened the view. An empty list hides all rows.",
+            "order": 1
+          }
+        }
+      },
+      {
+        "title": "Project analysis",
+        "order": 6,
+        "properties": {
           "dynare.searchPaths": {
             "type": "array",
             "items": {
@@ -536,39 +1202,14 @@
             },
             "default": [],
             "scope": "resource",
-            "description": "Additional include directories, resolved against the model's workspace folder or loose-file directory. Used for the model root; a displayed include keeps its chosen owner. Untitled documents have no disk base."
-          },
-          "dynare.macroWorkLimit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100000000,
-            "default": 20000000,
-            "scope": "resource",
-            "description": "Macro work allowance for each checked model root. Increase this finite limit for unusually large macro programs. Output size, source size, value size and nesting limits remain separate. An included file uses its selected model root's value."
-          },
-          "dynare.formatIndent": {
-            "oneOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "tab"
-                ]
-              },
-              {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 8
-              }
-            ],
-            "default": "tab",
-            "scope": "resource",
-            "description": "Use a tab or 1–8 spaces for indentation."
+            "description": "Add directories for include lookup. Relative paths start at the model root's workspace folder or, for a loose file, its directory. An include uses its chosen model root. Untitled files have no disk base.",
+            "order": 1
           },
           "dynare.analysisConfigurations": {
             "type": "array",
             "default": [],
             "scope": "resource",
-            "description": "Analysis configurations saved in this folder's .vscode/settings.json. Use Save current configuration in Dygnosis: Select analysis configuration to create a preset. Each session starts with Source. Root and include paths are relative to the owning workspace folder.",
+            "description": "Use Save current configuration in the model's configuration picker. Presets belong to the model's workspace folder. User settings and multi-root workspace-wide values are ignored.",
             "items": {
               "type": "object",
               "required": [
@@ -821,953 +1462,30 @@
                   }
                 }
               ]
-            }
-          }
-        }
-      },
-      {
-        "title": "Model overview",
-        "properties": {
-          "dynare.outline.sections": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "declarations",
-                "blocks",
-                "commands",
-                "dimensions",
-                "equations"
-              ]
             },
-            "uniqueItems": true,
-            "default": [
-              "declarations",
-              "blocks",
-              "commands",
-              "dimensions",
-              "equations"
-            ],
-            "scope": "resource",
-            "description": "Sections shown in Outline, breadcrumbs and quick outline. Empty hides all sections."
-          },
-          "dynare.outline.equationNumbers": {
-            "type": "boolean",
-            "default": true,
-            "scope": "resource",
-            "description": "Show Dygnosis equation numbers before transformation in Outline."
-          },
-          "dynare.statusBar.enabled": {
-            "type": "boolean",
-            "default": true,
-            "scope": "resource",
-            "description": "Show model counts and pending model actions in the status bar for the active Dynare file or macro expansion."
-          },
-          "dynare.statusBar.counts": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "endogenous",
-                "exogenous",
-                "equations"
-              ]
-            },
-            "uniqueItems": true,
-            "default": [
-              "endogenous",
-              "exogenous",
-              "equations"
-            ],
-            "scope": "resource",
-            "description": "Total model counts shown in the status bar, in this order. Empty hides the bar."
-          },
-          "dynare.outline.activity": {
-            "type": "string",
-            "enum": [
-              "both",
-              "active",
-              "inactive"
-            ],
-            "enumDescriptions": [
-              "Show active and inactive entries.",
-              "Show active entries.",
-              "Show inactive entries."
-            ],
-            "default": "both",
-            "scope": "resource",
-            "description": "Default macro activity filter for Outline and breadcrumbs. Use Filter Outline by macro activity for an open model. Mixed and unknown entries remain visible in each mode."
+            "order": 2
           }
         }
       },
       {
-        "title": "Name details",
+        "title": "Engine",
+        "order": 7,
         "properties": {
-          "dynare.nameDetails.longName": {
-            "type": "boolean",
-            "default": true,
-            "scope": "resource",
-            "description": "Show written long_name in hover, completion and Outline."
-          },
-          "dynare.nameDetails.tex": {
-            "type": "boolean",
-            "default": true,
-            "scope": "resource",
-            "description": "Show written TeX as literal text in hover, completion and Outline."
-          }
-        }
-      },
-      {
-        "title": "Value hints",
-        "properties": {
-          "dynare.parameterValueHints": {
-            "type": "boolean",
-            "default": true,
-            "scope": "resource",
-            "description": "Show proven expression values at top-level assignments. Also respects native editor inlay-hint visibility."
-          }
-        }
-      },
-      {
-        "title": "Actions",
-        "properties": {
-          "dynare.editorActions": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "toolbar",
-                "contextMenu"
-              ]
-            },
-            "uniqueItems": true,
-            "default": [
-              "toolbar",
-              "contextMenu"
-            ],
-            "scope": "window",
-            "description": "Locations for model actions. Commands remain in the Command Palette. An empty list hides toolbar and context-menu actions."
-          },
-          "dynare.effectiveModel.macroTint": {
-            "type": "boolean",
-            "default": true,
-            "scope": "resource",
-            "description": "Shade macro-expanded text in the macro expansion preview with a faint background. Resolved against the preview's chosen root."
-          }
-        }
-      },
-      {
-        "title": "Appearance",
-        "properties": {
-          "dynare.inactiveCode.enabled": {
-            "type": "boolean",
-            "default": true,
-            "scope": "resource",
-            "description": "Dim source excluded by the selected analysis configuration, including branch previews."
-          },
-          "dynare.blockTint.enabled": {
-            "type": "boolean",
-            "default": true,
-            "scope": "resource",
-            "order": 1,
-            "description": "Tint recognized Dynare blocks using the current theme. When off, all block tints are disabled."
-          },
-          "dynare.blockTint.model.aggregate": {
+          "dynare.serverPath": {
             "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "model",
-            "scope": "resource",
-            "description": "Background style for aggregate model blocks."
+            "default": "",
+            "scope": "machine",
+            "description": "Absolute path to a custom Dygnosis LSP executable. Empty uses the bundled LSP. MCP uses dygnosis-mcp beside the selected LSP executable. Set only in user/machine settings.",
+            "order": 1
           },
-          "dynare.blockTint.model.heterogeneous": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "model",
+          "dynare.macroWorkLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000000,
+            "default": 20000000,
             "scope": "resource",
-            "description": "Background style for heterogeneous model blocks."
-          },
-          "dynare.blockTint.model_replace": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for model_replace blocks."
-          },
-          "dynare.blockTint.steady_state_model": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for steady_state_model blocks."
-          },
-          "dynare.blockTint.initval": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for initval blocks."
-          },
-          "dynare.blockTint.endval.standard": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for endval blocks."
-          },
-          "dynare.blockTint.endval.learnt_in": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for endval(learnt_in) blocks."
-          },
-          "dynare.blockTint.histval": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for histval blocks."
-          },
-          "dynare.blockTint.filter_initial_state": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for filter_initial_state blocks."
-          },
-          "dynare.blockTint.shocks.standard": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for shocks blocks."
-          },
-          "dynare.blockTint.shocks.surprise": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for shocks(surprise) blocks."
-          },
-          "dynare.blockTint.shocks.learnt_in": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for shocks(learnt_in) blocks."
-          },
-          "dynare.blockTint.shocks.heterogeneous": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for shocks(heterogeneity) blocks."
-          },
-          "dynare.blockTint.mshocks.standard": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for mshocks blocks."
-          },
-          "dynare.blockTint.mshocks.learnt_in": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for mshocks(learnt_in) blocks."
-          },
-          "dynare.blockTint.heteroskedastic_shocks": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for heteroskedastic_shocks blocks."
-          },
-          "dynare.blockTint.shock_paths.standard": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for shock_paths blocks."
-          },
-          "dynare.blockTint.shock_paths.learnt_in": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for shock_paths(learnt_in) blocks."
-          },
-          "dynare.blockTint.perfect_foresight_controlled_paths.standard": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for perfect_foresight_controlled_paths blocks."
-          },
-          "dynare.blockTint.perfect_foresight_controlled_paths.learnt_in": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for perfect_foresight_controlled_paths(learnt_in) blocks."
-          },
-          "dynare.blockTint.conditional_forecast_paths": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for conditional_forecast_paths blocks."
-          },
-          "dynare.blockTint.estimated_params": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for estimated_params blocks."
-          },
-          "dynare.blockTint.estimated_params_init": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for estimated_params_init blocks."
-          },
-          "dynare.blockTint.estimated_params_bounds": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for estimated_params_bounds blocks."
-          },
-          "dynare.blockTint.estimated_params_remove": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for estimated_params_remove blocks."
-          },
-          "dynare.blockTint.observation_trends": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for observation_trends blocks."
-          },
-          "dynare.blockTint.deterministic_trends": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for deterministic_trends blocks."
-          },
-          "dynare.blockTint.matched_moments": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for matched_moments blocks."
-          },
-          "dynare.blockTint.matched_irfs": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for matched_irfs blocks."
-          },
-          "dynare.blockTint.matched_irfs_weights": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for matched_irfs_weights blocks."
-          },
-          "dynare.blockTint.generate_irfs": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for generate_irfs blocks."
-          },
-          "dynare.blockTint.irf_calibration": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for irf_calibration blocks."
-          },
-          "dynare.blockTint.moment_calibration": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for moment_calibration blocks."
-          },
-          "dynare.blockTint.optim_weights": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for optim_weights blocks."
-          },
-          "dynare.blockTint.osr_params_bounds": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for osr_params_bounds blocks."
-          },
-          "dynare.blockTint.ramsey_constraints": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for ramsey_constraints blocks."
-          },
-          "dynare.blockTint.homotopy_setup": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for homotopy_setup blocks."
-          },
-          "dynare.blockTint.occbin_constraints": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for occbin_constraints blocks."
-          },
-          "dynare.blockTint.svar_identification": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for svar_identification blocks."
-          },
-          "dynare.blockTint.shock_groups": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for shock_groups blocks."
-          },
-          "dynare.blockTint.init2shocks": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for init2shocks blocks."
-          },
-          "dynare.blockTint.pac_target_info": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for pac_target_info blocks."
-          },
-          "dynare.blockTint.epilogue": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for epilogue blocks."
-          },
-          "dynare.blockTint.verbatim": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for verbatim blocks."
-          },
-          "dynare.blockTint.priors": {
-            "type": "string",
-            "enum": [
-              "off",
-              "subtle",
-              "model"
-            ],
-            "enumItemLabels": [
-              "Off",
-              "Subtle",
-              "Model-strength"
-            ],
-            "default": "subtle",
-            "scope": "resource",
-            "description": "Background style for priors blocks."
-          },
-          "dynare.blockTint.heterogeneousModels": {
-            "type": "object",
-            "default": {},
-            "scope": "resource",
-            "additionalProperties": {
-              "type": "string",
-              "enum": [
-                "off",
-                "subtle",
-                "model"
-              ]
-            },
-            "propertyNames": {
-              "minLength": 1
-            },
-            "markdownDescription": "Override the heterogeneous model tint by written dimension name, for example `{\"households\": \"off\"}`. Takes priority over the heterogeneous model style. [Edit in settings.json](command:dygnosis.editSettingsJson)."
-          }
-        }
-      },
-      {
-        "title": "Diagnostics",
-        "properties": {
-          "dynare.diagnosticActions.ignore": {
-            "type": "boolean",
-            "default": true,
-            "scope": "resource",
-            "description": "Offer Ignore this check in diagnostic quick fixes. Hidden checks can still be restored with Show a hidden check or Show all hidden checks."
-          }
-        }
-      },
-      {
-        "title": "Changes",
-        "properties": {
-          "dynare.diff.defaultChangeKinds": {
-            "type": "array",
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "enum": [
-                "added",
-                "removed",
-                "changed"
-              ],
-              "enumItemLabels": [
-                "Added",
-                "Removed",
-                "Replaced"
-              ]
-            },
-            "default": [
-              "added",
-              "removed",
-              "changed"
-            ],
-            "scope": "resource",
-            "description": "Types of changes initially shown in a new Changes view: Added, Removed and Replaced. Occurrences without a proven match are shown separately as Added and Removed. Uses the model that opened it. Empty hides all rows."
-          }
-        }
-      },
-      {
-        "title": "Workspace checks",
-        "properties": {
-          "dynare.workspaceDiagnostics": {
-            "type": "boolean",
-            "default": true,
-            "scope": "window",
-            "description": "Check unopened saved .mod and .dyn models in workspace folders. Turning this off cancels background work and clears its workspace reports."
-          },
-          "dynare.workspaceExcludePaths": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "default": [],
-            "scope": "resource",
-            "description": "Paths and patterns excluded from background root checking in this folder. Exclusions do not hide .inc file entries. Open files and dependencies remain checked. Use *, ?, **, or a directory ending with /."
+            "description": "Increase the work allowance for unusually large macro programs. It applies per checked model root, including its includes. Output size, source size, value size and nesting have separate limits.",
+            "order": 2
           }
         }
       }
@@ -1836,7 +1554,7 @@
       },
       {
         "id": "dynare.blockTint.modelBackground",
-        "description": "Whole-line background for Model-strength Dynare block tinting. Supports transparency.",
+        "description": "Standard background for Dynare and MATLAB/Octave tinting. Supports transparency.",
         "defaults": {
           "dark": "#569CD61A",
           "light": "#007ACC12",
@@ -1846,7 +1564,7 @@
       },
       {
         "id": "dynare.blockTint.subtleBackground",
-        "description": "Whole-line background for Subtle Dynare block tinting. Supports transparency.",
+        "description": "Subtle background for Dynare and MATLAB/Octave tinting. Supports transparency.",
         "defaults": {
           "dark": "#569CD608",
           "light": "#007ACC06",
@@ -1860,6 +1578,66 @@
         "defaults": {
           "dark": "#D7BA7D14",
           "light": "#795E2612",
+          "highContrast": "#00000000",
+          "highContrastLight": "#00000000"
+        }
+      },
+      {
+        "id": "dynare.tintPalette.amber.standardBackground",
+        "description": "Amber palette standard tint background. Supports transparency.",
+        "defaults": {
+          "dark": "#E5AD561A",
+          "light": "#94620012",
+          "highContrast": "#00000000",
+          "highContrastLight": "#00000000"
+        }
+      },
+      {
+        "id": "dynare.tintPalette.amber.subtleBackground",
+        "description": "Amber palette subtle tint background. Supports transparency.",
+        "defaults": {
+          "dark": "#E5AD5608",
+          "light": "#94620006",
+          "highContrast": "#00000000",
+          "highContrastLight": "#00000000"
+        }
+      },
+      {
+        "id": "dynare.tintPalette.violet.standardBackground",
+        "description": "Violet palette standard tint background. Supports transparency.",
+        "defaults": {
+          "dark": "#BD9CF21A",
+          "light": "#7347B812",
+          "highContrast": "#00000000",
+          "highContrastLight": "#00000000"
+        }
+      },
+      {
+        "id": "dynare.tintPalette.violet.subtleBackground",
+        "description": "Violet palette subtle tint background. Supports transparency.",
+        "defaults": {
+          "dark": "#BD9CF208",
+          "light": "#7347B806",
+          "highContrast": "#00000000",
+          "highContrastLight": "#00000000"
+        }
+      },
+      {
+        "id": "dynare.tintPalette.slate.standardBackground",
+        "description": "Slate palette standard tint background. Supports transparency.",
+        "defaults": {
+          "dark": "#A4B1C41A",
+          "light": "#54678012",
+          "highContrast": "#00000000",
+          "highContrastLight": "#00000000"
+        }
+      },
+      {
+        "id": "dynare.tintPalette.slate.subtleBackground",
+        "description": "Slate palette subtle tint background. Supports transparency.",
+        "defaults": {
+          "dark": "#A4B1C408",
+          "light": "#54678006",
           "highContrast": "#00000000",
           "highContrastLight": "#00000000"
         }

@@ -54,7 +54,7 @@ const vscode = {
     get visibleTextEditors() { return host.editors; },
     get activeTextEditor() { return host.editors[0]; },
     createTextEditorDecorationType: options => {
-      const type = { id: options.backgroundColor?.id ?? "inactiveCode", options, disposed: false, dispose() { this.disposed = true; } };
+      const type = { id: options.backgroundColor ? options.backgroundColor.id + (options.isWholeLine ? "" : ":exact") : "inactiveCode", options, disposed: false, dispose() { this.disposed = true; } };
       host.types.push(type); return type;
     },
     onDidChangeVisibleTextEditors: listener => host.visible.event(listener),
@@ -64,7 +64,7 @@ const vscode = {
     getConfiguration: (section, scope) => {
       host.scopes.push({ section, scope });
       return { get: (key, fallback) => {
-        const local = host.resourceSettings.get(scope.uri.toString()) ?? {};
+        const local = host.resourceSettings.get(scope?.uri?.toString()) ?? {};
         return Object.hasOwn(local, key) ? local[key] : Object.hasOwn(host.settings, key) ? host.settings[key] : fallback;
       } };
     },
@@ -158,22 +158,18 @@ function pure(info, prefs = {}) {
   return tintRanges(info, doc, { enabled: true, styles: new Map(tintCategoryDefaults), heterogeneousModels: new Map(), ...prefs });
 }
 
-test("native block-tint settings expose the client categories, defaults and choices", () => {
+test("native tint table exposes the supported block names and style choices", () => {
   const properties = colorContributions.configuration.properties;
-  const categories = Object.entries(properties)
-    .filter(([key, entry]) => key.startsWith("dynare.blockTint.") && entry.type === "string")
-    .map(([key]) => key.slice("dynare.blockTint.".length));
-  assert.deepEqual(categories.sort(), tintCategoryDefaults.map(([category]) => category).sort());
-  for (const [category, fallback] of tintCategoryDefaults) {
-    const entry = properties[`dynare.blockTint.${category}`];
-    assert.deepEqual(entry.enum, ["off", "subtle", "model"]); assert.deepEqual(entry.enumItemLabels, ["Off", "Subtle", "Model-strength"]);
-    assert.equal(entry.default, fallback); assert.equal(entry.scope, "resource"); assert.equal(entry.type, "string");
-  }
+  const table = properties["dynare.blockTint.styles"];
+  assert.deepEqual(Object.keys(table.properties).sort(), tintCategoryDefaults.map(([category]) => category).sort());
+  assert.deepEqual(table.default, {});
+  assert.equal(table.additionalProperties, false);
+  for (const entry of Object.values(table.properties)) assert.deepEqual(entry.enum, ["Off", "Subtle", "Standard"]);
   assert.equal(properties["dynare.blockTint.enabled"].default, true);
   assert.equal(properties["dynare.blockTint.enabled"].scope, "resource");
   const overrides = properties["dynare.blockTint.heterogeneousModels"];
   assert.deepEqual(overrides.default, {}); assert.equal(overrides.scope, "resource"); assert.equal(overrides.type, "object");
-  assert.deepEqual(overrides.additionalProperties.enum, ["off", "subtle", "model"]);
+  assert.deepEqual(overrides.additionalProperties.enum, ["Off", "Subtle", "Standard"]);
 });
 
 test("four independently customizable roles use variable parent and explicit Dynare fallback scopes", () => {
@@ -190,7 +186,7 @@ test("four independently customizable roles use variable parent and explicit Dyn
 test("shared backgrounds use four theme defaults, transparent high contrast, and no token foreground styling", async () => {
   const env = setup(); await flush();
   for (const type of env.host.types.filter(type => type.options.backgroundColor)) {
-    assert.equal(type.options.isWholeLine, true); assert.equal(type.options.rangeBehavior, 3);
+    assert.equal(typeof type.options.isWholeLine, "boolean"); assert.equal(type.options.rangeBehavior, 3);
     assert.deepEqual(Object.keys(type.options).sort(), ["backgroundColor", "isWholeLine", "rangeBehavior"]);
     assert.ok(type.options.backgroundColor instanceof ThemeColor);
   }
@@ -213,6 +209,44 @@ test("runtime uses the response registry rather than a second block-kind classif
   assert.equal(env.ranges("subtle")[0].start.line, 8); env.registration.dispose();
 });
 
+test("MATLAB tint clips mixed lines and a palette switch repaints current ranges", async () => {
+  // Guards whole-line tint crossing a language boundary and palette changes requesting analysis.
+  const env = setup();
+  const current = env.host.editors[0];
+  env.service.info = () => facts(env.doc, {
+    statements: [block({ segments: [location(undefined, 2, 2, 0, 9)] })],
+    native_ranges: [location(undefined, 2, 2, 10, 17).range],
+  });
+  env.configure("MATLAB/OctaveTint", "Subtle"); await flush();
+  assert.deepEqual(env.ranges("model"), []);
+  assert.deepEqual(current.decorations.get("dynare.blockTint.modelBackground:exact"), [new Range(2, 0, 2, 9)]);
+  assert.deepEqual(current.decorations.get("dynare.blockTint.subtleBackground:exact"), [new Range(2, 10, 2, 17)]);
+  env.configure("blockTint.enabled", false); await flush();
+  assert.deepEqual(current.decorations.get("dynare.blockTint.modelBackground:exact"), []);
+  const requests = env.service.requests.length;
+  env.configure("tintPalette", "amber"); await flush();
+  assert.deepEqual(current.decorations.get("dynare.tintPalette.amber.subtleBackground:exact"), [new Range(2, 10, 2, 17)]);
+  assert.equal(env.service.requests.length, requests);
+  env.doc.version++;
+  env.host.edited.fire({ document: env.doc, contentChanges: [{}] });
+  assert.deepEqual(current.decorations.get("dynare.tintPalette.amber.subtleBackground:exact"), []);
+  env.registration.dispose();
+});
+
+test("equal tint strengths preserve both exact ranges on a mixed line", async () => {
+  // Guards exact Dynare ranges being added to the MATLAB range search input.
+  const env = setup();
+  env.service.info = () => facts(env.doc, {
+    statements: [block({ segments: [location(undefined, 2, 2, 0, 9)] })],
+    native_ranges: [location(undefined, 2, 2, 10, 17).range],
+  });
+  env.configure("MATLAB/OctaveTint", "Standard"); await flush();
+  assert.deepEqual(env.ranges("model"), []);
+  assert.deepEqual(env.host.editors[0].decorations.get("dynare.blockTint.modelBackground:exact"),
+    [new Range(2, 10, 2, 17), new Range(2, 0, 2, 9)]);
+  env.registration.dispose();
+});
+
 test("every shipped category's default, off, subtle and model choices reach its written segment", () => {
   for (const [category, fallback] of tintCategoryDefaults) {
     const expectedDefault = ["model.aggregate", "model.heterogeneous"].includes(category) ? "model" : "subtle";
@@ -229,30 +263,29 @@ test("every shipped category's default, off, subtle and model choices reach its 
 test("resource settings apply to displayed includes independently in multiple folders", async () => {
   const a = document("file:///one/part.inc"), b = document("file:///two/main.mod");
   const env = setup(a, [b]); env.service.select = current => current === a ? uri("file:///one/owner.mod") : current.uri;
-  env.configure("blockTint.model.aggregate", "subtle", a.uri.toString());
-  env.configure("blockTint.model.aggregate", "off", b.uri.toString()); await flush();
+  env.configure("blockTint.styles", { "model.aggregate": "Subtle" }, a.uri.toString());
+  env.configure("blockTint.styles", { "model.aggregate": "Off" }, b.uri.toString()); await flush();
   assert.equal(env.ranges("subtle", 0).length, 1); assert.equal(env.ranges("model", 0).length, 0);
   assert.equal(env.ranges("model", 1).length, 0); assert.equal(env.ranges("subtle", 1).length, 0);
   assert.ok(env.service.requests.some(row => row.root === "file:///one/owner.mod" && row.document === a.uri.toString()));
-  assert.ok(env.host.scopes.every(row => row.section === "dynare" && row.scope.languageId === "dynare"));
-  assert.ok(env.host.scopes.some(row => row.scope.uri === a.uri)); env.registration.dispose();
+  assert.ok(env.host.scopes.every(row => row.section === "dynare" && (!row.scope || row.scope.languageId === "dynare")));
+  assert.ok(env.host.scopes.some(row => row.scope?.uri === a.uri)); env.registration.dispose();
 });
 
 test("invalid enabled/style values fall back and explain their setting in Output", async () => {
-  const env = setup(); env.configure("blockTint.enabled", "false"); env.configure("blockTint.model.aggregate", null);
-  env.configure("blockTint.initval", "loud"); await flush();
+  const env = setup(); env.configure("blockTint.enabled", "false"); env.configure("blockTint.styles", { "model.aggregate": null, initval: "loud" }); await flush();
   assert.equal(env.ranges("model").length, 1);
   const prefs = tintPreferences(env.doc, registry, env.service.log);
   assert.equal(prefs.enabled, true); assert.equal(prefs.styles.get("initval"), "subtle");
   assert.ok(env.service.logged.some(row => row.includes("dynare.blockTint.enabled")));
-  assert.ok(env.service.logged.some(row => row.includes("dynare.blockTint.model.aggregate")));
-  assert.ok(env.service.logged.some(row => row.includes("dynare.blockTint.initval"))); env.registration.dispose();
+  assert.ok(env.service.logged.some(row => row.includes("dynare.blockTint.styles entry 'model.aggregate'")));
+  assert.ok(env.service.logged.some(row => row.includes("dynare.blockTint.styles entry 'initval'"))); env.registration.dispose();
 });
 
 test("dimension override validation keeps valid entries and handles JSON special property names safely", () => {
   const messages = [], log = message => messages.push(message);
   for (const value of [null, false, [], "off", 1]) assert.equal(dimensionOverrides(value, log).size, 0);
-  const value = JSON.parse('{"households":"off","firms":"subtle","banks":"model","bad":false,"":"model","__proto__":"model","constructor":"subtle"}');
+  const value = JSON.parse('{"households":"Off","firms":"Subtle","banks":"Standard","bad":false,"":"Standard","__proto__":"Standard","constructor":"Subtle"}');
   const overrides = dimensionOverrides(value, log);
   assert.deepEqual([...overrides], [["households", "off"], ["firms", "subtle"], ["banks", "model"], ["__proto__", "model"], ["constructor", "subtle"]]);
   assert.equal({}.polluted, undefined); assert.ok(messages.some(row => row.includes("'bad'")));
@@ -265,7 +298,7 @@ test("dimension overrides take priority only for registered heterogeneous model 
     block({ category: "model.heterogeneous", dimension: "firms", segments: [location(undefined, 15, 17)] }),
     block({ category: "shocks.heterogeneous", dimension: "households", segments: [location(undefined, 20, 21)] }),
   ] });
-  env.configure("blockTint.model.heterogeneous", "subtle"); env.configure("blockTint.heterogeneousModels", { households: "off", firms: "model" }); await flush();
+  env.configure("blockTint.styles", { "model.heterogeneous": "Subtle" }); env.configure("blockTint.heterogeneousModels", { households: "Off", firms: "Standard" }); await flush();
   assert.deepEqual(env.ranges("model").map(range => range.start.line), [2, 15]);
   assert.deepEqual(env.ranges("subtle").map(range => range.start.line), [20]);
   assert.equal(pure(facts(undefined, { block_categories: [], statements: [block({ category: "model.heterogeneous", dimension: "firms" })] }),
@@ -369,9 +402,9 @@ test("edits and configuration switches clear inactive proof before a delayed res
 
 test("style and dimension reset restore declared defaults live without restarting the engine", async () => {
   const env = setup(); env.service.info = () => facts(env.doc, { statements: [block({ category: "model.heterogeneous", dimension: "households" })] });
-  env.configure("blockTint.model.heterogeneous", "off"); env.configure("blockTint.heterogeneousModels", { households: "subtle" }); await flush();
+  env.configure("blockTint.styles", { "model.heterogeneous": "Off" }); env.configure("blockTint.heterogeneousModels", { households: "Subtle" }); await flush();
   assert.equal(env.ranges("subtle").length, 1); const instance = env.service.currentInstance;
-  delete env.host.settings["blockTint.model.heterogeneous"]; delete env.host.settings["blockTint.heterogeneousModels"];
+  delete env.host.settings["blockTint.styles"]; delete env.host.settings["blockTint.heterogeneousModels"];
   env.host.configured.fire({ affectsConfiguration: () => true }); await flush();
   assert.equal(env.ranges("subtle").length, 0); assert.equal(env.ranges("model").length, 1); assert.equal(env.service.currentInstance, instance);
   env.registration.dispose();

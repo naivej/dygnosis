@@ -57,7 +57,7 @@ export function helpMarkdown(markdown: string, imageUri: (file: string) => strin
       case "code": return `<div class="example"><button type="button" data-copy>Copy example</button><pre><code>${escapeHtml(token.text)}</code></pre></div>`;
       case "link": {
         const target = token.href.replace(/^([a-z][a-z-]+)\.md(?=#|$)/, "help:$1");
-        const allowed = /^(help:[a-z-]+(?:#[\w-]+)?|check:[A-Z]\d{3}|tool:dynare_\w+|option:\w+|settings:dynare\.[\w.]+|action:(output|restart|shortcuts)|https?:\/\/[^\s<>]+|#[\w-]+)$/.test(target);
+        const allowed = /^(help:[a-z-]+(?:#[\w-]+)?|check:[A-Z]\d{3}|tool:dynare_\w+|option:\w+|settings:dynare\.(?:[\w.]+|MATLAB\/OctaveTint)|action:(output|restart|shortcuts)|https?:\/\/[^\s<>]+|#[\w-]+)$/.test(target);
         return allowed ? `<a href="#" data-link="${escapeHtml(target)}">${render(token.tokens)}</a>` : render(token.tokens);
       }
       case "image": {

@@ -18,7 +18,7 @@ export function analysisSettingsChanged(event: vscode.ConfigurationChangeEvent, 
     .some(key => event.affectsConfiguration(`dynare.${key}`, resource));
 }
 export function serverSettingsChanged(event: vscode.ConfigurationChangeEvent): boolean {
-  return analysisSettingsChanged(event) || ["formatIndent", "nameDetails", "outline", "parameterValueHints"]
+  return analysisSettingsChanged(event) || ["nameDetails", "outline", "parameterValueHints"]
     .some(key => event.affectsConfiguration(`dynare.${key}`));
 }
 function valueSetting(key: string, resource: vscode.Uri | undefined, fallback: unknown): unknown {
@@ -60,11 +60,8 @@ function stringListSetting(key: string, resource: vscode.Uri | undefined, log: L
 }
 export function engineSettings(resource: vscode.Uri | undefined, log: Log) {
   const searchPaths = stringListSetting("searchPaths", resource, log);
-  const rawIndent = valueSetting("formatIndent", resource, "tab");
-  const formatIndent = rawIndent === "tab" || (typeof rawIndent === "number" && Number.isInteger(rawIndent) && rawIndent >= 1 && rawIndent <= 8) ? rawIndent : "tab";
-  if (formatIndent !== rawIndent) invalidSetting("formatIndent", resource, "tab or an integer from 1 to 8", "using tab", log);
   return {
-    searchPaths, macroWorkLimit: valueSetting("macroWorkLimit", resource, 20_000_000), formatIndent, workspaceExcludePaths: stringListSetting("workspaceExcludePaths", resource, log),
+    searchPaths, macroWorkLimit: valueSetting("macroWorkLimit", resource, 20_000_000), workspaceExcludePaths: stringListSetting("workspaceExcludePaths", resource, log),
     nameDetails: {
       longName: booleanSetting("nameDetails.longName", resource, true, log),
       tex: booleanSetting("nameDetails.tex", resource, true, log),

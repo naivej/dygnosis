@@ -1270,6 +1270,8 @@ pub struct Model {
     /// Tokens after macro expansion. Equation and assignment `active_tokens`
     /// index this vector. Empty when the model was not produced by the parser.
     pub expanded_tokens: Vec<crate::engine::language::lexer::Token>,
+    /// Confirmed native ranges in parser input, before projecting written origins.
+    pub(crate) native_tint_spans: Vec<Span>,
     pub intern: Interner,
     pub statements: Vec<Statement>,
     pub execution_steps: Vec<ExecutionStep>,

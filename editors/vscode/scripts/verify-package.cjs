@@ -56,7 +56,10 @@ async function main() {
     : path.join(root, "profile with spaces");
   const extensions = path.join(root, "extensions with spaces");
   const harness = path.join(root, "extension harness");
-  for (const directory of [profile, extensions, harness]) await fs.mkdir(directory, { recursive: true });
+  const secondFolder = path.join(root, "second workspace folder");
+  const workspaceFile = path.join(root, "models with spaces.code-workspace");
+  for (const directory of [profile, extensions, harness, secondFolder]) await fs.mkdir(directory, { recursive: true });
+  await writeJson(workspaceFile, { folders: [workspace, secondFolder].map(folder => ({ path: path.basename(folder) })) });
   const executable = values.executable ? path.resolve(values.executable) : await downloadAndUnzipVSCode({ version: values.vscode, platform: info.vscode, cachePath: path.join(extensionRoot, ".vscode-test") });
   const cli = await resolveCli(executable, values.vscode === "stable" ? undefined : values.vscode);
   const cliArgs = [cli, "--user-data-dir", profile, "--extensions-dir", extensions];
@@ -69,9 +72,9 @@ async function main() {
   // A separate harness loads the test suite; Dygnosis itself is installed by the
   // VS Code CLI, never supplied as an extensionDevelopmentPath.
   const hostResult = path.join(root, "installed-host.json");
-  const env = { ...process.env, DYGNOSIS_PACKAGE_SOURCE: JSON.stringify(provenance), DYGNOSIS_PACKAGE_RUN_ID: runId, DYGNOSIS_PACKAGE_EXTENSIONS: extensions, DYGNOSIS_PACKAGE_HOST_RESULT: hostResult };
+  const env = { ...process.env, DYGNOSIS_PACKAGE_SOURCE: JSON.stringify(provenance), DYGNOSIS_PACKAGE_RUN_ID: runId, DYGNOSIS_PACKAGE_EXTENSIONS: extensions, DYGNOSIS_PACKAGE_HOST_RESULT: hostResult, DYGNOSIS_PACKAGE_PROFILE: profile };
   delete env.ELECTRON_RUN_AS_NODE;
-  await runHost({ executable, args: [workspace, `--extensionDevelopmentPath=${harness}`, `--extensionTestsPath=${path.join(__dirname, "installed-host.cjs")}`, "--user-data-dir", profile, "--extensions-dir", extensions, "--skip-welcome", "--skip-release-notes", "--disable-workspace-trust", "--disable-gpu", "--no-sandbox"], env, root, profile,
+  await runHost({ executable, args: [workspaceFile, `--extensionDevelopmentPath=${harness}`, `--extensionTestsPath=${path.join(__dirname, "installed-host.cjs")}`, "--user-data-dir", profile, "--extensions-dir", extensions, "--skip-welcome", "--skip-release-notes", "--disable-workspace-trust", "--disable-gpu", "--no-sandbox", "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0"], env, root, profile,
     identity: { runId, target: source.target, version: source.version, commit: source.commit, requested_vscode: values.vscode } });
   const host = JSON.parse(await fs.readFile(hostResult, "utf8"));
   assert.equal(host.runId, runId); assert.equal(host.passed, true);

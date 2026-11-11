@@ -246,6 +246,35 @@ impl<'a> WrittenView<'a> {
         self
     }
 
+    pub fn native_ranges(&self, root: &Url) -> Vec<Range> {
+        let root_key = normalize_uri(root.as_str());
+        let before_line_ending = |offset: u32| {
+            let bytes = self.text.as_bytes();
+            let offset = offset as usize;
+            if offset > 0 && bytes.get(offset - 1..=offset) == Some(b"\r\n") {
+                (offset - 1) as u32
+            } else {
+                offset as u32
+            }
+        };
+        self.map
+            .native_ranges
+            .iter()
+            .filter(|segment| segment.file.as_deref().unwrap_or(&root_key) == self.root_key)
+            .filter_map(|segment| {
+                let span = Span {
+                    start: before_line_ending(segment.span.start),
+                    end: before_line_ending(segment.span.end),
+                };
+                if span.is_empty() {
+                    return None;
+                }
+                self.location(&WrittenSegment { file: None, span })
+                    .map(|location| location.range)
+            })
+            .collect()
+    }
+
     fn location(&self, segment: &WrittenSegment) -> Option<Location> {
         let own = segment
             .file

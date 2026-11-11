@@ -112,6 +112,17 @@ pub(crate) struct SpliceSegment {
     pub evaluation: Option<String>,
 }
 
+impl SpliceSegment {
+    fn written_intersection(&self, span: Span) -> Option<Span> {
+        let start = span.start.max(self.spliced.start);
+        let end = span.end.min(self.spliced.end);
+        (start < end).then(|| Span {
+            start: self.origin.start + start - self.spliced.start,
+            end: self.origin.start + end - self.spliced.start,
+        })
+    }
+}
+
 pub(crate) fn map_execution_inputs(
     analysis: Arc<crate::engine::analysis_configuration::ResolvedAnalysis>,
     map: &[SpliceSegment],
@@ -491,6 +502,9 @@ fn expand_spliced(
         map,
         map_complete,
     );
+    if !incomplete && macro_navigation_complete {
+        model_map.native_ranges = map_native_ranges(model, parsed_tokens, map);
+    }
     if invocation_unavailable {
         for row in &mut model_map.equations {
             row.active = false;
@@ -1067,6 +1081,7 @@ fn build_model_map(
         crate::engine::workspace::model_map::outline_occurrences(model, source);
     WrittenModelMap {
         complete,
+        native_ranges: Vec::new(),
         statement_objects,
         statement_children,
         statements: model
@@ -1112,6 +1127,105 @@ fn build_model_map(
     }
 }
 
+/// A written byte receives tint only if every emitted copy was native.
+/// Use the existing copied origins, excluding generated macro text.
+fn map_native_ranges(
+    model: &crate::engine::language::model::Model,
+    tokens: &[Token],
+    map: &[SpliceSegment],
+) -> Vec<WrittenSegment> {
+    if model.native_tint_spans.is_empty() {
+        return Vec::new();
+    }
+    let mut spans = model.native_tint_spans.clone();
+    spans.sort_unstable_by_key(|span| (span.start, span.end));
+    let mut native: Vec<Span> = Vec::new();
+    for span in spans.into_iter().filter(|span| !span.is_empty()) {
+        if let Some(last) = native.last_mut().filter(|last| span.start <= last.end) {
+            last.end = last.end.max(span.end);
+        } else {
+            native.push(span);
+        }
+    }
+
+    // Two coverage counts in written coordinates account for both repeated
+    // macro copies and the same file included at more than one site.
+    let mut events = Vec::new();
+    let mut add = |span: Span, copies: i32, native_copies: i32| {
+        let first = map.partition_point(|segment| segment.spliced.end <= span.start);
+        for segment in map[first..]
+            .iter()
+            .take_while(|segment| segment.spliced.start < span.end)
+        {
+            if let Some(written) = segment.written_intersection(span) {
+                let file = segment.file.as_deref();
+                events.push((file, written.start, copies, native_copies));
+                events.push((file, written.end, -copies, -native_copies));
+            }
+        }
+    };
+    if let Some(emitted) = tokens.first().and_then(|token| token.emitted.as_ref()) {
+        let mut first = 0;
+        for origin in emitted.source.origins.iter().filter(|origin| origin.copied) {
+            if crate::engine::control::cancelled() {
+                return Vec::new();
+            }
+            add(origin.written, 1, 0);
+            while first < native.len() && native[first].end <= origin.emitted.start {
+                first += 1;
+            }
+            for span in native[first..]
+                .iter()
+                .take_while(|span| span.start < origin.emitted.end)
+            {
+                let start = span.start.max(origin.emitted.start);
+                let end = span.end.min(origin.emitted.end);
+                if start < end {
+                    add(
+                        Span {
+                            start: origin.written.start + start - origin.emitted.start,
+                            end: origin.written.start + end - origin.emitted.start,
+                        },
+                        0,
+                        1,
+                    );
+                }
+            }
+        }
+    } else {
+        add(Span::new(0, model.source.len()), 1, 0);
+        for span in native {
+            add(span, 0, 1);
+        }
+    }
+    events.sort_unstable();
+    let mut result: Vec<WrittenSegment> = Vec::new();
+    let (mut previous_file, mut previous_end, mut copies, mut native_copies) = (None, 0, 0, 0);
+    for (file, end, copy_change, native_change) in events {
+        if file == previous_file && previous_end < end && copies > 0 && copies == native_copies {
+            if let Some(last) = result
+                .last_mut()
+                .filter(|last| last.file.as_deref() == file && last.span.end == previous_end)
+            {
+                last.span.end = end;
+            } else {
+                result.push(WrittenSegment {
+                    file: file.map(str::to_owned),
+                    span: Span {
+                        start: previous_end,
+                        end,
+                    },
+                });
+            }
+        }
+        previous_file = file;
+        previous_end = end;
+        copies += copy_change;
+        native_copies += native_change;
+    }
+    result
+}
+
 /// Group tokens by the include segment they actually came from. Clipping makes
 /// cross-file rows safe; one file's range cannot run into another file's bytes.
 fn map_token_segments(map: &[SpliceSegment], tokens: &[Token]) -> Vec<WrittenSegment> {
@@ -1148,15 +1262,12 @@ fn map_token_segments(map: &[SpliceSegment], tokens: &[Token]) -> Vec<WrittenSeg
 pub(crate) fn map_written_segments(map: &[SpliceSegment], span: Span) -> Vec<WrittenSegment> {
     map.iter()
         .filter_map(|segment| {
-            let start = span.start.max(segment.spliced.start);
-            let end = span.end.min(segment.spliced.end);
-            (start < end).then(|| WrittenSegment {
-                file: segment.file.clone(),
-                span: Span {
-                    start: segment.origin.start + start - segment.spliced.start,
-                    end: segment.origin.start + end - segment.spliced.start,
-                },
-            })
+            segment
+                .written_intersection(span)
+                .map(|span| WrittenSegment {
+                    file: segment.file.clone(),
+                    span,
+                })
         })
         .collect()
 }

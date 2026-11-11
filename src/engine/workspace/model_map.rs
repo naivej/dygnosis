@@ -74,6 +74,7 @@ pub struct WrittenModelMap {
     /// Recovered structure remains available when counts are not authoritative.
     pub complete: bool,
     pub statements: Vec<SourceOccurrence>,
+    pub native_ranges: Vec<WrittenSegment>,
     pub declarations: Vec<SourceOccurrence>,
     pub equations: Vec<EquationOccurrence>,
     /// Captured declaration type-event indices with proven token occurrences.

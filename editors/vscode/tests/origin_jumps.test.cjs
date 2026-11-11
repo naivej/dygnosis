@@ -1350,7 +1350,7 @@ test("macro tint toggles preserve source jumps and restore decoration without Re
   assert.equal(paints.at(-1).length, 1);
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
   assert.equal(env.service.requests.length, count);
-  for (const setting of ["outline.activity", "nameDetails.tex", "parameterValueHints", "formatIndent"]) {
+  for (const setting of ["outline.activity", "nameDetails.tex", "parameterValueHints"]) {
     env.host.configured.fire({ affectsConfiguration: key => ["dynare", `dynare.${setting}`, `dynare.${setting.split(".")[0]}`].includes(key) });
     assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true, `${setting} preserves source navigation`);
     assert.equal(env.service.requests.length, count, `${setting} needs no expansion`);

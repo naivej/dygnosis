@@ -114,8 +114,18 @@ async function checkHelpAccess(evidence, waitFor) {
     return settings?.length > 1;
   }, "native Settings shows block tint controls");
   assert.equal(settings[0].key, "dynare.blockTint.enabled", "the master switch is first");
-  assert.match(settings[0].text, /When off, all block tints are disabled/);
+  assert.match(settings[0].text, /When off, all Dynare block tints are disabled/);
   evidence.checks.push("native Settings shows the master tint switch before block options");
+
+  await vscode.commands.executeCommand("dygnosis.openHelp", "appearance");
+  await waitFor(() => readHelp("Boolean(document.querySelector('[data-link=\"settings:dynare.MATLAB/OctaveTint\"]'))"), "Appearance Help has the MATLAB/Octave setting link");
+  await readHelp("document.querySelector('[data-link=\"settings:dynare.MATLAB/OctaveTint\"]').click()");
+  await waitFor(() => nativeWorkbench(async send => {
+    const result = await send("Runtime.evaluate", { returnByValue: true, expression:
+      "document.querySelector('.setting-item-contents[data-key=\"dynare.MATLAB/OctaveTint\"]')?.querySelector('.setting-item-title')?.textContent" });
+    return result.result.value === "Dynare: MATLAB/Octave Tint";
+  }), "Appearance Help opens the exact native MATLAB/Octave setting");
+  evidence.checks.push("Appearance Help opens the exact MATLAB/Octave tint setting");
 }
 
 module.exports = { checkHelpAccess };

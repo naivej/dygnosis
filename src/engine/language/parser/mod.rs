@@ -6393,6 +6393,9 @@ impl Parser<'_> {
             start: written_head.start,
             end: emitted.source.written_end(end).max(written_head.end),
         });
+        self.model
+            .native_tint_spans
+            .push(Span::new(emitted.span.start as usize, end));
         true
     }
 
@@ -6444,6 +6447,7 @@ impl Parser<'_> {
             end: t.source.written_end(end),
         });
         self.model.ms_unparsed_spans.push(written);
+        self.model.native_tint_spans.push(Span::new(start, end));
         if from < self.i {
             self.model.opaque_tokens.insert(
                 self.model.execution_steps.len(),
@@ -10196,7 +10200,10 @@ impl Parser<'_> {
         self.eat(TokenKind::Semi);
         let body = &self.tokens[self.i - 1];
         let start = body.emitted.as_ref().map_or(body.span.end, |t| t.span.end) as usize;
-        let end = crate::engine::language::native_line::verbatim_region_end(source, start);
+        let (end, close) = crate::engine::language::native_line::verbatim_bounds(source, start);
+        if let Some(close) = close.filter(|&close| start < close) {
+            self.model.native_tint_spans.push(Span::new(start, close));
+        }
         while !self.at(TokenKind::Eof)
             && (self.tokens[self.i]
                 .emitted
@@ -10352,6 +10359,9 @@ impl Parser<'_> {
                 (token.source.text.as_str(), token.span.start as usize)
             });
         let region_end = crate::engine::language::native_line::native_region_end(native_src, start);
+        self.model
+            .native_tint_spans
+            .push(Span::new(start, region_end));
         self.initial_source_cursor = region_end;
         let expr_i = self.i;
         while !self.at(TokenKind::Eof)

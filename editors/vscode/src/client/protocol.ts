@@ -75,6 +75,7 @@ export interface ModelInfo {
   owner_roots: string[]; statements: Statement[]; declarations: Declaration[];
   dependency_candidates?: string[];
   inactive_ranges?: Range[];
+  native_ranges?: Range[];
   equations: Equation[]; related_files: RelatedFile[];
   block_categories: { category: string; default: string }[];
   first_model_anchor: Location | null;
@@ -197,6 +198,7 @@ export function parseModelInfo(value: unknown, root: string, document: string): 
       (value.has_named_equation !== undefined && typeof value.has_named_equation !== "boolean") ||
       !(value.dependency_candidates === undefined || strings(value.dependency_candidates)) ||
       !(value.inactive_ranges === undefined || Array.isArray(value.inactive_ranges) && value.inactive_ranges.every(range)) ||
+      !(value.native_ranges === undefined || Array.isArray(value.native_ranges) && value.native_ranges.every(range)) ||
       !rows(value.statements, row => source(row) && typeof row.id === "string" &&
         typeof row.kind === "string" && typeof row.name === "string" &&
         typeof row.complete === "boolean" && typeof row.native === "boolean" &&

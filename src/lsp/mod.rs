@@ -2169,7 +2169,7 @@ impl Backend {
         })
     }
 
-    fn format_document(&self, uri: &Url) -> Result<Option<Vec<TextEdit>>> {
+    fn format_document(&self, uri: &Url, indent: &str) -> Result<Option<Vec<TextEdit>>> {
         let inner = self.lock_inner();
         let doc = inner.document(uri).ok_or_else(|| {
             tower_lsp::jsonrpc::Error::invalid_params(
@@ -2177,11 +2177,7 @@ impl Backend {
             )
         })?;
         let settings = inner.settings.resolve(uri);
-        match format_outcome_with_limit(
-            &doc.text,
-            &settings.format_indent_unit,
-            settings.macro_work_limit,
-        ) {
+        match format_outcome_with_limit(&doc.text, indent, settings.macro_work_limit) {
             FormatOutcome::Changed(formatted) => {
                 Ok(Some(vec![full_document_edit(&doc.text, formatted)]))
             }
@@ -2192,7 +2188,12 @@ impl Backend {
         }
     }
 
-    fn format_line_range(&self, uri: &Url, range: Range) -> Result<Option<Vec<TextEdit>>> {
+    fn format_line_range(
+        &self,
+        uri: &Url,
+        range: Range,
+        indent: &str,
+    ) -> Result<Option<Vec<TextEdit>>> {
         let inner = self.lock_inner();
         let doc = inner.document(uri).ok_or_else(|| {
             tower_lsp::jsonrpc::Error::invalid_params(
@@ -2208,7 +2209,7 @@ impl Backend {
             &doc.text,
             range.start.line,
             end_line,
-            &settings.format_indent_unit,
+            indent,
             settings.macro_work_limit,
         ) {
             RangeFormatOutcome::Changed(start, end, replacement) => (start, end, replacement),
@@ -2391,6 +2392,7 @@ impl Backend {
                 json!({"definition":source.has_definition,"branch":source.has_branch});
         }
         result["inactive_ranges"] = json!(inactive_ranges);
+        result["native_ranges"] = json!(view.native_ranges(&root));
         result["document_version"] = json!(inner.document(&document).map(|doc| doc.version));
         result["revision"] = json!(revision);
         result["complete"] = json!(complete);
@@ -3591,7 +3593,7 @@ impl LanguageServer for Backend {
         ordering::ready().await;
         self.wait_document_analysis(Some(&params.text_document.uri))
             .await;
-        self.format_document(&params.text_document.uri)
+        self.format_document(&params.text_document.uri, &request_indent(&params.options))
     }
 
     async fn range_formatting(
@@ -3601,7 +3603,11 @@ impl LanguageServer for Backend {
         ordering::ready().await;
         self.wait_document_analysis(Some(&params.text_document.uri))
             .await;
-        self.format_line_range(&params.text_document.uri, params.range)
+        self.format_line_range(
+            &params.text_document.uri,
+            params.range,
+            &request_indent(&params.options),
+        )
     }
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
@@ -5053,6 +5059,17 @@ fn full_document_range(text: &str) -> Range {
     )
 }
 
+fn request_indent(options: &FormattingOptions) -> String {
+    if !options.insert_spaces {
+        return "\t".to_owned();
+    }
+    let width = match options.tab_size {
+        width @ 1..=32 => width,
+        _ => 4,
+    };
+    " ".repeat(width as usize)
+}
+
 fn full_document_edit(old_text: &str, new_text: String) -> TextEdit {
     TextEdit {
         range: full_document_range(old_text),
@@ -5134,7 +5151,7 @@ mod diagnostic_revision_tests {
         let context = analysis_configuration::context_revision(&mut inner, &root).unwrap();
         inner
             .settings
-            .apply(&json!({"outline":{"activity":"inactive"},"formatIndent":2}));
+            .apply(&json!({"outline":{"activity":"inactive"}}));
         assert_eq!(inner.root_revision(&root).unwrap(), revision);
         assert_eq!(
             analysis_configuration::context_revision(&mut inner, &root).unwrap(),

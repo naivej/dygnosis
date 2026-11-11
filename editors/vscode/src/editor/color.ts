@@ -1,18 +1,30 @@
 import * as vscode from "vscode";
 import { DygnosisClient, isAnalysisDocument } from "../client/client";
-import { location, ModelInfo, record } from "../client/protocol";
+import { location, ModelInfo, Position, Range, record } from "../client/protocol";
 import { booleanSetting, Log } from "../client/settings";
 
 export type TintStyle = "off" | "subtle" | "model";
 
 export interface TintPreferences {
   enabled: boolean;
+  native: TintStyle;
   styles: ReadonlyMap<string, TintStyle>;
   heterogeneousModels: ReadonlyMap<string, TintStyle>;
 }
 function style(value: unknown): value is TintStyle {
   return value === "off" || value === "subtle" || value === "model";
 }
+function tintChoice(value: unknown): TintStyle | undefined {
+  switch (value) {
+    case "Off": return "off";
+    case "Subtle": return "subtle";
+    case "Standard": return "model";
+  }
+}
+const nativeTintKey = "MATLAB/OctaveTint";
+const resourceConfiguration = (document: vscode.TextDocument) =>
+  vscode.workspace.getConfiguration("dynare", { uri: document.uri, languageId: "dynare" });
+
 export function dimensionOverrides(value: unknown, log: Log): Map<string, TintStyle> {
   const result = new Map<string, TintStyle>();
   if (!record(value)) {
@@ -20,7 +32,8 @@ export function dimensionOverrides(value: unknown, log: Log): Map<string, TintSt
     return result;
   }
   for (const [dimension, choice] of Object.entries(value)) {
-    if (dimension.length > 0 && style(choice)) result.set(dimension, choice);
+    const tint = tintChoice(choice);
+    if (dimension.length > 0 && tint) result.set(dimension, tint);
     else log(`Invalid dynare.blockTint.heterogeneousModels entry '${dimension}' was ignored.`);
   }
   return result;
@@ -28,16 +41,21 @@ export function dimensionOverrides(value: unknown, log: Log): Map<string, TintSt
 /** Read presentation against the displayed file, using the engine's defaults. */
 export function tintPreferences(document: vscode.TextDocument, registry: ModelInfo["block_categories"], log: Log): TintPreferences {
   const enabled = booleanSetting("blockTint.enabled", document.uri, true, log);
-  const config = vscode.workspace.getConfiguration("dynare", { uri: document.uri, languageId: "dynare" });
-  const styles = new Map<string, TintStyle>();
-  for (const entry of registry) {
-    const fallback = style(entry.default) ? entry.default : "off";
-    const key = `blockTint.${entry.category}`;
-    const value = config.get<unknown>(key, fallback);
-    if (!style(value)) log(`Invalid dynare.${key}; using ${fallback}.`);
-    styles.set(entry.category, style(value) ? value : fallback);
+  const config = resourceConfiguration(document);
+  const styles = new Map<string, TintStyle>(registry.map(entry => [entry.category, style(entry.default) ? entry.default : "off"]));
+  const overrides = config.get<unknown>("blockTint.styles", {});
+  if (record(overrides)) {
+    for (const [block, value] of Object.entries(overrides)) {
+      const tint = tintChoice(value);
+      if (styles.has(block) && tint) styles.set(block, tint);
+      else log(`Invalid dynare.blockTint.styles entry '${block}' was ignored.`);
+    }
+  } else {
+    log("Invalid dynare.blockTint.styles; using the default block styles.");
   }
-  return { enabled, styles,
+  const native = tintChoice(config.get<unknown>(nativeTintKey, "Off"));
+  if (!native) log(`Invalid dynare.${nativeTintKey}; using Off.`);
+  return { enabled, native: native ?? "off", styles,
     heterogeneousModels: dimensionOverrides(config.get<unknown>("blockTint.heterogeneousModels", {}), log) };
 }
 
@@ -76,9 +94,13 @@ export function tintRanges(info: ModelInfo, document: vscode.TextDocument, prefe
 
 /** Activity is proved by the selected execution, never inferred from block colors. */
 export function inactiveRanges(info: ModelInfo, document: vscode.TextDocument): vscode.Range[] {
+  return documentRanges(info, document, info.inactive_ranges ?? []);
+}
+
+function documentRanges(info: ModelInfo, document: vscode.TextDocument, ranges: Range[]): vscode.Range[] {
   const result: vscode.Range[] = [];
   if (info.document_uri !== document.uri.toString()) return result;
-  for (const range of info.inactive_ranges ?? []) {
+  for (const range of ranges) {
     if (!location({ uri: info.document_uri, range })) continue;
     const { start, end } = range;
     if (start.line === end.line && start.character === end.character || end.line >= document.lineCount ||
@@ -88,35 +110,102 @@ export function inactiveRanges(info: ModelInfo, document: vscode.TextDocument): 
   return result;
 }
 
+type TintRanges = ReturnType<typeof tintRanges>;
+type TintPaint = { whole: TintRanges; exact: TintRanges };
+const positionOrder = (a: Position, b: Position): number => a.line - b.line || a.character - b.character;
+const editorRange = (start: Position, end: Position): vscode.Range => new vscode.Range(start.line, start.character, end.line, end.character);
+
+function tintPaint(info: ModelInfo, document: vscode.TextDocument, preferences: TintPreferences): TintPaint {
+  const blocks = tintRanges(info, document, preferences);
+  const native = documentRanges(info, document, info.native_ranges ?? []);
+  const paint: TintPaint = { whole: { model: [], subtle: [] }, exact: { model: [], subtle: [] } };
+  const lineEnd = (line: number): Position => ({ line, character: document.lineAt(line).text.length });
+  const nativeEnds = native.map(range => range.end.character === 0 && range.end.line > range.start.line ? lineEnd(range.end.line - 1) : range.end);
+  if (preferences.native !== "off") paint.exact[preferences.native] = native.slice();
+
+  for (const strength of ["model", "subtle"] as const) {
+    const whole = paint.whole[strength], exact = paint.exact[strength];
+    const gap = (start: Position, end: Position, exactStart: boolean, exactEnd: boolean): void => {
+      if (positionOrder(start, end) >= 0) return;
+      if (start.line === end.line) {
+        (exactStart || exactEnd ? exact : whole).push(editorRange(start, end));
+        return;
+      }
+      if (exactStart) {
+        exact.push(editorRange(start, lineEnd(start.line)));
+        start = { line: start.line + 1, character: 0 };
+      }
+      if (exactEnd) {
+        exact.push(editorRange({ line: end.line, character: 0 }, end));
+        end = lineEnd(end.line - 1);
+      }
+      if (positionOrder(start, end) <= 0) whole.push(editorRange(start, end));
+    };
+    for (const block of blocks[strength]) {
+      let start: Position = block.start, exactStart = false;
+      let low = 0, high = native.length;
+      while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        if (nativeEnds[mid].line < start.line) low = mid + 1;
+        else high = mid;
+      }
+      const clip = (point: Position): Position => positionOrder(point, block.start) < 0 ? block.start :
+        positionOrder(point, block.end) > 0 ? block.end : point;
+      for (let index = low; index < native.length && native[index].start.line <= block.end.line; index++) {
+        const before = clip(native[index].start), after = clip(nativeEnds[index]);
+        gap(start, before, exactStart, true);
+        start = after;
+        exactStart = true;
+      }
+      gap(start, block.end, exactStart, false);
+    }
+  }
+  return paint;
+}
+
+function tintDecorations(palette: unknown) {
+  const prefix = palette === "amber" || palette === "violet" || palette === "slate" ? `dynare.tintPalette.${palette}` : undefined;
+  const model = new vscode.ThemeColor(prefix ? `${prefix}.standardBackground` : "dynare.blockTint.modelBackground");
+  const subtle = new vscode.ThemeColor(prefix ? `${prefix}.subtleBackground` : "dynare.blockTint.subtleBackground");
+  const create = (backgroundColor: vscode.ThemeColor, isWholeLine: boolean) => vscode.window.createTextEditorDecorationType({
+    isWholeLine, backgroundColor, rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
+  });
+  return { whole: { model: create(model, true), subtle: create(subtle, true) }, exact: { model: create(model, false), subtle: create(subtle, false) } };
+}
+
 /** Shared model cache; this surface owns only visible-editor decorations. */
 export function registerColors(service: DygnosisClient): vscode.Disposable {
-  const decorations = {
-    model: vscode.window.createTextEditorDecorationType({ isWholeLine: true,
-      rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
-      backgroundColor: new vscode.ThemeColor("dynare.blockTint.modelBackground") }),
-    subtle: vscode.window.createTextEditorDecorationType({ isWholeLine: true,
-      rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
-      backgroundColor: new vscode.ThemeColor("dynare.blockTint.subtleBackground") }),
-    inactive: vscode.window.createTextEditorDecorationType({ opacity: "0.65",
-      rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed }),
+  const palette = () => vscode.workspace.getConfiguration("dynare").get<unknown>("tintPalette");
+  let decorations = tintDecorations(palette());
+  const inactive = vscode.window.createTextEditorDecorationType({ opacity: "0.65", rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed });
+  const paintTint = (editor: vscode.TextEditor, paint?: TintPaint): void => {
+    for (const kind of ["whole", "exact"] as const) {
+      for (const strength of ["model", "subtle"] as const) editor.setDecorations(decorations[kind][strength], paint?.[kind][strength] ?? []);
+    }
+  };
+  const disposeTints = (): void => {
+    for (const kind of Object.values(decorations)) for (const decoration of Object.values(kind)) decoration.dispose();
   };
   interface EditorState {
     document: vscode.TextDocument;
     client: DygnosisClient["client"];
     instance: number;
     root?: string;
+    paint?: TintPaint;
   }
   const tracked = new Map<vscode.TextEditor, EditorState>();
   let generation = 0, disposed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const cancelTimer = (): void => { if (timer !== undefined) clearTimeout(timer); timer = undefined; };
   const clear = (editor: vscode.TextEditor): void => {
-    editor.setDecorations(decorations.model, []);
-    editor.setDecorations(decorations.subtle, []);
-    editor.setDecorations(decorations.inactive, []);
+    const state = tracked.get(editor);
+    if (state) state.paint = undefined;
+    paintTint(editor);
+    editor.setDecorations(inactive, []);
   };
   const enabled = (document: vscode.TextDocument): boolean =>
     booleanSetting("blockTint.enabled", document.uri, true, service.log) ||
+    (tintChoice(resourceConfiguration(document).get<unknown>(nativeTintKey)) ?? "off") !== "off" ||
     booleanSetting("inactiveCode.enabled", document.uri, true, service.log);
   const update = async (editor: vscode.TextEditor, state: EditorState, request: number): Promise<void> => {
     const { document, client, instance } = state;
@@ -140,12 +229,11 @@ export function registerColors(service: DygnosisClient): vscode.Disposable {
       const selected = await service.rootForDocument(document);
       if (!current()) return;
       if (selected?.toString() !== root.toString()) { clear(editor); state.root = undefined; return; }
-      const ranges = tintRanges(info, document, tintPreferences(document, info.block_categories, service.log));
+      state.paint = tintPaint(info, document, tintPreferences(document, info.block_categories, service.log));
       // VS Code moves the existing decorations with edits while this request is
       // pending. Replace them only with current facts; do not repaint old offsets.
-      editor.setDecorations(decorations.model, ranges.model);
-      editor.setDecorations(decorations.subtle, ranges.subtle);
-      editor.setDecorations(decorations.inactive,
+      paintTint(editor, state.paint);
+      editor.setDecorations(inactive,
         booleanSetting("inactiveCode.enabled", document.uri, true, service.log) ? inactiveRanges(info, document) : []);
     } catch (error: unknown) {
       if (current()) { clear(editor); service.log(String(error)); }
@@ -172,7 +260,10 @@ export function registerColors(service: DygnosisClient): vscode.Disposable {
           !enabled(document)) { clear(editor); continue; }
       // A changed input invalidates activity proof immediately. Block outlines
       // can keep moving with edits while the selected execution is refreshed.
-      editor.setDecorations(decorations.inactive, []);
+      editor.setDecorations(inactive, []);
+      if (state.paint?.exact.model.length) editor.setDecorations(decorations.exact.model, []);
+      if (state.paint?.exact.subtle.length) editor.setDecorations(decorations.exact.subtle, []);
+      state.paint = undefined;
       pending.push([editor, state]);
     }
     const run = (): void => {
@@ -194,9 +285,15 @@ export function registerColors(service: DygnosisClient): vscode.Disposable {
     vscode.workspace.onDidOpenTextDocument(document => { if (hasDocument(document)) refresh(); }),
     vscode.workspace.onDidCloseTextDocument(document => { if (hasDocument(document)) refresh(); }),
     vscode.workspace.onDidChangeConfiguration(event => {
+      if (event.affectsConfiguration("dynare.tintPalette")) {
+        disposeTints();
+        decorations = tintDecorations(palette());
+        for (const [editor, state] of tracked) paintTint(editor, state.paint);
+      }
       let affected = false;
       for (const editor of tracked.keys()) {
         if (event.affectsConfiguration("dynare.blockTint", editor.document.uri) ||
+            event.affectsConfiguration(`dynare.${nativeTintKey}`, editor.document.uri) ||
             event.affectsConfiguration("dynare.inactiveCode", editor.document.uri)) { clear(editor); affected = true; }
       }
       if (affected) refresh();
@@ -211,6 +308,6 @@ export function registerColors(service: DygnosisClient): vscode.Disposable {
     for (const listener of listeners) listener.dispose();
     for (const editor of tracked.keys()) clear(editor);
     tracked.clear();
-    decorations.model.dispose(); decorations.subtle.dispose(); decorations.inactive.dispose();
+    disposeTints(); inactive.dispose();
   });
 }

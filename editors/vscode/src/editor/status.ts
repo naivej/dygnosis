@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { DygnosisClient, isAnalysisDocument } from "../client/client";
 import { AnalysisOverride, ModelInfo } from "../client/protocol";
-import { booleanSetting, listSetting } from "../client/settings";
+import { listSetting } from "../client/settings";
 import type { EffectivePreviewRegistry } from "./preview";
 import { failureText, fileLabel, reasonText } from "../client/failure";
 import { automaticConfigurationName, configurationSummary } from "../client/analysis_presentation";
@@ -150,10 +150,8 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
       accessibilityLabel: `${fileLabel((displayed.root ?? displayed.document.uri).toString())}. ${activity.label}. ${outlineClickInstruction}`,
     } : displayed.value);
   };
-  const preferences = (document: vscode.TextDocument): { enabled: boolean; counts: StatusCount[] } => ({
-    enabled: booleanSetting("statusBar.enabled", document.uri, true, service.log),
-    counts: listSetting("statusBar.counts", document.uri, statusCounts, statusCounts, service.log) as StatusCount[],
-  });
+  const preferences = (document: vscode.TextDocument): StatusCount[] =>
+    listSetting("statusBar.counts", document.uri, statusCounts, statusCounts, service.log) as StatusCount[];
   const refresh = (): void => {
     const request = ++generation;
     displayed = undefined;
@@ -164,15 +162,15 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
     const document = vscode.window.activeTextEditor?.document;
     const preview = document && previews?.get(document.uri);
     if (disposed || !document || document.isClosed || !isAnalysisDocument(document) && !preview) return;
-    const settings = preferences(document);
-    if (!settings.enabled || settings.counts.length === 0) return;
+    const counts = preferences(document);
+    if (counts.length === 0) return;
     const uri = document.uri.toString(), version = document.version;
     const current = (): boolean => {
       const active = vscode.window.activeTextEditor?.document;
       if (disposed || request !== generation || active !== document || document.isClosed ||
           active.uri.toString() !== uri || active.version !== version) return false;
       const latest = preferences(document);
-      return latest.enabled && latest.counts.join("\n") === settings.counts.join("\n");
+      return latest.join("\n") === counts.join("\n");
     };
     displayed = { document, current, value: {
       text: "$(sync~spin) Dynare: updating",
@@ -212,7 +210,7 @@ export function registerStatus(service: DygnosisClient, previews?: EffectivePrev
       if (info.root_uri !== root.toString() || info.document_uri !== requestedDocument.toString() || !preview && info.document_version !== version) {
         unavailable("The response no longer matches this model or document. Counts were withheld."); return;
       }
-      updateContent(modelStatus(info, settings.counts));
+      updateContent(modelStatus(info, counts));
     };
     void update().catch((error: unknown) => {
       if (current()) { service.log(String(error)); unavailable(failureText(error)); }
