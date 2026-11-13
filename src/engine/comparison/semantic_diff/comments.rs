@@ -41,7 +41,7 @@ fn quoted_end(bytes: &[u8], start: usize) -> usize {
 }
 
 /// Macro directive arguments accept trailing // comments and double-quoted strings.
-pub(super) fn macro_argument(text: &str) -> &str {
+pub(in crate::engine::comparison) fn macro_argument(text: &str) -> &str {
     let bytes = text.as_bytes();
     let mut position = 0;
     while position < bytes.len() {

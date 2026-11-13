@@ -2,23 +2,30 @@
 /* global structuredClone */
 const clone = value => structuredClone(value);
 const emptySemantic = () => ({
-  comparison_versions: { semantic: 1, source_changes: 1, coverage: 1 },
-  semantic: { schema_version: 1, availability: "complete", budgets: { token_alignment_cells: 1, source_alignment_cells: 1, references_per_side: 1, source_hunks: 1, serialized_output_bytes: 1 }, rows: [], references: [], limits: [] },
-  source_changes: { schema_version: 1, availability: "complete", files: [], limits: [] },
+  comparison_versions: { semantic: 2, source_changes: 2, coverage: 1 },
+  semantic: { schema_version: 2, availability: "complete", budgets: { token_alignment_cells: 1, source_alignment_cells: 1, references_per_side: 1, source_hunks: 1, serialized_output_bytes: 1 }, rows: [], references: [], limits: [] },
+  source_changes: { schema_version: 2, availability: "complete", files: [], limits: [], root_text: "matching", executed_includes: { before: [], after: [] } },
   coverage: { schema_version: 1, availability: "complete", source_boundary: "captured_roots_and_executed_includes", families: [], limits: [] },
 });
+const summaryFor = ({ semantic, source_changes: source }) => {
+  const rows = semantic.rows.length, files = source.files.length;
+  const unpaired = source.files.filter(file => file.correspondence === "unpaired").length;
+  return { semantic_rows: rows, available_semantic_rows: rows, source_files: unpaired ? null : files, available_source_files: files,
+    reference_membership_complete: true, semantic_availability: semantic.availability, source_availability: source.availability,
+    root_text: source.root_text, executed_includes: source.executed_includes, paired_file_changes: files - unpaired, unpaired_files: unpaired, issues: [] };
+};
+exports.emptySemantic = emptySemantic;
+exports.summaryFor = summaryFor;
 
 exports.currentSnapshot = ({ beforeRoot, afterRoot, diff, sources = { before: {}, after: {} }, navigationRows = [], revisions = { before: "before-revision", after: "after-revision" } }) => {
   const ids = { before: "before", after: "after" }, roots = { before: beforeRoot, after: afterRoot };
   const currentDiff = clone(diff);
   const semantic = emptySemantic();
-  currentDiff.semantic_schema_version ??= 1;
-  currentDiff.source_changes_schema_version ??= 1;
-  currentDiff.coverage_schema_version ??= 1;
   currentDiff.comparison_versions ??= semantic.comparison_versions;
   currentDiff.semantic ??= semantic.semantic;
   currentDiff.source_changes ??= semantic.source_changes;
   currentDiff.coverage ??= semantic.coverage;
+  currentDiff.summary ??= summaryFor(currentDiff);
   for (const file of currentDiff.source_changes.files) for (const side of ["before", "after"]) {
     if (file[side]) file[side].input_id = ids[side];
   }

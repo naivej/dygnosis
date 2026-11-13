@@ -113,7 +113,7 @@ pub enum CountUnit {
 }
 
 /// Families name compared facts, not diagnostic classes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SemanticFamily {
     Symbols,
@@ -572,12 +572,30 @@ pub struct SourceFileChange {
     pub limits: Vec<ComparisonLimit>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RootText {
+    Matching,
+    Changed,
+    #[default]
+    Unavailable,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct ExecutedIncludes {
+    pub before: Vec<String>,
+    pub after: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct SourceChanges {
     pub schema_version: u32,
     pub availability: Availability,
     pub files: Vec<SourceFileChange>,
     pub limits: Vec<ComparisonLimit>,
+    pub root_text: RootText,
+    /// Captured file membership. Multiple executions of a file share its key.
+    pub executed_includes: Option<ExecutedIncludes>,
 }
 
 impl Default for SourceChanges {
@@ -591,6 +609,57 @@ impl Default for SourceChanges {
                 "Source changes require captured roots and executed includes.",
                 "source_changes",
             )],
+            root_text: RootText::Unavailable,
+            executed_includes: None,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ComparisonEffect {
+    ModelRows,
+    Pairing,
+    References,
+    Highlights,
+    TextHunks,
+    CapturedText,
+    Detail,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct ComparisonIssue<'a> {
+    pub effect: ComparisonEffect,
+    pub family: Option<SemanticFamily>,
+    pub file: Option<&'a str>,
+    #[serde(flatten)]
+    pub limit: &'a ComparisonLimit,
+}
+
+pub(crate) fn semantic_effect(code: &str) -> Option<ComparisonEffect> {
+    use ComparisonEffect::*;
+    Some(match code {
+        "serialized_output_limit" => ModelRows,
+        "equation_correspondence_unpaired" | "occurrence_correspondence_unpaired" => Pairing,
+        "identifier_correspondence_unpaired" => Detail,
+        "reference_limit" | "reference_output_limit" | "reference_target_output_limit" => {
+            References
+        }
+        "token_alignment_limit"
+        | "occurrence_token_alignment_limit"
+        | "written_statement_highlight_limit"
+        | "highlight_output_limit" => Highlights,
+        "written_macro_records_unavailable" => ModelRows,
+        _ if code.ends_with("_tree_materialization_limit")
+            || code.ends_with("_tree_node_limit")
+            || code.ends_with("_selector_token_limit")
+            || code.ends_with("_selector_visit_limit")
+            || code.ends_with("_text_materialization_limit") =>
+        {
+            ModelRows
+        }
+        _ if code.ends_with("_unpaired") => Pairing,
+        _ if code.ends_with("_limit") => Detail,
+        _ => return None,
+    })
 }

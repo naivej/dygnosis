@@ -5,7 +5,7 @@ import type { ModelSnapshot } from "../client/client";
 import type { Equation, Location, Range } from "../client/protocol";
 import { fileLabel } from "../client/failure";
 import { captureSelection, commandEditor, containsSelection } from "../client/editor_target";
-import { sameSourceUri } from "../client/source_uri";
+import { displayPath, sameSourceUri } from "../client/source_uri";
 
 export interface NavigationContext {
   document: vscode.TextDocument;
@@ -19,7 +19,7 @@ interface OwnerPick extends vscode.QuickPickItem { root: vscode.Uri; info: Model
 function sourceLabel(location: Location | null): string {
   if (!location) return "No single source location";
   const uri = vscode.Uri.parse(location.uri);
-  return `${vscode.workspace.asRelativePath(uri)}:${String(location.range.start.line + 1)}`;
+  return `${displayPath(vscode.workspace.asRelativePath(uri))}:${String(location.range.start.line + 1)}`;
 }
 function scopeLabel(equation: Equation): string {
   return equation.scope === "aggregate" ? "Aggregate" : `Dimension ${equation.dimension ?? "(unnamed)"}`;
@@ -149,7 +149,7 @@ export function registerModelNavigation(service: DygnosisClient): vscode.Disposa
       if (info && info.root_uri === root.toString() && info.document_uri === document.uri.toString() &&
           info.document_version === version && info.client_instance === instance &&
           info.owner_roots.some(owner => sameSourceUri(vscode.Uri.parse(owner), root))) {
-        picks.push({ label: vscode.workspace.asRelativePath(root), description: root.fsPath, root, info });
+        picks.push({ label: displayPath(vscode.workspace.asRelativePath(root)), description: root.fsPath, root, info });
       }
     }
     if (owners.length === 0) { refuse(service.noModelOwnersMessage(document.uri)); }

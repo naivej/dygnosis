@@ -845,7 +845,7 @@ fn compare_repository_inner(
     if let Err(failure) = acquisition.check() {
         return failure.response("after");
     }
-    // MCP retains its established structural fields at the result's top level.
+    // Publish the same comparison facts as the snapshot LSP response.
     if result["state"] == "result" {
         let mut output = result["diff"].clone();
         output["state"] = json!("result");
@@ -1093,7 +1093,12 @@ mod tests {
         let result = repo.compare(git("main.mod", &first), git("main.mod", &second), &[]);
         assert_eq!(result["state"], "result", "{result}");
         assert_eq!(
-            result["changed_equations"].as_array().unwrap().len(),
+            result["semantic"]["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|row| row["family"] == "equations" && row["change"] == "changed")
+                .count(),
             1,
             "{result}"
         );
@@ -1283,7 +1288,15 @@ mod tests {
         repo.write("common/equations.inc", "[name='eq'] y=9;\n");
         let result = repo.compare(git("main.mod", &first), working("main.mod"), &[&folder]);
         assert_eq!(result["state"], "result", "{result}");
-        assert_eq!(result["changed_equations"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            result["semantic"]["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|row| row["family"] == "equations" && row["change"] == "changed")
+                .count(),
+            1
+        );
         repo.write(
             "absolute.mod",
             &format!("var y;\nmodel;\n@#include \"{folder}/equations.inc\"\nend;\n"),
@@ -1332,7 +1345,15 @@ mod tests {
         repo.commit();
         let saved = repo.compare(working("main.mod"), working("other.mod"), &["../common"]);
         assert_eq!(saved["state"], "result", "{saved}");
-        assert_eq!(saved["changed_equations"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            saved["semantic"]["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|row| row["family"] == "equations" && row["change"] == "changed")
+                .count(),
+            1
+        );
         assert_eq!(
             saved["inputs"]["before"]["search_paths"],
             json!(["../common"])

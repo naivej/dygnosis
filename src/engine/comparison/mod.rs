@@ -421,6 +421,33 @@ pub fn compare_models_with_budgets(
     source_b: Option<CompareSource<'_>>,
     budgets: ComparisonBudgets,
 ) -> ModelDiff {
+    compare_retained_models(model_a, model_b, source_a, source_b, budgets, true)
+}
+
+pub(crate) fn compare_captured_models(
+    model_a: &Model,
+    model_b: &Model,
+    source_a: Option<CompareSource<'_>>,
+    source_b: Option<CompareSource<'_>>,
+) -> ModelDiff {
+    compare_retained_models(
+        model_a,
+        model_b,
+        source_a,
+        source_b,
+        ComparisonBudgets::default(),
+        false,
+    )
+}
+
+fn compare_retained_models(
+    model_a: &Model,
+    model_b: &Model,
+    source_a: Option<CompareSource<'_>>,
+    source_b: Option<CompareSource<'_>>,
+    budgets: ComparisonBudgets,
+    compare_model_macro_records: bool,
+) -> ModelDiff {
     let variables_a = model_a.final_decls(&["var"]);
     let variables_b = model_b.final_decls(&["var"]);
     let end_a = names(model_a, &variables_a);
@@ -479,7 +506,12 @@ pub fn compare_models_with_budgets(
         coverage: ComparisonCoverage::default(),
     };
     crate::engine::comparison::semantic_diff::populate(
-        model_a, model_b, &values_a, &values_b, &mut diff,
+        model_a,
+        model_b,
+        &values_a,
+        &values_b,
+        &mut diff,
+        compare_model_macro_records,
     );
     crate::engine::comparison::semantic_diff::enforce_output_budget(&mut diff);
     diff

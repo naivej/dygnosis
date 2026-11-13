@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { DygnosisClient } from "../client/client";
 import { diffHtml, diffPreferences } from "./diff";
-import { ComparisonResource, changesScheme, changesViewType, GitSelector, historyScheme, inputLabel, ModelSelector, resourceData, resourceName, resourceQuery } from "./changes_resource";
+import { ComparisonResource, changesScheme, changesViewType, configurationLabel, GitSelector, historyScheme, ModelSelector, resourceData, resourceName, resourceQuery } from "./changes_resource";
 import { DiffChoices, DiffRow, DiffSide, normalizeChoices } from "./diff_view";
 import { createGitSources } from "./git_source_host";
 import { GitRepository, GitSources, HistoryCursor, PinnedCommit, RevisionRef } from "./git_source";
@@ -18,10 +18,35 @@ import { record } from "../client/protocol";
 import { CapturedTextSources } from "./captured_text";
 import { SourceFile } from "./semantic_view";
 import { ActionFailure, failureText, fileLabel } from "../client/failure";
+import { configurationSummary } from "../client/analysis_presentation";
+import { displayPath, displaySourcePath } from "../client/source_uri";
 
 interface EditorView { panel: vscode.WebviewPanel; choices: DiffChoices; subscriptions: vscode.Disposable[] }
 interface InputSelection { token: vscode.CancellationToken; signal: AbortSignal; dispose(): void }
-const sourceName = (key: string): string => path.posix.basename(key.startsWith("file:") ? vscode.Uri.parse(key).path : key.replaceAll("\\", "/"));
+interface IncludeRow extends DiffRow { includeFile: true; sourceLabels: Record<DiffSide, string | null> }
+const sourceName = (key: string): string => key.startsWith("file:") ? path.basename(vscode.Uri.parse(key).fsPath) : path.basename(displayPath(key));
+const repositoryFile = (repository: string, key: string): vscode.Uri => vscode.Uri.joinPath(vscode.Uri.parse(repository), key);
+function inputLabel(input: ModelSelector): string {
+  const analysis = input.analysis ? ` · ${configurationLabel(input.analysis)}` : "";
+  if (input.kind === "working") return `${displaySourcePath(vscode.Uri.parse(input.root_uri))} · Working${analysis}`;
+  const commit = input.commit.slice(0, 7), ref = input.requested_ref.replace(/^[0-9a-f]{40,64}(?=$|[~^])/, value => value.slice(0, 7));
+  return `${displaySourcePath(repositoryFile(input.repository_uri, input.root_file))}${ref && ref !== commit ? ` @ ${ref}` : ""} · ${commit}${analysis}`;
+}
+function inputNames(before: vscode.Uri, after: vscode.Uri): Record<DiffSide, string> {
+  const names = [before, after].map(uri => [uri.authority, ...uri.path.split("/")].filter(Boolean));
+  let depth = 1;
+  const label = (parts: string[]): string => parts.slice(-depth).join(path.sep);
+  const maxDepth = Math.max(names[0].length, names[1].length);
+  if (names[0].join("/") !== names[1].join("/")) while (depth < maxDepth && label(names[0]) === label(names[1])) depth++;
+  const display = (uri: vscode.Uri, parts: string[]): string => uri.scheme === "file" && uri.authority && depth >= parts.length ? uri.fsPath : label(parts);
+  const inputName = (uri: vscode.Uri, parts: string[]): string => before.scheme !== after.scheme && label(names[0]) === label(names[1]) && uri.scheme === "untitled" ? `${label(parts)} (Untitled)` : display(uri, parts);
+  return { before: inputName(before, names[0]), after: inputName(after, names[1]) };
+}
+function capturedPath(input: ModelSelector, key: string, uri?: vscode.Uri): string {
+  if (input.kind === "git") return displaySourcePath(repositoryFile(input.repository_uri, key));
+  return uri ? displaySourcePath(uri) : displayPath(key);
+}
+const modelPathPick = (root_file: string) => ({ label: displayPath(root_file), root_file });
 // The picker displays only a bounded subject; full commit bodies are not retained.
 const pickerRevision = (revision: PinnedCommit): PinnedCommit => ({ ...revision, message: revision.message.split("\n", 1)[0].slice(0, 512) });
 function textDiffTitle(resource: ComparisonResource, beforeKey?: string, afterKey?: string): string {
@@ -44,6 +69,43 @@ function cardSourceFiles(result: CapturedComparison, row: DiffRow, side: DiffSid
   }
   return [...uris];
 }
+function firstChangedLine(file: SourceFile, side: DiffSide): number | undefined {
+  const changed = side === "before" ? "removed" : "added";
+  for (const hunk of file.hunks) {
+    let line = hunk[side === "before" ? "before_start" : "after_start"] - 1;
+    for (const entry of hunk.lines) {
+      if (entry.role === changed) return line;
+      if (entry.role === "unchanged") line++;
+    }
+  }
+}
+function includedFileRows(resource: ComparisonResource, result: CapturedComparison): Map<string, IncludeRow> {
+  const rows = new Map<string, IncludeRow>();
+  for (const file of result.snapshot.sourceChanges.files) {
+    if (file.correspondence === "selected_roots") continue;
+    const describe = (side: DiffSide) => {
+      const own = file[side];
+      if (!own) return { label: null, sourceLabel: null, target: null };
+      const input = result.inputs[side], uri = result.sourceUris[side].get(own.file_key);
+      const filename = capturedPath(resource[side], own.file_key, uri);
+      const rootUri = result.sourceUris[side].get(input.root_file);
+      let label = filename;
+      if (input.kind === "git") label = displayPath(path.posix.relative(path.posix.dirname(input.root_file), own.file_key)) || path.basename(filename);
+      else if (uri?.scheme === "file" && rootUri?.scheme === "file") label = path.relative(path.dirname(rootUri.fsPath), filename) || path.basename(filename);
+      if (!own.exact_text_available || !uri || !Object.hasOwn(result.texts[side], own.file_key)) return { label, sourceLabel: label, target: null };
+      const line = file.change === "changed" ? firstChangedLine(file, side) : undefined;
+      const position = { line: line ?? 0, character: 0 };
+      return { label, sourceLabel: line === undefined ? label : `${label}:${line + 1}`,
+        target: { occurrence_id: file.pointer, domain: "aggregate", dimension: null, written_locations: [{ uri: uri.toString(), range: { start: position, end: position } }] } };
+    };
+    const before = describe("before"), after = describe("after");
+    rows.set(file.pointer, { id: file.pointer, section: "macroContext", group: "Macro context", kind: file.change,
+      label: after.label ?? before.label!, before: before.label, after: after.label, scopes: [], sideScopes: { before: null, after: null },
+      navigation: { id: file.pointer, kind: "source", before: before.target, after: after.target },
+      includeFile: true, sourceLabels: { before: before.sourceLabel, after: after.sourceLabel } });
+  }
+  return rows;
+}
 function checkSelection(token: vscode.CancellationToken): void {
   if (token.isCancellationRequested) throw new ComparisonFailure("CANCELLED", "Input selection was cancelled.");
 }
@@ -56,6 +118,8 @@ class ChangesDocument implements vscode.CustomDocument {
   generation = 0; instance = 0; disposed = false;
   status: ViewStatus = "loading"; message = "Loading comparison…";
   result?: CapturedComparison; captureId?: string; capture?: vscode.CancellationTokenSource; loading?: Promise<void>;
+  includeRows = new Map<string, IncludeRow>();
+  sourcePaths: Record<string, string> = {};
   failureSide?: DiffSide;
   failureCode?: string;
   analysisSummaries?: Record<DiffSide, AnalysisSummary>;
@@ -99,24 +163,45 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
   const current = (doc: ChangesDocument, generation: number, instance: number): boolean =>
     !disposed && !doc.disposed && doc.generation === generation && service.currentInstance === instance;
   const send = (doc: ChangesDocument): void => {
+    const result = doc.result, snapshot = result?.snapshot;
+    const summary = snapshot && { ...snapshot.summary, issues: snapshot.summary.issues.filter(issue => issue.effect !== "text_hunks") };
+    const rows = snapshot?.rows.map(row => ({ ...row, sourceFiles: { before: cardSourceFiles(result!, row, "before"), after: cardSourceFiles(result!, row, "after") } })) ?? [];
+    const sideSummary = (side: DiffSide): (AnalysisSummary & { search_paths?: string[] }) | undefined => {
+      const input = doc.result?.inputs[side];
+      return input ? { analysis: input.analysis, complete: input.complete, counts: input.counts ?? null, search_paths: input.search_paths.map(displayPath) } : doc.analysisSummaries?.[side];
+    };
+    const analysisSummaries = { before: sideSummary("before"), after: sideSummary("after") };
+    const configurationLabels = Object.fromEntries((["before", "after"] as const).map(side => {
+      const input = analysisSummaries[side];
+      const configuration = input?.analysis?.configuration ?? input?.requested_analysis;
+      return [side, configuration ? configurationSummary({ ...configuration, name: input?.analysis?.selection?.name ?? configuration.name }) : undefined];
+    }));
     for (const view of doc.views) void view.panel.webview.postMessage({ type: "render", key: doc.uri.toString(), token: doc.generation,
       captureId: doc.captureId, active: view.panel.active,
       before: inputLabel(doc.resource.before), after: inputLabel(doc.resource.after), status: doc.status, message: doc.message,
       canChoosePath: ["ROOT_NOT_FOUND", "REPOSITORY_CHANGED", "FILE_NOT_FOUND", "ROOT_OUTSIDE_REPOSITORY"].includes(doc.failureCode ?? ""),
       failureCode: doc.failureCode,
-      inputNames: Object.fromEntries((["before", "after"] as const).map(side => [side, sourceName(modelUri(doc.resource[side]).path)])),
+      inputNames: inputNames(modelUri(doc.resource.before), modelUri(doc.resource.after)),
       inputRevisions: Object.fromEntries((["before", "after"] as const).map(side => {
         const input = doc.resource[side];
         return [side, input.kind === "git" ? input.commit.slice(0, 7) : undefined];
       })),
-      rows: doc.result?.snapshot.rows.map(row => ({ ...row, sourceFiles: { before: cardSourceFiles(doc.result!, row, "before"), after: cardSourceFiles(doc.result!, row, "after") } })) ?? [], choices: view.choices,
-      defaults: diffPreferences(vscode.Uri.parse(doc.resource.context_uri), service.log), semantic: doc.result?.snapshot.semantic,
-      sourceChanges: doc.result?.snapshot.sourceChanges, coverage: doc.result?.snapshot.coverage, references: doc.result?.snapshot.references,
-      analysisSummaries: doc.result ? Object.fromEntries((["before", "after"] as const).map(side => [side, { analysis: doc.result!.inputs[side].analysis, complete: doc.result!.inputs[side].complete, counts: doc.result!.inputs[side].counts ?? null, search_paths: doc.result!.inputs[side].search_paths }])) : doc.analysisSummaries });
+      rows: [...rows, ...doc.includeRows.values()], choices: view.choices,
+      defaults: diffPreferences(vscode.Uri.parse(doc.resource.context_uri), service.log), semantic: Boolean(snapshot),
+      rootText: snapshot?.sourceChanges.root_text,
+      executedIncludes: result && snapshot?.sourceChanges.executed_includes && {
+        before: snapshot.sourceChanges.executed_includes.before.map(key => capturedPath(doc.resource.before, key, result.sourceUris.before.get(key))),
+        after: snapshot.sourceChanges.executed_includes.after.map(key => capturedPath(doc.resource.after, key, result.sourceUris.after.get(key))),
+      },
+      sourcePaths: doc.sourcePaths,
+      summary, references: snapshot?.references,
+      analysisSummaries, configurationLabels });
   };
   const release = (doc: ChangesDocument): void => {
     if (doc.result) { history.release(doc.result.holder); capturedText.release(doc.result.holder); }
     doc.result = undefined;
+    doc.includeRows.clear();
+    doc.sourcePaths = {};
     doc.captureId = undefined;
   };
   const stale = (doc: ChangesDocument, cause = "Comparison inputs changed."): void => {
@@ -157,6 +242,9 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       });
       if (!current(doc, generation, result.instance) || token.token.isCancellationRequested) { history.release(result.holder); return; }
       doc.instance = result.instance; doc.result = result; doc.captureId = randomUUID(); doc.status = "ready";
+      doc.includeRows = includedFileRows(doc.resource, result);
+      doc.sourcePaths = Object.fromEntries((["before", "after"] as const).flatMap(side =>
+        [...result.sourceUris[side]].map(([key, uri]) => [uri.toString(), capturedPath(doc.resource[side], key, uri)])));
       doc.message = "Current comparison";
       watchInputs(doc); send(doc);
     } catch (error) {
@@ -171,8 +259,8 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       release(doc); doc.analysisSummaries = error instanceof ComparisonFailure ? error.summaries : undefined; service.log(doc.message); send(doc);
     } finally { if (doc.capture === token) { token.dispose(); doc.capture = undefined; } }
   };
-  const modelUri = (input: ModelSelector): vscode.Uri => input.kind === "working" ? vscode.Uri.parse(input.root_uri) : vscode.Uri.joinPath(vscode.Uri.parse(input.repository_uri), input.root_file);
-  const openResource = async (resource: ComparisonResource, column?: vscode.ViewColumn, choices?: DiffChoices): Promise<void> => {
+  const modelUri = (input: ModelSelector): vscode.Uri => input.kind === "working" ? vscode.Uri.parse(input.root_uri) : repositoryFile(input.repository_uri, input.root_file);
+  const openResource = async (resource: ComparisonResource, column?: vscode.ViewColumn, choices?: DiffChoices, checkTarget?: () => void): Promise<void> => {
     const generation = opening, cancellation = new vscode.CancellationTokenSource();
     const cancel = invocation?.token.onCancellationRequested(() => cancellation.cancel());
     try {
@@ -182,6 +270,7 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       const anchor = resource.anchor === resource.after ? after : resource.anchor === resource.before ? before : resource.anchor;
       resource = { ...resource, before, after, anchor };
     } finally { cancel?.dispose(); cancellation.dispose(); }
+    checkTarget?.();
     const query = resourceQuery(resource);
     // A restored tab can still use the caption from an earlier release.
     const existing = [...documents.values()].find(document => document.uri.query === query);
@@ -199,13 +288,13 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       try { return [sources.fileKey(repository, root)]; } catch { return []; }
     });
     const choices = [...new Set([...currentCandidates, ...capture.modelPaths()])];
-    const root = await vscode.window.showQuickPick(choices.map(root_file => ({ label: root_file, description: currentCandidates.includes(root_file) ? "Current owner candidate; checked at this revision" : "Model at this revision", root_file })), { placeHolder: "Choose the model that includes this historical source" }, token);
+    const root = await vscode.window.showQuickPick(choices.map(root_file => ({ ...modelPathPick(root_file), description: currentCandidates.includes(root_file) ? "Current owner candidate; checked at this revision" : "Model at this revision" })), { placeHolder: "Choose the model that includes this historical source" }, token);
     checkSelection(token); if (!root) return undefined;
     const selected = { ...input, root_file: root.root_file }, context_uri = modelUri(selected).toString();
     const proof = await captureComparison(service, git, history, { schema_version: 1, before: selected, after: selected, anchor: selected, context_uri }, token);
     try {
       checkSelection(token);
-      if (!proof.inputs.after.file_keys.includes(invokingKey)) throw new Error(`${root.root_file} does not include ${invokingKey} at ${input.commit.slice(0, 7)}.`);
+      if (!proof.inputs.after.file_keys.includes(invokingKey)) throw new Error(`${displayPath(root.root_file)} does not include ${displayPath(invokingKey)} at ${input.commit.slice(0, 7)}.`);
       return selected;
     } finally { history.release(proof.holder); }
   };
@@ -219,7 +308,7 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
         const owners = service.knownOwners(document.uri);
         if (owners.length === 1) root = owners[0];
         else if (owners.length > 1) {
-          const selected = await vscode.window.showQuickPick(owners.map(root => ({ label: vscode.workspace.asRelativePath(root), description: root.fsPath, root })), { placeHolder: "Choose the model that owns this include" }, token);
+          const selected = await vscode.window.showQuickPick(owners.map(root => ({ label: displayPath(vscode.workspace.asRelativePath(root)), description: root.fsPath, root })), { placeHolder: "Choose the model that owns this include" }, token);
           checkSelection(token);
           if (!selected) return undefined;
           root = selected.root;
@@ -246,7 +335,7 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       const owners = history.owners(document.uri);
       if (owners.length === 1) return owners[0];
       if (owners.length > 1) {
-        const owner = await vscode.window.showQuickPick(owners.map(input => ({ label: input.root_file, input })), { placeHolder: "Choose the historical model owner" }, token);
+        const owner = await vscode.window.showQuickPick(owners.map(input => ({ ...modelPathPick(input.root_file), input })), { placeHolder: "Choose the historical model owner" }, token);
         checkSelection(token); return owner?.input;
       }
       const source = historicalSource(document.uri);
@@ -389,27 +478,32 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     if (!Object.hasOwn(capture.manifest, root_file)) {
       const rename = await sources.rename(repository, commit.hash, anchor.kind === "git" ? anchor.commit : undefined, root_file, signal); checkSelection(token);
       if (rename) {
-        const pick = await vscode.window.showQuickPick([{ label: `Use ${rename.before} → ${rename.after}`, key: rename.before }, { label: "Choose model path at this revision", key: "" }], { placeHolder: "Git found a root rename. Choose the Before path." }, token);
+        const pick = await vscode.window.showQuickPick([{ label: `Use ${displayPath(rename.before)} → ${displayPath(rename.after)}`, key: rename.before }, { label: "Choose model path at this revision", key: "" }], { placeHolder: "Git found a root rename. Choose the Before path." }, token);
         checkSelection(token);
         if (!pick) return undefined;
         if (pick.key) root_file = pick.key;
         else {
-          const selected = await vscode.window.showQuickPick(capture.modelPaths(), { placeHolder: "Choose the Before model at this revision" }, token);
-          checkSelection(token); if (!selected) return undefined; root_file = selected;
+          const selected = await vscode.window.showQuickPick(capture.modelPaths().map(modelPathPick), { placeHolder: "Choose the Before model at this revision" }, token);
+          checkSelection(token); if (!selected) return undefined; root_file = selected.root_file;
         }
       }
     }
     return { before: { kind: "git", repository_uri: repository.rootUri.toString(), commit: commit.hash, root_file, requested_ref: commit.requested_ref }, after: anchor };
   };
-  const start = async (argument?: unknown, fileOnly = false, from?: ChangesDocument, view?: EditorView): Promise<void> => {
-    const originating = from ?? (argument === undefined ? activeComparison() : undefined);
+  const start = async (argument?: unknown, fileOnly = false): Promise<void> => {
+    const active = activeComparison();
+    const originating = active && (argument === undefined || argument instanceof vscode.Uri && argument.toString() === active.uri.toString()) ? active : undefined;
+    const view = originating && [...originating.views].find(candidate => candidate.panel.active);
     const selection = beginSelection(originating, view), request = opening, { token, signal } = selection;
     try {
       const context = originating ? { anchor: originating.resource.anchor, context_uri: originating.resource.context_uri } : await anchorAtInvocation(argument, token, signal);
       if (!context || token.isCancellationRequested) return;
       const selected = await chooseBaseline(context.anchor, fileOnly, token, signal);
       if (!selected || disposed || request !== opening || token.isCancellationRequested) return;
-      await openResource({ schema_version: 1, ...context, ...selected, anchor: selected.after }, view?.panel.viewColumn, view?.choices);
+      const check = originating ? () => {
+        if (activeComparison() !== originating || !view?.panel.active) refuse("The active comparison changed. Open Show model changes again.");
+      } : undefined;
+      await openResource({ schema_version: 1, ...context, ...selected, anchor: selected.after }, view?.panel.viewColumn, view?.choices, check);
     } catch (error) { if (!disposed && request === opening && !token.isCancellationRequested) await explainFailure(service, error); }
     finally { selection.dispose(); }
   };
@@ -419,44 +513,50 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     if (!result || doc.status !== "ready" || !current(doc, generation, instance)) return expired();
     const verified = await validateCapturedInputs(service, result);
     if (!current(doc, generation, instance) || !verified) expired();
-    if (!current(doc, generation, instance)) expired();
   };
+  const comparisonChanged = () => new ActionFailure("This comparison changed while the action was open. Run the action again.", "INPUT_CHANGED");
   const sourceAction = async (doc: ChangesDocument, action: () => Promise<void>): Promise<void> => {
     const generation = doc.generation, instance = doc.instance;
     try { await action(); }
-    catch (error) { if (current(doc, generation, instance)) {
-      if (!(error instanceof ActionFailure && ["SOURCE_LOCATION_UNAVAILABLE", "CAPTURED_TEXT_UNAVAILABLE"].includes(String(error.code)))) stale(doc);
-      await explainFailure(service, error);
-    } }
+    catch (error) {
+      if (disposed) return;
+      const stillCurrent = current(doc, generation, instance);
+      const code = error instanceof ActionFailure ? error.code : undefined;
+      if (stillCurrent && code !== "SOURCE_LOCATION_UNAVAILABLE" && code !== "CAPTURED_TEXT_UNAVAILABLE" && code !== "ACTIVE_COMPARISON_CHANGED") stale(doc);
+      await explainFailure(service, stillCurrent || code === "INPUT_CHANGED" || code === "ACTIVE_COMPARISON_CHANGED" ? error : comparisonChanged());
+    }
   };
   const openSource = async (doc: ChangesDocument, row: Pick<DiffRow, "id" | "navigation">, side: DiffSide): Promise<void> => {
     const generation = doc.generation, instance = doc.instance, result = doc.result;
     if (!result) { refuse("This comparison has no current result. Refresh it before opening source."); }
-    const own = result.snapshot.rows.find(candidate => candidate.id === row.id), target = row.navigation[side] ?? row.navigation.block_openers?.[side];
+    const own = doc.includeRows.get(row.id) ?? result.snapshot.rows.find(candidate => candidate.id === row.id);
+    const target = row.navigation[side] ?? row.navigation.block_openers?.[side];
     const locations = target?.written_locations ?? (own ? cardSourceFiles(result, own, side) : []).map(uri => ({ uri, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } }));
     if (!locations.length) { refuse(`${side === "before" ? "Before" : "After"} source for ${own?.label ?? "the selected change"} has no verified location. No source jump was made.`, "SOURCE_LOCATION_UNAVAILABLE"); }
     const expired = (): never => refuse("Comparison inputs changed. Refresh the comparison before opening source.");
     await validateWorking(doc);
     const selected = locations.length === 1 ? locations[0] : (await vscode.window.showQuickPick(locations.map(location => ({
-      label: location.uri, description: `${side === "before" ? "Before" : "After"}${target ? ` · line ${location.range.start.line + 1}` : " · row not present"}`, location,
+      label: doc.sourcePaths[location.uri] ?? displaySourcePath(vscode.Uri.parse(location.uri)), description: `${side === "before" ? "Before" : "After"}${target ? ` · line ${location.range.start.line + 1}` : " · row not present"}`, location,
     })), { placeHolder: "Choose a contributing written source" }))?.location;
-    if (!selected || !current(doc, generation, instance)) return;
+    if (!selected) return;
+    if (!current(doc, generation, instance)) expired();
     const source = vscode.Uri.parse(selected.uri);
     let written = await vscode.workspace.openTextDocument(source);
     if (source.scheme === historyScheme) written = await vscode.languages.setTextDocumentLanguage(written, "dynare");
-    if (!current(doc, generation, instance)) return;
+    if (!current(doc, generation, instance)) expired();
     await validateWorking(doc);
-    if (!current(doc, generation, instance)) return;
+    if (!current(doc, generation, instance)) expired();
     const key = [...result.sourceUris[side]].find(([, uri]) => uri.toString() === source.toString())?.[0];
     if (!key || normalizeGitText(written.getText()) !== normalizeGitText(result.texts[side][key])) expired();
     const input = doc.resource[side]; if (input.kind === "working") service.selectOwner(written.uri, modelUri(input));
     const range = new vscode.Range(selected.range.start.line, selected.range.start.character, selected.range.end.line, selected.range.end.character);
     await vscode.window.showTextDocument(written, { selection: range });
   };
-  const openCaptured = async (doc: ChangesDocument, file: SourceFile): Promise<void> => {
+  const openCaptured = async (doc: ChangesDocument, file: Pick<SourceFile, "pointer" | "before" | "after">, checkTarget: () => void): Promise<void> => {
     const generation = doc.generation, instance = doc.instance, result = doc.result;
     if (!result || doc.status !== "ready") { refuse("Refresh this comparison before opening its captured text."); }
     await validateWorking(doc);
+    checkTarget();
     if (!current(doc, generation, instance)) return;
     const uri = (which: DiffSide): vscode.Uri | undefined => {
       const own = file[which];
@@ -467,32 +567,66 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     };
     const before = uri("before"), after = uri("after");
     if (!before || !after) refuse(`Text diff for ${sourceName(file.after?.file_key ?? file.before!.file_key)} was not opened: complete ${!before ? "Before" : "After"} text was not captured.`, "CAPTURED_TEXT_UNAVAILABLE");
-    await validateWorking(doc);
     if (current(doc, generation, instance)) await vscode.commands.executeCommand("vscode.diff", before, after, textDiffTitle(doc.resource, file.before?.file_key, file.after?.file_key));
   };
-  const chooseCaptured = async (doc: ChangesDocument): Promise<void> => {
+  const chooseCaptured = async (doc: ChangesDocument, checkTarget: () => void): Promise<void> => {
     const generation = doc.generation, instance = doc.instance;
-    const files = doc.result?.snapshot.sourceChanges?.files ?? [];
-    if (!files.length) { refuse("This comparison has no captured file changes to show."); }
-    await validateWorking(doc);
-    if (!current(doc, generation, instance)) return;
+    const result = doc.result;
+    if (!result || doc.status !== "ready") refuse("Refresh the comparison before opening Text diff.");
+    const files = result.snapshot.sourceChanges.files;
+    if (!files.length) {
+      const root = (side: DiffSide) => ({
+        file_key: result.inputs[side].root_file, input_id: result.inputs[side].input_id,
+        exact_text_available: Object.hasOwn(result.texts[side], result.inputs[side].root_file),
+      });
+      await openCaptured(doc, { pointer: "/selected_roots", before: root("before"), after: root("after") }, checkTarget);
+      return;
+    }
     const textAvailable = (file: SourceFile): boolean => (["before", "after"] as const).every(side => !file[side] ||
-      file[side].exact_text_available && Object.hasOwn(doc.result!.texts[side], file[side].file_key));
-    if (files.length === 1 && textAvailable(files[0])) { await openCaptured(doc, files[0]); return; }
+      file[side].exact_text_available && Object.hasOwn(result.texts[side], file[side].file_key));
+    if (files.length === 1 && textAvailable(files[0])) { await openCaptured(doc, files[0], checkTarget); return; }
+    await validateWorking(doc);
+    checkTarget();
+    if (!current(doc, generation, instance)) return;
     const names = files.map(file => sourceName(file.after?.file_key ?? file.before!.file_key));
     const selected = await vscode.window.showQuickPick(files.map((file, index) => {
       const available = textAvailable(file);
+      const before = file.before && capturedPath(doc.resource.before, file.before.file_key, result.sourceUris.before.get(file.before.file_key));
+      const after = file.after && capturedPath(doc.resource.after, file.after.file_key, result.sourceUris.after.get(file.after.file_key));
       return {
         label: names[index],
-        description: available ? `${names.filter(name => name === names[index]).length > 1 ? `${(file.after?.file_key ?? file.before!.file_key).split("/").slice(0, -1).join("/") || "."} · ` : ""}${file.change}${file.correspondence === "unpaired" ? " · file correspondence not established" : ""}` : "Text diff unavailable: complete captured text is missing",
-        detail: `Before: ${file.before?.file_key ?? "absent"} → After: ${file.after?.file_key ?? "absent"}`,
+        description: available ? `${names.filter(name => name === names[index]).length > 1 ? `${path.dirname(after ?? before!)} · ` : ""}${file.change}${file.correspondence === "unpaired" ? " · file correspondence not established" : ""}` : "Text diff unavailable: complete captured text is missing",
+        detail: `Before: ${before ?? "absent"} → After: ${after ?? "absent"}`,
         file, available,
       };
     }), { placeHolder: "Choose a changed file for text diff" });
-    if (!selected || !current(doc, generation, instance)) return;
+    if (!selected) return;
+    checkTarget();
+    if (!current(doc, generation, instance)) return;
     if (!selected.available) { refuse(`Text diff for ${selected.label} was not opened: complete captured text is unavailable.`, "CAPTURED_TEXT_UNAVAILABLE"); }
-    await openCaptured(doc, selected.file);
+    await openCaptured(doc, selected.file, checkTarget);
   };
+  const compareAction = (action: "refresh" | "swap" | "textDiff" | "find", uri?: unknown): Promise<void> => runCommand(service, async () => {
+    const doc = activeComparison();
+    const view = doc && [...doc.views].find(candidate => candidate.panel.active);
+    if (!doc || !view || uri !== undefined && (!(uri instanceof vscode.Uri) || uri.toString() !== doc.uri.toString())) {
+      refuse("Select the Changes editor before using this comparison action.");
+    }
+    const generation = doc.generation;
+    const checkTarget = (): void => {
+      if (activeComparison() !== doc || !view.panel.active) {
+        refuse("The active comparison changed. Run the action again.", "ACTIVE_COMPARISON_CHANGED");
+      }
+      if (doc.generation !== generation) throw comparisonChanged();
+    };
+    if (action === "refresh") await refresh(doc);
+    else if (action === "find") {
+      if (!await view.panel.webview.postMessage({ type: "findChanges" })) refuse("Find changes could not open. Select the Changes editor and try again.");
+    }
+    else if (action === "swap") await openResource({ ...doc.resource, before: doc.resource.after, after: doc.resource.before }, view.panel.viewColumn, view.choices, checkTarget);
+    else if (doc.status !== "ready") refuse("Refresh the comparison before opening Text diff.");
+    else await sourceAction(doc, () => chooseCaptured(doc, checkTarget));
+  }, () => !disposed);
   const choosePath = async (doc: ChangesDocument, view: EditorView): Promise<void> => {
     const selection = beginSelection(doc, view), { token, signal } = selection;
     try {
@@ -503,8 +637,8 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
         const repository = await sources.repositoryFor(vscode.Uri.parse(input.repository_uri), signal);
         const capture = await sources.capture(repository, await sources.resolve(repository, input.commit, signal), input.root_file, signal);
         checkSelection(token);
-        const root_file = await vscode.window.showQuickPick(capture.modelPaths(), { placeHolder: `Choose ${side === "before" ? "Before" : "After"} model path at ${input.commit.slice(0, 7)}` }, token);
-        checkSelection(token); if (root_file) selected = { ...input, root_file };
+        const pick = await vscode.window.showQuickPick(capture.modelPaths().map(modelPathPick), { placeHolder: `Choose ${side === "before" ? "Before" : "After"} model path at ${input.commit.slice(0, 7)}` }, token);
+        checkSelection(token); if (pick) selected = { ...input, root_file: pick.root_file };
       } else {
         const uri = (await vscode.window.showOpenDialog({ title: `Choose the ${side} model`, filters: { "Dynare models": ["mod", "dyn"] }, canSelectMany: false }))?.[0];
         checkSelection(token); if (uri) selected = { kind: "working", root_uri: uri.toString() };
@@ -534,27 +668,14 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
             send(doc);
           }
           else if (message.type === "choices" && message.key === key) { view.choices = normalizeChoices(message.choices, defaults); remembered.set(key, view.choices); }
-          else if (message.type === "refresh") void refresh(doc);
           else if (message.type === "help") void vscode.commands.executeCommand("dygnosis.openHelp", "structural-diff");
-          else if (message.type === "changeComparison") void start(undefined, false, doc, view);
-          else if (message.type === "swap") void runCommand(service, () => openResource({ ...doc.resource, before: doc.resource.after, after: doc.resource.before }, panel.viewColumn, view.choices), () => !disposed && !doc.disposed);
           else if (message.type === "choosePath") void runCommand(service, () => choosePath(doc, view), () => !disposed && !doc.disposed);
-          else if (message.type === "rootTextDiff" && message.token === doc.generation && doc.status === "ready") {
-            const generation = doc.generation, instance = doc.instance;
-            void sourceAction(doc, async () => {
-              await validateWorking(doc);
-              if (!current(doc, generation, instance)) return;
-              const result = doc.result!, before = result.sourceUris.before.get(result.inputs.before.root_file), after = result.sourceUris.after.get(result.inputs.after.root_file);
-              if (!before || !after) refuse("Complete captured source is unavailable for one comparison model.");
-              await vscode.commands.executeCommand("vscode.diff", before, after, textDiffTitle(doc.resource, result.inputs.before.root_file, result.inputs.after.root_file));
-            });
-          } else if (message.type === "openSource" && message.token === doc.generation && doc.status === "ready" && typeof message.rowId === "string" && (message.side === "before" || message.side === "after")) {
-            const row = doc.result?.snapshot.rows.find(row => row.id === message.rowId); if (row) void sourceAction(doc, () => openSource(doc, row, message.side as DiffSide));
+          else if (message.type === "openSource" && message.token === doc.generation && doc.status === "ready" && typeof message.rowId === "string" && (message.side === "before" || message.side === "after")) {
+            const row = doc.includeRows.get(message.rowId) ?? doc.result?.snapshot.rows.find(row => row.id === message.rowId);
+            if (row) void sourceAction(doc, () => openSource(doc, row, message.side as DiffSide));
           } else if (message.type === "openReference" && message.token === doc.generation && doc.status === "ready" && typeof message.pointer === "string" && (message.side === "before" || message.side === "after")) {
             const reference = doc.result?.snapshot.references?.find(reference => reference.pointer === message.pointer && reference.side === message.side);
             if (reference) void sourceAction(doc, () => openSource(doc, { id: reference.pointer, navigation: reference.navigation }, reference.side));
-          } else if (message.type === "capturedTextDiff" && message.token === doc.generation && doc.status === "ready") {
-            void sourceAction(doc, () => chooseCaptured(doc));
           }
         }), panel.onDidChangeViewState(() => { if (panel.visible) send(doc); }));
       panel.webview.html = diffHtml(panel.webview, assets); send(doc);
@@ -593,6 +714,10 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
     vscode.window.registerCustomEditorProvider(changesViewType, provider, { supportsMultipleEditorsPerDocument: true, webviewOptions: { retainContextWhenHidden: false } }),
     vscode.commands.registerCommand("dygnosis.openChanges", (argument?: unknown) => start(argument)),
     vscode.commands.registerCommand("dygnosis.diffWith", (argument?: unknown) => start(argument, true)),
+    vscode.commands.registerCommand("dygnosis.refreshComparison", (uri?: unknown) => compareAction("refresh", uri)),
+    vscode.commands.registerCommand("dygnosis.swapComparisonSides", (uri?: unknown) => compareAction("swap", uri)),
+    vscode.commands.registerCommand("dygnosis.comparisonTextDiff", (uri?: unknown) => compareAction("textDiff", uri)),
+    vscode.commands.registerCommand("dygnosis.findChanges", () => compareAction("find")),
     new vscode.Disposable(() => { disposed = true; ++opening; invocation?.cancel(); invocation?.dispose(); for (const doc of [...documents.values()]) doc.dispose(); remembered.clear(); void gitSources?.then(sources => sources.clear()); }));
   return registration;
 }

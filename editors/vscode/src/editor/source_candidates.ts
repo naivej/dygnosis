@@ -4,6 +4,7 @@ import { location, record } from "../client/protocol";
 import type { Location } from "../client/protocol";
 import { CommandCancelled, refuse, runCommand } from "../client/refusal";
 import { captureSelection, commandEditor, comparePositions } from "../client/editor_target";
+import { displayPath } from "../client/source_uri";
 
 export interface SourceCandidate {
   source_id: string;
@@ -75,7 +76,7 @@ export function registerSourceCandidates(service: Pick<DygnosisClient, "ensureSt
     }
     const pick = await vscode.window.showQuickPick(proof.candidates.map(candidate => ({
       label: candidate.name, description: `${candidate.kind ?? "declaration"} · ${candidate.availability === "mixed" ? "active in some expansions" : candidate.availability}`,
-      detail: `${vscode.workspace.asRelativePath(document.uri)}:${String(candidate.location.range.start.line + 1)}`, candidate,
+      detail: `${displayPath(vscode.workspace.asRelativePath(document.uri))}:${String(candidate.location.range.start.line + 1)}`, candidate,
     })), { title: "Dynare: Source declarations", placeHolder: "Choose a declaration; this does not establish references" });
     if (!pick) throw new CommandCancelled();
     if (!current()) refuse("The source or server changed while choosing a candidate. Request source candidates again.");

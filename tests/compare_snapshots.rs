@@ -140,10 +140,12 @@ fn configuration_only_comparison_retains_choices_and_empty_source_diff() {
     let result = compare_captured_snapshots(old, new, SnapshotCoordinates::Lsp);
     assert_eq!(result["state"], "result", "{result}");
     assert_eq!(
-        result["diff"]["changed_equations"]
+        result["diff"]["semantic"]["rows"]
             .as_array()
             .unwrap()
-            .len(),
+            .iter()
+            .filter(|row| row["family"] == "equations" && row["change"] == "changed")
+            .count(),
         1
     );
     assert!(
@@ -280,7 +282,7 @@ fn changed_row(result: &Value) -> &Value {
         .as_array()
         .unwrap()
         .iter()
-        .find(|row| row["id"] == "/changed_equations/0")
+        .find(|row| row["family"] == "equations")
         .unwrap()
 }
 
@@ -501,8 +503,7 @@ fn same_path_at_two_commits_has_two_source_identities_and_exact_utf16_ranges() {
     }
     let same =
         compare_captured_snapshots(ready(&before), ready(&equivalent), SnapshotCoordinates::Lsp);
-    assert_eq!(same["diff"]["changed_equations"], serde_json::json!([]));
-    assert_eq!(same["diff"]["added_equations"], serde_json::json!([]));
+    assert_eq!(same["diff"]["semantic"]["rows"], serde_json::json!([]));
 }
 
 #[test]
@@ -534,15 +535,8 @@ fn working_and_historical_resolvers_agree_for_supported_candidates() {
     let result = compare_captured_snapshots(historical, working, SnapshotCoordinates::Lsp);
     std::fs::remove_dir_all(&directory).unwrap();
     assert_eq!(result["state"], "result", "{result}");
-    for key in [
-        "changed_equations",
-        "added_equations",
-        "removed_equations",
-        "added_endogenous",
-        "removed_endogenous",
-    ] {
-        assert_eq!(result["diff"][key], serde_json::json!([]), "{key}");
-    }
+    assert_eq!(result["diff"]["summary"]["semantic_rows"], 0);
+    assert_eq!(result["diff"]["semantic"]["rows"], serde_json::json!([]));
     assert_eq!(result["inputs"]["after"]["source_policy"], "saved_files");
     assert!(
         result["inputs"]["after"]["dependency_candidates"]

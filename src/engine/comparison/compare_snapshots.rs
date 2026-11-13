@@ -12,12 +12,12 @@ use crate::engine::analysis_configuration::{
     AnalysisConfiguration, AnalysisMetadata, ConfigurationError,
 };
 use crate::engine::comparison::compare_navigation::{
-    ComparisonInput, Coordinates, navigation_json,
+    ComparisonInput, Coordinates, populate_source_comparison, semantic_wire,
 };
 use crate::engine::comparison::semantic_diff::{
     CaptureBoundary, SourceFilePair, SourceIdentityProof,
 };
-use crate::engine::comparison::{CompareSource, compare_models_with_sources};
+use crate::engine::comparison::{CompareSource, compare_captured_models};
 use crate::engine::language::model::Model;
 use crate::engine::workspace::Workspace;
 
@@ -859,10 +859,12 @@ mod configured_capture_tests {
         let result = compare_captured_snapshots(before, after, SnapshotCoordinates::Lsp);
         assert_eq!(result["state"], "result", "{result}");
         assert_eq!(
-            result["diff"]["changed_equations"]
+            result["diff"]["semantic"]["rows"]
                 .as_array()
                 .unwrap()
-                .len(),
+                .iter()
+                .filter(|row| row["family"] == "equations" && row["change"] == "changed")
+                .count(),
             1
         );
         assert_eq!(*live.root_analysis_configuration("root.mod"), preview);
@@ -1136,7 +1138,7 @@ pub fn compare_captured_snapshots_ref(
     if let Err(failure) = validate_working_pair(before, after, None) {
         return failure.response("after");
     }
-    let mut diff = compare_models_with_sources(
+    let mut diff = compare_captured_models(
         &before.model,
         &after.model,
         before
@@ -1193,17 +1195,13 @@ pub fn compare_captured_snapshots_ref(
     )
     .with_snapshot_identity(&after.input_id, after.inputs["commit"].as_str());
     let include_pairs = source_pairs(before, after);
-    crate::engine::comparison::compare_navigation::populate_written_statements(
-        &mut diff, &old, &new,
-    );
-    let boundary = CaptureBoundary::RootAndExecutedIncludes;
-    let _ = crate::engine::comparison::semantic_diff::populate_captured_sources(
+    populate_source_comparison(
         &mut diff,
-        old.source_input(boundary),
-        new.source_input(boundary),
+        &old,
+        &new,
+        CaptureBoundary::RootAndExecutedIncludes,
         &include_pairs,
     );
-    crate::engine::comparison::semantic_diff::enforce_output_budget(&mut diff);
     for (side, input) in [("before", &before), ("after", &after)] {
         if !input.historical && !input.workspace.input_snapshot_is_current(&input.root) {
             return input_changed().response(side);
@@ -1212,8 +1210,17 @@ pub fn compare_captured_snapshots_ref(
     if let Err(failure) = validate_working_pair(before, after, None) {
         return failure.response("after");
     }
+    let (wire, navigation) = semantic_wire(
+        &diff,
+        &old,
+        &new,
+        match coordinates {
+            SnapshotCoordinates::Lsp => Coordinates::SnapshotLsp,
+            SnapshotCoordinates::Mcp => Coordinates::SnapshotMcp,
+        },
+    );
     json!({"state":"result", "inputs":{"schema_version":SNAPSHOT_SCHEMA_VERSION, "before":before.inputs, "after":after.inputs},
-        "diff":diff.to_json(), "navigation":navigation_json(&diff, &old, &new, match coordinates { SnapshotCoordinates::Lsp => Coordinates::SnapshotLsp, SnapshotCoordinates::Mcp => Coordinates::SnapshotMcp }),
+        "diff":wire, "navigation":navigation,
         "sources":{"before":before.sources, "after":after.sources}})
 }
 

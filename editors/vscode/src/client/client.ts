@@ -13,7 +13,7 @@ import type { OutlineActivity } from "./settings";
 import { AnalysisConfiguration, AnalysisContext, PresetBinding, ModelInfo, parseAnalysisContext, parseModelInfo, record, timingModifiers, tokenRoles } from "./protocol";
 import type { Range } from "./protocol";
 import { renameSymbol } from "./rename";
-import { sameSourceUri as sameUri, sourceUriKey } from "./source_uri";
+import { displayPath, sameSourceUri as sameUri, sourceUriKey } from "./source_uri";
 import { ModelActivity, RequestActivity } from "./activity";
 
 interface ClientProcess extends ManagedClient { readonly client: LanguageClient }
@@ -424,7 +424,7 @@ export class DygnosisClient implements vscode.Disposable {
       if (this.closed || generation !== this.startGeneration) return;
       const binary = await (this.dependencies.resolve ?? resolveBinary)(this.context, this.log);
       if (this.closed || generation !== this.startGeneration) return;
-      this.log(`LSP executable: ${binary.path}`);
+      this.log(`LSP executable: ${displayPath(binary.path)}`);
       const create = this.dependencies.create ?? ((...args: ConstructorParameters<typeof ProcessClient>) => new ProcessClient(...args));
       await this.lifecycle.replace(() => create(binary, this.output, this.activity.middleware(this.middleware, document => this.selectedOwners.get(document) ??
         (isRootUri(vscode.Uri.parse(document)) && !this.ownedDocuments.has(document) ? document : undefined)), configurationSnapshot(this.log), params => { this.lastInitializeParams = params; }), async managed => {
@@ -852,7 +852,7 @@ export class DygnosisClient implements vscode.Disposable {
       return isRootUri(document.uri) ? document.uri : undefined;
     }
     if (!prompt) return undefined;
-    const pick = await vscode.window.showQuickPick(owners.map(root => ({ label: vscode.workspace.asRelativePath(root), description: root.fsPath, root })), { placeHolder: "Choose the model that owns this include" }, token);
+    const pick = await vscode.window.showQuickPick(owners.map(root => ({ label: displayPath(vscode.workspace.asRelativePath(root)), description: root.fsPath, root })), { placeHolder: "Choose the model that owns this include" }, token);
     if (token?.isCancellationRequested) return undefined;
     if (this.selectedOwners.get(key) !== selection) return undefined;
     if (!pick) throw new CommandCancelled();

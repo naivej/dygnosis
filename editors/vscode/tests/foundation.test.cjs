@@ -127,6 +127,7 @@ test("the palette exposes user actions in their context and hides aliases and ta
     ["resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewWrittenSource", ["goToWrittenSource"]],
     ["resourceScheme == dygnosis-effective && dygnosis.effectivePreview", ["refreshEffectiveModel"]],
     ["dygnosis.changesContext", ["openChanges", "diffWith"]],
+    ["activeCustomEditorId == dygnosis.changes", ["refreshComparison", "swapComparisonSides", "comparisonTextDiff", "findChanges"]],
     ["dygnosis.analysisDocument || dygnosis.effectivePreview", ["selectAnalysisConfiguration", "resetAnalysisConfiguration"]],
     ["(dygnosis.analysisDocument || dygnosis.effectivePreview) && workspaceFolderCount > 0", ["saveAnalysisConfiguration"]],
     ["workspaceFolderCount > 0", ["showNotFullyCheckedModels", "showAllWorkspaceFiles", "recheckWorkspace", "cancelWorkspace", "configureWorkspaceExclusions"]],

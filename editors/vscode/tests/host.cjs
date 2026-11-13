@@ -75,10 +75,15 @@ async function historyThemeChecks(evidence) {
 
 async function historyPaletteCheck(evidence, description) {
   if (!process.env.DYGNOSIS_HOST_CDP_PORT) return;
-  await vscode.commands.executeCommand("workbench.action.quickOpen", ">Dygnosis: Open changes");
+  await vscode.commands.executeCommand("workbench.action.showCommands");
   try {
     await waitFor(async () => hostDevtools(async send => {
-      const response = await send("Runtime.evaluate", { expression: 'Array.from(document.querySelectorAll(".quick-input-list .monaco-list-row")).some(row => row.getClientRects().length > 0 && row.textContent.includes("Dygnosis: Open changes") && row.getAttribute("aria-disabled") !== "true" && !row.classList.contains("disabled"))', returnByValue: true });
+      const response = await send("Runtime.evaluate", { expression: 'Boolean(document.activeElement?.closest(".quick-input-widget"))', returnByValue: true });
+      return response.result.value;
+    }), "native Command Palette input receives focus");
+    await hostDevtools(send => send("Input.insertText", { text: "Show model changes" }));
+    await waitFor(async () => hostDevtools(async send => {
+      const response = await send("Runtime.evaluate", { expression: 'Array.from(document.querySelectorAll(".quick-input-list .monaco-list-row")).some(row => row.getClientRects().length > 0 && row.textContent.includes("Dygnosis: Show model changes") && row.getAttribute("aria-disabled") !== "true" && !row.classList.contains("disabled"))', returnByValue: true });
       return response.result.value;
     }), description);
     evidence.history_palette_enabled = true;
@@ -95,17 +100,17 @@ async function historyKeyboardCheck(evidence) {
     for (const frame of frames.reverse()) {
       try {
         const world = await send("Page.createIsolatedWorld", { frameId: frame.id, worldName: "dygnosis-history-keyboard-evidence" });
-        const response = await send("Runtime.evaluate", { contextId: world.executionContextId, expression: 'Boolean(document.getElementById("changeComparison"))', returnByValue: true });
+        const response = await send("Runtime.evaluate", { contextId: world.executionContextId, expression: 'Boolean(document.getElementById("search"))', returnByValue: true });
         if (response.result.value) { context = world.executionContextId; break; }
       } catch { /* Cross-process webview frames can require their own CDP target. */ }
     }
     if (!context) { evidence.history_keyboard = { checked: false, barrier: "The workbench CDP target did not expose the rendered webview control frame." }; return; }
-    await send("Runtime.evaluate", { contextId: context, expression: 'document.getElementById("changeComparison").focus()' });
+    await send("Runtime.evaluate", { contextId: context, expression: 'document.getElementById("search").focus()' });
     await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
     await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
     const response = await send("Runtime.evaluate", { contextId: context, expression: 'JSON.stringify({id:document.activeElement.id,outline:getComputedStyle(document.activeElement).outlineStyle,width:getComputedStyle(document.activeElement).outlineWidth})', returnByValue: true });
     const focused = JSON.parse(response.result.value);
-    assert.equal(focused.id, "swap", "native Tab moves between the visible Changes controls");
+    assert.match(focused.id, /^(kind-toggle-|change-type-|search)/, "native Tab reaches the Changes filter controls");
     assert.notEqual(focused.outline, "none"); assert.notEqual(focused.width, "0px");
     evidence.history_keyboard = { checked: true, from: "Change comparison…", to: "Swap sides", focus_outline: focused };
   });
@@ -519,7 +524,7 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
     await vscode.window.showTextDocument(nativeGitBody, { preview: false });
     if (process.env.DYGNOSIS_HOST_CDP_PORT) {
       await waitFor(async () => hostDevtools(async send => {
-        const response = await send("Runtime.evaluate", { expression: 'Array.from(document.querySelectorAll(".editor-actions .action-label")).some(action => action.getClientRects().length > 0 && ((action.getAttribute("title") || "") + (action.getAttribute("aria-label") || "")).includes("Open changes") && action.getAttribute("aria-disabled") !== "true" && !action.classList.contains("disabled"))', returnByValue: true });
+        const response = await send("Runtime.evaluate", { expression: 'Array.from(document.querySelectorAll(".editor-actions .action-label")).some(action => action.getClientRects().length > 0 && ((action.getAttribute("title") || "") + (action.getAttribute("aria-label") || "")).includes("Show model changes") && action.getAttribute("aria-disabled") !== "true" && !action.classList.contains("disabled"))', returnByValue: true });
         return response.result.value;
       }), "native title offers Open changes on a known plaintext Git include");
       await historyPaletteCheck(evidence, "native Command Palette offers Open changes on a known plaintext Git include");
@@ -536,25 +541,28 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
       mcpTool = vscode.lm.tools.find(tool => tool.name.endsWith("_dynare_compare_models")); return !!mcpTool;
     }, "native repository comparison MCP tool discovery");
     const repositoryInput = { repository_path: repositoryPath, before: { kind: "git", root_file: "root.mod", ref: afterCommit }, after: { kind: "working", root_file: "root.mod" } };
+    const equations = data => data.semantic.rows.filter(row => row.family === "equations")
+      .map(({ name, change, fields, expressions, timing }) => ({ name, change, fields, expressions, timing }));
     const invoke = async input => {
       const result = await vscode.lm.invokeTool(mcpTool.name, {
-        input: { comparison: { kind: "repository", ...input }, sections: ["structural"] },
+        input: { comparison: { kind: "repository", ...input }, sections: ["semantic"], detail: "full" },
       }, token.token);
       const envelope = JSON.parse(result.content.filter(item => item instanceof vscode.LanguageModelTextPart).map(item => item.value).join("\n"));
       assert.equal(envelope.schema_version, 3);
       return envelope.data;
     };
     const mcpSaved = await invoke(repositoryInput);
-    assert.deepEqual(mcpSaved.changed_equations, savedWire.diff.changed_equations);
+    assert.deepEqual(equations(mcpSaved), equations(savedWire.diff));
     assert.equal(mcpSaved.inputs.after.source_policy, "saved_files");
     const mcpFixed = await invoke({ ...repositoryInput, before: { kind: "git", root_file: "root.mod", ref: beforeCommit }, after: { kind: "git", root_file: "root.mod", ref: afterCommit } });
-    assert.deepEqual(mcpFixed.changed_equations, fixedWire.diff.changed_equations);
+    assert.deepEqual(equations(mcpFixed), equations(fixedWire.diff));
     const edit = new vscode.WorkspaceEdit(); edit.replace(body.uri, new vscode.Range(body.positionAt(0), body.positionAt(body.getText().length)), bodyText(4));
     assert.equal(await vscode.workspace.applyEdit(edit), true); assert.equal(body.isDirty, true);
     assert.equal(body.languageId, "plaintext", "the unsaved edit must precede the language change");
     assert.ok(service.knownOwners(body.uri).some(owner => owner.toString() === rootUri.toString()), "the root snapshot proves the include owner");
     const unrelated = await vscode.workspace.openTextDocument(path.join(workspaceRoot, "model.mod"));
     await vscode.window.showTextDocument(unrelated);
+    await currentSnapshot(service, unrelated, () => service.modelInfo(unrelated.uri), "unrelated Dynare editor is ready");
     await historyPaletteCheck(evidence, "native Command Palette offers Open changes with an unrelated editor active");
     const selected = [], selectOwner = service.selectOwner.bind(service);
     service.selectOwner = (document, owner) => {
@@ -575,15 +583,16 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
     let scmWire;
     await waitFor(() => {
       scmWire = transport.findLast(result => result?.state === "result");
-      return scmWire?.inputs.after.kind === "working" && scmWire.inputs.after.root_uri === rootUri.toString() && scmWire.diff.changed_equations[0]?.text_new?.includes("4");
+      return scmWire?.inputs.after.kind === "working" && scmWire.inputs.after.root_uri === rootUri.toString()
+        && equations(scmWire.diff).some(row => row.expressions.some(expression => expression.field === "expression" && expression.after?.text.includes("4")));
     }, "native SCM Open changes captures the unsaved arbitrary-extension include");
-    assert.deepEqual((await invoke(repositoryInput)).changed_equations, mcpSaved.changed_equations);
+    assert.deepEqual(equations(await invoke(repositoryInput)), equations(mcpSaved));
     evidence.checks.push("explicit SCM URI on an unsaved plaintext .data include uses its proven owner with an unrelated editor active, selects owner before Dynare language change, retains context after cache invalidation, and keeps editor/MCP source policies distinct");
     await currentSnapshot(service, root, () => service.modelInfo(root.uri), "history unsaved include snapshot");
     const unsaved = await captureComparison(service, async () => sources, historical, workingResource, token.token);
-    const changedEquation = unsaved.snapshot.rows.find(row => row.id === "/changed_equations/0");
+    const changedEquation = unsaved.snapshot.rows.find(row => row.semantic.family === "equations" && row.kind === "changed");
     assert.ok(changedEquation?.semantic.expressions.some(expression => expression.field === "expression" && expression.after?.text.includes("4")));
-    assert.deepEqual((await invoke(repositoryInput)).changed_equations, mcpSaved.changed_equations, "independent MCP still reads saved include bytes");
+    assert.deepEqual(equations(await invoke(repositoryInput)), equations(mcpSaved), "independent MCP still reads saved include bytes");
     await vscode.commands.executeCommand("workbench.mcp.stopServer", serverId);
     evidence.checks.push("native VS Code MCP discovery and repository calls agree with editor snapshots for saved and fixed inputs; an unsaved include affects the editor while MCP retains saved bytes");
 
@@ -604,6 +613,9 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
     await waitFor(() => tabs(fixedUri).length === 2, "comparison opens in two editor groups");
     await vscode.window.tabGroups.close(tabs(fixedUri)[0]);
     assert.equal(tabs(fixedUri).length, 1, "closing one split retains the other");
+    await vscode.window.tabGroups.close(tabs(fixedUri)[0]);
+    await vscode.commands.executeCommand("workbench.action.reopenClosedEditor");
+    await waitFor(() => tabs(fixedUri).length === 1, "closed Changes tab restores its ordered comparison");
     const swappedUri = comparisonUri({ ...fixedResource, before: fixedResource.after, after: fixedResource.before });
     await vscode.commands.executeCommand("vscode.openWith", swappedUri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
     await waitFor(() => tabs(swappedUri).length === 1, "swapped ordered comparison owns another resource");
@@ -630,18 +642,20 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
 
     await vscode.window.showTextDocument(newSource, { preview: false });
     const opening = vscode.commands.executeCommand("dygnosis.openChanges");
-    await new Promise(resolve => setTimeout(resolve, 800));
-    if (process.env.DYGNOSIS_HOST_CDP_PORT) await hostDevtools(async send => {
-      const response = await send("Runtime.evaluate", { expression: 'JSON.stringify({labels:Array.from(document.querySelectorAll(".quick-input-list .label-name")).filter(row => row.getClientRects().length > 0).map(row => row.textContent),placeholder:document.querySelector(".quick-input-widget input")?.placeholder})', returnByValue: true });
-      const picker = JSON.parse(response.result.value);
-      assert.equal(picker.placeholder, "Choose Before");
-      assert.ok(picker.labels.includes("Model file…"));
-      assert.equal(picker.labels.includes("Configuration…"), false);
-      assert.equal(picker.labels.includes("With previous revision"), false);
-      assert.ok(picker.labels.some(label => /^[0-9a-f]{7}$/.test(label)), "the picker shows local commit rows");
-      assert.equal(picker.labels.includes("With revision…"), false);
-      assert.equal(picker.labels.includes("With branch or tag…"), false);
-    });
+    if (process.env.DYGNOSIS_HOST_CDP_PORT) {
+      await hostDevtools(async send => {
+        let picker;
+        await waitFor(async () => {
+          const response = await send("Runtime.evaluate", { expression: '({labels:Array.from(document.querySelectorAll(".quick-input-list .label-name")).filter(row => row.getClientRects().length > 0).map(row => row.textContent),placeholder:document.querySelector(".quick-input-widget input")?.placeholder})', returnByValue: true });
+          picker = response.result.value;
+          return picker?.placeholder === "Choose Before" && picker.labels.includes(beforeCommit.slice(0, 7));
+        }, "the historical picker lists the local commit");
+        assert.ok(picker.labels.includes("Model file…"));
+        for (const obsolete of ["Configuration…", "With previous revision", "With revision…", "With branch or tag…"]) {
+          assert.equal(picker.labels.includes(obsolete), false);
+        }
+      });
+    } else await new Promise(resolve => setTimeout(resolve, 800));
     await historyScreenshot("picker", evidence);
     await chooseCommit(beforeCommit, false); await opening;
     let opened;
@@ -656,6 +670,7 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
     evidence.history = { beforeCommit, afterCommit, repository_root: repository.rootUri.toString(), git_api: 1, snapshot_schema: fixedWire.inputs.schema_version,
       navigation_schema: fixedWire.navigation.schema_version, source_requests: transport.filter(value => value?.state === "needs_sources").length,
       fixed_changes: fixed.snapshot.rows.length, native_mcp_agreement: true, historical_tabs_read_only: true };
+    assert.equal(await adoptedBody.save(), true, "save the disposable unsaved-include fixture before host exit");
     await vscode.window.tabGroups.close(vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === changesViewType));
   } finally {
     service.execute = execute; token.cancel(); token.dispose(); sources.clear();
@@ -675,7 +690,7 @@ exports.run = async function run() {
     evidence.extension_version = extension.packageJSON.version;
     evidence.extension_entrypoint_sha256 = createHash("sha256").update(await fs.readFile(path.resolve(extension.extensionPath, extension.packageJSON.main))).digest("hex");
     const service = await extension.activate();
-    assert.ok(["all", "mcp", "semantic", "folding", "presentation", "rename", "workspace", "syntax", "lifecycle", "analysis", "help", "preview", "menu"].includes(scope), "Unknown native host scope");
+    assert.ok(["all", "mcp", "semantic", "history", "folding", "presentation", "rename", "workspace", "syntax", "lifecycle", "analysis", "help", "preview", "menu"].includes(scope), "Unknown native host scope");
     if (scope === "menu") {
       await require("./helpers/menu_host.cjs").checkMenu(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, currentSnapshot, writeObservedInput });
       await service.shutdown();
@@ -772,6 +787,16 @@ exports.run = async function run() {
       await service.shutdown();
       evidence.artifacts_after = await historyArtifacts();
       assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "the engine and compiled extension must remain unchanged throughout the host gate");
+      evidence.passed = true;
+      return;
+    }
+    if (scope === "history") {
+      const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      await fs.writeFile(path.join(root, "model.mod"), "var y; model; y=0; end;\n");
+      await checkGitHistory(service, root, evidence);
+      await service.shutdown();
+      evidence.artifacts_after = await historyArtifacts();
+      assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "native history acceptance uses one matching candidate");
       evidence.passed = true;
       return;
     }

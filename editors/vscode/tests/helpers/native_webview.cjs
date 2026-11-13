@@ -72,7 +72,7 @@ async function nativeWorkbench(callback) {
   }
 }
 
-async function nativeChanges(callback, marker = "changeComparison") {
+async function nativeChanges(callback, marker = "search") {
   return nativeWorkbench(async send => {
     const contexts = new Map(), sessions = new Map();
     send.onEvent(event => {

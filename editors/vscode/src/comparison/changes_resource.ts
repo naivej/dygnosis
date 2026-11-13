@@ -72,9 +72,3 @@ export function resourceName(resource: ComparisonResource): string {
 export function configurationLabel(analysis: AnalysisConfiguration): string {
   return configurationSummary(analysis);
 }
-export function inputLabel(input: ModelSelector): string {
-  const analysis = input.analysis ? ` · ${configurationLabel(input.analysis)}` : "";
-  if (input.kind === "working") return `${decodeURIComponent(new URL(input.root_uri).pathname)} · Working${analysis}`;
-  const commit = input.commit.slice(0, 7), ref = input.requested_ref.replace(/^[0-9a-f]{40,64}(?=$|[~^])/, value => value.slice(0, 7));
-  return `${input.root_file}${ref && ref !== commit ? ` @ ${ref}` : ""} · ${commit}${analysis}`;
-}

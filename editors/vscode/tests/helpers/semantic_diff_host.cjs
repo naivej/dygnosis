@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { Buffer } = require("node:buffer");
+const { performance } = require("node:perf_hooks");
 const { URL } = require("node:url");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
@@ -55,6 +56,7 @@ async function checkSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     await checkRegionalInputs(service, workspaceRoot, evidence, waitFor);
     await checkFrbDependencies(service, workspaceRoot, evidence, waitFor);
     await checkHistoryCardSource(service, workspaceRoot, evidence, waitFor);
+    await checkComparisonScale(service, workspaceRoot, evidence, waitFor);
   } finally {
     for (const [key, value] of Object.entries(saved)) await config.update(key, value, vscode.ConfigurationTarget.Workspace);
   }
@@ -79,7 +81,7 @@ async function checkEquationSurgerySource(service, workspaceRoot, evidence, wait
     try { return await nativeChanges(async ({ evaluate }) => {
       evidence.semantic_surgery_state = await evaluate('({status:document.getElementById("status").className,failureCode:document.getElementById("status").getAttribute("data-code"),message:document.getElementById("status").textContent,groups:[...document.querySelectorAll(".group-button")].map(node=>node.textContent),code:document.querySelector(".side.after .expression")?.textContent,models:document.getElementById("models").textContent})');
       if (evidence.semantic_surgery_state.failureCode === "INPUT_CHANGED" && !evidence.semantic_surgery_refreshed) {
-        evidence.semantic_surgery_refreshed = true; await evaluate('document.getElementById("refresh").click()');
+        evidence.semantic_surgery_refreshed = true; await vscode.commands.executeCommand("dygnosis.refreshComparison");
       }
       return evidence.semantic_surgery_state.status === "ready" && evidence.semantic_surgery_state.groups.length > 0;
     }); }
@@ -118,7 +120,7 @@ async function checkForecastSource(service, workspaceRoot, evidence, waitFor) {
     catch (error) { if (error.code === "NATIVE_FRAME_PENDING") return false; throw error; }
   }, "forecast source cards");
   await nativeChanges(async ({ evaluate, send }) => {
-    assert.equal(await evaluate('document.querySelector("#kinds summary").textContent'), "Type of changes");
+    assert.match(await evaluate('document.querySelector("#kinds summary").textContent'), /Added|Removed|Changed|All kinds/);
     assert.equal(await evaluate('[...document.querySelectorAll(".token.added,.token.removed")].some(node=>node.textContent.includes("name=drivers"))'), false);
     await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="Forecast").click()');
     await openFirstRow(evaluate);
@@ -282,9 +284,9 @@ async function checkRegionalInputs(service, workspaceRoot, evidence, waitFor) {
           status:document.getElementById("status").textContent,rows:rows.map(row=>row.querySelector(".row-label").textContent),
           visible:rows.every(row=>{const rect=row.getBoundingClientRect();return rect.top>=viewport.top && rect.bottom<=viewport.bottom;})};
       })()`);
-      assert.match(result.summary, /12 macro inputs/);
+      assert.match(result.summary, /SCALE=2/);
       assert.equal(result.expanded, false);
-      assert.match(result.status, /captured file text is identical/);
+      assert.equal(result.status, "");
       assert.deepEqual(result.rows.sort(), ["Regional n", "Regional s"]);
       assert.equal(result.visible, true);
       evidence.semantic_regional_inputs = result;
@@ -310,11 +312,13 @@ async function checkFrbDependencies(service, workspaceRoot, evidence, waitFor) {
     const after = { kind: "working", root_uri: document.uri.toString() };
     const resource = { schema_version: 1, before: { kind: "working", root_uri: vscode.Uri.file(beforeFile).toString() }, after, anchor: after, context_uri: after.root_uri };
     const uri = vscode.Uri.from({ scheme: "dygnosis-changes", path: `/${resourceName(resource)}`, query: resourceQuery(resource) });
+    const start = performance.now();
     await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
     await waitFor(async () => {
       try { return await nativeChanges(async ({ evaluate }) => evaluate('document.getElementById("status").className === "ready" && Boolean(document.querySelector("article[data-row-id]"))')); }
       catch (error) { if (error.code === "NATIVE_FRAME_PENDING") return false; throw error; }
     }, "FRB-US Changes");
+    return performance.now() - start;
   };
   await openChanges(afterFile);
   await nativeChanges(async ({ evaluate, send }) => {
@@ -354,7 +358,7 @@ async function checkFrbDependencies(service, workspaceRoot, evidence, waitFor) {
   assert.match(wide, /^xgap2\s*=\s*101\*/m);
   const wideFile = path.join(directory, "after-wide.mod");
   await fs.writeFile(wideFile, wide);
-  await openChanges(wideFile);
+  const openToReady = await openChanges(wideFile);
   await nativeChanges(async ({ evaluate, send }) => {
     await evaluate('document.querySelector("[aria-label^=\'Parameters,\']").click()');
     assert.equal(await evaluate('document.getElementById("counts").textContent'), "124 changes");
@@ -381,7 +385,11 @@ async function checkFrbDependencies(service, workspaceRoot, evidence, waitFor) {
               selectedBorder:getComputedStyle(selected).borderTopColor};
           })()`);
           assert.ok(layout.fits && layout.visible > 0, JSON.stringify(layout));
-          if (width === 788) assert.ok(layout.visible >= 12, JSON.stringify(layout));
+          if (width === 788) {
+            assert.ok(layout.visible >= 12, JSON.stringify(layout));
+            const positions = await evaluate('[...document.querySelectorAll(".value-pair")].slice(0,4).map(pair=>pair.getBoundingClientRect().left)');
+            assert.equal(new Set(positions).size, 1, "wide value pairs start at the same column");
+          }
           if (themeClass === "vscode-high-contrast") assert.notEqual(layout.selectedBorder, "rgba(0, 0, 0, 0)");
           viewports.push({ theme, ...layout });
           if (width === 788 && themeClass === "vscode-dark") {
@@ -401,12 +409,68 @@ async function checkFrbDependencies(service, workspaceRoot, evidence, waitFor) {
       assert.ok(equation.id);
       assert.equal(equation.count, "1 of 124 changes");
       assert.deepEqual(expression, equation);
-      evidence.semantic_frb_wide = { viewports, equation };
+      const filter = await measureFiltering(evaluate, "xgap2");
+      evidence.semantic_frb_wide = { viewports, equation, openToReady, filter };
     } finally {
       await send("Emulation.clearDeviceMetricsOverride");
       await appearance.update("colorTheme", previousTheme, vscode.ConfigurationTarget.Workspace);
     }
   });
+}
+
+function measureFiltering(evaluate, query) {
+  return evaluate(`(() => {
+    const search=document.getElementById("search"), content=document.getElementById("reviewContent");
+    const run=value=>{const start=performance.now();search.value=value;search.dispatchEvent(new Event("input",{bubbles:true}));content.getBoundingClientRect();return performance.now()-start;};
+    const filter=[],clear=[];
+    for(let i=0;i<17;i++){const f=run(${JSON.stringify(query)}),c=run("");if(i>=2){filter.push(f);clear.push(c);}}
+    const stats=values=>{values.sort((a,b)=>a-b);return {median:values[7],p90:values[13]};};
+    return {filter:stats(filter),clear:stats(clear)};
+  })()`);
+}
+
+async function checkComparisonScale(service, workspaceRoot, evidence, waitFor) {
+  const examples = path.resolve(__dirname, "../../../../.agents/skills/use-dynare/references/examples");
+  const generated = value => "var y;\nmodel;\n" + Array.from({ length: 1200 }, (_, i) =>
+    `[name='Production ${i + 1}'] y=${value};\n`).join("") + "end;\n";
+  const cases = [
+    { name: "CMR", texts: await Promise.all(["US_CMR14_rep.mod", "US_CMR14noFA_rep.mod"].map(file => fs.readFile(path.join(examples, file), "utf8"))), query: "equation" },
+    { name: "1200", texts: [generated(1), generated(2)], query: "Production 1200" },
+  ];
+  evidence.semantic_scale = {};
+  for (const { name, texts, query } of cases) {
+    await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+    const selectors = [];
+    for (const [index, text] of texts.entries()) {
+      const filename = path.join(workspaceRoot, `scale-${name}-${index}.mod`);
+      await fs.writeFile(filename, text);
+      const document = await vscode.workspace.openTextDocument(filename);
+      await vscode.window.showTextDocument(document);
+      await waitFor(async () => (await service.modelInfo(document.uri))?.complete, `${name} model capture`);
+      selectors.push({ kind: "working", root_uri: document.uri.toString() });
+    }
+    const [before, after] = selectors;
+    const resource = { schema_version: 1, before, after, anchor: after, context_uri: after.root_uri };
+    const uri = vscode.Uri.from({ scheme: "dygnosis-changes", path: `/${resourceName(resource)}`, query: resourceQuery(resource) });
+    const start = performance.now();
+    await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
+    await waitFor(async () => {
+      try { return await nativeChanges(({ evaluate }) => evaluate('document.getElementById("status").className === "ready" && Boolean(document.querySelector(".change-row"))')); }
+      catch (error) { if (error.code === "NATIVE_FRAME_PENDING") return false; throw error; }
+    }, `${name} comparison ready`);
+    const openToReady = performance.now() - start;
+    await nativeChanges(async ({ evaluate }) => {
+      await evaluate('(() => {const all=document.querySelector("[data-change-type=all]");if(!all.checked)all.click();})()');
+      const counts = await evaluate('document.getElementById("counts").textContent');
+      const filter = await measureFiltering(evaluate, query);
+      if (name === "1200") {
+        assert.equal(counts, "1200 changes");
+        const matched = await evaluate(`(() => {const search=document.getElementById("search");search.value=${JSON.stringify(query)};search.dispatchEvent(new Event("input",{bubbles:true}));return [...document.querySelectorAll(".row-label")].map(row=>row.textContent);})()`);
+        assert.deepEqual(matched, [query], "an exact label remains searchable in the large comparison");
+      }
+      evidence.semantic_scale[name] = { counts, openToReady, filter };
+    });
+  }
 }
 
 async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
@@ -477,7 +541,7 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
       control.click();
     })()`);
     const textDiff = async filename => {
-      await click("#capturedTextDiff");
+      void vscode.commands.executeCommand("dygnosis.comparisonTextDiff");
       let picker;
       await waitFor(async () => nativeWorkbench(async send => {
         const state = await send("Runtime.evaluate", { expression: 'Array.from(document.querySelectorAll(".quick-input-list .monaco-list-row")).filter(row=>row.getClientRects().length).map(row=>row.textContent)', returnByValue: true });
@@ -504,14 +568,35 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
       assert.equal(header.cards[index].open, false, "input details start collapsed");
     }
     await evaluate('document.querySelectorAll("#models details.input-side > summary").forEach(summary=>summary.click())');
-    const inputDetails = await evaluate('[...document.querySelectorAll("#models details.input-side")].map(card=>card.textContent)');
-    assert.ok(inputDetails[0].includes(decodeURIComponent(new URL(roots.before.toString()).pathname)));
-    assert.ok(inputDetails[1].includes(decodeURIComponent(new URL(roots.after.toString()).pathname)));
+    const inputDetails = await evaluate('[...document.querySelectorAll("#models details.input-side")].map(card=>({model:card.querySelector(".model-path").textContent,includes:[...card.querySelectorAll(".executed-includes li")].map(row=>row.textContent)}))');
+    for (const [index, side] of ["before", "after"].entries()) {
+      assert.ok(inputDetails[index].model.startsWith(`${roots[side].fsPath} · `));
+      const expectedInclude = path.join(path.dirname(roots[side].fsPath), "body.mod");
+      const includes = process.platform === "win32" ? inputDetails[index].includes.map(file => file.toLowerCase()) : inputDetails[index].includes;
+      assert.deepEqual(includes, [process.platform === "win32" ? expectedInclude.toLowerCase() : expectedInclude], `${side} displays the executed include's native path`);
+    }
     await evaluate('document.querySelectorAll("#models details.input-side > summary").forEach(summary=>summary.click())');
     assert.equal(header.kinds, "DETAILS"); assert.equal(header.checkboxes, 4);
-    const placement = await evaluate('({models:document.getElementById("models").getBoundingClientRect().bottom,change:document.getElementById("changeComparison").getBoundingClientRect().top,swap:document.getElementById("swap").getBoundingClientRect().right,refresh:document.getElementById("refresh").getBoundingClientRect().x})');
-    assert.ok(placement.change >= placement.models && placement.refresh > placement.swap);
-    assert.deepEqual(header.legend, ["+ Added", "− Removed", "~ Replaced"]);
+    const toolbar = async () => (await send("Runtime.evaluate", {
+      expression: '[...document.querySelectorAll(".editor-actions [aria-label]")].filter(action=>action.getClientRects().length).map(action=>action.getAttribute("aria-label"))', returnByValue: true
+    })).result?.value;
+    const titleActions = await toolbar();
+    for (const action of ["Swap sides", "Refresh comparison", "Text diff"]) assert.ok(titleActions.includes(action), action);
+    const chrome = await workbenchInsets(evaluate, send);
+    try {
+      for (const width of [320, 390, 540, 790]) {
+        await send("Emulation.setDeviceMetricsOverride", { width: width + chrome.width, height: 803 + chrome.height, deviceScaleFactor: 1, mobile: false });
+        await waitFor(() => evaluate(`Math.abs(innerWidth - ${width}) <= 2`), `Changes ${width}px viewport`);
+        assert.ok((await toolbar()).includes("Swap sides"), `Swap sides visible at ${width}px`);
+        const layout = await evaluate('({narrow:document.getElementById("kinds").getClientRects().length>0,wide:document.querySelector(".kind-toggle").getClientRects().length>0})');
+        assert.deepEqual(layout, { narrow: width < 500, wide: width >= 500 });
+      }
+      evidence.semantic_title_widths = [320, 390, 540, 790];
+    } finally { await send("Emulation.clearDeviceMetricsOverride"); }
+    await evaluate('document.querySelector(".group-button").focus()');
+    await key("f", "KeyF", 70, process.platform === "darwin" ? 4 : 2);
+    await waitFor(() => evaluate('document.activeElement?.id === "search"'), "native Find changes keyboard shortcut");
+    assert.deepEqual(header.legend, []);
     assert.equal(await evaluate('document.querySelector("[data-change-type=all]").indeterminate'), true);
     const selectTypes = selected => evaluate(`(() => { const selected=${JSON.stringify(selected)}; for (const kind of ["added","removed","changed"]) { const input=document.querySelector('[data-change-type="'+kind+'"]'); if (input.checked !== selected.includes(kind)) input.click(); } })()`);
     await selectTypes(["changed"]);
@@ -522,7 +607,7 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="Parameters").click()');
     assert.equal(await evaluate('document.querySelectorAll("article[data-row-id]").length'), 1);
     assert.equal(await evaluate('Boolean(document.getElementById("scope") || document.getElementById("sectionFilter") || document.getElementById("section-all"))'), false);
-    assert.equal(await evaluate('document.getElementById("counts").textContent'), "15 changes");
+    assert.equal(await evaluate('document.getElementById("counts").textContent'), "13 changes shown");
     const checkPairedCards = async () => {
       await openFirstRow(evaluate);
       const card = await evaluate('(() => {const before=document.querySelector(".side.before").getBoundingClientRect(),after=document.querySelector(".side.after").getBoundingClientRect();return {bx:before.x,by:before.y,bw:before.width,ax:after.x,ay:after.y,aw:after.width};})()');
@@ -532,15 +617,31 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     };
     const group = label => evaluate(`(() => {const button=[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent===${JSON.stringify(label)});if (!button) throw new Error("Missing change group");button.click();})()`);
     const groupLabels = await evaluate('[...document.querySelectorAll(".group-button")].map(button=>button.querySelector("span").textContent)');
+    await group("Equations");
+    const ambiguous = () => evaluate('[...document.querySelectorAll(".change-row")].filter(row=>row.querySelector(".row-label").textContent==="Ambiguous").map(row=>({id:row.id,kind:row.querySelector(".change-mark").className.split(" ").at(-1)}))');
+    const both = await ambiguous();
+    assert.deepEqual(both.map(row => row.kind).sort(), ["added", "added", "removed", "removed"]);
+    assert.equal(new Set(both.map(row => row.id)).size, 4);
+    for (const kind of ["added", "removed"]) {
+      await selectTypes([kind]);
+      await group("Equations");
+      assert.deepEqual(await ambiguous(), both.filter(row => row.kind === kind));
+    }
+    await selectTypes(["added", "removed", "changed"]);
     const visited = [];
     for (const label of groupLabels) {
       await group(label); await checkPairedCards(); visited.push(...await evaluate('[...document.querySelectorAll("article[data-row-id]")].map(row=>row.getAttribute("data-row-id"))'));
       const notes = await evaluate('({outsideRows:document.querySelectorAll(".group-rows > .group-notes").length,rows:[...document.querySelectorAll(".group-notes")].map(note=>({row:note.closest("article[data-row-id]")?.getAttribute("data-row-id"),text:[...note.querySelectorAll("li")].map(item=>item.textContent)}))})');
       assert.equal(notes.outsideRows, 0);
       for (const note of notes.rows) { assert.ok(note.row); assert.equal(note.text.length, new Set(note.text).size); }
-      if (label === "Commands") assert.equal(await evaluate('document.querySelector(".group-rows").textContent.includes("Unclaimed accepted tokens")'), false);
+      if (label === "Commands") {
+        assert.deepEqual(await evaluate('[...document.querySelectorAll(".group-rows .row-label")].map(row=>row.textContent)'), ["stoch_simul"]);
+        assert.equal(await evaluate('document.querySelectorAll(".group-rows .row-summary").length'), 0);
+        assert.equal(await evaluate('document.querySelector(".group-rows").textContent.includes("Unclaimed accepted tokens")'), false);
+      }
+      if (label === "Macro context") assert.deepEqual(await evaluate('[...document.querySelectorAll(".macro-entry > h3")].map(heading=>heading.textContent).sort()'), ["Included file added", "Included file removed"]);
     }
-    assert.equal(new Set(visited).size, 15, "all filtered changes are available as full rows in their groups");
+    assert.equal(new Set(visited).size, 11, "command facts share a card and included files share another");
     evidence.semantic_group_rows = { groups: groupLabels, rows: visited.length };
     await group("Equations");
     evidence.semantic_compact_controls = header;
@@ -552,10 +653,12 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     evidence.semantic_frozen_legend = legend;
     checks.push("single model view");
     await group("Symbols");
-    await evaluate('document.querySelector(".group-button").focus()');
-    await key("Tab", "Tab", 9);
+    await evaluate('document.querySelector(".group-button.selected").focus()');
+    await key("ArrowRight", "ArrowRight", 39);
     await key("Enter", "Enter", 13);
     assert.equal(await evaluate('document.querySelector(".group-button.selected > span").textContent'), "Parameters", "native keyboard selects a whole group");
+    await key("Tab", "Tab", 9);
+    assert.equal(await evaluate('document.activeElement.classList.contains("change-row")'), true, "Tab leaves the group controls for the row set");
     await group("Model-local variables");
     const localId = await evaluate('(() => {const row=[...document.querySelectorAll("article[data-row-id]")].find(row=>row.querySelector(".change-row").textContent.includes("forecast"));if (!row) throw new Error("Missing local definition");return row.getAttribute("data-row-id");})()');
     const localSelector = `article[data-row-id=${JSON.stringify(localId)}]`;
@@ -564,11 +667,15 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     await evaluate('document.getElementById("search").focus()');
     await send("Input.insertText", { text: "forecast" });
     assert.equal(await evaluate('document.activeElement.value'), "forecast");
-    await evaluate(`document.querySelector(${localQuery(".change-row")}).focus()`);
+    await evaluate(`(() => {
+      const row = document.querySelector(${localQuery(".change-row")});
+      if (row.getAttribute("aria-expanded") === "true") row.click();
+      row.focus();
+    })()`);
     await key("Enter", "Enter", 13);
-    assert.equal(await evaluate('document.activeElement.getAttribute("aria-expanded")'), "true");
+    await waitFor(() => evaluate(`document.activeElement === document.querySelector(${localQuery(".change-row")}) && document.activeElement.getAttribute("aria-expanded") === "true"`), "Enter opens the focused change");
     await key("Escape", "Escape", 27);
-    assert.equal(await evaluate('document.activeElement.getAttribute("aria-expanded")'), "false");
+    await waitFor(() => evaluate(`document.activeElement === document.querySelector(${localQuery(".change-row")}) && document.activeElement.getAttribute("aria-expanded") === "false"`), "Escape closes the focused change");
     await evaluate('document.getElementById("search").focus()');
     await key("a", "KeyA", 65, process.platform === "darwin" ? 4 : 2);
     await key("Backspace", "Backspace", 8);
@@ -584,7 +691,7 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     assert.equal(await evaluate(`document.querySelectorAll(${localQuery(".side-title button.source-link")}).length`), 2);
     assert.equal(await evaluate('Boolean(document.querySelector(".detail table, .detail details, .detail .gutter, .detail .facet"))'), false);
     assert.equal(await evaluate(`document.querySelectorAll(${localQuery(".expression")}).length`), 2, "each expression appears once per side");
-    assert.equal(await evaluate('document.getElementById("capturedTextDiff").getClientRects().length > 0'), true);
+
     assert.equal(await evaluate('Boolean(document.getElementById("updateRevision"))'), false);
     const rootDiffTab = await textDiff("root.mod");
     const rootDiff = rootDiffTab.input;
@@ -612,7 +719,7 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
         assert.equal(await evaluate('Array.from(document.querySelectorAll(".token.removed")).every(node => !getComputedStyle(node).textDecorationLine.includes("line-through"))'), true);
         themes.push(theme);
         evidence.semantic_themes = [...themes];
-        themeColors.push(await evaluate('({theme:document.body.className,roles:[...document.querySelectorAll("footer .change-mark")].map(mark=>({role:mark.className,color:getComputedStyle(mark).color}))})'));
+        themeColors.push(await evaluate('({theme:document.body.className,roles:[...document.querySelectorAll(".change-row .change-mark")].map(mark=>({role:mark.className,color:getComputedStyle(mark).color}))})'));
         evidence.semantic_theme_colors = [...themeColors];
       }
       await appearance.update("colorCustomizations", {
@@ -620,7 +727,7 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
         "diffEditor.insertedTextBackground": "#22884455", "diffEditor.removedTextBackground": "#aa334455",
       }, vscode.ConfigurationTarget.Workspace);
       await waitFor(async () => {
-        const color = await evaluate('(() => { const style=getComputedStyle(document.body); return {variables:[...style].filter(name=>name.startsWith("--")&&(name.includes("dynare")||name.includes("diff"))).map(name=>({name,value:style.getPropertyValue(name).trim()})),dotted:style.getPropertyValue("--vscode-dynare-diff.changedForeground").trim().toLowerCase(),hyphens:style.getPropertyValue("--vscode-dynare-diff-changedForeground").trim().toLowerCase(),glyph:getComputedStyle(document.querySelector("footer .change-mark.changed")).color}; })()');
+        const color = await evaluate('(() => { const style=getComputedStyle(document.body); return {variables:[...style].filter(name=>name.startsWith("--")&&(name.includes("dynare")||name.includes("diff"))).map(name=>({name,value:style.getPropertyValue(name).trim()})),dotted:style.getPropertyValue("--vscode-dynare-diff.changedForeground").trim().toLowerCase(),hyphens:style.getPropertyValue("--vscode-dynare-diff-changedForeground").trim().toLowerCase(),glyph:getComputedStyle(document.querySelector(".change-row .change-mark.changed")).color}; })()');
         evidence.semantic_custom_colors = color;
         return color.glyph === "rgb(34, 102, 170)";
       }, "native customized comparison color");
@@ -630,11 +737,12 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
       await openFirstRow(evaluate);
       const fills = await evaluate('({added:[...document.querySelectorAll(".detail .token.added")].map(token=>getComputedStyle(token).backgroundColor),removed:[...document.querySelectorAll(".detail .token.removed")].map(token=>getComputedStyle(token).backgroundColor)})');
       assert.ok(fills.added.length > 0 && fills.removed.length > 0, "native diff fill checks use actual added and removed expression tokens");
+      assert.equal(await evaluate('Array.from(document.querySelectorAll(".token.added")).every(node => !getComputedStyle(node).textDecorationLine.includes("underline"))'), true);
       assert.ok(fills.added.every(color => color.startsWith("rgba(34, 136, 68,")));
       assert.ok(fills.removed.every(color => color.startsWith("rgba(170, 51, 68,")));
       evidence.semantic_native_diff_fills = fills;
-      const changedColor = await evaluate('getComputedStyle(document.querySelector("footer .change-mark.changed")).color');
-      assert.equal(changedColor, "rgb(34, 102, 170)", "Replaced glyph uses the customized native semantic color");
+      const changedColor = await evaluate('getComputedStyle(document.querySelector(".change-row .change-mark.changed")).color');
+      assert.equal(changedColor, "rgb(34, 102, 170)", "Changed glyph uses the customized native semantic color");
       evidence.semantic_changed_color = changedColor;
       await appearance.update("activityBar.location", "hidden", vscode.ConfigurationTarget.Workspace);
       await send("Emulation.setDeviceMetricsOverride", { width: 320, height: 1000, deviceScaleFactor: 1, mobile: false });
@@ -709,7 +817,7 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     assert.equal(vscode.window.activeTextEditor.selection.start.line, 2, "the accepted direct reference maps to the counted Output equation");
     await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
     await regainChanges();
-    await waitFor(() => evaluate('document.getElementById("status").className === "ready" && !document.getElementById("capturedTextDiff").disabled'), "rendered captured-text action is ready");
+    await waitFor(() => evaluate('document.getElementById("status").className === "ready"'), "rendered captured-text action is ready");
     const capturedDiffTab = await textDiff("body.mod"), capturedDiff = capturedDiffTab.input;
     assert.equal(capturedDiffTab.label, "body.mod (Working Tree) ↔ body.mod (Working Tree)");
     assert.equal(capturedDiff.modified.scheme, "dygnosis-captured");
@@ -725,16 +833,41 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     edit.insert(roots.after, rootDocument.positionAt(rootDocument.getText().length), "// Native refresh control\n");
     assert.equal(await vscode.workspace.applyEdit(edit), true);
     await waitFor(() => evaluate('document.getElementById("status").classList.contains("stale")'), "native comparison becomes out of date");
-    assert.equal(await evaluate('document.getElementById("rootTextDiff").disabled'), true);
+
     assert.ok(await evaluate('document.querySelectorAll(".detail .reference button").length') > 0, "the stale reference check has real accepted references");
     assert.equal(await evaluate('Array.from(document.querySelectorAll(".detail button")).filter(button => /Open .*source|Open .*reference/.test(button.getAttribute("aria-label"))).every(button => button.disabled)'), true);
-    assert.equal(await evaluate('document.getElementById("capturedTextDiff").disabled'), true);
-    await click("#refresh");
+
+    await vscode.commands.executeCommand("dygnosis.refreshComparison");
     await waitFor(() => evaluate('document.getElementById("status").classList.contains("ready")'), "native refreshed comparison");
     await checkPairedCards();
     assert.equal(await evaluate(`document.querySelector(${localQuery(".side.after .source-link")}).disabled`), false, "Refresh restores the current row's source action");
     evidence.semantic_stale_refresh = true;
+    const beforeHeading = await evaluate('document.getElementById("input-before").textContent');
+    const afterHeading = await evaluate('document.getElementById("input-after").textContent');
+    assert.notEqual(beforeHeading.replace(/^Before/, ""), afterHeading.replace(/^After/, ""), "equal basenames have distinct input headings");
+    await vscode.commands.executeCommand("dygnosis.swapComparisonSides");
+    await regainChanges();
+    assert.equal(await evaluate('document.getElementById("input-before").textContent'), afterHeading.replace(/^After/, "Before"));
+    assert.equal(await evaluate('document.getElementById("input-after").textContent'), beforeHeading.replace(/^Before/, "After"));
+    const settings = vscode.workspace.getConfiguration("dynare");
+    const previousActions = settings.inspect("editorActions")?.workspaceValue;
+    try {
+      await settings.update("editorActions", [], vscode.ConfigurationTarget.Workspace);
+      await waitFor(async () => !(await toolbar()).includes("Swap sides"), "Changes actions hidden from the toolbar");
+      await vscode.commands.executeCommand("workbench.action.showCommands");
+      const quickInput = async expression => (await send("Runtime.evaluate", { expression, returnByValue: true })).result?.value;
+      await waitFor(() => quickInput('document.activeElement?.classList.contains("quick-input-input") || Boolean(document.activeElement?.closest(".quick-input-widget"))'), "native Command Palette");
+      await send("Input.insertText", { text: "Swap sides" });
+      await waitFor(() => quickInput('[...document.querySelectorAll(".quick-input-list .monaco-list-row")].some(row=>row.textContent.includes("Swap sides"))'), "Swap sides in the palette with the toolbar hidden");
+      await key("Escape", "Escape", 27);
+    } finally {
+      await settings.update("editorActions", previousActions, vscode.ConfigurationTarget.Workspace);
+    }
+    evidence.semantic_native_swap = { beforeHeading, afterHeading, paletteWithToolbarHidden: true };
     await vscode.window.showTextDocument(rootDocument, { viewColumn: vscode.ViewColumn.Active, preview: false });
+    await key("f", "KeyF", 70, process.platform === "darwin" ? 4 : 2);
+    await waitFor(async () => (await send("Runtime.evaluate", { expression: 'Boolean(document.querySelector(".monaco-editor .find-widget.visible"))', returnByValue: true })).result?.value, "native Find in the adjacent model editor");
+    await key("Escape", "Escape", 27);
     await vscode.commands.executeCommand("dygnosis.showEffectiveModel");
     await waitFor(() => vscode.window.activeTextEditor?.document.uri.scheme === "dygnosis-effective", "Expand macros opens the read-only include expansion");
     const expansionScreenshot = path.join(path.dirname(process.env.DYGNOSIS_HOST_RESULT), `macro-expansion-${vscode.version}.png`);
@@ -743,6 +876,7 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
       await fs.writeFile(expansionScreenshot, Buffer.from(picture.data, "base64"));
     });
     evidence.macro_expansion_screenshot = expansionScreenshot;
+    assert.equal(await rootDocument.save(), true, "save the disposable refresh fixture before host exit");
   }).catch(async error => { await captureFailure(evidence); throw error; });
   evidence.checks.push("native grouped rows with Before left and After right, references within their own card, source links for both includes and HEAD, saved filters, keyboard focus, themes, direct text diff and stale Refresh actions");
 }

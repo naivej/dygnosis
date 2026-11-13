@@ -798,7 +798,134 @@ async fn current(backend: &Backend, old: &str, new: &str) -> Value {
 }
 
 #[tokio::test]
+async fn command_groups_follow_occurrence_proof_across_fact_changes() {
+    let base = "var y pi rate; varexo e; model; y=.5*y(-1)+e; pi=y; rate=y; end;\n";
+    for (before, after, expected_groups) in [
+        (
+            "stoch_simul(irf=12) y pi;",
+            "stoch_simul(irf=24) y rate;",
+            1,
+        ),
+        ("stoch_simul(irf=12);", "stoch_simul(irf=24) y rate;", 1),
+        ("", "stoch_simul(irf=24) y rate;", 1),
+        (
+            "stoch_simul(irf=12) y pi;\nstoch_simul(irf=8) pi;",
+            "stoch_simul(irf=24) y rate;\nstoch_simul(irf=4) rate;",
+            4,
+        ),
+    ] {
+        let (service, _socket) = new_service();
+        let result = current(
+            service.inner(),
+            &format!("{base}{before}"),
+            &format!("{base}{after}"),
+        )
+        .await;
+        let mut groups = std::collections::BTreeMap::<_, Vec<_>>::new();
+        for row in result["semantic"]["rows"].as_array().unwrap() {
+            if row["before"]["context"]["name"] == "stoch_simul"
+                || row["after"]["context"]["name"] == "stoch_simul"
+            {
+                let key = row["statement_group"].as_str().expect("command group");
+                groups.entry(key).or_default().push(&row["change"]);
+            }
+        }
+        assert_eq!(groups.len(), expected_groups, "{groups:?}");
+        assert!(groups.values().all(|facts| facts.len() >= 2), "{groups:?}");
+        if expected_groups == 4 {
+            assert!(
+                groups
+                    .values()
+                    .all(|facts| facts.iter().all(|fact| *fact == facts[0])),
+                "{groups:?}"
+            );
+        }
+    }
+}
+
+// Guards a one-sided fact in a paired command losing the existing command on the other side.
+#[tokio::test]
+async fn paired_command_keeps_written_text_when_only_one_member_changes() {
+    let base = "var y c; model; y=0; c=y; end;\n";
+    for (command, before, after) in [
+        (
+            "stoch_simul",
+            "stoch_simul(irf=12);",
+            "stoch_simul(irf=12) y;",
+        ),
+        ("varobs", "varobs y;", "varobs y c;"),
+    ] {
+        let (service, _socket) = new_service();
+        let result = current(
+            service.inner(),
+            &format!("{base}{before}"),
+            &format!("{base}{after}"),
+        )
+        .await;
+        let rows: Vec<_> = result["semantic"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["after"]["context"]["name"] == command)
+            .collect();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["change"], "added", "{rows:?}");
+        assert!(rows[0]["before"].is_null());
+        let text = rows[0]["expressions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|detail| detail["field"] == "statement_text")
+            .unwrap();
+        assert_eq!(text["before"]["text"], before);
+        assert_eq!(text["after"]["text"], after);
+        let added: String = text["after"]["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|run| run["role"] == "added")
+            .map(|run| run["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            added.trim(),
+            after
+                .strip_suffix(';')
+                .unwrap()
+                .split_whitespace()
+                .last()
+                .unwrap()
+        );
+    }
+}
+
+#[tokio::test]
 async fn retained_families_and_prior_shapes_agree_across_current_and_snapshot_coordinates() {
+    fn model_facts(result: &Value) -> Value {
+        let mut semantic = result["semantic"].clone();
+        for row in semantic["rows"].as_array_mut().unwrap() {
+            let row = row.as_object_mut().unwrap();
+            row.remove("pointer");
+            row.remove("statement_group");
+            let written_macro = row["family"] == "macro_context";
+            for side in ["before", "after"] {
+                if let Some(input) = row.get_mut(side).and_then(Value::as_object_mut) {
+                    if written_macro {
+                        input.remove("name");
+                    }
+                    if let Some(context) = input.get_mut("context").and_then(Value::as_object_mut) {
+                        context.remove("pointer");
+                    }
+                }
+            }
+        }
+        for reference in semantic["references"].as_array_mut().unwrap() {
+            reference
+                .as_object_mut()
+                .unwrap()
+                .remove("equation_pointer");
+        }
+        json!({"rows":semantic["rows"],"references":semantic["references"]})
+    }
     let cases = [
         ("parameters", "a=.5;", "a=.6;"),
         ("symbols", "var(log) z;", "var z;"),
@@ -948,7 +1075,11 @@ async fn retained_families_and_prior_shapes_agree_across_current_and_snapshot_co
             "homotopy_setup; a,0,1; end;",
             "homotopy_setup; b,0,1; end;",
         ),
-        ("macro_context", "@#define n=1\n", "@#define n=2\n"),
+        (
+            "macro_context",
+            "@#ifndef POLICY\n@#define POLICY=0\n@#endif\n@#define FEEDBACK_SCALE=1\n",
+            "@#ifndef POLICY\n@#define POLICY=1\n@#endif\n@#define FEEDBACK_SCALE=2\n",
+        ),
     ];
     let (service, _socket) = new_service();
     for (label, old, new) in cases {
@@ -962,8 +1093,12 @@ async fn retained_families_and_prior_shapes_agree_across_current_and_snapshot_co
             "no compared row for {label}"
         );
         let live = current(service.inner(), &old, &new).await;
+        let facts = model_facts(&live);
+        let coverage = live["coverage"]["families"].clone();
+        if label != "macro_context" {
+            assert_eq!(facts, model_facts(&supplied), "{label} via Rust library");
+        }
         for (name, result) in [
-            ("current_lsp", live),
             (
                 "snapshot_lsp",
                 compare_captured_snapshots(
@@ -983,12 +1118,9 @@ async fn retained_families_and_prior_shapes_agree_across_current_and_snapshot_co
                     .clone(),
             ),
         ] {
+            assert_eq!(model_facts(&result), facts, "{label} via {name}");
             assert_eq!(
-                result["semantic"], supplied["semantic"],
-                "{label} via {name}"
-            );
-            assert_eq!(
-                result["coverage"]["families"], supplied["coverage"]["families"],
+                result["coverage"]["families"], coverage,
                 "{label} coverage via {name}"
             );
         }

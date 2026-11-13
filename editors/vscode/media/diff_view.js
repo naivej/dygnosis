@@ -4,9 +4,10 @@
   const api = acquireVsCodeApi(), saved = api.getState();
   const names = { symbols: "Symbols", parameters: "Parameters", equations: "Equations", shockSetup: "Shock setup", shockAnalysisSetup: "Shock analysis setup", steadyState: "State", forecast: "Forecast", priors: "Priors", commands: "Commands", data: "Data", occbin: "OccBin", policy: "Policy", semiStructural: "Semi-structural", moments: "Method of moments", msSbvar: "MS-SBVAR", heterogeneity: "Heterogeneity", externalFunctions: "External functions", trends: "Trends", operations: "Operations", macroContext: "Macro context" };
   const kinds = ["added", "removed", "changed"], marks = { added: "+", removed: "−", changed: "~" };
-  const changeLabel = kind => kind === "changed" ? "Replaced" : titleCase(kind);
-  const controls = Object.fromEntries(["models", "status", "search", "kinds", "counts", "results", "refresh"].map(id => [id, document.getElementById(id)]));
+  const changeLabel = kind => titleCase(kind);
+  const controls = Object.fromEntries(["models", "status", "search", "kinds", "kindToggles", "counts", "results"].map(id => [id, document.getElementById(id)]));
   let payload, choices, groupList, references = new Map(), groups = new Map();
+  let kindCounts = {}, rowFocus, refreshFocus;
   let presentation = saved?.presentation ?? {};
   const scrollArea = document.getElementById("reviewContent");
   const node = (tag, text, className) => { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (className) element.className = className; return element; };
@@ -23,6 +24,8 @@
     return indexes.length ? "Equation " + indexes.join(" → ") : row.label;
   };
   const contextScopes = row => row.scopes.filter(scope => scope !== "aggregate" && scope !== "global" || row.sideScopes.before !== null && row.sideScopes.after !== null && row.sideScopes.before !== row.sideScopes.after);
+  const ownerIdentity = row => JSON.stringify([row.semantic?.family, row.kind, row.label, row.sideScopes,
+    ...["before", "after"].map(side => row.navigation[side]?.occurrence_id ?? row.semantic?.[side]?.occurrence)]);
   const post = (type, args = {}) => api.postMessage({ type, token: payload.token, ...args });
   const persist = () => api.setState({ key: payload.key, choices, presentation });
   const remember = () => { persist(); api.postMessage({ type: "choices", key: payload.key, choices }); };
@@ -34,7 +37,9 @@
   function renderControls() {
     controls.search.value = choices.search;
     const focused = document.activeElement?.getAttribute("data-change-type"), selected = choices.changeKinds;
-    const summary = node("summary", "Type of changes"), options = node("div", undefined, "change-type-options");
+    const selection = selected.length === kinds.length ? "All kinds" : selected.map(changeLabel).join(", ") || "No kinds";
+    const summary = node("summary", selection), options = node("div", undefined, "change-type-options");
+    summary.setAttribute("aria-label", "Change kinds. " + selection);
     options.setAttribute("role", "group"); options.setAttribute("aria-label", "Type of changes");
     for (const kind of ["all", ...kinds]) {
       const label = node("label"), checkbox = node("input"); checkbox.type = "checkbox";
@@ -46,10 +51,21 @@
         choices.customChangeKinds = [...choices.changeKinds]; renderControls(); update();
         document.getElementById(checkbox.id)?.focus();
       });
-      label.append(checkbox, node("span", kind === "all" ? "All" : changeLabel(kind))); options.append(label);
+      label.append(checkbox, node("span", kind === "all" ? "All" : changeLabel(kind) + " " + (kindCounts[kind] ?? 0))); options.append(label);
     }
-    summary.title = selected.map(changeLabel).join(", ") || "No types selected";
     controls.kinds.replaceChildren(summary, options);
+    controls.kindToggles?.replaceChildren(...kinds.map(kind => {
+      const button = node("button", changeLabel(kind) + " " + (kindCounts[kind] ?? 0), "kind-toggle " + kind);
+      button.type = "button";
+      button.id = "kind-toggle-" + kind;
+      button.setAttribute("aria-pressed", String(selected.includes(kind)));
+      button.addEventListener("click", () => {
+        choices.changeKinds = kinds.filter(value => value === kind ? !selected.includes(value) : selected.includes(value));
+        choices.customChangeKinds = [...choices.changeKinds];
+        renderControls(); update(button.id);
+      });
+      return button;
+    }));
     if (focused) document.getElementById("change-type-" + focused)?.focus();
   }
   function action(label, type, args, reason, rowId) {
@@ -62,15 +78,16 @@
     });
     return button;
   }
-  function sourceAction(row, side) {
+  function sourceAction(row, side, owner = row.id) {
     const target = row.navigation[side] ?? row.navigation.block_openers?.[side], files = row.sourceFiles?.[side] ?? [];
     const locations = target?.written_locations ?? [];
     const reason = payload.status !== "ready" ? "Refresh to open source links." : !locations.length && !files.length ? "The source for this side is unavailable." : "";
-    const button = action("Open " + titleCase(side) + " source", "openSource", { rowId: row.id, side }, reason, row.id);
+    const label = row.sourceLabels?.[side];
+    const button = action("Open " + titleCase(side) + " " + (label ?? "source"), "openSource", { rowId: row.id, side }, reason, owner);
     button.id = "source-" + side + "-" + row.id;
-    button.textContent = locations.length === 1 ? basename(locations[0].uri) + ":" + (locations[0].range.start.line + 1) : files.length === 1 ? basename(files[0]) : "Open source" + (locations.length > 1 || files.length > 1 ? "…" : "");
+    button.textContent = label ?? (locations.length === 1 ? basename(locations[0].uri) + ":" + (locations[0].range.start.line + 1) : files.length === 1 ? basename(files[0]) : "Open source" + (locations.length > 1 || files.length > 1 ? "…" : ""));
     button.className = "source-link";
-    if (!reason) button.title = [...locations.map(location => location.uri), ...files].join("\n");
+    if (!reason) button.title = [...locations.map(location => location.uri), ...files].map(uri => payload.sourcePaths?.[uri] ?? uri).join("\n");
     return button;
   }
   function* codeRanges(text) {
@@ -119,9 +136,9 @@
     }
     return { runs: output, compact: kept < text.length };
   }
-  function codeLines(parent, expression, side) {
+  function codeLines(parent, expression, side, writtenMacro = false) {
     if (!expression) return;
-    const display = displayedCode(expression.runs);
+    const display = writtenMacro ? { runs: expression.runs, compact: false } : displayedCode(expression.runs);
     let lines = [[]];
     // The host validates runs. Text insertion never creates HTML or actions.
     for (const run of display.runs) run.text.split("\n").forEach((text, index) => {
@@ -157,13 +174,17 @@
     const role = textField(detail, "role", side);
     return detail.family === "observables" && detail[side] && ["varobs", "varexobs"].includes(role) ? role : null;
   };
-  const observableDeclaration = detail => detail.family === "observables" && ["before", "after"].every(side => !detail[side] || observableKeyword(detail, side));
+  const observableDeclaration = detail => !detail.statement_group && detail.family === "observables" && ["before", "after"].every(side => !detail[side] || observableKeyword(detail, side));
   function declaration(detail, side) {
-    if (observableKeyword(detail, side)) return observableKeyword(detail, side);
+    if (observableDeclaration(detail)) return observableKeyword(detail, side);
     const written = textField(detail, "written_kind", side);
     return detail[side] && ["var", "varexo", "varexo_det", "parameters"].includes(written) ? written : localRole(detail) === "model_local_declaration" && detail[side] ? "model_local_variable" : null;
   }
   const writtenStatement = detail => detail.expressions.find(expression => expression.field === "statement_text" && ["before", "after"].every(side => !detail[side] || expression[side]));
+  const pairedCommand = group => /^\d+:\d+$/.test(group);
+  const writtenEdit = statement => statement && statement.before?.text !== statement.after?.text && statement.highlight_basis !== "none";
+  // Interpolation can change a retained value without changing its written tokens.
+  const writtenEditExplainsFields = statement => writtenEdit(statement) && ![statement.before, statement.after].some(side => side && /@(?:\{|#)/.test(side.text));
   function declarationKeywordRole(detail, side, keyword) {
     if (!observableKeyword(detail, side)) return "unchanged";
     const text = writtenStatement(detail)?.[side];
@@ -173,22 +194,23 @@
     const roles = new Set(sliceRuns(text, start, start + keyword.length).map(run => run.role));
     return roles.size === 1 ? [...roles][0] : "unchanged";
   }
-  function visibleFields(detail) {
+  function visibleFields(detail, expressions) {
     const assignment = detail.expressions.find(expression => expression.field === "expression");
     const evaluatedValueNeeded = ["before", "after"].some(side => {
       const text = assignment?.[side]?.text ?? textField(detail, "expression", side);
       return text !== null && text.trim() !== "" && !/^(?:[+-]\s*)?(?:\d+(?:\.\d*)?|\.\d+)(?:[eEdD][+-]?\d+)?$/.test(text.trim());
     });
     const statement = writtenStatement(detail);
-    const expressions = visibleExpressions(detail);
+    const writtenExplainsFields = writtenEditExplainsFields(statement);
     return detail.fields.filter(field => {
       if (field.name === "dependent_on") return false;
+      if (field.name === "written_directives" && expressions.some(expression => expression.field === field.name)) return false;
       if (observableDeclaration(detail) && field.comparison_availability === "complete") {
         if (field.name === "role" || field.name === "target" && ["before", "after"].every(side => !detail[side] || textField(detail, "target", side) === detail[side].name)) return false;
         if (field.name === "captured_kind" && ["before", "after"].every(side => !detail[side] || textField(detail, "captured_kind", side) === (observableKeyword(detail, side) === "varobs" ? "var" : "varexo"))) return false;
       }
       if (field.name === "evaluated_value") return evaluatedValueNeeded;
-      if (statement && statement.before?.text !== statement.after?.text && field.comparison_availability === "complete" && !["order", "execution_order"].includes(field.name)
+      if (writtenExplainsFields && field.comparison_availability === "complete" && !["order", "execution_order"].includes(field.name)
         && (field.name !== "status" || [field.before, field.after].every(side => side.state === "absent" || side.value?.kind === "text" && ["active", "written"].includes(side.value.value)))) return false;
       if (field.comparison_availability === "complete") {
         if (field.name === "role" && ["commands", "operations", "ms_sbvar"].includes(detail.family)) return false;
@@ -212,19 +234,20 @@
     const written = writtenStatement(detail);
     // Captured text can stay identical while macro expansion or retained
     // operation results change. Only hide detail that the written edit explains.
-    if (written && written.before?.text !== written.after?.text) return [written];
+    if (writtenEditExplainsFields(written)) return [written];
     const values = detail.expressions.filter(expression => expression !== written &&
       (expression.before?.text !== expression.after?.text || expression.availability !== "complete" || !written && expression.field === "expression"));
     return written ? [written, ...values] : values;
   }
-  function sidePanel(row, side) {
+  function sidePanel(row, side, owner) {
     const panel = node("div", undefined, "side " + side), heading = node("div", undefined, "side-title"), own = row.semantic?.[side];
     const scope = row.sideScopes[side], scopeShown = scope !== null && contextScopes(row).includes(scope);
     heading.append(node("strong", titleCase(side)));
     if (scopeShown) heading.append(node("span", scopeLabel(scope), "scope-label"));
-    heading.append(sourceAction(row, side));
+    if (!row.includeFile || row[side] !== null) heading.append(sourceAction(row.commandSources?.[side] ?? row, side, owner));
     panel.append(heading);
-    if (row[side] === null) panel.append(node("p", "Not present", "source-note"));
+    if (row[side] === null) panel.append(node("p", row.includeFile ? "Not included" : "Not present", "source-note"));
+    else if (row.includeFile) return panel;
     else if (!row.semantic) panel.append(node("pre", row[side]));
     else if (own) {
       const keyword = declaration(row.semantic, side), role = localRole(row.semantic);
@@ -232,21 +255,34 @@
         codeLines(panel, { runs: [{ text: keyword, role: declarationKeywordRole(row.semantic, side, keyword) }, { text: " ", role: "unchanged" }, { text: own.name, role: row.kind === "added" ? "added" : row.kind === "removed" ? "removed" : "unchanged" }, { text: ";", role: "unchanged" }] }, side);
       }
       const expressions = visibleExpressions(row.semantic);
-      if (!keyword && !["symbols", "parameters", "equations", "shocks", "macro_context"].includes(row.semantic.family) && !writtenStatement(row.semantic)?.[side]) panel.append(node("p", "The file text for this instruction is unavailable. Use Text diff to review the files.", "source-note"));
+      if (!keyword && !["symbols", "parameters", "equations", "shocks", "macro_context"].includes(row.semantic.family) && !expressions.some(expression => expression.field === "statement_text" && expression[side])) panel.append(node("p", "The file text for this instruction is unavailable. Use Text diff to review the files.", "source-note"));
       for (const expression of expressions) {
         if (!["expression", "statement_text"].includes(expression.field) || expressions.length > 1) panel.append(node("h3", expression.field === "statement_text" ? "Written instruction" : expression.field === "statement_tokens" ? "Expanded instruction" : row.semantic.fields.find(field => field.name === expression.field)?.label ?? titleCase(expression.field), "field-label"));
         const value = expression[side];
         const definitionRole = ["added", "removed"].includes(row.kind) ? row.kind : "unchanged";
-        codeLines(panel, value && role === "model_local_definition" && expression.field === "expression" ? { runs: [{ text: "# " + own.name + " = ", role: definitionRole }, ...value.runs, { text: ";", role: definitionRole }] } : value, side);
+        if (expression.field !== "written_directives" || value?.text) {
+          codeLines(panel, value && role === "model_local_definition" && expression.field === "expression" ? { runs: [{ text: "# " + own.name + " = ", role: definitionRole }, ...value.runs, { text: ";", role: definitionRole }] } : value, side, expression.field === "written_directives");
+        }
       }
-      for (const field of visibleFields(row.semantic)) {
+      for (const field of visibleFields(row.semantic, expressions)) {
         if (field.name === "dimension" && field.comparison_availability === "complete" && scopeShown && field[side].value?.kind === "text" && field[side].value.value === scope) continue;
         const value = node("div", undefined, "field"), available = field.comparison_availability === "complete";
         value.setAttribute("data-field", field.name);
         value.append(node("h3", field.label, "field-label"));
-        const text = node("div", undefined, "field-content");
-        text.append(fieldValue(field[side], field.changed && available ? side === "before" ? "token removed" : "token added" : ""));
-        value.append(text); if (!available) value.append(node("p", "This value could not be compared.", "source-note")); panel.append(value);
+        const written = field.name === "written_directives" && field[side].value?.kind === "list" ? field[side].value.value : null;
+        if (written) {
+          const opposite = field[side === "before" ? "after" : "before"].value;
+          const role = side === "before" ? "removed" : "added";
+          const runs = written.map((item, index) => ({ text: (index ? "\n" : "") + valueText(item),
+            role: available && !(opposite?.kind === "list" && valueText(opposite.value[index]) === valueText(item)) ? role : "unchanged" }));
+          if (runs.length) codeLines(value, { runs }, side, true);
+        } else {
+          const text = node("div", undefined, "field-content");
+          text.append(fieldValue(field[side], field.changed && available ? side === "before" ? "token removed" : "token added" : ""));
+          value.append(text);
+        }
+        if (!available) value.append(node("p", "This value could not be compared.", "source-note"));
+        panel.append(value);
       }
     }
     const refs = referenceDisclosure(row, side, scopeShown ? scope : null);
@@ -273,7 +309,7 @@
     list.id = "references-" + side + "-" + row.id;
     toggle.setAttribute("aria-controls", list.id);
     const render = () => {
-      const open = presentation.referenceSides.includes(side);
+      const open = presentation.expandedDetails[row.id].includes(side);
       toggle.setAttribute("aria-expanded", String(open));
       list.hidden = !open;
       list.replaceChildren();
@@ -282,7 +318,7 @@
         const line = node("p", undefined, "reference"), target = ref.navigation[side];
         const reason = payload.status !== "ready" ? "Refresh to open this equation." : !target?.written_locations.length ? "The source line for this equation is unavailable." : "";
         const button = action("Open " + titleCase(side) + " reference: " + ref.label, "openReference", { pointer: ref.pointer, side }, reason, row.id);
-        button.id = "reference-" + ref.pointer;
+        button.id = "reference-" + row.id + "-" + ref.pointer;
         button.textContent = ref.label;
         line.append(button);
         if (ref.scope.dimension && ref.scope.dimension !== shownScope) line.append(node("span", scopeLabel(ref.scope.dimension), "source-note"));
@@ -290,8 +326,8 @@
       }
     };
     toggle.addEventListener("click", () => {
-      const sides = presentation.referenceSides;
-      presentation.referenceSides = sides.includes(side) ? sides.filter(value => value !== side) : [...sides, side];
+      const sides = presentation.expandedDetails[row.id];
+      presentation.expandedDetails[row.id] = sides.includes(side) ? sides.filter(value => value !== side) : [...sides, side];
       render();
       persist();
     });
@@ -315,16 +351,66 @@
     if (text.length <= 240 || !value || value.kind !== "list" && value.kind !== "record") return node("span", text, className);
     return node("pre", text, "field-value " + className);
   }
-  function rowDetail(row) {
-    const detail = node("div", undefined, "detail");
+  function renderRowDetail(row, detail) {
+    if (!row.macroRows) { renderChangeDetail(row, detail, row.id); return; }
+    for (const entry of row.macroRows) {
+      const block = node("div", undefined, "macro-entry");
+      if (entry.includeFile) block.append(node("h3", "Included file " + entry.kind, "field-label"));
+      renderChangeDetail(entry, block, row.id);
+      detail.append(block);
+    }
+  }
+  function renderChangeDetail(row, detail, owner) {
     const sides = node("div", undefined, "sides");
-    sides.append(sidePanel(row, "before"), sidePanel(row, "after"));
+    const card = row.commandRows ? combinedCommand(row) : row.historyRows?.length > 1 ? combinedHistory(row) : row;
+    sides.append(sidePanel(card, "before", owner), sidePanel(card, "after", owner));
     detail.append(sides);
-    const instruction = row.semantic?.expressions.find(expression => expression.field === "statement_text");
-    if (row.semantic?.family === "operations" && instruction?.before && instruction.after && instruction.before.text === instruction.after.text && row.semantic.fields.some(field => field.changed && !["role", "order"].includes(field.name))) detail.append(node("p", "The same instruction changes the model in different ways.", "source-note"));
-    const notes = rowNotes(row);
+    if (card.includeFile) return;
+    const instruction = card.semantic && writtenStatement(card.semantic);
+    if (card.semantic?.family === "operations" && instruction?.before && instruction.after && instruction.before.text === instruction.after.text && card.semantic.fields.some(field => field.changed && !["role", "order"].includes(field.name))) detail.append(node("p", "The same instruction changes the model in different ways.", "source-note"));
+    const notes = rowNotes(card);
     if (notes) detail.append(notes);
-    return detail;
+  }
+  function commandName(row) {
+    if (!row.semantic?.statement_group) return null;
+    const context = row.semantic?.after?.context ?? row.semantic?.before?.context;
+    return context?.kind === "command" ? context.name : null;
+  }
+  function combinedCommand(card) {
+    const { commandRows, semantic } = card;
+    const sides = ["before", "after"];
+    const paired = pairedCommand(semantic.statement_group);
+    const sideRows = Object.fromEntries(sides.map(side => [side, commandRows.find(row => row.semantic[side])]));
+    const commandSides = Object.fromEntries(sides.map(side => [side, sideRows[side]?.semantic[side] ?? (paired ? semantic.before ?? semantic.after : null)]));
+    const statements = commandRows.map(row => writtenStatement(row.semantic)).filter(Boolean);
+    const statement = statements.find(expression => sides.every(side => !commandSides[side] || expression[side]));
+    const fields = new Map(), expressions = new Map();
+    for (const row of commandRows) {
+      for (const field of row.semantic.fields) fields.set(JSON.stringify([field.name, field.before, field.after]), field);
+      for (const expression of row.semantic.expressions) {
+        if (expression.field === "statement_text") continue;
+        expressions.set(JSON.stringify([expression.field, expression.before?.text, expression.after?.text]), expression);
+      }
+    }
+    if (statement) expressions.set("statement_text", statement);
+    else if (statements.length) {
+      // These snippets describe one-sided facts inside a command pair. Only a
+      // paired statement expression can highlight changes to the full command.
+      const context = side => {
+        const text = statements.find(item => item[side])?.[side].text;
+        return text === undefined ? null : { text, runs: [{ text, role: "unchanged" }] };
+      };
+      expressions.set("statement_text", { field: "statement_text", before: context("before"), after: context("after"), highlight_basis: "none", availability: "complete" });
+    }
+    return {
+      ...card,
+      before: commandSides.before?.name ?? null, after: commandSides.after?.name ?? null,
+      commandSources: Object.fromEntries(sides.map(side => [side, card.navigation[side]?.written_locations.length ? card : commandRows.find(row => row.navigation[side]?.written_locations.length) ??
+        commandRows.find(row => row.navigation.block_openers?.[side]?.written_locations.length) ?? card])),
+      semantic: { ...semantic, change: card.kind, ...commandSides,
+        fields: [...fields.values()], expressions: [...expressions.values()], limits: commandRows.flatMap(row => row.semantic.limits),
+        references: commandRows.flatMap(row => row.semantic.references) },
+    };
   }
   function sliceRuns(expression, start, end) {
     let offset = 0;
@@ -341,45 +427,51 @@
       const detail = row.semantic, statement = detail && writtenStatement(detail);
       const target = detail && (textField(detail, "target", "after") ?? textField(detail, "target", "before"));
       const history = detail && ["before", "after"].every(side => !detail[side] || ["histval", "filter_initial_state"].includes(detail[side].context?.name));
-      const parts = statement && Object.fromEntries(["before", "after"].map(side => {
+      if (!history || !target || !statement || detail.limits.some(limit => limit.code === "occurrence_correspondence_unpaired") || detail.fields.some(field => field.changed && field.comparison_availability === "complete" && !["expression", "role", "target", "lag"].includes(field.name))) { cards.push(row); continue; }
+      const parts = Object.fromEntries(["before", "after"].map(side => {
         const text = statement[side]?.text, match = text?.match(/^([^\n]*;\r?\n)([\s\S]*)(\r?\nend;)$/);
         return [side, match && { start: match[1].length, end: text.length - match[3].length, header: match[1], footer: match[3] }];
       }));
-      if (!history || !target || detail.limits.some(limit => limit.code === "occurrence_correspondence_unpaired") || !parts || ["before", "after"].some(side => detail[side] && !parts[side]) || detail.fields.some(field => field.changed && field.comparison_availability === "complete" && !["expression", "role", "target", "lag"].includes(field.name))) { cards.push(row); continue; }
+      if (["before", "after"].some(side => detail[side] && !parts[side])) { cards.push(row); continue; }
       const key = JSON.stringify([target, row.kind, ...["before", "after"].map(side => [detail[side]?.context, row.navigation[side]?.occurrence_id, row.navigation[side]?.written_locations.map(location => location.uri), parts[side]?.header, parts[side]?.footer])]);
       const existing = groups.get(key);
       if (!existing) {
-        const card = { ...row };
-        groups.set(key, { card, parts, statement });
+        const card = { ...row, historyRows: [{ parts, statement }] };
+        groups.set(key, card);
         cards.push(card);
         continue;
       }
-      existing.card.label = target;
-      if (existing.card.id !== presentation.detailId) continue;
-      if (!existing.combined) {
-        existing.combined = { ...existing.statement };
-        existing.card.semantic = { ...existing.card.semantic, expressions: [existing.combined] };
-      }
-      const combined = existing.combined;
-      for (const side of ["before", "after"]) {
-        if (!combined[side]) continue;
-        const own = combined[side], footer = existing.parts[side].footer;
-        const runs = [...sliceRuns(own, 0, own.text.length - footer.length), { text: "\n", role: "unchanged" }, ...sliceRuns(statement[side], parts[side].start, parts[side].end), ...sliceRuns(own, own.text.length - footer.length, own.text.length)];
-        combined[side] = { text: runs.map(run => run.text).join(""), runs };
-      }
+      existing.label = target;
+      existing.historyRows.push({ parts, statement });
     }
     return cards;
+  }
+  function combinedHistory(card) {
+    const [first, ...periods] = card.historyRows, combined = { ...first.statement };
+    for (const side of ["before", "after"]) {
+      const expression = first.statement[side];
+      if (!expression) continue;
+      const end = first.parts[side].end;
+      const runs = [
+        sliceRuns(expression, 0, end),
+        ...periods.map(({ parts, statement }) => [{ text: "\n", role: "unchanged" }, ...sliceRuns(statement[side], parts[side].start, parts[side].end)]),
+        sliceRuns(expression, end, expression.text.length),
+      ].flat();
+      combined[side] = { text: runs.map(run => run.text).join(""), runs };
+    }
+    return { ...card, semantic: { ...card.semantic, expressions: [combined] } };
   }
   // Engine reasons describe the data contract. The view explains only what a
   // reader needs to know about the displayed changes, with no raw reason fallback.
   const comparisonNotes = {
-    identifier_correspondence_unpaired: null, timing_correspondence_limit: null,
+    identifier_correspondence_unpaired: "Some symbol uses in this equation could not be matched between Before and After.",
+    timing_correspondence_limit: "This equation exceeded the limit for comparing leads and lags.",
     statement_options_text_only: null, matched_irf_expression_positions: null,
     command_list_empty_occurrences_not_retained: null, type_result_history_association: null,
     prior_function_history_unavailable: null,
-    equation_correspondence_unpaired: "Equation pairing unavailable; shown as Removed and Added.",
-    condition_correspondence_unpaired: "Condition pairing unavailable; shown as Removed and Added.",
-    occurrence_correspondence_unpaired: "Occurrence pairing unavailable; shown as Removed and Added.",
+    equation_correspondence_unpaired: "This equation could not be matched between Before and After.",
+    condition_correspondence_unpaired: "This condition could not be matched between Before and After.",
+    occurrence_correspondence_unpaired: "This entry could not be matched between Before and After.",
     complementarity_unmatched: "Condition compared as text only.",
     references_partial: "Some equation references were omitted to limit the comparison size.",
     reference_limit: "Equation reference list reached its limit.",
@@ -400,6 +492,7 @@
   };
   function comparisonNote(detail, limit) {
     const code = limit.code;
+    if (code === "identifier_correspondence_unpaired" && detail.limits.some(limit => limit.code === "timing_correspondence_limit")) return null;
     if (Object.hasOwn(comparisonNotes, code)) return comparisonNotes[code];
     if (["token_alignment_limit", "occurrence_token_alignment_limit"].includes(code) || code.endsWith("_path_owner")) return null;
     const instructionShown = ["before", "after"].every(side => !detail[side] || visibleExpressions(detail).some(expression => ["statement_text", "statement_tokens", "written_row"].includes(expression.field) && expression[side]?.text));
@@ -437,7 +530,7 @@
   }
   function searchText(row) {
     const fields = row.semantic?.fields.filter(field => field.name !== "dependent_on") ?? [];
-    return [rowLabel(row), row.group, row.before ?? "", row.after ?? "", ...contextScopes(row).map(scopeLabel),
+    return [rowLabel(row), commandName(row), row.group, row.before ?? "", row.after ?? "", ...contextScopes(row).map(scopeLabel),
       ...(row.semantic?.facets ?? []).map(titleCase),
       ...(row.semantic?.expressions ?? []).flatMap(expression => [expression.before?.text ?? "", expression.after?.text ?? ""]),
       ...fields.flatMap(field => [field.label, fieldText(field.before), fieldText(field.after)])].join("\n").toLocaleLowerCase();
@@ -465,47 +558,109 @@
   }
   function indexGroups(rows) {
     const indexed = new Map(), sections = Object.keys(names);
+    kindCounts = {};
     for (const row of rows) {
       const key = row.section + ":" + row.group;
-      if (!indexed.has(key)) indexed.set(key, { key, label: row.group, section: row.section, rows: [] });
-      indexed.get(key).rows.push(row);
+      kindCounts[row.kind] = (kindCounts[row.kind] ?? 0) + 1;
+      row.summary = commandName(row) || ["commands", "macroContext"].includes(row.section) ? null : changeSummary(row);
+      row.search = searchText(row);
+      row.owner = ownerIdentity(row);
+      if (!indexed.has(key)) indexed.set(key, { key, label: row.group, section: row.section, rows: [], commands: new Map() });
+      const group = indexed.get(key);
+      group.rows.push(row);
+      const statement = row.semantic?.statement_group;
+      if (statement && commandName(row)) {
+        if (!group.commands.has(statement)) group.commands.set(statement, []);
+        group.commands.get(statement).push(row);
+      }
     }
     const ordered = [...indexed.values()].sort((left, right) => sections.indexOf(left.section) - sections.indexOf(right.section));
-    for (const group of ordered) group.parents = group.section === "parameters" ? parameterParents(group.rows) : new Map();
+    for (const group of ordered) {
+      group.parents = group.section === "parameters" ? parameterParents(group.rows) : new Map();
+      for (const [key, commandRows] of group.commands) {
+        const paired = pairedCommand(key);
+        if (commandRows.length < 2 && !paired) { group.commands.delete(key); continue; }
+        const primary = commandRows.find(row => row.kind === "changed" && writtenStatement(row.semantic)) ??
+          commandRows.find(row => row.kind === "changed") ?? commandRows.find(row => writtenStatement(row.semantic)) ?? commandRows[0];
+        const kind = paired || commandRows.some(row => row.kind !== primary.kind) ? "changed" : primary.kind;
+        group.commands.set(key, { ...primary, kind, commandRows });
+      }
+    }
     return new Map(ordered.map(group => [group.key, group]));
   }
 
   function changeSummary(row) {
+    const preview = text => text ? { text, valuePair: false } : null;
+    const values = (field, label = "") => ({ text: label + fieldPair(field), valuePair: true });
     if (pairedParameter(row)) {
       const value = parameterField(row, "evaluated_value");
-      if (value?.changed) {
-        const before = fieldText(value.before), after = fieldText(value.after);
-        if (before && after) return before + " → " + after;
-      }
+      if (value?.changed) return values(value);
       const expression = parameterField(row, "expression");
-      if (expression?.changed) return "Expression changed";
+      if (expression?.changed) return values(expression);
     }
-    if (row.kind !== "changed") return "";
-    if (row.semantic?.facets.includes("expression")) return "Expression changed";
-    if (row.semantic?.facets.includes("timing")) return "Timing changed";
-    if (row.semantic?.facets.includes("tags")) return "Tags changed";
-    return "";
+    const fact = row.semantic;
+    if (!fact) return null;
+    if (fact.family === "equations") {
+      const expression = fact.expressions.find(expression => expression.field === "expression");
+      if (row.kind !== "changed") {
+        const side = row.kind === "added" ? "after" : "before";
+        const field = fact.fields.find(field => field.name === "expression")?.[side];
+        return preview(excerpt(expression?.[side] ?? (field && { text: fieldText(field), runs: [] }), false));
+      }
+      const timing = fact.timing.find(({ before, after }) => before && after && before.name === after.name &&
+        before.written_offset !== after.written_offset);
+      if (timing) {
+        const use = item => item.name + (item.written_offset ? "(" + (item.written_offset > 0 ? "+" : "") + item.written_offset + ")" : "");
+        return preview(use(timing.before) + " → " + use(timing.after));
+      }
+      const before = excerpt(expression?.before), after = excerpt(expression?.after);
+      if (before && after && before !== after) return preview(before + " → " + after);
+      if (fact.facets.includes("expression")) return preview("Expression changed");
+      if (fact.facets.includes("timing")) return preview("Timing changed");
+      if (fact.facets.includes("tags")) return preview("Tags changed");
+    }
+    if (row.kind !== "changed") return null;
+    const fields = fact.fields.filter(field => field.changed && field.comparison_availability === "complete" &&
+      !["form", "role", "target", "block", "domain", "order"].includes(field.name));
+    const field = fields.find(field => ["irf", "values", "expression", "mean"].includes(field.name)) ?? fields[0];
+    if (field) {
+      if (field.name === "expression" && fact.family === "symbols" && localRole(fact)) return values(field);
+      const measure = fact.family === "shocks" && (textField(fact, "measure", "after") || textField(fact, "measure", "before"));
+      return values(field, (measure || field.label) + " ");
+    }
+    return null;
   }
-  function toggleRow(id) {
-    presentation.detailId = presentation.detailId === id ? null : id;
-    presentation.referenceSides = [];
-    presentation.returnFocus = null;
-    update("row-" + id);
+  function fieldPair(field) {
+    const display = side => side.state === "absent" ? "Not set" : side.state === "empty" ? "Empty" : fieldText(side);
+    const before = display(field.before);
+    return field.changed ? before + " → " + display(field.after) : before;
+  }
+  function excerpt(side, aroundChange = true) {
+    if (!side?.text) return "";
+    let first = 0;
+    for (const run of aroundChange ? side.runs : []) {
+      if (run.role !== "unchanged") break;
+      first += run.text.length;
+    }
+    const text = side.text;
+    let start = Math.max(0, (first === text.length ? 0 : first) - 12);
+    if (start > 0 && /[\uDC00-\uDFFF]/.test(text[start])) start -= 1;
+    let end = Math.min(text.length, start + 52);
+    if (end < text.length && /[\uDC00-\uDFFF]/.test(text[end])) end += 1;
+    return (start ? "…" : "") + side.text.slice(start, end).trim().replace(/\s+/g, " ") + (end < side.text.length ? "…" : "");
   }
   function compactRow(row, { child = false, context = false, dependents = [] } = {}) {
     const article = node("article", undefined, "change-item" + (child ? " dependent-row" : ""));
     article.setAttribute("data-row-id", row.id);
-    const open = presentation.detailId === row.id, title = rowLabel(row), summary = changeSummary(row);
+    const title = commandName(row) ?? rowLabel(row), summary = row.summary;
     const line = node("div", undefined, "change-line"), heading = node("h2", undefined, "row-heading");
-    const toggle = node("button", undefined, "change-row");
+    const hasValuePair = summary?.valuePair;
+    const toggle = node("button", undefined, "change-row" + (hasValuePair ? " has-value-pair" : ""));
     toggle.type = "button";
     toggle.id = "row-" + row.id;
-    toggle.setAttribute("aria-expanded", String(open));
+    toggle.title = title;
+    toggle.tabIndex = -1;
+    toggle.setAttribute("data-row-owner", row.id);
     toggle.setAttribute("aria-controls", "detail-" + row.id);
     const mark = node("span", marks[row.kind], "change-mark " + row.kind);
     mark.setAttribute("aria-hidden", "true");
@@ -514,16 +669,37 @@
     toggle.append(twisty, mark, node("span", changeLabel(row.kind) + " ", "sr-only"), node("span", title, "row-label"));
     const scope = contextScopes(row).map(scopeLabel).join(" · ");
     if (scope) toggle.append(node("span", scope, "row-scope"));
-    if (summary) toggle.append(node("span", summary, "row-summary"));
+    if (row.historyRows?.length > 1) toggle.append(node("span", row.historyRows.length + " changed periods", "row-summary"));
+    else if (summary) toggle.append(node("span", summary.text, "row-summary" + (hasValuePair ? " value-pair" : "")));
     if (!child && valueOnly(row)) toggle.append(node("span", "Value only", "row-note"));
-    toggle.addEventListener("click", () => toggleRow(row.id));
     heading.append(toggle);
     line.append(heading);
     article.append(line);
-    const detail = open ? rowDetail(row) : node("div");
+    const detail = node("div");
     detail.id = "detail-" + row.id;
-    detail.hidden = !open;
     article.append(detail);
+    const showDetail = () => {
+      const open = Object.hasOwn(presentation.expandedDetails, row.id);
+      toggle.setAttribute("aria-expanded", String(open));
+      detail.hidden = !open;
+      if (open) {
+        detail.className = "detail";
+        renderRowDetail(row, detail);
+      } else if (detail.className) {
+        detail.className = "";
+        detail.replaceChildren();
+      }
+    };
+    const toggleDetail = () => {
+      if (Object.hasOwn(presentation.expandedDetails, row.id)) delete presentation.expandedDetails[row.id];
+      else presentation.expandedDetails[row.id] = [];
+      presentation.returnFocus = null;
+      showDetail();
+      toggle.focus({ preventScroll: true });
+      persist();
+    };
+    toggle.addEventListener("click", toggleDetail);
+    showDetail();
     if (dependents.length) {
       const id = "dependents-" + row.id;
       const count = dependents.length + (dependents.length === 1 ? " dependent value" : " dependent values");
@@ -544,10 +720,6 @@
         disclosure.append(arrow, node("span", count));
         disclosure.addEventListener("click", () => {
           presentation.openDependents = expanded ? presentation.openDependents.filter(id => id !== row.id) : [...presentation.openDependents, row.id];
-          if (expanded && dependents.some(item => item.id === presentation.detailId)) {
-            presentation.detailId = null;
-            presentation.referenceSides = [];
-          }
           update(disclosure.id);
         });
         line.append(disclosure);
@@ -558,8 +730,23 @@
     return article;
   }
   function appendRows(container, group, shown) {
+    if (group.section === "macroContext") {
+      const primary = group.rows[0], kind = shown.every(row => row.kind === shown[0].kind) ? shown[0].kind : "changed";
+      const includes = group.rows.some(row => row.includeFile), macros = group.rows.some(row => !row.includeFile);
+      const label = includes && macros ? "Macro and include changes" : includes ? "Include changes" : "Macro code changes";
+      container.append(compactRow({ ...primary, label, kind, macroRows: shown }));
+      return;
+    }
     if (!group.parents.size) {
-      for (const row of historyCards(shown)) container.append(compactRow(row));
+      const statements = new Set();
+      for (const row of historyCards(shown)) {
+        const key = row.semantic?.statement_group;
+        const command = commandName(row) && group.commands.get(key);
+        if (!command) { container.append(compactRow(row)); continue; }
+        if (statements.has(key)) continue;
+        statements.add(key);
+        container.append(compactRow(command));
+      }
       return;
     }
     const matched = new Set(), children = new Map();
@@ -589,7 +776,7 @@
     const query = choices.search.trim().toLocaleLowerCase(), filtered = new Map();
     let total = 0;
     for (const [key, group] of groups) {
-      const rows = group.rows.filter(row => choices.changeKinds.includes(row.kind) && (!query || searchText(row).includes(query)));
+      const rows = group.rows.filter(row => choices.changeKinds.includes(row.kind) && (!query || row.search.includes(query)));
       filtered.set(key, rows);
       total += rows.length;
     }
@@ -625,6 +812,7 @@
       button.type = "button";
       button.id = "group-" + key;
       button.disabled = !count;
+      button.tabIndex = selected ? 0 : -1;
       button.append(node("span", group.label), node("span", String(count), "group-count"));
       button.setAttribute("aria-label", group.label + ", " + countText(count));
       button.setAttribute("aria-pressed", String(selected));
@@ -644,6 +832,13 @@
     controls.results.append(grid);
     groupList = list;
     const focus = focusId && document.getElementById(focusId);
+    const buttons = [...rows.querySelectorAll(".change-row")];
+    const row = buttons.find(button => button.id === focusId || button.id === rowFocus) ?? buttons[0];
+    if (row) row.tabIndex = 0;
+    if (focus?.parentElement === list && !focus.disabled && focus !== selectedButton) {
+      selectedButton.tabIndex = -1;
+      focus.tabIndex = 0;
+    }
     revealGroup(list, focus?.parentElement === list && !focus.disabled ? focus : selectedButton, scrollLeft, scrollTop);
     if (focus && !focus.disabled) focus.focus({ preventScroll: true });
   }
@@ -657,20 +852,17 @@
     const configuration = analysis?.configuration ?? summary?.requested_analysis;
     const equation = configuration?.equation_selection, defines = configuration?.defines ?? [];
     const receipts = analysis?.overrides ?? [], overrides = configuration?.overrides ?? [];
-    const preset = analysis?.selection?.name ?? configuration?.name;
-    const hasNamedPreset = preset && !/^(?:Analysis preview|Macro inputs)(?: \(modified\))?$/.test(preset);
-    const choiceCount = defines.length + (receipts.length || overrides.length);
-    const compact = [];
-    if (hasNamedPreset) compact.push(preset);
-    else if (choiceCount) compact.push(choiceCount + (choiceCount === 1 ? " macro input" : " macro inputs"));
-    else if (equation) compact.push("Equation selection");
-    else if (configuration) compact.push("Source");
-    const revision = message.inputRevisions?.[side];
-    if (revision) compact.unshift(revision);
+    const compact = [message.inputRevisions?.[side], message.configurationLabels?.[side]].filter(Boolean);
     heading.append(node("small", label), node("code", sourceLabel));
     if (compact.length) heading.append(node("span", compact.join(" · "), "input-summary"));
 
     content.append(node("p", input, "model-path"));
+    const includes = message.executedIncludes?.[side];
+    if (includes?.length) {
+      const list = node("ul", undefined, "executed-includes");
+      for (const file of includes) list.append(node("li", file));
+      content.append(node("p", "Executed includes", "analysis-detail"), list);
+    }
     for (const define of defines) content.append(node("p", "Macro: " + define.name + "=" + define.expression, "analysis-detail"));
     for (const value of equation?.values ?? []) content.append(node("p", "Equation: " + (equation.tag ?? "name") + "='" + value + "' (" + (equation.mode === "include" ? "included" : "excluded") + ")", "analysis-detail"));
     const names = new Map();
@@ -719,51 +911,32 @@
   }
 
   function comparisonLimits(message) {
-    const semantic = message.semantic?.limits ?? [];
-    const coverage = message.coverage;
-    const workLimit = /_(?:tree_(?:node|materialization)|selector_(?:visit|token)|text_materialization)_limit$/;
-    const hasWorkLimit = limits => limits.some(limit => workLimit.test(limit.code));
-    const workLimited = hasWorkLimit(semantic) || hasWorkLimit(coverage?.limits ?? []) ||
-      coverage?.families?.some(family => hasWorkLimit(family.limits));
-    const omitted = codes => semantic.filter(limit => codes.includes(limit.code)).reduce((total, limit) => total + (limit.omitted ?? 0), 0);
-    const rows = omitted(["serialized_output_limit"]);
-    const refs = omitted(["reference_limit", "reference_output_limit", "reference_target_output_limit"]);
-    let hunks = 0, sourceDetailLimited = false, pairedFiles = false, unpairedFiles = false;
-    for (const file of message.sourceChanges?.files ?? []) {
-      hunks += file.omitted_hunks ?? 0;
-      sourceDetailLimited ||= file.limits.some(limit => ["source_materialization_limit", "source_alignment_limit"].includes(limit.code));
-      if (file.before && file.after) pairedFiles = true;
-      else unpairedFiles = true;
-    }
-    const clauses = [];
-    if (rows) clauses.push(rows + (rows === 1 ? " model change detail" : " model change details"));
-    if (refs) clauses.push(refs + (refs === 1 ? " equation reference" : " equation references"));
-    if (hunks) clauses.push(hunks + (hunks === 1 ? " section of file differences" : " sections of file differences"));
+    const summary = message.summary;
     const notices = [];
-    if (clauses.length) notices.push("Comparison limits omitted " + clauses.join(", ") + ".");
-    else if (semantic.some(limit => ["token_alignment_limit", "occurrence_token_alignment_limit"].includes(limit.code))) notices.push("Some highlights were omitted because the comparison reached its limit.");
-    else if (coverage?.limits?.some(limit => limit.code === "detail_output_partial")) notices.push("Some details were omitted because the comparison reached its limit.");
-    if (sourceDetailLimited) notices.push("Some file difference details were omitted because the comparison reached its limit. Use Text diff to review the files.");
-    if (workLimited) notices.push("Some model changes may be missing because the comparison reached its work limit.");
-    return { incompleteRows: Boolean(rows || workLimited), pairedFiles, unpairedFiles, text: notices.join(" ") };
+    for (const issue of summary?.issues ?? []) {
+      if (["text_hunks", "pairing"].includes(issue.effect) || ["identifier_correspondence_unpaired", "timing_correspondence_limit"].includes(issue.code)) continue;
+      const family = issue.family ? titleCase(issue.family) : "Model";
+      if (issue.effect === "model_rows") notices.push(issue.omitted !== null && issue.code === "serialized_output_limit" ?
+        countText(issue.omitted) + " omitted by the comparison limit." : family + " comparison is incomplete. " + issue.reason);
+      else if (issue.effect === "references") notices.push("Some equation references were omitted.");
+      else if (issue.effect === "highlights") notices.push(issue.family ? family + ": some changed text could not be highlighted." : "Some changed text could not be highlighted.");
+      else if (issue.code === "captured_sources_required") notices.push("File text is unavailable.");
+      else notices.push(issue.reason);
+    }
+    return { incompleteRows: summary?.semantic_rows === null, text: [...new Set(notices)].join(" ") };
   }
   function resultMessage(message, limits) {
     if (message.status !== "ready") return message.message;
-    const files = message.sourceChanges;
-    const identical = files?.availability === "complete" && !files.files.length &&
-      message.coverage?.source_boundary && message.coverage.source_boundary !== "parsed_models_only";
-    if (message.rows.length) return identical ? "The captured file text is identical." : "";
-    const model = limits.incompleteRows ? "No model changes shown." : "No model changes found.";
-    return model + (limits.pairedFiles ? " The file text changed." : "") +
-      (limits.unpairedFiles ? " Some files could not be matched between inputs." : "") +
-      (identical ? " The captured file text is identical." : "");
+    if (message.rows.length) return "";
+    if (limits.incompleteRows) return "No model changes shown.";
+    if (message.rootText === "changed") return "No model changes found. Open Text diff to review file edits.";
+    return "No model changes found.";
   }
   function renderOutcome(message, limits) {
     controls.status.textContent = resultMessage(message, limits);
     controls.status.className = message.status;
     controls.status.hidden = !controls.status.textContent;
     controls.status.setAttribute("data-code", message.failureCode ?? "");
-    controls.refresh.disabled = message.status === "loading";
     const limit = document.getElementById("limitsStatus");
     if (limit) {
       limit.textContent = limits.text;
@@ -771,24 +944,9 @@
     }
     const choosePath = document.getElementById("choosePath");
     if (choosePath) choosePath.hidden = message.status !== "failure" || !message.canChoosePath;
-    const boundary = document.getElementById("sourceBoundary");
-    if (boundary) {
-      const scope = message.coverage?.source_boundary;
-      boundary.hidden = !scope;
-      boundary.textContent = !scope ? "" : scope === "parsed_models_only" ? "File text is unavailable" : scope.startsWith("supplied_") ? "Provided model files and the includes they use" : "Model files and the includes they use";
-    }
-    const hasFiles = Boolean(message.sourceChanges?.files.length);
-    for (const [id, hidden] of [["rootTextDiff", hasFiles], ["capturedTextDiff", !hasFiles]]) {
-      const button = document.getElementById(id);
-      if (!button) continue;
-      button.hidden = hidden;
-      button.disabled = message.status !== "ready";
-      button.title = !button.disabled ? "" : message.status === "loading" ? "Wait for the comparison to finish." : "Refresh to compare the current file text.";
-    }
   }
 
-  controls.refresh.addEventListener("click", () => post("refresh"));
-  for (const name of ["changeComparison", "swap", "rootTextDiff", "capturedTextDiff", "choosePath", "help"]) document.getElementById(name)?.addEventListener("click", () => post(name));
+  for (const name of ["choosePath", "help"]) document.getElementById(name)?.addEventListener("click", () => post(name));
   controls.search.addEventListener("input", () => {
     choices.search = controls.search.value;
     if (scrollArea) scrollArea.scrollTop = 0;
@@ -798,39 +956,81 @@
     if (event.key === "Escape") { controls.kinds.open = false; controls.kinds.children[0]?.focus(); }
   });
   controls.results.addEventListener("keydown", event => {
-    const id = presentation.detailId;
-    if (event.key !== "Escape" || !id) return;
-    if (event.target.id !== "row-" + id && !document.getElementById("detail-" + id)?.contains(event.target)) return;
+    const movement = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
+    const group = event.target.getAttribute("data-group"), owner = event.target.getAttribute("data-row-owner");
+    if ((group || owner) && (Object.hasOwn(movement, event.key) || event.key === "Home" || event.key === "End")) {
+      const buttons = [...controls.results.querySelectorAll(group ? ".group-button" : ".change-row")].filter(button => !button.disabled);
+      const index = buttons.indexOf(event.target);
+      const next = event.key === "Home" ? buttons[0] : event.key === "End" ? buttons.at(-1) : buttons[index + movement[event.key]];
+      if (next) {
+        event.target.tabIndex = -1;
+        next.tabIndex = 0;
+        next.focus();
+      }
+      event.preventDefault();
+      return;
+    }
+    if (event.key !== "Escape") return;
+    const id = owner ?? event.target.closest(".detail")?.parentElement?.getAttribute("data-row-id");
+    if (!id || !Object.hasOwn(presentation.expandedDetails, id)) return;
     event.preventDefault();
-    toggleRow(id);
+    document.getElementById("row-" + id)?.click();
+  });
+  controls.results.addEventListener("focusin", event => {
+    if (event.target.getAttribute("data-row-owner")) {
+      const previous = rowFocus && document.getElementById(rowFocus);
+      if (previous && previous !== event.target) previous.tabIndex = -1;
+      rowFocus = event.target.id;
+      event.target.tabIndex = 0;
+    }
   });
   document.addEventListener?.("pointerdown", event => {
     if (!controls.kinds.contains(event.target)) controls.kinds.open = false;
   });
   window.addEventListener("message", event => {
     const message = event.data;
+    if (message?.type === "findChanges") { controls.search.focus(); controls.search.select(); return; }
     if (!message || message.type !== "render" || !Array.isArray(message.rows)) return;
 
     const sameCapture = message.captureId && message.captureId === payload?.captureId;
-    if (!message.captureId || message.captureId !== presentation.captureId || !presentation.referenceSides) {
-      presentation = { captureId: message.captureId, detailId: null, openDependents: [], referenceSides: [], inputDetails: [], returnFocus: null };
+    if (message.status === "loading" && payload?.captureId) {
+      const focused = document.activeElement?.closest("[data-row-id]")?.getAttribute("data-row-id");
+      refreshFocus = focused && groups.get(choices?.group)?.rows.find(row => row.id === focused)?.owner;
+    }
+    if (!message.captureId || message.captureId !== presentation.captureId) {
+      presentation = { captureId: message.captureId, expandedDetails: {}, openDependents: [], inputDetails: [], returnFocus: null };
       groupList = null;
       if (scrollArea) scrollArea.scrollTop = 0;
+    } else if (!presentation.expandedDetails) {
+      const { detailId, referenceSides, ...rest } = presentation;
+      presentation = { ...rest, expandedDetails: detailId ? { [detailId]: referenceSides ?? [] } : {} };
     }
     if (!sameCapture) {
       groups = indexGroups(message.rows);
       references = new Map((message.references ?? []).map(reference => [reference.pointer, reference]));
     }
     const limits = comparisonLimits(message);
-    payload = { key: message.key, token: message.token, status: message.status, captureId: message.captureId,
+    payload = { key: message.key, token: message.token, status: message.status, captureId: message.captureId, sourcePaths: message.sourcePaths,
       available: message.rows.length, semantic: Boolean(message.semantic), incompleteRows: limits.incompleteRows };
     choices = message.choices;
     const returning = message.active !== false && presentation.returnFocus;
     const focused = message.active === false ? "" : document.activeElement?.id;
+    let refreshed;
+    if (refreshFocus && message.status === "ready" && message.active !== false) {
+      const matches = message.rows.filter(row => row.owner === refreshFocus);
+      if (matches.length === 1) {
+        const row = matches[0], group = groups.get(row.section + ":" + row.group);
+        choices.group = row.section + ":" + row.group;
+        const parent = group?.parents.get(row.id);
+        if (parent) presentation.openDependents.push(parent);
+        refreshed = "row-" + row.id;
+      }
+      refreshFocus = undefined;
+    }
     controls.models.replaceChildren(inputDetails(message, "before"), inputDetails(message, "after"));
     renderOutcome(message, limits);
     renderControls();
-    renderRows(returning?.id || focused);
+    renderRows(returning?.id || refreshed || focused);
     if (returning) {
       if (scrollArea) scrollArea.scrollTop = returning.scrollTop;
       const target = document.getElementById(returning.id);

@@ -9,6 +9,7 @@ import type { Location, Position, Range } from "../client/protocol";
 import { analysisSettingsChanged, booleanSetting, listSetting } from "../client/settings";
 import { fileLabel } from "../client/failure";
 import { commandEditor } from "../client/editor_target";
+import { displayPath } from "../client/source_uri";
 
 /** The input-only event and native placement option are integrated with 0.11.2. */
 export interface OriginJumpClient extends Pick<DygnosisClient, "client" | "currentInstance" | "log" | "failure" | "revalidate" | "execute" | "output" | "onDidChangeAnalysis"> {
@@ -166,7 +167,7 @@ function targetFitsDocument(target: PreviewLocation, document: vscode.TextDocume
     return !(previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff);
   });
 }
-function sourceLabel(target: PreviewLocation): string { return `${vscode.workspace.asRelativePath(vscode.Uri.parse(target.uri))}:${String(target.range.start.line + 1)}`; }
+function sourceLabel(target: PreviewLocation): string { return `${displayPath(vscode.workspace.asRelativePath(vscode.Uri.parse(target.uri)))}:${String(target.range.start.line + 1)}`; }
 function rowLabel(row: PreviewRow): string {
   return `${row.scope === "aggregate" ? "Aggregate" : `Dimension ${row.dimension ?? "(unnamed)"}`} · ${row.number === null ? row.kind : `Equation ${String(row.number)}`} · Preview line ${String(row.effective_range.start.line + 1)}`;
 }

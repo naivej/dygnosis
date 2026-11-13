@@ -860,7 +860,7 @@ fn comparison_mode(
         let coverage = json!({"before":before.coverage,"after":after.coverage});
         let mut data = if before.coverage["complete"] != true || after.coverage["complete"] != true
         {
-            json!({"status":"incomplete","message":"Comparison inputs are incomplete; change arrays and source navigation were withheld.","inputs":coverage})
+            json!({"status":"incomplete","message":"Comparison inputs are incomplete; model changes and source navigation are unavailable.","inputs":coverage})
         } else {
             compare_supplied(&mut before, &mut after, &control)?
         };
@@ -885,7 +885,7 @@ fn comparison_mode(
         let message = data["message"]
             .as_str()
             .or_else(|| data["error"].as_str())
-            .unwrap_or("Comparison inputs are incomplete; change arrays were withheld")
+            .unwrap_or("Comparison inputs are incomplete; model changes and source navigation are unavailable.")
             .to_owned();
         result.cause("refused", &code, message);
         if code == "CAPTURE_LIMIT" {
@@ -894,19 +894,17 @@ fn comparison_mode(
         result.data = data.clone();
         return Ok(result.wire());
     }
-    result.limits = data["semantic"]["limits"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    result.limits.extend(
-        data["source_changes"]["limits"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .cloned(),
-    );
-    if !result.limits.is_empty() {
-        result.cause("partial", "COMPARISON_LIMIT", "Some comparison detail is unavailable. Coverage and limits identify the retained facts and omitted detail.");
+    let mut reported = std::collections::BTreeSet::new();
+    for issue in data["summary"]["issues"].as_array().into_iter().flatten() {
+        let (Some(code), Some(reason)) = (issue["code"].as_str(), issue["reason"].as_str()) else {
+            continue;
+        };
+        if reported.insert((code, issue["family"].as_str(), issue["file"].as_str())) {
+            result.cause_for(
+                "partial", code, reason,
+                json!({"effect":issue["effect"],"family":issue["family"],"file":issue["file"],"owner":issue["owner"],"omitted":issue["omitted"]}),
+            );
+        }
     }
     let revision =
         source::sha256(serde_json::to_vec(&result.inputs).expect("comparison identities"));
@@ -1069,10 +1067,10 @@ fn compare_supplied(
     control: &RequestControl,
 ) -> Result<Value, rmcp::ErrorData> {
     use crate::engine::comparison::compare_navigation::{self, ComparisonInput, Coordinates};
-    use crate::engine::comparison::semantic_diff::{self, CaptureBoundary, Side};
-    use crate::engine::comparison::{CompareSource, compare_models_with_sources};
+    use crate::engine::comparison::semantic_diff::{CaptureBoundary, Side};
+    use crate::engine::comparison::{CompareSource, compare_captured_models};
     control.check().map_err(source_error)?;
-    let mut diff = compare_models_with_sources(
+    let mut diff = compare_captured_models(
         &before.model,
         &after.model,
         Some(CompareSource {
@@ -1122,15 +1120,13 @@ fn compare_supplied(
     )
     .with_file_names(after.sources.keys());
     let pairs = old.same_file_pairs(&new);
-    compare_navigation::populate_written_statements(&mut diff, &old, &new);
-    let boundary = CaptureBoundary::SuppliedRootAndExecutedIncludes;
-    let _ = semantic_diff::populate_captured_sources(
+    compare_navigation::populate_source_comparison(
         &mut diff,
-        old.source_input(boundary),
-        new.source_input(boundary),
+        &old,
+        &new,
+        CaptureBoundary::SuppliedRootAndExecutedIncludes,
         &pairs,
     );
-    semantic_diff::enforce_output_budget(&mut diff);
     control.check().map_err(source_error)?;
     if !before.workspace.input_snapshot_is_current(&before.root)
         || !after.workspace.input_snapshot_is_current(&after.root)
@@ -1151,8 +1147,9 @@ fn compare_supplied(
             json!({"error":error.message,"code":if error.code=="CAPTURE_LIMIT"{"SOURCE_LIMIT"}else{error.code}}),
         );
     }
-    let mut data = diff.to_json();
-    data["navigation"] = compare_navigation::navigation_json(&diff, &old, &new, Coordinates::Mcp);
+    let (mut data, navigation) =
+        compare_navigation::semantic_wire(&diff, &old, &new, Coordinates::Mcp);
+    data["navigation"] = navigation;
     data["sources"] = json!({"before":old.sources(),"after":new.sources()});
     Ok(data)
 }

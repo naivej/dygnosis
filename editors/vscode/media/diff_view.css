@@ -13,7 +13,8 @@ body {
 [hidden] { display: none !important; }
 body { color: var(--vscode-editor-foreground, var(--vscode-foreground)); background: var(--vscode-editor-background); font: var(--vscode-font-size)/1.5 var(--vscode-font-family); padding: 0; margin: 0; overflow: hidden; }
 main { height: 100vh; display: flex; flex-direction: column; min-width: 0; }
-.review-content { flex: 1; min-height: 0; min-width: 0; overflow: auto; }
+.comparison-body { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: auto; }
+.review-content { flex: 1; min-height: min(8rem, 25vh); min-width: 0; overflow: auto; }
 h1, h2, h3, p { margin: 0; }
 h2, h3, strong { font: inherit; font-weight: 500; }
 button, input, select, summary { font: inherit; color: inherit; }
@@ -49,11 +50,14 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; tab-size: 4
 .input-side code { line-height: inherit; flex: 0 1 auto; }
 .input-side code, .input-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tools label { display: flex; align-items: center; gap: 5px; color: var(--secondary); min-width: 0; }
-.comparison-actions { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 3px; }
 .tools { padding: 5px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); min-width: 0; }
 .tools .search { flex: 1 1 170px; min-width: 0; }
 .search input { width: 100%; min-width: 0; }
-.change-type-filter { position: relative; flex: 0 0 auto; }
+.kind-toggles { display: flex; gap: 3px; flex: 0 0 auto; }
+.kind-toggle { border-color: var(--input-border); }
+.kind-toggle[aria-pressed="true"] { color: var(--vscode-list-activeSelectionForeground); background: var(--vscode-list-activeSelectionBackground); border-color: var(--vscode-contrastActiveBorder, var(--vscode-focusBorder)); }
+.kind-toggle[aria-pressed="true"]:hover { background: var(--vscode-list-activeSelectionBackground); }
+.change-type-filter { display: none; position: relative; flex: 0 0 auto; }
 .change-type-filter summary { cursor: pointer; border: 1px solid var(--input-border); border-radius: 2px; background: var(--vscode-input-background); padding: 3px 8px; }
 .change-type-options { position: absolute; z-index: 10; top: calc(100% + 4px); right: 0; min-width: 175px; padding: 5px; background: var(--vscode-dropdown-background, var(--panel)); border: 1px solid var(--input-border); box-shadow: 0 2px 8px var(--vscode-widget-shadow); }
 .change-type-options label { padding: 4px 7px; cursor: pointer; color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); }
@@ -82,6 +86,8 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; tab-size: 4
 .row-label { flex: 0 1 auto; }
 .row-scope, .row-summary, .row-note, .dependent-context { color: var(--secondary); font-size: 12px; }
 .row-summary { font-variant-numeric: tabular-nums; }
+.row-summary.value-pair { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+.executed-includes { margin: 4px 0; padding-left: 1.4em; overflow-wrap: anywhere; }
 .row-note { flex: 0 0 auto; }
 .dependent-toggle, .dependent-context { display: flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; }
 .dependent-context { padding-right: 7px; }
@@ -93,6 +99,8 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; tab-size: 4
 .change-mark.removed { color: var(--remove); }
 .change-mark.changed { color: var(--change); }
 .detail { min-width: 0; padding: 4px 12px 9px; }
+.macro-entry + .macro-entry { margin-top: 10px; }
+.macro-entry > .field-label { margin-bottom: 4px; }
 .source-note, .scope-label { color: var(--secondary); font-size: 12px; overflow-wrap: anywhere; }
 .source-note { margin: 4px 0; }
 .field { padding: 5px 9px 9px; }
@@ -100,7 +108,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; tab-size: 4
 .field .field-label { padding: 0 0 3px; }
 .field-content { white-space: pre-wrap; overflow-wrap: anywhere; }
 .field-value { max-height: 320px; overflow: auto; }
-.token.added { background: var(--vscode-diffEditor-insertedTextBackground, var(--vscode-diffEditor-insertedLineBackground)); text-decoration: underline; text-underline-offset: 3px; }
+.token.added { background: var(--vscode-diffEditor-insertedTextBackground, var(--vscode-diffEditor-insertedLineBackground)); }
 .token.removed { background: var(--vscode-diffEditor-removedTextBackground, var(--vscode-diffEditor-removedLineBackground)); text-decoration: none; }
 .sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .side { min-width: 0; border: 1px solid var(--line); }
@@ -122,20 +130,26 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; tab-size: 4
 .reset-filters { color: var(--vscode-textLink-foreground); }
 .footer { flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; border-top: 1px solid var(--line); padding: 7px 14px; color: var(--secondary); }
 .footer > span { display: inline-flex; align-items: center; gap: 5px; }
-.footer .boundary { margin-left: auto; }
 .footer button { padding: 0 3px; color: var(--vscode-textLink-foreground); }
 @container (max-width: 555px) {
   .sides { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+}
+@container (min-width: 480px) {
+  .has-value-pair .row-label { flex: 0 0 9em; }
 }
 @media (max-width: 600px) {
   .grouped { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
   .group-list { display: flex; border-right: 0; border-bottom: 1px solid var(--line); }
   .group-button { width: auto; flex: 0 0 auto; gap: 5px; }
-  .comparison-actions { justify-content: flex-start; }
   .comparison-inputs { grid-template-columns: minmax(0, 1fr); }
   .change-row { flex-wrap: wrap; }
   .sides { gap: 8px; }
-  .footer .boundary { margin-left: 0; }
+}
+@media (max-width: 499px) {
+  .kind-toggles { display: none; }
+  .change-type-filter { display: block; max-width: 55%; }
+  .change-type-filter summary { overflow-wrap: anywhere; }
+  .row-summary.value-pair { flex-basis: 100%; }
 }
 @media (pointer: coarse) { button, summary, input, select { min-height: 44px; } input, select { font-size: 16px; } }
 body.vscode-high-contrast .token.added, body.vscode-high-contrast-light .token.added { outline: 1px solid var(--vscode-contrastBorder, currentColor); }

@@ -467,18 +467,7 @@ fn supplied_boundary_names_unexamined_files_without_downgrading_captured_file_de
         diff.coverage.source_boundary,
         "supplied_roots_and_executed_includes"
     );
-    assert!(
-        diff.coverage
-            .limits
-            .iter()
-            .any(|limit| limit.code == "sources_not_captured")
-    );
-    assert!(
-        diff.coverage
-            .limits
-            .iter()
-            .any(|limit| limit.code == "supplied_source_boundary")
-    );
+    assert!(diff.source_changes.limits.is_empty());
     assert!(
         !diff
             .coverage

@@ -609,6 +609,24 @@ async fn lsp_compare(backend: &Backend, before: &Url, after: &Url) -> Value {
     diff
 }
 
+fn semantic_owner<'a>(diff: &'a Value, family: &str) -> &'a Value {
+    diff["semantic"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["family"] == family && row["change"] == "changed")
+        .expect("changed semantic owner")
+}
+
+fn evaluated_parameter<'a>(diff: &'a Value, side: &str) -> &'a Value {
+    &semantic_owner(diff, "parameters")["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["name"] == "evaluated_value")
+        .unwrap()[side]["value"]["value"]
+}
+
 #[tokio::test]
 async fn lsp_uses_utf16_and_current_overlay_revisions() {
     let source = "var y; model; /* 😀 */ y=1; end;\r\n";
@@ -620,7 +638,9 @@ async fn lsp_uses_utf16_and_current_overlay_revisions() {
     open(backend, before_uri.clone(), source).await;
     open(backend, after_uri.clone(), &after).await;
     let diff = lsp_compare(backend, &before_uri, &after_uri).await;
-    let location = &row(&diff, "/changed_equations/0")["before"]["written_locations"][0];
+    let owner = semantic_owner(&diff, "equations");
+    let location =
+        &row(&diff, owner["pointer"].as_str().unwrap())["before"]["written_locations"][0];
     assert_eq!(location["input_id"], "before");
     let root_key = location["file_key"].as_str().expect("snapshot file key");
     assert_eq!(diff["sources"]["before"][root_key], source);
@@ -667,7 +687,12 @@ async fn lsp_uses_utf16_and_current_overlay_revisions() {
         edited["inputs"]["after"]["revision"]
     );
     assert_eq!(
-        row(&edited, "/changed_equations/0")["after"]["written_locations"][0]["range"]["start"]["line"],
+        row(
+            &edited,
+            semantic_owner(&edited, "equations")["pointer"]
+                .as_str()
+                .unwrap()
+        )["after"]["written_locations"][0]["range"]["start"]["line"],
         1
     );
     let capability = serde_json::to_value(dygnosis::server::initialize_result()).unwrap();
@@ -732,9 +757,17 @@ async fn lsp_each_root_keeps_its_settings_disk_dependencies_and_include_overlays
     }).await.unwrap();
     let diff = lsp_compare(backend, &before_uri, &after_uri).await;
     assert_pointers(&diff);
-    assert_eq!(diff["changed_parameter_values"][0]["old_value"], 1.0);
-    assert_eq!(diff["changed_parameter_values"][0]["new_value"], 2.0);
-    let parameter = row(&diff, "/changed_parameter_values/0");
+    assert_eq!(
+        evaluated_parameter(&diff, "before"),
+        &serde_json::json!(1.0)
+    );
+    assert_eq!(evaluated_parameter(&diff, "after"), &serde_json::json!(2.0));
+    let parameter = row(
+        &diff,
+        semantic_owner(&diff, "parameters")["pointer"]
+            .as_str()
+            .unwrap(),
+    );
     for (side, expected_text) in [
         ("before", "parameters p; p=1;\n"),
         ("after", "parameters p; p=2;\n"),
@@ -747,7 +780,10 @@ async fn lsp_each_root_keeps_its_settings_disk_dependencies_and_include_overlays
     // No watched-file event: comparing itself must observe changed disk input.
     files.write("b/values.inc", "parameters p; p=3;\n");
     let disk_edit = lsp_compare(backend, &before_uri, &after_uri).await;
-    assert_eq!(disk_edit["changed_parameter_values"][0]["new_value"], 3.0);
+    assert_eq!(
+        evaluated_parameter(&disk_edit, "after"),
+        &serde_json::json!(3.0)
+    );
     assert_eq!(
         diff["navigation"]["before"]["revision"],
         disk_edit["navigation"]["before"]["revision"]
@@ -758,7 +794,10 @@ async fn lsp_each_root_keeps_its_settings_disk_dependencies_and_include_overlays
     );
     open(backend, after_include, "parameters p; p=4;\n").await;
     let overlay = lsp_compare(backend, &before_uri, &after_uri).await;
-    assert_eq!(overlay["changed_parameter_values"][0]["new_value"], 4.0);
+    assert_eq!(
+        evaluated_parameter(&overlay, "after"),
+        &serde_json::json!(4.0)
+    );
     assert_ne!(
         disk_edit["navigation"]["after"]["revision"],
         overlay["navigation"]["after"]["revision"]
@@ -770,8 +809,14 @@ async fn lsp_each_root_keeps_its_settings_disk_dependencies_and_include_overlays
         ]}}}),
     }).await;
     let settings = lsp_compare(backend, &before_uri, &after_uri).await;
-    assert_eq!(settings["changed_parameter_values"][0]["old_value"], 1.0);
-    assert_eq!(settings["changed_parameter_values"][0]["new_value"], 5.0);
+    assert_eq!(
+        evaluated_parameter(&settings, "before"),
+        &serde_json::json!(1.0)
+    );
+    assert_eq!(
+        evaluated_parameter(&settings, "after"),
+        &serde_json::json!(5.0)
+    );
     assert_eq!(
         overlay["navigation"]["before"]["revision"],
         settings["navigation"]["before"]["revision"]

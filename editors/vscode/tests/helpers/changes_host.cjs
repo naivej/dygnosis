@@ -1,5 +1,5 @@
 const { compiledModule, importedModule } = require("./extension_modules.cjs");
-const { currentSnapshot } = require("./current_snapshot.cjs");
+const { currentSnapshot, emptySemantic, summaryFor } = require("./current_snapshot.cjs");
 const { parseSnapshotDiff } = require(compiledModule("diff_view"));
 // Native-like VS Code surface for comparison document, capture, and source lifetime tests.
 const Module = require("node:module");
@@ -53,14 +53,13 @@ const deferred = () => { let resolve, reject; const promise = new Promise((done,
 const flush = async () => { for (let index = 0; index < 12; index++) await new Promise(resolve => setImmediate(resolve)); };
 
 function diffData(changed = true) {
-  const data = { semantic_schema_version: 1, source_changes_schema_version: 1, coverage_schema_version: 1,
-    comparison_versions: { semantic: 1, source_changes: 1, coverage: 1 },
-    semantic: { schema_version: 1, availability: "complete", budgets: { token_alignment_cells: 1, source_alignment_cells: 1, references_per_side: 1, source_hunks: 1, serialized_output_bytes: 1 }, rows: [], references: [], limits: [] },
-    source_changes: { schema_version: 1, availability: "complete", files: [], limits: [] },
-    coverage: { schema_version: 1, availability: "complete", source_boundary: "captured_roots_and_executed_includes", families: [], limits: [] },
-    symbols_changed: [], changed_parameter_values: [], added_equations: [], removed_equations: [], changed_equations: [], unmatched_same_name: [], heterogeneous_equations: [], shock_setup_changes: [] };
-  for (const category of ["endogenous", "exogenous", "parameters"]) for (const kind of ["added", "removed", "common"]) data[`${kind}_${category}`] = [];
-  if (changed) data.changed_equations.push({ index_old: 1, index_new: 1, text_old: "y = 1", text_new: "y = 2", name_old: "goods", name_new: "goods", tags_old: { name: "goods" }, tags_new: { name: "goods" } });
+  const data = emptySemantic();
+  const side = { name: "goods", equation_index: 1, occurrence: 1, context: null, scope: { domain: "aggregate", dimension: null, block: "model" } };
+  const field = text => ({ state: "present", value: { kind: "text", value: text } });
+  if (changed) data.semantic.rows.push({ pointer: "/semantic/rows/0", family: "equations", change: "changed", name: "goods", count_unit: "accepted_occurrence",
+    before: side, after: side, facets: ["expression"], fields: [{ name: "expression", label: "Expression", before: field("y = 1"), after: field("y = 2"), changed: true, comparison_availability: "complete", numeric_difference: null }],
+    expressions: [], timing: [], references: [], limits: [], statement_group: null });
+  data.summary = summaryFor(data);
   return data;
 }
 function captured(resource, history, host, instance = 1, changed = true) {
@@ -78,7 +77,7 @@ function captured(resource, history, host, instance = 1, changed = true) {
     written_locations: [{ file_key: Object.keys(texts[side])[1], ...(inputs[side].kind === "git" ? { commit: inputs[side].revision } : {}), range: { start: { line: 0, character: 3 }, end: { line: 0, character: 5 } } }] });
   const receipt = currentSnapshot({ beforeRoot: inputs.before.root_file, afterRoot: inputs.after.root_file, revisions: { before: inputs.before.revision, after: inputs.after.revision },
     diff: diffData(changed), sources: texts,
-    navigationRows: changed ? [{ id: "/changed_equations/0", kind: "equation", before: target("before"), after: target("after") }] : [] });
+    navigationRows: changed ? [{ id: "/semantic/rows/0", kind: "semantic", family: "equations", name: "goods", before: target("before"), after: target("after") }] : [] });
   const snapshot = parseSnapshotDiff(receipt, { before: "before", after: "after" }, (side, key) => {
     const uri = sourceUris[side].get(key); if (!uri) throw new Error("unsupported current snapshot source key"); return uri.toString();
   }, { before: { root_file: inputs.before.root_file, revision: inputs.before.revision, ...(inputs.before.kind === "git" ? { commit: inputs.before.revision } : {}) },
@@ -103,7 +102,7 @@ function snapshotResponse(request, changed = true) {
   }
   if (changed) {
     const target = side => ({ occurrence_id: `${side}:1`, domain: "aggregate", dimension: null, written_locations: [{ input_id: request[side].input_id, file_key: Object.keys(sources[side]).at(-1), ...(request[side].kind === "git" ? { commit: request[side].commit } : {}), range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } } }] });
-    navigation.rows.push({ id: "/changed_equations/0", kind: "equation", before: target("before"), after: target("after") });
+    navigation.rows.push({ id: "/semantic/rows/0", kind: "semantic", family: "equations", name: "goods", before: target("before"), after: target("after") });
   }
   return { state: "result", inputs, sources, navigation, diff: diffData(changed) };
 }
@@ -130,6 +129,7 @@ function createHost() {
   host.panel = document => {
     const received = new Emitter(), closed = new Emitter(), visible = new Emitter();
     const panel = { document, received, closed, visibility: visible, visible: true, viewColumn: 2, messages: [], disposed: false,
+      get active() { return host.activeTab?.input?.uri?.toString() === document.uri.toString() && (!host.activePanel || host.activePanel === this); },
       webview: { options: {}, cspSource: "vscode-webview:", asWebviewUri: uri => uri, onDidReceiveMessage: received.event, postMessage: async message => { panel.messages.push(message); } },
       onDidDispose: closed.event, onDidChangeViewState: visible.event, dispose() { if (!this.disposed) { this.disposed = true; closed.fire(); } } };
     host.panels.push(panel); return panel;
@@ -183,9 +183,10 @@ function createHost() {
         if (id !== "vscode.openWith") return undefined;
         const [uri] = args; let document = host.custom.get(uri.toString());
         host.activeTab = { input: new TabInputCustom(uri, changesViewType) };
-        if (document && host.panels.some(panel => panel.document === document && !panel.disposed)) return undefined;
+        const existing = document && host.panels.find(panel => panel.document === document && !panel.disposed);
+        if (existing) { host.activePanel = existing; return undefined; }
         document ??= host.provider.openCustomDocument(uri, {}, token()); host.custom.set(uri.toString(), document);
-        const panel = host.panel(document); await host.provider.resolveCustomEditor(document, panel, token()); return undefined;
+        const panel = host.panel(document); host.activePanel = panel; await host.provider.resolveCustomEditor(document, panel, token()); return undefined;
       },
     },
     workspace: {
@@ -227,7 +228,7 @@ function createHost() {
       showTextDocument: async (document, options) => { host.shown.push({ document, options }); return { document }; },
     },
   };
-  const service = { currentInstance: 1, client: { initializeResult: { capabilities: { experimental: { dygnosis: { compareModelSnapshots: { schema_version: 1, navigation_schema_version: 2, semantic_schema_version: 1, source_changes_schema_version: 1, coverage_schema_version: 1 } } }, executeCommandProvider: { commands: ["dynare/showEffectiveModel"] } } } },
+  const service = { currentInstance: 1, client: { initializeResult: { capabilities: { experimental: { dygnosis: { compareModelSnapshots: { schema_version: 1, navigation_schema_version: 2, semantic_schema_version: 2, source_changes_schema_version: 2, coverage_schema_version: 1 } } }, executeCommandProvider: { commands: ["dynare/showEffectiveModel"] } } } },
     onDidInvalidate: host.changed.event, onDidChange: host.changed.event, onDidUpdateModelInfo: host.modelUpdated.event, log: message => host.logs.push(message), failure: async message => host.failures.push(message), ensureStarted: async () => {},
     rootForDocument: async document => host.rootFor ? host.rootFor(document) : document.uri,
     knownOwners: uri => host.knownOwners?.(uri) ?? [], knownIncludedFiles: () => host.includedFiles ?? [],
@@ -273,7 +274,11 @@ function createHost() {
   host.openSaved = resource => vscode.commands.executeCommand("vscode.openWith", Uri.from({ scheme: changesScheme, path: `/${resourceName(resource)}`, query: resourceQuery(resource) }), changesViewType);
   host.last = (panel = host.panels.at(-1)) => panel.messages.at(-1);
   host.message = (message, panel = host.panels.at(-1)) => panel.received.fire(message);
-  host.source = (side = "before", panel = host.panels.at(-1), extra = {}) => host.message({ type: "openSource", token: host.last(panel).token, rowId: "/changed_equations/0", side, ...extra }, panel);
+  host.source = (side = "before", panel = host.panels.at(-1), extra = {}) => host.message({ type: "openSource", token: host.last(panel).token, rowId: "/semantic/rows/0", side, ...extra }, panel);
+  host.invoke = (command, panel) => {
+    if (panel) { host.activeTab = { input: new TabInputCustom(panel.document.uri, changesViewType) }; host.activePanel = panel; }
+    return vscode.commands.executeCommand("dygnosis." + command);
+  };
   host.split = async document => { const panel = host.panel(document); await host.provider.resolveCustomEditor(document, panel, token()); return panel; };
   host.close = panel => { panel.dispose(); if (!host.panels.some(other => other.document === panel.document && !other.disposed)) { panel.document.dispose(); host.custom.delete(panel.document.uri.toString()); } };
   host.closeText = document => { document.isClosed = true; host.closedText.fire(document); host.texts.delete(document.uri.toString()); };

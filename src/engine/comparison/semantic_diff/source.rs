@@ -83,6 +83,7 @@ pub fn populate_captured_sources(
                 &error.reason,
                 "source_changes",
             )],
+            ..SourceChanges::default()
         };
         set_boundary(diff, "capture_unavailable");
         diff.coverage.availability = Availability::Partial;
@@ -99,6 +100,11 @@ pub fn populate_captured_sources(
         availability: Availability::Complete,
         files: Vec::new(),
         limits: Vec::new(),
+        root_text: RootText::Unavailable,
+        executed_includes: Some(ExecutedIncludes {
+            before: included_files(before),
+            after: included_files(after),
+        }),
     };
     let mut remaining_hunks = diff.semantic.budgets.source_hunks;
     let mut materialization = MaterializationBudget {
@@ -182,21 +188,16 @@ pub fn populate_captured_sources(
             "sources_not_captured" | "supplied_source_boundary"
         )
     });
-    diff.coverage.limits.push(ComparisonLimit::new(
-        "sources_not_captured",
-        "Source comparison covers the selected roots and executed includes. Unexecuted child files, external MATLAB functions and data files are not captured.",
-        "source_changes",
-    ));
-    if before.boundary == CaptureBoundary::SuppliedRootAndExecutedIncludes
-        || after.boundary == CaptureBoundary::SuppliedRootAndExecutedIncludes
-    {
-        diff.coverage.limits.push(ComparisonLimit::new(
-            "supplied_source_boundary",
-            "Supplied-text capture covers only the supplied root and supplied files actually used by executed includes. Other supplied or external files are not compared.",
-            "source_changes",
-        ));
-    }
     Ok(())
+}
+
+fn included_files(input: CapturedSourceInput<'_>) -> Vec<String> {
+    input
+        .sources
+        .keys()
+        .filter(|key| key.as_str() != input.root_key)
+        .cloned()
+        .collect()
 }
 
 fn validate_inputs(
@@ -282,10 +283,17 @@ fn compare_file(
 ) {
     let old_raw = before.map(|(input, key)| input.sources[key].as_str());
     let new_raw = after.map(|(input, key)| input.sources[key].as_str());
-    if old_raw
+    let matching = old_raw
         .zip(new_raw)
-        .is_some_and(|(old, new)| normalized_equal(old, new))
-    {
+        .is_some_and(|(old, new)| normalized_equal(old, new));
+    if correspondence == SourceCorrespondence::SelectedRoots {
+        sources.root_text = if matching {
+            RootText::Matching
+        } else {
+            RootText::Changed
+        };
+    }
+    if matching {
         return;
     }
     let side = |input: CapturedSourceInput<'_>, key: &str| SourceFileSide {
@@ -439,7 +447,11 @@ fn normalized_line_count(text: &str, cap: usize) -> Option<usize> {
 
 /// Inputs have already spent their comparison-wide N*M work charge. Empty
 /// sides need no matrix; common prefixes/suffixes are outside this alignment.
-fn align_lines<'a>(before: &[&'a str], after: &[&'a str], out: &mut Vec<(TokenRole, &'a str)>) {
+pub(in crate::engine::comparison) fn align_lines<'a>(
+    before: &[&'a str],
+    after: &[&'a str],
+    out: &mut Vec<(TokenRole, &'a str)>,
+) {
     if before.is_empty() {
         out.extend(after.iter().map(|line| (TokenRole::Added, *line)));
         return;

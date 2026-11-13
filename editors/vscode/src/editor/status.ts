@@ -5,6 +5,7 @@ import { listSetting } from "../client/settings";
 import type { EffectivePreviewRegistry } from "./preview";
 import { failureText, fileLabel, reasonText } from "../client/failure";
 import { automaticConfigurationName, configurationSummary } from "../client/analysis_presentation";
+import { displayPath } from "../client/source_uri";
 
 export const statusCounts = ["endogenous", "exogenous", "equations"];
 export type StatusCount = "endogenous" | "exogenous" | "equations";
@@ -71,7 +72,7 @@ function configurationHover(info: ModelInfo): vscode.MarkdownString {
     tooltip.appendMarkdown("  \n").appendText(choice);
   if (name && choices.length) tooltip.appendMarkdown("  \n").appendText(name);
   if (analysis?.include_paths !== null && analysis?.include_paths !== undefined)
-    tooltip.appendMarkdown("  \n").appendText(`Include paths: ${analysis.include_paths.join(", ") || "none"}`);
+    tooltip.appendMarkdown("  \n").appendText(`Include paths: ${analysis.include_paths.map(displayPath).join(", ") || "none"}`);
   if (info.root_uri !== info.document_uri) tooltip.appendMarkdown("\n\n").appendText(`Model: ${fileLabel(info.root_uri)}`);
   if (info.complete && analysis?.cause) tooltip.appendMarkdown("\n\n").appendText(analysis.cause.message);
   tooltip.isTrusted = { enabledCommands: ["dygnosis.selectAnalysisConfiguration"] };

@@ -5,6 +5,7 @@ import { record } from "../client/protocol";
 import { analysisSettingsChanged, workspaceDiagnosticsSetting } from "../client/settings";
 import { automaticConfigurationName } from "../client/analysis_presentation";
 import type { ModelSnapshot } from "../client/client";
+import { displaySourcePath } from "../client/source_uri";
 
 const states = ["pending", "checking", "checked", "incomplete", "failed", "excluded"] as const;
 type RootState = typeof states[number];
@@ -151,7 +152,7 @@ export function workspaceStatusContent(status: WorkspaceStatus): StatusContent {
     const failures = status.discovery_failures.length;
     if (failures) {
       const first = status.discovery_failures[0];
-      notes.push(`${vscode.Uri.parse(first.folder_uri).path}: ${first.failure}${failures > 1 ? ` (${failures - 1} more folder failures)` : ""} The model list may be incomplete.`);
+      notes.push(`${displaySourcePath(vscode.Uri.parse(first.folder_uri))}: ${first.failure}${failures > 1 ? ` (${failures - 1} more folder failures)` : ""} The model list may be incomplete.`);
     }
   }
   const tooltip = new vscode.MarkdownString("**Models in workspace**\n\n");

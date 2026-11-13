@@ -31,14 +31,10 @@ impl Query<'_> {
     }
 }
 
-// A retained fact can be returned in both semantic and structural sections.
-// Each copy needs its own valid local navigation target.
-type LocalPointers = BTreeMap<String, Vec<String>>;
+type LocalPointers = BTreeMap<String, String>;
 
 #[derive(Default)]
 struct Owners {
-    names: BTreeMap<String, BTreeSet<String>>,
-    equations: BTreeMap<(String, Option<String>, u64), BTreeSet<String>>,
     selected: BTreeSet<String>,
     references: BTreeMap<String, BTreeSet<String>>,
 }
@@ -51,28 +47,6 @@ impl Owners {
                 continue;
             };
             result.selected.insert(pointer.to_owned());
-            if matches!(row["family"].as_str(), Some("symbols" | "parameters")) {
-                result
-                    .names
-                    .entry(row["name"].as_str().unwrap_or_default().to_owned())
-                    .or_default()
-                    .insert(pointer.to_owned());
-            }
-            if row["family"] == "equations" {
-                for side in ["before", "after"] {
-                    if let Some(index) = row[side]["equation_index"].as_u64() {
-                        result
-                            .equations
-                            .entry((
-                                side.to_owned(),
-                                row[side]["scope"]["dimension"].as_str().map(str::to_owned),
-                                index,
-                            ))
-                            .or_default()
-                            .insert(pointer.to_owned());
-                    }
-                }
-            }
             for reference in row["references"]
                 .as_array()
                 .into_iter()
@@ -88,30 +62,6 @@ impl Owners {
         }
         result
     }
-
-    fn contains_structural(&self, path: &str, index: usize, value: &Value) -> bool {
-        if self.selected.contains(&format!("{path}/{index}")) {
-            return true;
-        }
-        if let Some(name) = value.as_str() {
-            return self.names.contains_key(name);
-        }
-        if path.contains("/unmatched_same_name/") {
-            let side = if path.ends_with("/removed") {
-                "before"
-            } else {
-                "after"
-            };
-            if let Some(index) = value["index"].as_u64() {
-                return self.equations.contains_key(&(
-                    side.to_owned(),
-                    value["dimension"].as_str().map(str::to_owned),
-                    index,
-                ));
-            }
-        }
-        false
-    }
 }
 
 fn array(value: &mut Value) -> Vec<Value> {
@@ -123,14 +73,13 @@ fn array(value: &mut Value) -> Vec<Value> {
 }
 
 fn map_pointer(pointers: &mut LocalPointers, old: &str, new: String) {
-    pointers.entry(old.to_owned()).or_default().push(new);
+    pointers.insert(old.to_owned(), new);
 }
 
 fn rebase_pointer(value: &mut Value, pointers: &LocalPointers) {
     let Some(old) = value.as_str() else { return };
     *value = pointers
         .get(old)
-        .and_then(|targets| targets.first())
         .map_or(Value::Null, |target| json!(target));
 }
 
@@ -160,54 +109,6 @@ fn rebase_equation(value: &mut Value, pointers: &LocalPointers) {
         value["snapshot_equation_pointer"] = value["equation_pointer"].clone();
         rebase_pointer(&mut value["equation_pointer"], pointers);
     }
-}
-
-// Container indexes stay stable even when all their leaf entries are omitted.
-// This order is part of the MCP projection contract, not JSON object ordering.
-fn structural_paths(data: &Value) -> Vec<String> {
-    let mut paths = [
-        "added_endogenous",
-        "removed_endogenous",
-        "common_endogenous",
-        "added_exogenous",
-        "removed_exogenous",
-        "common_exogenous",
-        "added_parameters",
-        "removed_parameters",
-        "common_parameters",
-        "changed_parameter_values",
-        "symbols_changed",
-        "added_equations",
-        "removed_equations",
-        "changed_equations",
-    ]
-    .into_iter()
-    .map(|path| format!("/{path}"))
-    .collect::<Vec<_>>();
-    fn unmatched(paths: &mut Vec<String>, data: &Value, prefix: &str) {
-        let path = format!("{prefix}/unmatched_same_name");
-        for index in 0..data
-            .pointer(&path)
-            .and_then(Value::as_array)
-            .map_or(0, Vec::len)
-        {
-            paths.push(format!("{path}/{index}/removed"));
-            paths.push(format!("{path}/{index}/added"));
-        }
-    }
-    unmatched(&mut paths, data, "");
-    for index in 0..data["heterogeneous_equations"]
-        .as_array()
-        .map_or(0, Vec::len)
-    {
-        let prefix = format!("/heterogeneous_equations/{index}");
-        for kind in ["added", "removed", "changed"] {
-            paths.push(format!("{prefix}/{kind}"));
-        }
-        unmatched(&mut paths, data, &prefix);
-    }
-    paths.push("/shock_setup_changes".into());
-    paths
 }
 
 fn source_context(nav: &[Value], owners: &Owners) -> [BTreeSet<Option<String>>; 2] {
@@ -271,7 +172,6 @@ pub(super) fn project(
 ) -> Result<(), String> {
     let allowed = [
         "summary",
-        "structural",
         "semantic",
         "references",
         "source",
@@ -285,28 +185,27 @@ pub(super) fn project(
         .iter()
         .any(|section| !allowed.contains(&section.as_str()))
     {
-        return Err("Unsupported comparison section".into());
+        return Err("Unsupported comparison section. Use semantic for model changes.".into());
     }
     if query.wants("navigation")
-        && !["semantic", "structural", "references"]
+        && !["semantic", "references"]
             .into_iter()
             .any(|section| query.wants(section))
     {
-        result.cause("refused", "NAVIGATION_OWNER_REQUIRED", "Comparison navigation needs returned facts. Select semantic, structural or references with navigation.");
+        result.cause("refused", "NAVIGATION_OWNER_REQUIRED", "Comparison navigation needs returned facts. Select semantic or references with navigation.");
         *data = Value::Null;
         return Ok(());
     }
     let mut pages = Pages::new(
-        "v3:dynare_compare_models",
+        "v4:dynare_compare_models",
         revision,
         arguments,
         query.output,
     )?;
     pages.share_budget();
-    let semantic_complete = data["semantic"]["availability"] == "complete";
-    let source_complete = data["source_changes"]["availability"] == "complete";
-    let semantic_availability = data["semantic"]["availability"].clone();
-    let source_availability = data["source_changes"]["availability"].clone();
+    let semantic_complete = data["summary"]["semantic_rows"].is_u64();
+    let reference_complete = data["summary"]["reference_membership_complete"] == true;
+    let source_complete = data["summary"]["source_files"].is_u64();
     let source_selection_complete = source_complete && (!query.filtered() || semantic_complete);
     let mut rows = array(&mut data["semantic"]["rows"]);
     rows.retain(|row| query.matches(row));
@@ -314,10 +213,10 @@ pub(super) fn project(
     let available_rows = rows.len();
     let navigation = array(&mut data["navigation"]["rows"]);
     let source_files = source_context(&navigation, &owners);
+    if query.wants("markdown") {
+        data["markdown"] = json!(filtered_markdown(&rows));
+    }
     if query.filtered() {
-        if query.wants("markdown") {
-            data["markdown"] = json!(filtered_markdown(&rows));
-        }
         if query.wants("source_text") {
             for (index, side) in ["before", "after"].iter().enumerate() {
                 let root = data["navigation"][side]["root_file"]
@@ -363,41 +262,6 @@ pub(super) fn project(
     } else {
         rows.clear();
     }
-    if query.wants("structural") {
-        for path in structural_paths(data) {
-            let Some(value) = data.pointer_mut(&path) else {
-                continue;
-            };
-            let mut facts: Vec<_> = array(value)
-                .into_iter()
-                .enumerate()
-                .filter(|(index, row)| {
-                    !query.filtered() || owners.contains_structural(&path, *index, row)
-                })
-                .collect();
-            let range = pages.projection_range(
-                &path[1..].replace('/', "."),
-                facts.len(),
-                !query.filtered() || semantic_complete,
-            );
-            let mut output = Vec::with_capacity(range.len());
-            for (index, (old_index, fact)) in facts.drain(range).enumerate() {
-                map_pointer(
-                    &mut pointers,
-                    &format!("{path}/{old_index}"),
-                    format!("{path}/{index}"),
-                );
-                output.push(fact);
-            }
-            *value = json!(output);
-        }
-    }
-    if query.filtered()
-        && !semantic_complete
-        && (query.wants("structural") || query.wants("source"))
-    {
-        result.cause("partial", "COMPARISON_FILTER_INCOMPLETE", "Comparison filters use the retained semantic changes. Some semantic detail is unavailable; structural rows and source files without a retained matching change were omitted.");
-    }
     let mut references = array(&mut data["semantic"]["references"]);
     references.retain(|reference| {
         reference["pointer"]
@@ -405,7 +269,7 @@ pub(super) fn project(
             .is_some_and(|id| owners.references.contains_key(id))
     });
     if query.wants("references") {
-        pages.collection_with_coverage("semantic.references", &mut references, semantic_complete);
+        pages.collection_with_coverage("semantic.references", &mut references, reference_complete);
         for (index, reference) in references.iter_mut().enumerate() {
             let old = reference["pointer"].as_str().unwrap_or_default().to_owned();
             reference["owners"] = json!(owners.references.get(&old));
@@ -433,7 +297,7 @@ pub(super) fn project(
             .filter_map(Value::as_str)
             .filter_map(|id| returned_references.get(id).cloned())
             .collect();
-        row["reference_counts"] = json!({"available_matches":ids.len(),"total_matches":semantic_complete.then_some(ids.len()),"returned_count":local.len()});
+        row["reference_counts"] = json!({"available_matches":ids.len(),"total_matches":reference_complete.then_some(ids.len()),"returned_count":local.len()});
         row["references"] = json!(local);
     }
     for reference in &mut references {
@@ -442,6 +306,7 @@ pub(super) fn project(
     data["semantic"]["rows"] = json!(rows);
     data["semantic"]["references"] = json!(references);
     let mut available_files = 0;
+    let mut unpaired_files = 0;
     if let Some(value) = data.pointer_mut("/source_changes/files") {
         let mut files = array(value);
         files.retain(|file| {
@@ -455,6 +320,10 @@ pub(super) fn project(
                 })
         });
         available_files = files.len();
+        unpaired_files = files
+            .iter()
+            .filter(|file| file["correspondence"] == "unpaired")
+            .count();
         if query.wants("source") {
             pages.collection_with_coverage(
                 "source_changes.files",
@@ -478,14 +347,13 @@ pub(super) fn project(
         let Some(old) = original["id"].as_str() else {
             continue;
         };
-        if let Some(targets) = pointers.get(old) {
-            for target in targets {
-                let mut row = original.clone();
-                row["snapshot_pointer"] = json!(old);
-                row["id"] = json!(target);
-                rebase_equation(&mut row, &pointers);
-                nav_rows.push(row);
-            }
+        if let Some(target) = pointers.get(old) {
+            let old = old.to_owned();
+            let mut row = original;
+            row["snapshot_pointer"] = json!(old);
+            row["id"] = json!(target);
+            rebase_equation(&mut row, &pointers);
+            nav_rows.push(row);
         }
     }
     data["navigation"]["rows"] = json!(nav_rows);
@@ -504,20 +372,24 @@ pub(super) fn project(
     if !query.wants("semantic") && !query.wants("references") {
         object.remove("semantic");
     }
-    if !query.wants("structural") {
-        let keep = [
-            "semantic",
-            "source_changes",
-            "sources",
-            "navigation",
-            "coverage",
-            "comparison_versions",
-            "markdown",
-        ];
-        object.retain(|key, _| keep.contains(&key.as_str()));
-    }
     if query.wants("summary") {
-        object.insert("summary".into(), json!({"semantic_rows":semantic_complete.then_some(available_rows),"available_semantic_rows":available_rows,"source_files":source_selection_complete.then_some(available_files),"available_source_files":available_files,"semantic_availability":semantic_availability,"source_availability":source_availability}));
+        let summary = object.get_mut("summary").expect("comparison summary");
+        summary["semantic_rows"] = json!(semantic_complete.then_some(available_rows));
+        summary["available_semantic_rows"] = json!(available_rows);
+        summary["source_files"] = json!(source_selection_complete.then_some(available_files));
+        summary["available_source_files"] = json!(available_files);
+        summary["paired_file_changes"] = json!(available_files - unpaired_files);
+        summary["unpaired_files"] = json!(unpaired_files);
+    } else {
+        object.remove("summary");
+    }
+    if query.filtered()
+        && !semantic_complete
+        && (query.wants("source") || query.wants("source_text"))
+    {
+        result.cause_for("partial", "COMPARISON_FILTER_INCOMPLETE",
+            "The filter used the available model changes. Other matching file changes could not be determined.",
+            json!({"effect":"model_rows"}));
     }
     result.selection = pages.finish(query.output);
     Ok(())
@@ -563,6 +435,207 @@ mod tests {
         json!({"comparison":{"kind":"sources","before":{"kind":"text","text":before},"after":{"kind":"text","text":after}}})
     }
 
+    #[test]
+    fn configuration_switch_reports_executed_includes_without_a_written_macro_edit() {
+        let root = "var y;\n@#ifndef POLICY\n@#define POLICY = 0\n@#endif\nmodel;\n@#if POLICY\n@#include \"policy.inc\"\n@#else\n@#include \"baseline.inc\"\n@#endif\nend;";
+        let source = json!({"kind":"map","root":"main.mod","files":{
+            "main.mod":root, "baseline.inc":"[name='Demand'] y=1;", "policy.inc":"[name='Demand'] y=2;"
+        }});
+        let result = call(json!({
+            "comparison":{"kind":"sources","before":source,"after":source},
+            "analysis_b":{"defines":[{"name":"POLICY","expression":"1"}]},
+            "sections":["summary","semantic","source","navigation"], "detail":"full"
+        }));
+        let data = &result["data"];
+        assert_eq!(data["summary"]["root_text"], "matching", "{result}");
+        assert_eq!(
+            data["summary"]["executed_includes"],
+            json!({"before":["baseline.inc"],"after":["policy.inc"]})
+        );
+        let rows = data["semantic"]["rows"].as_array().unwrap();
+        assert!(
+            rows.iter()
+                .any(|row| row["family"] == "equations" && row["name"] == "Demand")
+        );
+        assert!(rows.iter().all(|row| row["family"] != "macro_context"));
+        assert!(data.get("changed_equations").is_none());
+        check_pointers(data);
+    }
+
+    #[test]
+    fn changed_macro_definitions_count_by_name_and_keep_their_written_lines() {
+        let before = "// macro settings\n@#ifndef POLICY\n@#define POLICY = 0\n@#endif\n@#define FEEDBACK_SCALE = 1\nvar y; model; y=0; end;\n";
+        let after = before
+            .replace("POLICY = 0", "POLICY = 1")
+            .replace("FEEDBACK_SCALE = 1", "FEEDBACK_SCALE = 2");
+        let result = call(json!({
+            "comparison":{"kind":"sources","before":{"kind":"text","text":before},"after":{"kind":"text","text":after}},
+            "sections":["summary","semantic","navigation"],"detail":"full"
+        }));
+        let data = &result["data"];
+        let rows = data["semantic"]["rows"].as_array().unwrap();
+        assert_eq!(data["summary"]["semantic_rows"], 2, "{result}");
+        assert_eq!(rows.len(), 2);
+        for (row, (name, line, old, new)) in rows.iter().zip([
+            ("POLICY", 3, "@#define POLICY = 0", "@#define POLICY = 1"),
+            (
+                "FEEDBACK_SCALE",
+                5,
+                "@#define FEEDBACK_SCALE = 1",
+                "@#define FEEDBACK_SCALE = 2",
+            ),
+        ]) {
+            assert_eq!(row["family"], "macro_context");
+            assert_eq!(row["name"], name);
+            assert_eq!(row["change"], "changed");
+            assert_eq!(row["before"]["written_locations"][0]["line"], line);
+            assert_eq!(row["after"]["written_locations"][0]["line"], line);
+            let field = &row["fields"][0];
+            assert_eq!(field["before"]["value"]["value"][0]["value"], old);
+            assert_eq!(field["after"]["value"]["value"][0]["value"], new);
+        }
+        check_pointers(data);
+    }
+
+    #[test]
+    fn inserted_macro_definition_keeps_only_the_edit_and_its_source_line() {
+        let before = "@#define H = 1\n@#define H = 3\nvar y; model; y=@{H}; end;";
+        let after = before.replace("@#define H = 3", "@#define H = 2\n@#define H = 3");
+        let result = call(json!({
+            "comparison":{"kind":"sources","before":{"kind":"text","text":before},"after":{"kind":"text","text":after}},
+            "sections":["summary","semantic","navigation"],"detail":"full"
+        }));
+        let data = &result["data"];
+        let rows = data["semantic"]["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 1, "{result}");
+        let row = &rows[0];
+        assert_eq!(row["family"], "macro_context");
+        assert_eq!(row["name"], "H");
+        assert_eq!(row["change"], "changed");
+        assert!(
+            row["before"]["written_locations"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(row["after"]["written_locations"][0]["line"], 2);
+        let field = &row["fields"][0];
+        assert_eq!(field["before"]["value"]["value"], json!([]));
+        assert_eq!(
+            field["after"]["value"]["value"],
+            json!([{"kind":"text","value":"@#define H = 2"}])
+        );
+        check_pointers(data);
+    }
+
+    #[test]
+    fn an_unchanged_macro_definition_stays_plain_when_it_moves_between_edits() {
+        let before = "@#define H = 1\n@#define H = 2\n@#define H = 3\nvar y; model; y=@{H}; end;";
+        let after = before
+            .replace("@#define H = 1", "@#define H = 10\n@#define H = 11")
+            .replace("@#define H = 3", "@#define H = 30");
+        let result = call(json!({
+            "comparison":{"kind":"sources","before":{"kind":"text","text":before},"after":{"kind":"text","text":after}},
+            "sections":["semantic"],"detail":"full"
+        }));
+        let row = result["data"]["semantic"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["family"] == "macro_context")
+            .unwrap();
+        let expression = &row["expressions"][0];
+        for side in ["before", "after"] {
+            let unchanged: String = expression[side]["runs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|run| run["role"] == "unchanged")
+                .map(|run| run["text"].as_str().unwrap())
+                .collect();
+            assert_eq!(unchanged.trim(), "@#define H = 2", "{expression}");
+        }
+    }
+
+    #[test]
+    fn repeated_include_retains_one_written_edit_with_both_exact_targets() {
+        let root =
+            "var y;\n@#for j in 1:2\n@#include \"shared.inc\"\n@#endfor\nmodel; y=@{V}; end;";
+        let side = |value| {
+            json!({"kind":"map","root":"main.mod","files":{
+                "main.mod":root, "shared.inc":format!("@#define V = {value}\n")
+            }})
+        };
+        let result =
+            call(json!({"comparison":{"kind":"sources","before":side(1),"after":side(2)}}));
+        let data = &result["data"];
+        let rows: Vec<_> = data["semantic"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["family"] == "macro_context")
+            .collect();
+        assert_eq!(rows.len(), 1, "{result}");
+        assert_eq!(rows[0]["name"], "V");
+        assert_eq!(
+            data["summary"]["executed_includes"],
+            json!({"before":["shared.inc"],"after":["shared.inc"]})
+        );
+        for side in ["before", "after"] {
+            assert_eq!(rows[0][side]["written_locations"][0]["file"], "shared.inc");
+        }
+        check_pointers(data);
+    }
+
+    #[test]
+    fn identical_capture_reports_zero_changes_without_a_partial_outcome() {
+        let mut args = inputs();
+        args["comparison"]["after"] = args["comparison"]["before"].clone();
+        let result = call(args);
+        assert_eq!(result["outcome"]["status"], "ok", "{result}");
+        assert_eq!(result["data"]["summary"]["semantic_rows"], 0);
+        assert_eq!(result["data"]["summary"]["source_files"], 0);
+        assert_eq!(result["data"]["summary"]["root_text"], "matching");
+    }
+
+    #[test]
+    fn a_macro_directive_comment_is_a_captured_text_edit_only() {
+        let before = "@#define SCALE = 1  \nvar y; model; [name='Law'] y=@{SCALE}; end;";
+        let after = before.replace("1  \n", "1  // Added comment\n");
+        let result = call(json!({
+            "comparison":{"kind":"sources","before":{"kind":"text","text":before},"after":{"kind":"text","text":after}}
+        }));
+        let summary = &result["data"]["summary"];
+        assert_eq!(summary["semantic_rows"], 0, "{result}");
+        assert_eq!(summary["root_text"], "changed");
+        assert_eq!(summary["source_files"], 1);
+        assert_eq!(result["outcome"]["status"], "ok");
+    }
+
+    #[test]
+    fn captured_statement_highlight_omission_reports_the_affected_family() {
+        let model = |value| {
+            let sum = vec![value; 160].join("+");
+            format!("var y x; model; y=1;x=1;end; initval; y={sum}; x={sum}; end;")
+        };
+        let result = call(json!({
+            "comparison":{"kind":"sources","before":{"kind":"text","text":model("1")},"after":{"kind":"text","text":model("2")}},
+            "detail":"full"
+        }));
+        let summary = &result["data"]["summary"];
+        assert_eq!(summary["semantic_rows"], 2, "{summary}");
+        let issue = summary["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|issue| issue["code"] == "written_statement_highlight_limit")
+            .expect("omitted statement highlighting is explained");
+        assert_eq!(issue["effect"], "highlights");
+        assert_eq!(issue["family"], "steady_state");
+        assert_eq!(issue["omitted"], 2);
+        assert_eq!(result["outcome"]["status"], "partial");
+    }
+
     fn check_pointers(data: &Value) {
         for row in data["semantic"]["rows"].as_array().into_iter().flatten() {
             assert!(data.pointer(row["pointer"].as_str().unwrap()).is_some());
@@ -592,14 +665,7 @@ mod tests {
     fn canonical_comparison_pages_every_requested_fact_and_keeps_owners() {
         // Guards structural budget bypass, duplicate traversal and dangling pointers.
         let mut args = inputs();
-        args["sections"] = json!([
-            "summary",
-            "semantic",
-            "structural",
-            "references",
-            "source",
-            "navigation"
-        ]);
+        args["sections"] = json!(["summary", "semantic", "references", "source", "navigation"]);
         args["page_size"] = json!(1);
         let mut identities = BTreeSet::new();
         let mut names = BTreeSet::new();
@@ -646,10 +712,7 @@ mod tests {
             names,
             BTreeSet::from(["p".to_owned(), "q".to_owned(), "eq".to_owned()])
         );
-        assert_eq!(counts["changed_parameter_values"], 2);
-        assert_eq!(counts["changed_equations"], 1);
-        assert_eq!(counts["common_endogenous"], 1);
-        assert_eq!(counts["common_parameters"], 2);
+        assert_eq!(counts["semantic.rows"], 3);
         assert_eq!(counts["source_changes.files"], 1);
     }
 
@@ -711,37 +774,34 @@ mod tests {
     }
 
     #[test]
-    fn filters_select_matching_structural_context_and_reference_owners() {
-        // Structural common names and references must follow the chosen changes.
+    fn filters_select_matching_model_changes_and_reference_owners() {
+        // Only references owned by the selected calibration rows should survive.
         let mut args = inputs();
         args["families"] = json!(["parameters"]);
         args["kinds"] = json!(["changed"]);
-        args["sections"] = json!([
-            "summary",
-            "structural",
-            "references",
-            "navigation",
-            "source"
-        ]);
+        args["sections"] = json!(["summary", "semantic", "references", "navigation", "source"]);
         args["page_size"] = json!(1000);
         let result = call(args);
         let data = &result["data"];
         assert_eq!(data["summary"]["available_semantic_rows"], 2);
-        assert_eq!(data["common_endogenous"], json!([]));
-        assert_eq!(data["common_parameters"], json!(["p", "q"]));
-        assert_eq!(data["changed_equations"], json!([]));
-        assert_eq!(
-            data["changed_parameter_values"].as_array().unwrap().len(),
-            2
+        assert_eq!(data["semantic"]["rows"].as_array().unwrap().len(), 2);
+        assert!(
+            data["semantic"]["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["family"] == "parameters")
         );
+        assert!(data.get("common_parameters").is_none());
         for reference in data["semantic"]["references"].as_array().unwrap() {
             assert!(matches!(reference["symbol"].as_str(), Some("p" | "q")));
-            assert!(reference["owners"].as_array().unwrap().iter().all(|owner| {
-                owner
-                    .as_str()
+            assert!(
+                reference["owners"]
+                    .as_array()
                     .unwrap()
-                    .starts_with("/changed_parameter_values/")
-            }));
+                    .iter()
+                    .all(|owner| { owner.as_str().unwrap().starts_with("/semantic/rows/") })
+            );
         }
         check_pointers(data);
     }
@@ -764,10 +824,10 @@ mod tests {
     }
 
     #[test]
-    fn references_keep_all_selected_owners_and_duplicate_section_navigation() {
+    fn references_keep_all_selected_owners_with_one_navigation_per_owner() {
         // A usage can support both a label change and a calibration change.
         let source = |label, value| json!({"kind":"text","text":format!("var y;parameters p (long_name='{label}');p={value};model;[name='eq'] y=p;end;")});
-        let mut args = json!({"comparison":{"kind":"sources","before":source("Old",1),"after":source("New",2)},"sections":["semantic","structural","references","navigation"],"page_size":1000});
+        let mut args = json!({"comparison":{"kind":"sources","before":source("Old",1),"after":source("New",2)},"sections":["semantic","references","navigation"],"page_size":1000});
         let result = call(args.clone());
         let data = &result["data"];
         check_pointers(data);
@@ -784,18 +844,14 @@ mod tests {
             .iter()
             .find(|row| row["family"] == "parameters")
             .unwrap();
-        for target in [
-            parameter["pointer"].as_str().unwrap(),
-            parameter["snapshot_pointer"].as_str().unwrap(),
-        ] {
-            assert!(
-                data["navigation"]["rows"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|row| row["id"] == target)
-            );
-        }
+        let targets = data["navigation"]["rows"].as_array().unwrap();
+        assert_eq!(
+            targets
+                .iter()
+                .filter(|row| row["id"] == parameter["pointer"])
+                .count(),
+            1
+        );
         args["families"] = json!(["parameters"]);
         let filtered = call(args);
         assert!(
@@ -808,18 +864,19 @@ mod tests {
     }
 
     #[test]
-    fn changed_symbol_kind_selects_both_structural_declaration_sides() {
-        // A kind transition has one semantic owner and two declaration-list entries.
+    fn changed_symbol_kind_retains_both_declaration_targets() {
+        // A kind transition keeps both written declarations on one owner.
         let before = "var y z;parameters p;p=1;model;[name='y'] y=0;[name='z'] z=p;end;";
         let after = "var z;parameters y p;y=0;p=1;model;[name='z'] z=p;end;";
         let result = call(
-            json!({"comparison":{"kind":"sources","before":{"kind":"text","text":before},"after":{"kind":"text","text":after}},"families":["symbols"],"kinds":["changed"],"sections":["structural","navigation"],"page_size":1000}),
+            json!({"comparison":{"kind":"sources","before":{"kind":"text","text":before},"after":{"kind":"text","text":after}},"families":["symbols"],"kinds":["changed"],"sections":["semantic","navigation"],"page_size":1000}),
         );
         let data = &result["data"];
-        assert_eq!(data["removed_endogenous"], json!(["y"]));
-        assert_eq!(data["added_parameters"], json!(["y"]));
-        assert_eq!(data["common_endogenous"], json!([]));
-        assert_eq!(data["removed_equations"], json!([]));
+        assert_eq!(data["semantic"]["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(data["semantic"]["rows"][0]["name"], "y");
+        let targets = &data["navigation"]["rows"][0];
+        assert!(targets["before"]["written_locations"][0]["line"].is_u64());
+        assert!(targets["after"]["written_locations"][0]["line"].is_u64());
         check_pointers(data);
     }
 
@@ -832,6 +889,7 @@ mod tests {
         );
         let data = &result["data"];
         assert_eq!(data["summary"]["available_semantic_rows"], 1);
+        assert_eq!(data["summary"]["paired_file_changes"], 1);
         assert_eq!(data["source_changes"]["files"].as_array().unwrap().len(), 1);
         assert_eq!(
             data["source_changes"]["files"][0]["before"]["file_key"],
@@ -853,7 +911,7 @@ mod tests {
     #[test]
     fn partial_semantic_membership_cannot_supply_exact_filtered_source_totals() {
         // Source capture can be complete while filtered change membership is limited.
-        let mut data = json!({"semantic":{"availability":"limit_exceeded","rows":[{"pointer":"/semantic/rows/0","family":"parameters","change":"changed","name":"p","references":[]}],"references":[]},"source_changes":{"availability":"complete","files":[{"pointer":"/source_changes/files/0","correspondence":"proven_file_identity","before":{"file_key":"p.inc"}}]},"navigation":{"rows":[{"id":"/semantic/rows/0","before":{"written_locations":[{"file":"p.inc"}]}}]}});
+        let mut data = json!({"summary":{"semantic_rows":null,"source_files":1,"semantic_availability":"limit_exceeded","source_availability":"complete"},"semantic":{"availability":"limit_exceeded","rows":[{"pointer":"/semantic/rows/0","family":"parameters","change":"changed","name":"p","references":[]}],"references":[]},"source_changes":{"availability":"complete","files":[{"pointer":"/source_changes/files/0","correspondence":"proven_file_identity","before":{"file_key":"p.inc"}}]},"navigation":{"rows":[{"id":"/semantic/rows/0","before":{"written_locations":[{"file":"p.inc"}]}}]}});
         let output = ResultOptions {
             sections: vec!["summary".into(), "source".into()],
             page_size: Some(1),

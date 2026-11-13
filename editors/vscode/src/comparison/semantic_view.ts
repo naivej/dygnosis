@@ -15,14 +15,17 @@ export interface ExpressionSide { text: string; runs: TokenRun[] }
 export interface Expression { field: string; before: ExpressionSide | null; after: ExpressionSide | null; highlight_basis: "paired_expression" | "unpaired_text_only" | "none"; availability: Availability; reason: string | null }
 export interface TimingSide { name: string; class: string; written_offset: number; converted_offset: number; occurrence: number }
 export interface Reference { pointer: string; symbol: string; side: "before" | "after"; equation_pointer: string; equation_index: number; label: string; scope: Scope; occurrence: number; timing: TimingSide }
-export interface SemanticRow { pointer: string; family: SemanticFamily; change: "added" | "removed" | "changed"; name: string; count_unit: "final_fact" | "accepted_occurrence" | "operation"; facets: typeof facets[number][]; before: RowSide | null; after: RowSide | null; fields: FieldChange[]; expressions: Expression[]; timing: { before: TimingSide | null; after: TimingSide | null }[]; references: string[]; limits: Limit[] }
-export interface Semantic { schema_version: 1; availability: Availability; budgets: Record<string, number>; rows: SemanticRow[]; references: Reference[]; limits: Limit[] }
+export interface SemanticRow { pointer: string; family: SemanticFamily; change: "added" | "removed" | "changed"; name: string; count_unit: "final_fact" | "accepted_occurrence" | "operation"; facets: typeof facets[number][]; before: RowSide | null; after: RowSide | null; fields: FieldChange[]; expressions: Expression[]; timing: { before: TimingSide | null; after: TimingSide | null }[]; references: string[]; limits: Limit[]; statement_group: string | null }
+export interface Semantic { schema_version: 2; availability: Availability; budgets: Record<string, number>; rows: SemanticRow[]; references: Reference[]; limits: Limit[] }
 export interface SourceSide { input_id: string | null; file_key: string; exact_text_available: boolean }
 export interface SourceHunk { before_start: number; before_lines: number; after_start: number; after_lines: number; lines: TokenRun[] }
 export interface SourceFile { pointer: string; change: SemanticRow["change"]; correspondence: "selected_roots" | "proven_file_identity" | "unpaired"; before: SourceSide | null; after: SourceSide | null; availability: Availability; hunks: SourceHunk[]; omitted_hunks: number | null; limits: Limit[] }
-export interface SourceChanges { schema_version: 1; availability: Availability; files: SourceFile[]; limits: Limit[] }
+export interface SourceChanges { schema_version: 2; availability: Availability; files: SourceFile[]; limits: Limit[]; root_text: "matching" | "changed" | "unavailable"; executed_includes: Record<"before" | "after", string[]> | null }
 export interface Coverage { schema_version: 1; availability: Availability; source_boundary: string; families: { family: SemanticFamily; availability: Availability; fields: string[]; limits: Limit[] }[]; limits: Limit[] }
-export interface SemanticPayload { semantic: Semantic; sourceChanges: SourceChanges; coverage: Coverage }
+const effects = ["model_rows", "pairing", "references", "highlights", "text_hunks", "captured_text", "detail"] as const;
+export interface ComparisonIssue extends Limit { effect: typeof effects[number]; family: SemanticFamily | null; file: string | null }
+export interface ComparisonSummary { semantic_rows: number | null; available_semantic_rows: number; paired_file_changes: number; unpaired_files: number; issues: ComparisonIssue[] }
+export interface SemanticPayload { semantic: Semantic; sourceChanges: SourceChanges; coverage: Coverage; summary: ComparisonSummary }
 export type SourceRegistry = Record<"before" | "after", Record<string, string>>;
 const availability = ["complete", "partial", "not_available", "limit_exceeded"] as const;
 const changes = ["added", "removed", "changed"] as const;
@@ -88,8 +91,8 @@ function expression(value: unknown): Expression {
 }
 function timing(value: unknown): TimingSide { const r = object(value, ["name", "class", "written_offset", "converted_offset", "occurrence"]); return { name: text(r.name), class: text(r.class), written_offset: integer(r.written_offset, -2147483648), converted_offset: integer(r.converted_offset, -2147483648), occurrence: integer(r.occurrence) }; }
 function semanticRow(value: unknown): SemanticRow {
-  const r = object(value, ["pointer", "family", "change", "name", "count_unit", "facets", "before", "after", "fields", "expressions", "timing", "references", "limits"]);
-  const result: SemanticRow = { pointer: pointer(r.pointer), family: one(r.family, semanticFamilies), change: one(r.change, changes), name: text(r.name), count_unit: one(r.count_unit, ["final_fact", "accepted_occurrence", "operation"]), facets: unique(array(r.facets).map(v => one(v, facets))), before: nullable(r.before, rowSide), after: nullable(r.after, rowSide), fields: array(r.fields).map(field), expressions: array(r.expressions).map(expression), timing: array(r.timing).map(v => { const t = object(v, ["before", "after"]); const before = nullable(t.before, timing), after = nullable(t.after, timing); if (!before && !after) invalid(); return { before, after }; }), references: unique(array(r.references).map(pointer)), limits: array(r.limits).map(limit) };
+  const r = object(value, ["pointer", "family", "change", "name", "count_unit", "facets", "before", "after", "fields", "expressions", "timing", "references", "limits", "statement_group"]);
+  const result: SemanticRow = { pointer: pointer(r.pointer), family: one(r.family, semanticFamilies), change: one(r.change, changes), name: text(r.name), count_unit: one(r.count_unit, ["final_fact", "accepted_occurrence", "operation"]), facets: unique(array(r.facets).map(v => one(v, facets))), before: nullable(r.before, rowSide), after: nullable(r.after, rowSide), fields: array(r.fields).map(field), expressions: array(r.expressions).map(expression), timing: array(r.timing).map(v => { const t = object(v, ["before", "after"]); const before = nullable(t.before, timing), after = nullable(t.after, timing); if (!before && !after) invalid(); return { before, after }; }), references: unique(array(r.references).map(pointer)), limits: array(r.limits).map(limit), statement_group: nullable(r.statement_group, text) };
   validateChangeSides(result.change, result.before, result.after);
   unique(result.fields.map(f => f.name)); unique(result.expressions.map(e => e.field));
   return result;
@@ -98,25 +101,31 @@ function reference(value: unknown): Reference { const r = object(value, ["pointe
 /** Require the semantic schemas supported by current snapshot results. */
 export function validateSemanticCapability(value: unknown): void {
   if (!record(value)) invalid();
-  const keys = ["semantic_schema_version", "source_changes_schema_version", "coverage_schema_version"];
-  if (keys.some(key => value[key] !== 1)) invalid();
+  if (value.semantic_schema_version !== 2 || value.source_changes_schema_version !== 2 || value.coverage_schema_version !== 1) invalid();
 }
-/** Validate closed v1 data before it can enter the webview or source-action registry. */
+/** Validate comparison data before it can enter the webview or source-action registry. */
 export function parseSemantic(value: Record<string, unknown>, ids: Record<"before" | "after", string | null>, registry: SourceRegistry): SemanticPayload {
   const present = ["comparison_versions", "semantic", "source_changes", "coverage"].some(key => Object.hasOwn(value, key));
   if (!present) invalid();
   const versions = object(value.comparison_versions, ["semantic", "source_changes", "coverage"]);
-  if (Object.values(versions).some(v => v !== 1)) invalid();
+  if (versions.semantic !== 2 || versions.source_changes !== 2 || versions.coverage !== 1) invalid();
   const s = object(value.semantic, ["schema_version", "availability", "budgets", "rows", "references", "limits"]);
   const budgetKeys = ["token_alignment_cells", "source_alignment_cells", "references_per_side", "source_hunks", "serialized_output_bytes"];
   const budget = object(s.budgets, budgetKeys);
-  const semantic: Semantic = { schema_version: 1, availability: one(s.availability, availability), budgets: Object.fromEntries(Object.entries(budget).map(([k, v]) => [k, integer(v)])), rows: array(s.rows).map(semanticRow), references: array(s.references).map(reference), limits: array(s.limits).map(limit) };
+  const semantic: Semantic = { schema_version: 2, availability: one(s.availability, availability), budgets: Object.fromEntries(Object.entries(budget).map(([k, v]) => [k, integer(v)])), rows: array(s.rows).map(semanticRow), references: array(s.references).map(reference), limits: array(s.limits).map(limit) };
   const c = object(value.coverage, ["schema_version", "availability", "source_boundary", "families", "limits"]);
   const coverage: Coverage = { schema_version: 1, availability: one(c.availability, availability), source_boundary: text(c.source_boundary), families: array(c.families).map(v => { const f = object(v, ["family", "availability", "fields", "limits"]); return { family: one(f.family, semanticFamilies), availability: one(f.availability, availability), fields: unique(array(f.fields).map(text)), limits: array(f.limits).map(limit) }; }), limits: array(c.limits).map(limit) };
-  const source = object(value.source_changes, ["schema_version", "availability", "files", "limits"]);
-  if (s.schema_version !== 1 || c.schema_version !== 1 || source.schema_version !== 1) invalid();
+  const source = object(value.source_changes, ["schema_version", "availability", "files", "limits", "root_text", "executed_includes"]);
+  if (s.schema_version !== 2 || c.schema_version !== 1 || source.schema_version !== 2) invalid();
+  const executed_includes = nullable(source.executed_includes, raw => {
+    const includes = object(raw, ["before", "after"]);
+    const keys = (side: "before" | "after"): string[] => unique(array(includes[side]).map(raw => {
+      const key = text(raw); if (!Object.hasOwn(registry[side], key)) invalid(); return key;
+    }));
+    return { before: keys("before"), after: keys("after") };
+  });
   const sourceSide = (value: unknown, side: "before" | "after"): SourceSide => { const r = object(value, ["input_id", "file_key", "exact_text_available"]), input_id = nullable(r.input_id, text), file_key = text(r.file_key), exact_text_available = bool(r.exact_text_available); if (input_id !== ids[side] || !Object.hasOwn(registry[side], file_key)) invalid(); return { input_id, file_key, exact_text_available }; };
-  const sourceChanges: SourceChanges = { schema_version: 1, availability: one(source.availability, availability), files: array(source.files).map(v => {
+  const sourceChanges: SourceChanges = { schema_version: 2, root_text: one(source.root_text, ["matching", "changed", "unavailable"]), executed_includes, availability: one(source.availability, availability), files: array(source.files).map(v => {
     const f = object(v, ["pointer", "change", "correspondence", "before", "after", "availability", "hunks", "omitted_hunks", "limits"]);
     const before = nullable(f.before, v => sourceSide(v, "before")), after = nullable(f.after, v => sourceSide(v, "after")), change = one(f.change, changes), correspondence = one(f.correspondence, ["selected_roots", "proven_file_identity", "unpaired"]);
     validateChangeSides(change, before, after);
@@ -134,5 +143,17 @@ export function parseSemantic(value: Record<string, unknown>, ids: Record<"befor
       if (!target || !row[target.side]) invalid();
     }
   }
-  return { semantic, sourceChanges, coverage };
+  const raw = object(value.summary, ["semantic_rows", "available_semantic_rows", "source_files", "available_source_files", "reference_membership_complete", "semantic_availability", "source_availability", "root_text", "executed_includes", "paired_file_changes", "unpaired_files", "issues"]);
+  const summary: ComparisonSummary = {
+    semantic_rows: nullable(raw.semantic_rows, integer), available_semantic_rows: integer(raw.available_semantic_rows),
+    paired_file_changes: integer(raw.paired_file_changes), unpaired_files: integer(raw.unpaired_files),
+    issues: array(raw.issues).map(value => {
+      const issue = object(value, ["code", "reason", "owner", "omitted", "effect", "family", "file"]);
+      return { code: text(issue.code), reason: text(issue.reason), owner: text(issue.owner), omitted: nullable(issue.omitted, n => integer(n, 1)),
+        effect: one(issue.effect, effects), family: nullable(issue.family, family => one(family, semanticFamilies)), file: nullable(issue.file, text) };
+    }),
+  };
+  if (summary.available_semantic_rows !== semantic.rows.length || summary.semantic_rows !== null && summary.semantic_rows !== semantic.rows.length ||
+      summary.paired_file_changes + summary.unpaired_files !== sourceChanges.files.length) invalid();
+  return { semantic, sourceChanges, coverage, summary };
 }

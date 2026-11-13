@@ -254,7 +254,18 @@ retains `data.analysis_summaries` with available metadata and causes. Null
 counts mean unavailable work, not a zero-equation model. It provides no diff
 or source navigation until both sides can be compared.
 
+Start with `summary`. Report the known or retained model-change count,
+`root_text`, and changes in `executed_includes` when they affect the review.
+Check `summary.issues` for omissions or unproved pairing. A null total means
+membership is incomplete. A scope boundary describes which sources were
+examined. The model changes are in `semantic.rows`; select `source`
+or `references` when the workflow needs file hunks or direct uses.
+Written macro definition changes count once per macro name in each paired file.
+Read `written_directives` for the range of edits on each side. A source
+location is available on a side with a verified edited definition.
 Follow navigation with its side, input identity, captured source and commit.
+Use `snapshot_pointer` to identify the same owner across pages. Follow ordinary
+JSON pointers within the current page.
 When a parameter's evaluated value changes and its assigned expression stays
 the same, the optional `dependent_on` field can name the edited parameter
 whose displayed assignment it reads directly on both sides. That parameter

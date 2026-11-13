@@ -4,6 +4,7 @@ pub(super) fn collect(
     model: &Model,
     facts: &mut Vec<CapturedFact>,
     work: &mut RetainedExpressionWork,
+    compare_model_macro_records: bool,
 ) {
     let mut owned_type_results = BTreeSet::new();
     for (index, row) in model.epilogue.iter().filter(|row| !row.native).enumerate() {
@@ -446,7 +447,9 @@ pub(super) fn collect(
         "parser_type_result_occurrence_retention",
     );
     facts.push(history);
-    macros(model, facts);
+    if compare_model_macro_records {
+        macros(model, facts);
+    }
     markers(model, facts);
 }
 

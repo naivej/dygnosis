@@ -132,11 +132,19 @@ pub fn enforce_output_budget(diff: &mut ModelDiff) {
     let mut omitted_rows = 0;
     let mut omitted_reference_bytes = 0;
     let mut omitted_hunk_bytes = 0;
+    let mut omitted_highlights = 0;
     // Remove optional highlights first, retaining exact expression text.
     if bytes > limit {
         for row in &mut diff.semantic.rows {
             let old_size = json_bytes(row);
             for expression in &mut row.expressions {
+                if ![&expression.before, &expression.after]
+                    .into_iter()
+                    .flatten()
+                    .any(|side| side.runs.iter().any(|run| run.role != TokenRole::Unchanged))
+                {
+                    continue;
+                }
                 for side in [&mut expression.before, &mut expression.after]
                     .into_iter()
                     .flatten()
@@ -149,6 +157,7 @@ pub fn enforce_output_budget(diff: &mut ModelDiff) {
                 expression.availability = Availability::LimitExceeded;
                 expression.highlight_basis = HighlightBasis::None;
                 expression.reason = Some("Serialized detail limit; exact expression text is retained without highlights.".into());
+                omitted_highlights += 1;
             }
             bytes = bytes
                 .saturating_sub(old_size)
@@ -177,8 +186,19 @@ pub fn enforce_output_budget(diff: &mut ModelDiff) {
     }
     add_limit(
         &mut diff.semantic.limits,
+        "highlight_output_limit",
+        "Some expression highlights were omitted by the serialized detail limit. Exact expression text remains available for retained rows.",
+        omitted_highlights,
+        "semantic_diff",
+    );
+    if omitted_highlights > 0 {
+        diff.semantic.availability = Availability::Partial;
+        diff.coverage.availability = Availability::Partial;
+    }
+    add_limit(
+        &mut diff.semantic.limits,
         "serialized_output_limit",
-        "Semantic rows were omitted by the serialized detail limit; structural comparison rows remain available.",
+        "Some model changes were omitted by the serialized detail limit.",
         omitted_rows,
         "semantic_diff",
     );
@@ -210,7 +230,7 @@ pub fn enforce_output_budget(diff: &mut ModelDiff) {
     add_limit(
         &mut diff.semantic.limits,
         "serialized_output_limit",
-        "Semantic rows were omitted by the serialized detail limit; structural comparison rows remain available.",
+        "Some model changes were omitted by the serialized detail limit.",
         additional_rows,
         "semantic_diff",
     );
@@ -243,7 +263,7 @@ fn repair_reference_links(diff: &mut ModelDiff) {
         .collect();
     let old_count = diff.semantic.references.len();
     diff.semantic.references.retain(|reference| {
-        !reference.equation_pointer.starts_with("/semantic/rows/")
+        reference.equation_pointer == reference.pointer
             || retained_rows.contains(reference.equation_pointer.as_str())
     });
     let omitted = old_count - diff.semantic.references.len();

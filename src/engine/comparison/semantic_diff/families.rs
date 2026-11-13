@@ -25,12 +25,23 @@ pub(super) fn populate(
     after: &Model,
     diff: &mut ModelDiff,
     claims: &mut TokenClaims,
+    compare_model_macro_records: bool,
 ) {
     let owned = declarations::enrich_primary(before, after, diff, claims);
     claim_surgery_sources(before, Side::Before, claims);
     claim_surgery_sources(after, Side::After, claims);
-    let old = collect(before, &mut claims.expression_work, &owned[0]);
-    let new = collect(after, &mut claims.expression_work, &owned[1]);
+    let old = collect(
+        before,
+        &mut claims.expression_work,
+        &owned[0],
+        compare_model_macro_records,
+    );
+    let new = collect(
+        after,
+        &mut claims.expression_work,
+        &owned[1],
+        compare_model_macro_records,
+    );
     coverage(&old, &new, diff);
     occurrences::compare_facts(before, after, old, new, diff, claims);
     finalize_option_claims(before, Side::Before, claims);
@@ -112,13 +123,14 @@ fn collect(
     model: &Model,
     work: &mut RetainedExpressionWork,
     owned_dimensions: &BTreeSet<usize>,
+    compare_model_macro_records: bool,
 ) -> Vec<CapturedFact> {
     let mut facts = Vec::new();
     declarations::collect(model, &mut facts, owned_dimensions);
     data::collect(model, &mut facts, work);
     advanced::collect(model, &mut facts, work);
     moments::collect(model, &mut facts, work);
-    operations::collect(model, &mut facts, work);
+    operations::collect(model, &mut facts, work, compare_model_macro_records);
     facts
 }
 
@@ -475,7 +487,7 @@ mod tests {
         let mut claims = TokenClaims::with_expression_budget(400);
         let mut diff = crate::engine::comparison::compare_models(&model, &model);
         diff.semantic.rows.clear();
-        populate(&model, &model, &mut diff, &mut claims);
+        populate(&model, &model, &mut diff, &mut claims, true);
         assert!(diff.semantic.rows.is_empty(), "{}", diff.to_json());
         assert!(
             diff.coverage

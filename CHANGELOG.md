@@ -3,6 +3,23 @@
 Each entry describes the release at the time. Feature names and interfaces can
 change in later releases; see Dygnosis Help for current guidance.
 
+## v0.12.3
+
+**Dygnosis: Show model changes** shows changed values and equation excerpts in
+the list and groups changes to each command in one **Before** and **After**
+card. **Macro context** groups macro code edits and changes to `@#include`
+files, with links to their sources.
+
+Use **Swap sides**, **Refresh comparison**, and **Text diff** from the editor
+title bar or the Command Palette. Press Ctrl+F (Cmd+F on macOS) in Changes to
+search the comparison. Use the kind filters to select **Added**, **Removed**,
+and **Changed**.
+
+The MCP tool `dynare_compare_models` returns the same model changes and
+reports limits that affect the result. Clients that selected `structural`
+now use `semantic` and its row pointers. Update a custom VS Code engine set
+through `dynare.serverPath` with the extension.
+
 ## v0.12.2
 
 **Dygnosis: Open Settings** puts editing, appearance, and workspace checks

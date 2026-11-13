@@ -426,7 +426,7 @@ fn reference(index: usize, side: Side) -> EquationReference {
         pointer: format!("/semantic/references/{index}"),
         symbol: "p".into(),
         side,
-        equation_pointer: "/changed_equations/0".into(),
+        equation_pointer: format!("/semantic/references/{index}"),
         equation_index: 0,
         label: "Output".into(),
         scope: ComparisonScope::aggregate(),
@@ -518,6 +518,39 @@ fn output_limits_never_keep_references_to_omitted_semantic_equations() {
 }
 
 #[test]
+fn serialized_budget_reports_highlight_only_omission() {
+    let model = |literal| {
+        let expression = vec![format!("x+{literal}"); 40].join("+");
+        parse(&format!(
+            "var x y; model; x=1; [name='output'] y={expression}; end;"
+        ))
+    };
+    let mut diff = compare_models(&model(1), &model(2));
+    assert_eq!(diff.semantic.rows.len(), 1);
+    let row_size = serde_json::to_vec(&diff.semantic.rows[0]).unwrap().len();
+    diff.semantic.budgets.serialized_output_bytes = row_size - 1;
+    enforce_output_budget(&mut diff);
+    assert_eq!(
+        diff.semantic.rows.len(),
+        1,
+        "plain expression fits the budget"
+    );
+    assert_eq!(diff.semantic.availability, Availability::Partial);
+    assert!(
+        diff.semantic
+            .limits
+            .iter()
+            .any(|limit| limit.code == "highlight_output_limit" && limit.omitted == Some(1))
+    );
+    assert!(
+        diff.semantic
+            .limits
+            .iter()
+            .all(|limit| limit.code != "serialized_output_limit")
+    );
+}
+
+#[test]
 fn reference_caps_reindex_pointers_and_keep_row_links_valid() {
     let mut diff = compare_models(&parse("parameters p; p=1;"), &parse("parameters p; p=2;"));
     diff.semantic.budgets.references_per_side = 1;
@@ -537,6 +570,10 @@ fn reference_caps_reindex_pointers_and_keep_row_links_valid() {
     assert_eq!(
         diff.semantic.references[1].pointer,
         "/semantic/references/1"
+    );
+    assert_eq!(
+        diff.semantic.references[1].equation_pointer,
+        diff.semantic.references[1].pointer
     );
     assert_eq!(
         diff.semantic.rows[0].references,

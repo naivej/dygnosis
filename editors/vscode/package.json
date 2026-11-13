@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -92,6 +92,29 @@
       }
     ],
     "commands": [
+      {
+        "command": "dygnosis.swapComparisonSides",
+        "title": "Swap sides",
+        "category": "Dygnosis",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "dygnosis.refreshComparison",
+        "title": "Refresh comparison",
+        "category": "Dygnosis",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "dygnosis.comparisonTextDiff",
+        "title": "Text diff",
+        "category": "Dygnosis",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "dygnosis.findChanges",
+        "title": "Find changes",
+        "category": "Dygnosis"
+      },
       {
         "command": "dygnosis.renameSymbol",
         "title": "Rename symbol",
@@ -288,6 +311,21 @@
     "menus": {
       "editor/title": [
         {
+          "command": "dygnosis.swapComparisonSides",
+          "when": "resourceScheme == dygnosis-changes && dygnosis.toolbarActions",
+          "group": "navigation@0"
+        },
+        {
+          "command": "dygnosis.refreshComparison",
+          "when": "resourceScheme == dygnosis-changes && dygnosis.toolbarActions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "dygnosis.comparisonTextDiff",
+          "when": "resourceScheme == dygnosis-changes && dygnosis.toolbarActions",
+          "group": "navigation@2"
+        },
+        {
           "command": "dygnosis.showEffectiveModel",
           "when": "dygnosis.modelContext && dygnosis.toolbarActions",
           "group": "navigation"
@@ -367,6 +405,22 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "dygnosis.swapComparisonSides",
+          "when": "activeCustomEditorId == dygnosis.changes"
+        },
+        {
+          "command": "dygnosis.refreshComparison",
+          "when": "activeCustomEditorId == dygnosis.changes"
+        },
+        {
+          "command": "dygnosis.comparisonTextDiff",
+          "when": "activeCustomEditorId == dygnosis.changes"
+        },
+        {
+          "command": "dygnosis.findChanges",
+          "when": "activeCustomEditorId == dygnosis.changes"
+        },
         {
           "command": "dygnosis.editSettingsJson",
           "when": "false"
@@ -1653,6 +1707,12 @@
       ]
     },
     "keybindings": [
+      {
+        "command": "dygnosis.findChanges",
+        "key": "ctrl+f",
+        "mac": "cmd+f",
+        "when": "activeCustomEditorId == dygnosis.changes"
+      },
       {
         "command": "dygnosis.renameSymbol",
         "key": "f2",

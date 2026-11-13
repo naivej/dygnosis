@@ -1,17 +1,18 @@
 //! Additive navigation for the existing structural comparison. Pairing is owned
 //! by model_diff; every navigation id is a JSON pointer into that unchanged diff.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use crate::engine::comparison::semantic_diff::{
-    CaptureBoundary, CapturedSourceInput, OccurrenceProvenance, Side, SourceFilePair,
-    SourceIdentityProof,
-};
+use crate::engine::analysis_configuration::DirectiveKind;
+use crate::engine::comparison::semantic_diff::{self, *};
 use crate::engine::comparison::{EquationChange, IndexedEquation, ModelDiff, ShockSetting};
+use crate::engine::language::lexer::TokenKind;
+use crate::engine::language::macro_source::MacroSource;
 use crate::engine::language::model::{AssignmentIndex, Model};
-use crate::engine::language::span::LineIndex;
+use crate::engine::language::span::{LineIndex, Span};
 use crate::engine::workspace::Workspace;
 use crate::engine::workspace::include_resolver::normalize_uri;
 use crate::engine::workspace::model_map::{SourceOccurrence, WrittenSegment};
@@ -38,6 +39,7 @@ pub(crate) struct ComparisonInput {
     complete: bool,
     sources: BTreeMap<String, String>,
     line_indexes: BTreeMap<String, LineIndex>,
+    macro_sources: BTreeMap<String, Arc<MacroSource>>,
     file_names: HashMap<String, String>,
     equations: BTreeMap<(Option<String>, usize), Target>,
     parameters: BTreeMap<String, Target>,
@@ -80,6 +82,15 @@ impl ComparisonInput {
             .iter()
             .map(|(key, text)| (key.clone(), LineIndex::new(text)))
             .collect();
+        let macro_sources = sources
+            .keys()
+            .filter_map(|key| {
+                let source = workspace
+                    .source_document(root, key)?
+                    .cached_macro_source()?;
+                Some((key.clone(), source))
+            })
+            .collect();
         let mut input = Self {
             root_uri: root_uri.map(str::to_owned),
             root_key,
@@ -87,6 +98,7 @@ impl ComparisonInput {
             complete,
             sources,
             line_indexes,
+            macro_sources,
             file_names: HashMap::new(),
             equations: BTreeMap::new(),
             parameters: BTreeMap::new(),
@@ -419,6 +431,43 @@ impl ComparisonInput {
         })
     }
 
+    fn row_target(&self, row: &SemanticRow, side: Side) -> Option<Target> {
+        let own = match side {
+            Side::Before => row.before.as_ref(),
+            Side::After => row.after.as_ref(),
+        }?;
+        let pointer = row.pointer.as_str();
+        if row.family == SemanticFamily::MacroContext {
+            let span = own.provenance.as_ref()?.span;
+            return Some(Target {
+                occurrence_id: format!("macro:{}:{}", own.name, span.start),
+                dimension: None,
+                segments: vec![WrittenSegment {
+                    file: Some(own.name.clone()),
+                    span,
+                }],
+            });
+        }
+        let retained = match row.family {
+            SemanticFamily::Equations => own
+                .equation_index
+                .and_then(|index| self.equations.get(&(own.scope.dimension.clone(), index))),
+            SemanticFamily::Parameters => self.parameters.get(&row.name),
+            SemanticFamily::Symbols if !pointer.starts_with("/semantic/rows/") => {
+                self.symbols.get(&row.name)
+            }
+            SemanticFamily::Shocks if pointer.starts_with("/shock_setup_changes/") => {
+                own.occurrence.and_then(|id| self.shocks.get(&id))
+            }
+            _ => None,
+        };
+        let mut target = retained
+            .cloned()
+            .or_else(|| self.semantic_target(pointer, Some(own)))?;
+        target.dimension.clone_from(&own.scope.dimension);
+        Some(target)
+    }
+
     /// Select instructions from existing accepted producer receipts. Mapping is
     /// captured while the workspace is current; it never supplies correspondence.
     pub(crate) fn with_written_facts(
@@ -549,7 +598,11 @@ impl ComparisonInput {
         if !own.instruction_tokens.is_empty() {
             return None;
         }
-        let target = self.proven_target(Some(proof))?;
+        self.written_target(self.proven_target(Some(proof))?)
+            .map(|text| vec![text])
+    }
+
+    fn written_target(&self, target: &Target) -> Option<&str> {
         let [segment] = target.segments.as_slice() else {
             return None;
         };
@@ -557,7 +610,13 @@ impl ComparisonInput {
         self.sources
             .get(key)?
             .get(segment.span.start as usize..segment.span.end as usize)
-            .map(|text| vec![text])
+    }
+
+    fn command_text(&self, statement: usize) -> Option<&str> {
+        if self.statement_ranges.get(&statement)?.len() > 10_000 {
+            return None;
+        }
+        self.written_target(self.statements.get(&statement)?)
     }
 
     pub(crate) fn with_snapshot_identity(mut self, input_id: &str, commit: Option<&str>) -> Self {
@@ -671,14 +730,34 @@ pub(crate) fn populate_written_statements(
         .budgets
         .serialized_output_bytes
         .min(8 * 1024 * 1024);
+    let mut highlight_limits = HashMap::new();
+    let mut command_details: HashMap<_, usize> = HashMap::new();
     for index in 0..diff.semantic.rows.len() {
         let row = &diff.semantic.rows[index];
-        if !written_family(row.family) {
+        let family = row.family;
+        if !written_family(family)
+            || row
+                .expressions
+                .iter()
+                .any(|detail| detail.field == "statement_text")
+        {
             continue;
         }
-        let old = before.written_statement(&row.pointer, row.before.as_ref());
-        let new = after.written_statement(&row.pointer, row.after.as_ref());
-        if row.before.is_some() != old.is_some() || row.after.is_some() != new.is_some() {
+        let command = command_occurrence(row);
+        let [old, new] = if let Some([old, new]) = command {
+            [
+                old.and_then(|id| before.command_text(id))
+                    .map(|text| vec![text]),
+                new.and_then(|id| after.command_text(id))
+                    .map(|text| vec![text]),
+            ]
+        } else {
+            [
+                before.written_statement(&row.pointer, row.before.as_ref()),
+                after.written_statement(&row.pointer, row.after.as_ref()),
+            ]
+        };
+        if row.before.is_some() && old.is_none() || row.after.is_some() && new.is_none() {
             continue;
         }
         let size = |parts: &Option<Vec<&str>>| {
@@ -695,33 +774,65 @@ pub(crate) fn populate_written_statements(
             continue;
         }
         remaining -= bytes;
-        let old = old.map(|parts| parts.join("\n"));
-        let new = new.map(|parts| parts.join("\n"));
         let unpaired = row.correspondence_uncertain;
-        let old_context = row
-            .before
-            .as_ref()
-            .and_then(|side| side.block_context.clone());
-        let new_context = row
-            .after
-            .as_ref()
-            .and_then(|side| side.block_context.clone());
-        let mut detail = crate::engine::comparison::semantic_diff::equations::expression_detail(
-            &mut diff.semantic,
-            "statement_text",
-            old.as_deref(),
-            new.as_deref(),
-        );
-        if unpaired && detail.highlight_basis == HighlightBasis::PairedExpression {
-            detail.highlight_basis = HighlightBasis::UnpairedTextOnly;
+        let command = command.map(|pair| (pair, unpaired));
+        let old_context = command
+            .is_none()
+            .then(|| row.before.as_ref()?.block_context.clone())
+            .flatten();
+        let new_context = command
+            .is_none()
+            .then(|| row.after.as_ref()?.block_context.clone())
+            .flatten();
+        let detail = if let Some(cached_row) = command.and_then(|key| command_details.get(&key)) {
+            diff.semantic.rows[*cached_row]
+                .expressions
+                .last()
+                .expect("cached command detail")
+                .clone()
+        } else {
+            let old = old.map(|parts| parts.join("\n"));
+            let new = new.map(|parts| parts.join("\n"));
+            let mut detail = semantic_diff::equations::expression_detail(
+                &mut diff.semantic,
+                "statement_text",
+                old.as_deref(),
+                new.as_deref(),
+            );
+            if unpaired && detail.highlight_basis == HighlightBasis::PairedExpression {
+                detail.highlight_basis = HighlightBasis::UnpairedTextOnly;
+            }
+            semantic_diff::equations::highlight_block_boundaries(
+                &mut diff.semantic,
+                &mut detail,
+                old_context.as_ref(),
+                new_context.as_ref(),
+            );
+            if let Some(key) = command {
+                command_details.insert(key, index);
+            }
+            detail
+        };
+        if detail.availability == Availability::LimitExceeded {
+            *highlight_limits.entry(family).or_insert(0) += 1;
         }
-        crate::engine::comparison::semantic_diff::equations::highlight_block_boundaries(
-            &mut diff.semantic,
-            &mut detail,
-            old_context.as_ref(),
-            new_context.as_ref(),
-        );
         diff.semantic.rows[index].expressions.push(detail);
+    }
+    if !highlight_limits.is_empty() {
+        diff.semantic.availability = Availability::Partial;
+        diff.coverage.availability = Availability::Partial;
+        for coverage in &mut diff.coverage.families {
+            if let Some(omitted) = highlight_limits.get(&coverage.family) {
+                let mut limit = ComparisonLimit::new(
+                    "written_statement_highlight_limit",
+                    "Some written statements exceeded the highlighting budget. Exact statement text remains available.",
+                    "written_statements",
+                );
+                limit.omitted = Some(*omitted);
+                coverage.availability = Availability::Partial;
+                coverage.limits.push(limit);
+            }
+        }
     }
 }
 
@@ -731,6 +842,338 @@ fn target(occurrence_id: String, source: &SourceOccurrence, dimension: Option<St
         dimension,
         segments: source.segments.clone(),
     }
+}
+
+/// Use captured file pairs for written macro edits. A file's original scan is
+/// compared once, even if execution visited the same include more than once.
+pub(crate) fn populate_source_comparison(
+    diff: &mut ModelDiff,
+    before: &ComparisonInput,
+    after: &ComparisonInput,
+    boundary: CaptureBoundary,
+    pairs: &[SourceFilePair<'_>],
+) {
+    populate_written_statements(diff, before, after);
+    if semantic_diff::populate_captured_sources(
+        diff,
+        before.source_input(boundary),
+        after.source_input(boundary),
+        pairs,
+    )
+    .is_ok()
+    {
+        populate_captured_macros(diff, before, after);
+    }
+    enforce_output_budget(diff);
+}
+
+fn populate_captured_macros(
+    diff: &mut ModelDiff,
+    before: &ComparisonInput,
+    after: &ComparisonInput,
+) {
+    let mut remaining = diff
+        .semantic
+        .budgets
+        .serialized_output_bytes
+        .min(8 * 1024 * 1024);
+    let mut omitted = 0;
+    for file in &diff.source_changes.files {
+        let (Some(old), Some(new)) = (&file.before, &file.after) else {
+            continue;
+        };
+        let written = |input: &ComparisonInput, key: &str| {
+            input
+                .macro_sources
+                .get(key)
+                .filter(|source| {
+                    source.syntax_refusal.is_none()
+                        && source.normalized.as_str() == input.sources[key]
+                })
+                .cloned()
+        };
+        let Some((old_source, new_source)) =
+            written(before, &old.file_key).zip(written(after, &new.file_key))
+        else {
+            omitted += 1;
+            continue;
+        };
+        let Some((old_records, new_records)) = macro_records(&old_source, &mut remaining)
+            .zip(macro_records(&new_source, &mut remaining))
+        else {
+            omitted += 1;
+            continue;
+        };
+        compare_macro_records(
+            &mut diff.semantic,
+            [&old.file_key, &new.file_key],
+            [&old_records, &new_records],
+        );
+    }
+    if let Some(coverage) = diff
+        .coverage
+        .families
+        .iter_mut()
+        .find(|coverage| coverage.family == SemanticFamily::MacroContext)
+    {
+        coverage.fields.push("written_directives".into());
+        if omitted > 0 {
+            let mut limit = ComparisonLimit::new(
+                "written_macro_records_unavailable",
+                "Some paired files lack comparable written macro records. Captured file text remains available.",
+                "macro_context",
+            );
+            limit.omitted = Some(omitted);
+            coverage.availability = Availability::Partial;
+            coverage.limits.push(limit.clone());
+            diff.semantic.limits.push(limit);
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct MacroRecord<'a> {
+    text: &'a str,
+    span: Span,
+    name: Option<&'a str>,
+}
+
+fn macro_edits<'a, 'source>(
+    [before, after]: [&'a [MacroRecord<'source>]; 2],
+) -> Option<[&'a [MacroRecord<'source>]; 2]> {
+    let prefix = before
+        .iter()
+        .zip(after)
+        .take_while(|(old, new)| old.text == new.text)
+        .count();
+    if prefix == before.len() && prefix == after.len() {
+        return None;
+    }
+    let suffix = before[prefix..]
+        .iter()
+        .rev()
+        .zip(after[prefix..].iter().rev())
+        .take_while(|(old, new)| old.text == new.text)
+        .count();
+    Some([
+        &before[prefix..before.len() - suffix],
+        &after[prefix..after.len() - suffix],
+    ])
+}
+
+fn compare_macro_records(
+    diff: &mut SemanticDiff,
+    files: [&str; 2],
+    records: [&[MacroRecord<'_>]; 2],
+) {
+    let Some(edits) = macro_edits(records) else {
+        return;
+    };
+    let candidates: HashSet<_> = edits
+        .iter()
+        .flat_map(|side| side.iter().filter_map(|record| record.name))
+        .collect();
+    if candidates.is_empty() {
+        push_macro_change(diff, None, files, edits, edits);
+        return;
+    }
+    let mut definitions = BTreeMap::<_, [Vec<_>; 2]>::new();
+    for (side, records) in records.into_iter().enumerate() {
+        for &record in records {
+            if let Some(name) = record.name.filter(|name| candidates.contains(name)) {
+                definitions.entry(name).or_default()[side].push(record);
+            }
+        }
+    }
+    let mut changes = Vec::new();
+    for (&name, [before, after]) in &definitions {
+        let records = [before.as_slice(), after.as_slice()];
+        if let Some(edits) = macro_edits(records) {
+            let first = edits[0].first().or_else(|| edits[1].first()).unwrap();
+            changes.push((first.span.start, name, records, edits));
+        }
+    }
+    changes.sort_unstable_by_key(|&(start, name, ..)| (start, name));
+    let changed_names: HashSet<_> = changes.iter().map(|&(_, name, ..)| name).collect();
+    for (_, name, records, edits) in changes {
+        push_macro_change(diff, Some(name), files, records, edits);
+    }
+    if changed_names.is_empty() {
+        push_macro_change(diff, None, files, edits, edits);
+    } else {
+        // Retain other edits and order changes after taking out the definitions
+        // already described by name. Unchanged context contributes no row.
+        let remaining = edits.map(|side| {
+            side.iter()
+                .copied()
+                .filter(|record| record.name.is_none_or(|name| !changed_names.contains(name)))
+                .collect::<Vec<_>>()
+        });
+        if let Some(edits) = macro_edits([&remaining[0], &remaining[1]]) {
+            push_macro_change(diff, None, files, edits, edits);
+        }
+    }
+}
+
+fn push_macro_change(
+    diff: &mut SemanticDiff,
+    name: Option<&str>,
+    [before_file, after_file]: [&str; 2],
+    [before, after]: [&[MacroRecord<'_>]; 2],
+    [old_edit, new_edit]: [&[MacroRecord<'_>]; 2],
+) {
+    let change = match (name, before.is_empty(), after.is_empty()) {
+        (Some(_), true, _) => ChangeKind::Added,
+        (Some(_), _, true) => ChangeKind::Removed,
+        _ => ChangeKind::Changed,
+    };
+    let side = |file: &str, first: Option<&MacroRecord<'_>>| {
+        let mut side = RowSide::named(file, ComparisonScope::global());
+        side.provenance = first.map(|record| OccurrenceProvenance {
+            span: record.span,
+            parse_order: None,
+            equation_id: None,
+            statement_id: None,
+        });
+        side
+    };
+    let state = |records: &[MacroRecord<'_>]| {
+        FieldState::present(FieldValue::List(
+            records
+                .iter()
+                .map(|record| FieldValue::Text(record.text.into()))
+                .collect(),
+        ))
+    };
+    let mut row = SemanticRow::new(
+        SemanticFamily::MacroContext,
+        change,
+        name.unwrap_or("Written macro context"),
+    );
+    let [old, new] = [old_edit, new_edit]
+        .map(|edits| edits.iter().map(|record| record.text).collect::<Vec<_>>());
+    let mut aligned = Vec::new();
+    let available = old.is_empty()
+        || new.is_empty()
+        || diff.charge_token_alignment(old.len().saturating_add(1), new.len().saturating_add(1))
+            == Availability::Complete;
+    if available {
+        semantic_diff::align_lines(&old, &new, &mut aligned);
+    }
+    let expression = |edits: &[&str], omitted_role| {
+        let text = edits.join("\n");
+        if !available {
+            return ExpressionSide::plain(&text);
+        }
+        let runs = aligned
+            .iter()
+            .filter(|(role, _)| *role != omitted_role)
+            .enumerate()
+            .map(|(index, (role, line))| TokenRun {
+                text: if index == 0 {
+                    (*line).into()
+                } else {
+                    format!("\n{line}")
+                },
+                role: *role,
+            })
+            .collect();
+        ExpressionSide { text, runs }
+    };
+    row.expressions.push(ExpressionDetail {
+        field: "written_directives".into(),
+        before: (change != ChangeKind::Added).then(|| expression(&old, TokenRole::Added)),
+        after: (change != ChangeKind::Removed).then(|| expression(&new, TokenRole::Removed)),
+        highlight_basis: if available {
+            HighlightBasis::PairedExpression
+        } else {
+            HighlightBasis::None
+        },
+        availability: if available {
+            Availability::Complete
+        } else {
+            Availability::LimitExceeded
+        },
+        reason: (!available).then(|| {
+            "Macro code exceeded the highlighting budget. Exact text remains available.".into()
+        }),
+    });
+    let first_edit = |role| {
+        if available {
+            aligned
+                .iter()
+                .take_while(|(entry, _)| *entry != role)
+                .filter(|(entry, _)| *entry == TokenRole::Unchanged)
+                .count()
+        } else {
+            0
+        }
+    };
+    if change != ChangeKind::Added {
+        row.before = Some(side(
+            before_file,
+            old_edit.get(first_edit(TokenRole::Removed)),
+        ));
+    }
+    if change != ChangeKind::Removed {
+        row.after = Some(side(after_file, new_edit.get(first_edit(TokenRole::Added))));
+    }
+    row.facets.push(ChangeFacet::Options);
+    row.fields.push(FieldChange::new(
+        "written_directives",
+        "Macro code",
+        row.before
+            .as_ref()
+            .map_or_else(FieldState::absent, |_| state(old_edit)),
+        row.after
+            .as_ref()
+            .map_or_else(FieldState::absent, |_| state(new_edit)),
+    ));
+    diff.push_row(row);
+}
+
+fn macro_records<'a>(
+    source: &'a MacroSource,
+    remaining: &mut usize,
+) -> Option<Vec<MacroRecord<'a>>> {
+    let mut result = Vec::new();
+    let mut sites = source.sites.iter().peekable();
+    for token in source.tokens.iter() {
+        if crate::engine::control::cancelled() {
+            return None;
+        }
+        if matches!(token.kind, TokenKind::MacroDir | TokenKind::MacroInterp) {
+            let text = token.text(&source.normalized);
+            let text = if token.kind == TokenKind::MacroDir {
+                semantic_diff::comments::macro_argument(text).trim_end()
+            } else {
+                text
+            };
+            *remaining = remaining.checked_sub(text.len().saturating_add(48))?;
+            while sites
+                .peek()
+                .is_some_and(|site| site.directive_span.start < token.span.start)
+            {
+                sites.next();
+            }
+            let name = sites
+                .peek()
+                .filter(|site| {
+                    site.directive_span == token.span
+                        && matches!(
+                            site.kind,
+                            DirectiveKind::Definition | DirectiveKind::FunctionDefinition
+                        )
+                })
+                .and_then(|site| site.name.as_deref());
+            result.push(MacroRecord {
+                text,
+                span: token.span,
+                name,
+            });
+        }
+    }
+    Some(result)
 }
 
 pub(crate) fn navigation_json(
@@ -857,6 +1300,216 @@ pub(crate) fn navigation_json(
             (reference.side == Side::After).then(|| after.proven_target(proof)).flatten());
     }
     json!({"schema_version": if matches!(builder.coordinates, Coordinates::SnapshotLsp | Coordinates::SnapshotMcp) { 2 } else { 1 }, "before": before.envelope(), "after": after.envelope(), "rows": builder.rows})
+}
+
+/// Publish one comparison owner per retained semantic fact. The internal
+/// pairing results still supply exact occurrence targets where appropriate.
+pub(crate) fn semantic_wire(
+    diff: &ModelDiff,
+    before: &ComparisonInput,
+    after: &ComparisonInput,
+    coordinates: Coordinates,
+) -> (Value, Value) {
+    let pointers: HashMap<_, _> = diff
+        .semantic
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| (row.pointer.as_str(), format!("/semantic/rows/{index}")))
+        .collect();
+    let mut semantic = serde_json::to_value(&diff.semantic).expect("serializable comparison");
+    semantic["schema_version"] = json!(2);
+    let mut navigation =
+        Vec::with_capacity(diff.semantic.rows.len() + diff.semantic.references.len());
+    for (index, row) in diff.semantic.rows.iter().enumerate() {
+        let id = &pointers[row.pointer.as_str()];
+        let value = &mut semantic["rows"][index];
+        value["pointer"] = json!(id);
+        value["statement_group"] = json!(command_group(row));
+        for side in ["before", "after"] {
+            if let Some(context) = value[side]
+                .get_mut("context")
+                .and_then(Value::as_object_mut)
+                && let Some(pointer) = context.get_mut("pointer")
+                && let Some(owner) = pointer.as_str()
+            {
+                *pointer = json!(pointers.get(owner));
+            }
+        }
+        let mut target = json!({
+            "id":id, "kind":"semantic", "family":row.family, "name":row.name,
+            "before":before.render(before.row_target(row, Side::Before).as_ref(), &coordinates),
+            "after":after.render(after.row_target(row, Side::After).as_ref(), &coordinates)
+        });
+        let opener = |missing: bool,
+                      present: Option<&super::semantic_diff::RowSide>,
+                      input: &ComparisonInput| {
+            let mapped = present.filter(|_| missing).and_then(|side| {
+                let target = input.context_openers.get(&side.counterpart_statement?)?;
+                Some(Target {
+                    dimension: side.scope.dimension.clone(),
+                    ..target.clone()
+                })
+            });
+            input.render(mapped.as_ref(), &coordinates)
+        };
+        let old = opener(row.before.is_none(), row.after.as_ref(), before);
+        let new = opener(row.after.is_none(), row.before.as_ref(), after);
+        if !old.is_null() || !new.is_null() {
+            target["block_openers"] = json!({"before":old,"after":new});
+        }
+        navigation.push(target);
+    }
+    for (index, reference) in diff.semantic.references.iter().enumerate() {
+        let equation = pointers
+            .get(reference.equation_pointer.as_str())
+            .unwrap_or(&reference.pointer);
+        semantic["references"][index]["equation_pointer"] = json!(equation);
+        let proof = reference.provenance.as_ref();
+        navigation.push(json!({
+            "id":reference.pointer, "kind":"reference", "name":reference.symbol,
+            "equation_pointer":equation,
+            "before":before.render((reference.side == Side::Before).then(|| before.proven_target(proof)).flatten(), &coordinates),
+            "after":after.render((reference.side == Side::After).then(|| after.proven_target(proof)).flatten(), &coordinates)
+        }));
+    }
+    let summary = comparison_summary(diff);
+    semantic["availability"] = summary["semantic_availability"].clone();
+    let mut source_changes =
+        serde_json::to_value(&diff.source_changes).expect("serializable captured source");
+    source_changes["schema_version"] = json!(2);
+    (
+        json!({
+            "comparison_versions":{"semantic":2,"source_changes":2,"coverage":1},
+            "semantic":semantic, "source_changes":source_changes, "coverage":diff.coverage, "summary":summary
+        }),
+        json!({
+            "schema_version":if matches!(coordinates, Coordinates::SnapshotLsp | Coordinates::SnapshotMcp) { 2 } else { 1 },
+            "before":before.envelope(), "after":after.envelope(), "rows":navigation
+        }),
+    )
+}
+
+fn command_occurrence(row: &SemanticRow) -> Option<[Option<usize>; 2]> {
+    use super::semantic_diff::RowSide;
+    fn command_id(side: &RowSide) -> Option<usize> {
+        if side.context.as_ref()?.kind != "command" {
+            return None;
+        }
+        side.provenance.as_ref()?.statement_id
+    }
+    match (row.before.as_ref(), row.after.as_ref()) {
+        (Some(old), Some(new)) if old.context.as_ref()?.name == new.context.as_ref()?.name => {
+            Some([Some(command_id(old)?), Some(command_id(new)?)])
+        }
+        // A fact can be added or removed inside a paired command. Inherit the
+        // parent's proven counterpart, or keep the key on the present side only.
+        (Some(old), None) => Some([Some(command_id(old)?), old.counterpart_statement]),
+        (None, Some(new)) => Some([new.counterpart_statement, Some(command_id(new)?)]),
+        _ => None,
+    }
+}
+
+fn command_group(row: &SemanticRow) -> Option<String> {
+    let [before, after] =
+        command_occurrence(row)?.map(|id| id.map_or(String::new(), |id| id.to_string()));
+    Some(format!("{before}:{after}"))
+}
+
+fn comparison_summary(diff: &ModelDiff) -> Value {
+    use ComparisonEffect::*;
+    let mut issues = Vec::new();
+    for (family, limits) in diff
+        .coverage
+        .families
+        .iter()
+        .map(|family| (Some(family.family), family.limits.as_slice()))
+        .chain(std::iter::once((None, diff.semantic.limits.as_slice())))
+    {
+        for limit in limits {
+            if let Some(effect) = semantic_effect(&limit.code)
+                && !issues.iter().any(|issue: &ComparisonIssue<'_>| {
+                    issue.limit == limit && (family.is_none() || issue.family == family)
+                })
+            {
+                issues.push(ComparisonIssue {
+                    effect,
+                    family,
+                    file: None,
+                    limit,
+                });
+            }
+        }
+    }
+    let model_complete = !issues
+        .iter()
+        .any(|issue| matches!(issue.effect, ModelRows | Pairing));
+    let reference_complete =
+        model_complete && !issues.iter().any(|issue| issue.effect == References);
+    let semantic_availability = if issues.is_empty() {
+        Availability::Complete
+    } else {
+        Availability::Partial
+    };
+    let paired_files = diff
+        .source_changes
+        .files
+        .iter()
+        .filter(|file| file.correspondence != SourceCorrespondence::Unpaired)
+        .count();
+    let unpaired_files = diff.source_changes.files.len() - paired_files;
+    let pairing = ComparisonLimit {
+        code: "source_correspondence_unproved".into(),
+        reason: "Some captured files have no proven counterpart. Their exact text is available on the captured side.".into(),
+        omitted: (unpaired_files > 0).then_some(unpaired_files),
+        owner: "source_changes".into(),
+    };
+    if unpaired_files > 0 {
+        issues.push(ComparisonIssue {
+            effect: Pairing,
+            family: None,
+            file: None,
+            limit: &pairing,
+        });
+    }
+    for limit in &diff.source_changes.limits {
+        issues.push(ComparisonIssue {
+            effect: CapturedText,
+            family: None,
+            file: None,
+            limit,
+        });
+    }
+    for file in &diff.source_changes.files {
+        for limit in &file.limits {
+            issues.push(ComparisonIssue {
+                effect: TextHunks,
+                family: None,
+                file: file
+                    .after
+                    .as_ref()
+                    .or(file.before.as_ref())
+                    .map(|side| side.file_key.as_str()),
+                limit,
+            });
+        }
+    }
+    let file_count = diff.source_changes.files.len();
+    let files_complete =
+        diff.source_changes.root_text != RootText::Unavailable && unpaired_files == 0;
+    json!({
+        "semantic_rows":model_complete.then_some(diff.semantic.rows.len()),
+        "available_semantic_rows":diff.semantic.rows.len(),
+        "source_files":files_complete.then_some(file_count),
+        "available_source_files":file_count,
+        "reference_membership_complete":reference_complete,
+        "semantic_availability":semantic_availability,
+        "source_availability":diff.source_changes.availability,
+        "root_text":diff.source_changes.root_text,
+        "executed_includes":diff.source_changes.executed_includes,
+        "paired_file_changes":paired_files, "unpaired_files":unpaired_files,
+        "issues":issues
+    })
 }
 
 struct Rows<'a> {

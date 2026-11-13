@@ -7,38 +7,41 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { URL } = require("node:url");
 const { parseSnapshotDiff, normalizeChoices, diffSections, changeKinds } = require(compiledModule("diff_view"));
-const { currentSnapshot, parseCurrentSnapshot } = require("./helpers/current_snapshot.cjs");
+const { currentSnapshot, emptySemantic, parseCurrentSnapshot, summaryFor } = require("./helpers/current_snapshot.cjs");
 const before = "file:///before/main.mod", after = "file:///after/variant.mod";
 function uri(value) { const parsed = new URL(value); return { scheme: parsed.protocol.slice(0, -1), path: parsed.pathname, fsPath: decodeURIComponent(parsed.pathname), toString: () => value }; }
 function location(value = before, line = 3) { return { uri: value, range: { start: { line, character: 2 }, end: { line, character: 12 } } }; }
 function target(value, dimension = null) { return { occurrence_id: value.includes("before") ? "old:1" : "new:1", domain: dimension ? "heterogeneous" : "aggregate", dimension, written_locations: [location(value)] }; }
-function fixture(options = {}) {
-  const result = { added_endogenous: ["n"], removed_endogenous: ["k"], common_endogenous: ["c"], added_exogenous: [], removed_exogenous: [], common_exogenous: [],
-    added_parameters: [], removed_parameters: [], common_parameters: ["beta"],
-    symbols_changed: [{ name: "c", before: { kind: "endogenous", long_name: "Consumption", tex_name: "c" }, after: { kind: "endogenous", long_name: "Household consumption", tex_name: "c_h" } }],
-    changed_parameter_values: [{ name: "beta", old_raw: "0.99", old_value: .99, new_raw: "0.98", new_value: .98 }],
-    added_equations: [{ index: 1, text: "n = u", name: null, tags: {}, domain: "aggregate", dimension: null }],
-    removed_equations: [], changed_equations: [{ index_old: 2, index_new: 2, text_old: "c = y", text_new: "c = 2*y", name_old: "goods", name_new: "goods", tags_old: { name: "goods" }, tags_new: { name: "goods" }, domain: "aggregate", dimension: null }],
-    unmatched_same_name: [{ name: "repeat", dimension: null, removed: [{ index: 3, text: "a = 1", name: "repeat", tags: {}, domain: "aggregate", dimension: null }], added: [{ index: 3, text: "b = 2", name: "repeat", tags: {}, domain: "aggregate", dimension: null }] }],
-    heterogeneous_equations: [{ dimension: "households", added: [], removed: [], changed: [{ index_old: 1, index_new: 1, text_old: "c_h = w", text_new: "c_h = w+t", name_old: null, name_new: null, tags_old: {}, tags_new: {}, domain: "heterogeneous", dimension: "households" }], unmatched_same_name: [] }],
-    shock_setup_changes: [{ form: "stochastic_shock", role: "variance", target: "u", change: "changed", before: { block: "shocks", values: ["1"], overwrite: false }, after: { block: "shocks", values: ["2"], overwrite: false } },
-      { form: "shock_group", role: "membership", target: "supply", change: "added", after: { block: "shock_groups", references: ["u"], overwrite: false } }],
-    navigation: { schema_version: 1, before: { root_uri: before, revision: "old", complete: true }, after: { root_uri: after, revision: "new", complete: true }, rows: [] }, markdown: "ignored engine Markdown" };
-  const nav = (id, kind, old, next, dimension = null) => result.navigation.rows.push({ id, kind, before: old ? target(before, dimension) : null, after: next ? target(after, dimension) : null });
-  nav("/added_endogenous/0", "symbol", false, true); nav("/removed_endogenous/0", "symbol", true, false); nav("/common_endogenous/0", "symbol", true, true); nav("/common_parameters/0", "symbol", true, true);
-  nav("/symbols_changed/0", "symbol", true, true); nav("/changed_parameter_values/0", "parameter", true, true); nav("/added_equations/0", "equation", false, true); nav("/changed_equations/0", "equation", true, true);
-  nav("/unmatched_same_name/0/removed/0", "equation", true, false); nav("/unmatched_same_name/0/added/0", "equation", false, true);
-  nav("/heterogeneous_equations/0/changed/0", "equation", true, true, "households"); nav("/shock_setup_changes/0", "shock", true, true); nav("/shock_setup_changes/1", "shock", false, true);
-  Object.assign(result, options);
-  const navigation = result.navigation;
-  delete result.navigation; delete result.markdown;
-  const diff = result;
-  return currentSnapshot({ beforeRoot: before, afterRoot: after, diff, sources: { before: { [before]: "before source" }, after: { [after]: "after source" } }, navigationRows: navigation.rows, revisions: { before: "old", after: "new" } });
+function fixture() {
+  const diff = emptySemantic(), navigationRows = [];
+  const state = value => value === null ? { state: "absent", value: null } : { state: "present", value: { kind: "text", value } };
+  const field = (name, old, next) => ({ name, label: name, before: state(old), after: state(next), changed: old !== next, comparison_availability: "complete", numeric_difference: null });
+  const add = (family, name, change, old, next, dimension = null, equation_index = null, fields = []) => {
+    const pointer = "/semantic/rows/" + diff.semantic.rows.length;
+    const side = { name, scope: { domain: dimension ? "heterogeneous" : "aggregate", dimension, block: null }, occurrence: equation_index, equation_index, context: null };
+    diff.semantic.rows.push({ pointer, family, name, change, count_unit: "final_fact", facets: [], before: old === null ? null : { ...side },
+      after: next === null ? null : { ...side }, fields: [field("expression", old, next), ...fields], expressions: [], timing: [], references: [], limits: [], statement_group: null });
+    navigationRows.push({ id: pointer, kind: "semantic", family, name, before: old === null ? null : target(before, dimension), after: next === null ? null : target(after, dimension) });
+  };
+  add("symbols", "n", "added", null, "endogenous");
+  add("symbols", "k", "removed", "endogenous", null);
+  add("symbols", "c", "changed", "Consumption", "Household consumption");
+  add("parameters", "beta", "changed", "0.99", "0.98");
+  add("equations", "Equation", "added", null, "n = u", null, 1);
+  add("equations", "goods", "changed", "c = y", "c = 2*y", null, 2);
+  add("equations", "repeat", "removed", "a = 1", null, null, 3);
+  add("equations", "repeat", "added", null, "b = 2", null, 4);
+  add("equations", "Equation", "changed", "c_h = w", "c_h = w+t", "households", 1);
+  add("shocks", "u", "changed", "1", "2", null, null, [field("form", "stochastic_shock", "stochastic_shock")]);
+  add("shocks", "supply", "added", null, "u", null, null, [field("form", null, "shock_group")]);
+  return currentSnapshot({ beforeRoot: before, afterRoot: after, diff, sources: { before: { [before]: "before source" }, after: { [after]: "after source" } }, navigationRows, revisions: { before: "old", after: "new" } });
 }
 function noChanges() {
   const result = fixture();
-  for (const key of Object.keys(result.diff)) if (Array.isArray(result.diff[key])) result.diff[key] = [];
-  result.navigation.rows = []; return result;
+  result.diff.semantic.rows = [];
+  result.diff.summary = summaryFor(result.diff);
+  result.navigation.rows = [];
+  return result;
 }
 const parseCurrent = snapshot => parseCurrentSnapshot(parseSnapshotDiff, snapshot);
 const defaults = { sections: [...diffSections], changeKinds: [...changeKinds] };
@@ -47,30 +50,33 @@ test("current snapshot rows keep exact pointers, values, direction and engine pa
   const parsed = parseCurrent(fixture());
   assert.equal(parsed.rows.length, 11); assert.equal(parsed.complete, true);
   assert.deepEqual([...new Set(parsed.rows.map(row => row.section))], [...diffSections]);
-  assert.equal(parsed.rows.find(row => row.id === "/added_endogenous/0").before, null);
-  assert.equal(parsed.rows.find(row => row.id === "/removed_endogenous/0").after, null);
-  const unpaired = parsed.rows.filter(row => row.id.includes("unmatched_same_name"));
+  assert.equal(parsed.rows.find(row => row.id === "/semantic/rows/0").before, null);
+  assert.equal(parsed.rows.find(row => row.id === "/semantic/rows/1").after, null);
+  const unpaired = parsed.rows.filter(row => row.label === "repeat");
   assert.equal(unpaired.length, 2); assert.equal(unpaired[0].after, null); assert.equal(unpaired[1].before, null);
   assert.deepEqual(unpaired.map(row => row.kind), ["removed", "added"]);
-  assert.match(parsed.rows.find(row => row.section === "parameters").before, /0.99/);
+  assert.equal(parsed.rows.find(row => row.section === "parameters").semantic.fields[0].before.value.value, "0.99");
   assert.equal(parsed.rows.some(row => row.id.includes("common_")), false);
 });
 test("symbol scope moves keep both independent dimensions and missing navigation stays unavailable", () => {
-  const result = fixture(), source = result.navigation.rows.find(row => row.id === "/symbols_changed/0");
+  const result = fixture(), source = result.navigation.rows.find(row => row.id === "/semantic/rows/2");
   source.before.dimension = "firms"; source.after.dimension = "households";
-  result.navigation.rows.find(row => row.id === "/added_equations/0").after = null;
+  source.before.domain = source.after.domain = "heterogeneous";
+  const row = result.diff.semantic.rows[2];
+  row.before.scope = { ...row.before.scope, domain: "heterogeneous", dimension: "firms" };
+  row.after.scope = { ...row.after.scope, domain: "heterogeneous", dimension: "households" };
+  result.navigation.rows.find(row => row.id === "/semantic/rows/4").after = null;
   const rows = parseCurrent(result).rows;
   assert.deepEqual(rows.find(row => row.id === source.id).scopes, ["firms", "households"]);
-  assert.equal(rows.find(row => row.id === "/added_equations/0").navigation.after, null);
+  assert.equal(rows.find(row => row.id === "/semantic/rows/4").navigation.after, null);
 });
 test("unmapped shock rows retain navigation and side-specific dimensions", () => {
   for (const useSideDimensions of [false, true]) {
-    const result = fixture(), nav = result.navigation.rows.find(row => row.id === "/shock_setup_changes/0");
+    const result = fixture(), nav = result.navigation.rows.find(row => row.id === "/semantic/rows/9");
     nav.before = null; nav.after = null;
-    if (useSideDimensions) {
-      result.diff.shock_setup_changes[0].before.heterogeneity = "households";
-      result.diff.shock_setup_changes[0].after.heterogeneity = "firms";
-    } else nav.dimension = "households";
+    const fact = result.diff.semantic.rows[9];
+    fact.before.scope = { ...fact.before.scope, dimension: "households", domain: "heterogeneous" };
+    fact.after.scope = { ...fact.after.scope, dimension: useSideDimensions ? "firms" : "households", domain: "heterogeneous" };
     const row = parseCurrent(result).rows.find(row => row.id === nav.id);
     assert.deepEqual(row.scopes, useSideDimensions ? ["households", "firms"] : ["households"]);
     assert.equal(row.sideScopes.before, "households"); assert.equal(row.sideScopes.after, useSideDimensions ? "firms" : "households");
@@ -81,7 +87,7 @@ test("malformed, wrong-root, duplicate pointers and unsafe source schemes fail v
   const cases = [value => delete value.navigation, value => value.navigation.schema_version = 3,
     value => value.navigation.before.root_file = after, value => value.navigation.rows.push(value.navigation.rows[0]),
     value => value.navigation.rows.shift(), value => value.navigation.rows[0].after.written_locations[0].file_key = "command:bad",
-    value => value.diff.changed_parameter_values[0].old_value = {}, value => value.diff.changed_equations[0].text_new = {}];
+    value => value.diff.semantic.rows[3].fields[0].before.value.value = {}, value => value.diff.semantic.rows[5].fields[0].after.value.value = {}];
   for (const mutate of cases) { const value = fixture(); mutate(value); assert.throws(() => parseCurrent(value), /unsupported comparison/); }
 });
 test("current snapshot receipts require complete inputs and preserve no-change results", () => {
@@ -120,6 +126,7 @@ class Element {
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.children = children; this._text = ""; }
   addEventListener(name, listener) { this.listeners[name] = listener; }
+  querySelectorAll(selector) { return descendants(this).filter(element => element.className?.split(" ").includes(selector.slice(1))); }
   setAttribute(name, value) { this.attributes[name] = value; }
   getAttribute(name) { return this.attributes[name]; }
   focus() { this.focused = true; }
@@ -143,7 +150,7 @@ test("webview uses text nodes, labels source sides and disables missing/stale lo
   assert.equal(descendants(env.elements.results).some(element => element.tag === "img"), false);
   env.open(rows[0].id);
   const buttons = descendants(env.elements.results).filter(element => element.tag === "button" && element.attributes["aria-label"]?.startsWith("Open")); assert.equal(buttons[0].disabled, true); assert.equal(buttons[1].disabled, false);
-  buttons[1].fire("click"); assert.equal(env.posted.at(-1).side, "after"); assert.equal(env.posted.at(-1).rowId, "/added_endogenous/0");
+  buttons[1].fire("click"); assert.equal(env.posted.at(-1).side, "after"); assert.equal(env.posted.at(-1).rowId, "/semantic/rows/0");
   env.render({ status: "stale", message: "Out of date" }); assert.ok(descendants(env.elements.results).filter(element => element.tag === "button" && element.attributes["aria-label"]?.startsWith("Open")).every(button => button.disabled));
 });
 
@@ -151,7 +158,7 @@ test("comparison headers summarize choices, abnormal receipts and heterogeneous 
   const env = webview();
   const analysis = { selection: { name: "Policy <A>", preview: true }, configuration: { defines: [{ name: "N", expression: "2" }], equation_selection: { mode: "include", tag: "name", values: ["policy"] }, overrides: [{ kind: "definition", target: { file: "main.mod" }, expression: "1" }] }, model_complete: true,
     overrides: [{ operation: { kind: "definition", target: { file: "main.mod" }, expression: "1" }, name: "x", application: "not_reached", known_execution_count: 0, execution_count: 0, cause: "The parent branch was not reached." }] };
-  env.render({ before: "/before/main.mod @ HEAD · abc1234 · Source", inputNames: { before: "main.mod", after: "variant.mod" }, analysisSummaries: { before: { analysis: { ...analysis, configuration: { ...analysis.configuration, equation_selection: { mode: "exclude", tag: "name", values: ["policy"] } } }, counts: { n_equations: 1, n_endogenous: 1, heterogeneity_dimensions: [{ dimension: "households", n_equations: 2, n_endogenous: 3 }] }, search_paths: ["includes"] }, after: { analysis: { ...analysis, selection: { name: null, preview: false }, configuration: {}, overrides: [] } } } });
+  env.render({ before: "/before/main.mod @ HEAD · abc1234 · Source", inputNames: { before: "main.mod", after: "variant.mod" }, configurationLabels: { before: "Policy <A>", after: "Source" }, analysisSummaries: { before: { analysis: { ...analysis, configuration: { ...analysis.configuration, equation_selection: { mode: "exclude", tag: "name", values: ["policy"] } } }, counts: { n_equations: 1, n_endogenous: 1, heterogeneity_dimensions: [{ dimension: "households", n_equations: 2, n_endogenous: 3 }] }, search_paths: ["includes"] }, after: { analysis: { ...analysis, selection: { name: null, preview: false }, configuration: {}, overrides: [] } } } });
   const [beforeCard, afterCard] = env.elements.models.children;
   const text = env.elements.models.textContent;
   assert.equal(beforeCard.open, false);
@@ -194,7 +201,7 @@ test("captured repeated macro names identify their own definition lines", () => 
 
 test("incomplete comparison headers keep both choices and explain unavailable counts", () => {
   const env = webview();
-  env.render({ rows: [], status: "incomplete", analysisSummaries: {
+  env.render({ rows: [], status: "incomplete", configurationLabels: { before: "Policy A", after: "Policy B" }, analysisSummaries: {
     before: { requested_analysis: { name: "Policy A", defines: [{ name: "ON", expression: "false" }], overrides: [{ kind: "definition", target: { file: "models/main.mod" }, expression: "1" }] }, complete: true, counts: null, counts_cause: "Comparison stopped before counting the models.", cause: { message: "The source operation could not be matched." } },
     after: { requested_analysis: { name: "Policy B", defines: [{ name: "ON", expression: "true" }] }, complete: false, counts: null, counts_cause: "The active include missing.inc is unavailable." },
   } });
@@ -212,7 +219,7 @@ test("incomplete comparison headers keep both choices and explain unavailable co
   assert.doesNotMatch(text, /Complete|Completeness unavailable|Initial macro inputs|Analysis preview|Macro inputs/);
   assert.doesNotMatch(text, /0 equations|0 endogenous/);
 });
-test("compact rows open one Before and After detail and keep its source targets", () => {
+test("compact rows keep Before and After details and source targets open together", () => {
   const env = webview(), rows = parseCurrent(fixture()).rows; env.render();
   const groups = descendants(env.elements.results).filter(element => element.attributes["data-group"]).map(element => element.attributes["data-group"]);
   assert.deepEqual(groups.filter(group => group.startsWith("equations:")), ["equations:Equations"]);
@@ -223,13 +230,13 @@ test("compact rows open one Before and After detail and keep its source targets"
     assert.deepEqual(articles.map(article => article.attributes["data-row-id"]), rows.filter(row => row.section + ":" + row.group === group).map(row => row.id));
     visited.push(...articles.map(article => article.attributes["data-row-id"]));
     assert.equal(descendants(env.elements.results).find(element => element.attributes["data-group"] === group).focused, true);
-    for (const article of articles) {
+    for (const [index, article] of articles.entries()) {
       const row = rows.find(row => row.id === article.attributes["data-row-id"]);
       env.open(row.id);
       const open = descendants(env.elements.results).find(element => element.attributes["data-row-id"] === row.id);
       const cards = descendants(open).filter(element => element.className?.startsWith("side "));
       assert.deepEqual(cards.map(card => card.className), ["side before", "side after"]);
-      assert.equal(descendants(env.elements.results).filter(element => element.className === "detail").length, 1);
+      assert.equal(descendants(env.elements.results).filter(element => element.className === "detail").length, index + 1);
       for (const [index, side] of ["before", "after"].entries()) {
         const button = descendants(cards[index]).find(element => element.className === "source-link");
         if (!button.disabled) { button.fire("click"); assert.equal(env.posted.at(-1).rowId, row.id); assert.equal(env.posted.at(-1).side, side); }
@@ -253,8 +260,10 @@ test("webview text and kind filters preserve state and choose a visible group", 
   assert.equal(env.elements.counts.textContent, "11 changes");
 });
 test("side labels retain unmapped heterogeneous shock rows without a scope filter", () => {
-  const result = fixture(), nav = result.navigation.rows.find(row => row.id === "/shock_setup_changes/0");
-  nav.before = null; nav.after = null; nav.dimension = "households";
+  const result = fixture(), nav = result.navigation.rows.find(row => row.id === "/semantic/rows/9");
+  nav.before = null; nav.after = null;
+  const fact = result.diff.semantic.rows[9];
+  fact.before.scope = fact.after.scope = { ...fact.before.scope, dimension: "households", domain: "heterogeneous" };
   const rows = parseCurrent(result).rows.filter(row => row.id === nav.id), env = webview(); env.render({ rows });
   assert.match(env.elements.results.textContent, /Dimension: households/);
   assert.equal(env.elements.counts.textContent, "1 change");
@@ -265,7 +274,7 @@ test("side labels retain unmapped heterogeneous shock rows without a scope filte
 });
 
 test("returning to source restores the same captured row and discards reused IDs on a new capture", () => {
-  const env = webview(), id = "/added_endogenous/0";
+  const env = webview(), id = "/semantic/rows/0";
   env.render();
   env.open(id);
   env.elements.reviewContent.scrollTop = 81;

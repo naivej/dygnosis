@@ -14,6 +14,7 @@ import type { AnalysisSide } from "../editor/analysis_configuration";
 import { normalizeGitText } from "./git_provenance";
 import { validateSemanticCapability } from "./semantic_view";
 import { fileLabel } from "../client/failure";
+import { displayPath, displaySourcePath } from "../client/source_uri";
 
 interface WorkingInput { kind: "working"; input_id: string; root_uri: string; expected_revision: string; search_paths?: string[]; analysis?: AnalysisConfiguration }
 type ConfiguredHistoricalInput = HistoricalInput & { analysis?: AnalysisConfiguration };
@@ -203,7 +204,21 @@ export async function captureComparison(service: DygnosisClient, git: () => Prom
       if (!record(result)) throw new Error("The engine returned an invalid snapshot response.");
       if (result.state === "failure") {
         const side = result.side === "before" || result.side === "after" ? result.side : undefined;
-        throw new ComparisonFailure(String(result.code), `${side ? `${side === "before" ? "Before" : "After"}: ` : ""}${String(result.message)}${typeof result.file_key === "string" ? ` (${result.file_key})` : ""}`, side, typeof result.file_key === "string" ? result.file_key : undefined, failureSummaries(result.analysis_summaries, inputs));
+        const key = typeof result.file_key === "string" ? result.file_key : undefined;
+        const label = key && (/^(file|untitled):/.test(key) ? displaySourcePath(vscode.Uri.parse(key)) : displayPath(key));
+        let message = String(result.message);
+        const summaries = failureSummaries(result.analysis_summaries, inputs);
+        if (label && key) {
+          const sourcePrefix = `Active include ${key} `;
+          if (message.startsWith(sourcePrefix)) {
+            const original = message;
+            message = `Active include ${label} ${message.slice(sourcePrefix.length)}`;
+            const summary = side && summaries?.[side];
+            if (summary && summary.counts_cause === original) summary.counts_cause = message;
+            if (summary && summary.cause?.message === original) summary.cause.message = message;
+          } else message += ` (${label})`;
+        }
+        throw new ComparisonFailure(String(result.code), `${side ? `${side === "before" ? "Before" : "After"}: ` : ""}${message}`, side, key, summaries);
       }
       if (result.state === "needs_sources") {
         if (!Array.isArray(result.requests) || !result.requests.length) throw new Error("Historical capture made no progress.");

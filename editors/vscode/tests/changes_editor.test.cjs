@@ -296,18 +296,30 @@ test("same ordered comparison reuses its custom document and split views share c
   assert.equal(host.last(first).choices.search, "goods"); assert.equal(host.last(second).choices.search, ""); assert.equal(host.captures.length, 1);
   assert.equal(host.last(first).token, host.last(second).token);
   host.close(first); assert.equal(second.document.disposed, false); host.source("before", second); await flush(); assert.equal(host.shown.length, 1);
-  host.message({ type: "refresh" }, second); await flush(); assert.equal(host.captures.length, 2); assert.equal(host.last(second).status, "ready");
+  host.invoke("refreshComparison", second); await flush(); assert.equal(host.captures.length, 2); assert.equal(host.last(second).status, "ready");
+});
+
+test("Show model changes refuses a selection after focus moves to another split", async t => {
+  const { host } = setup(t); await host.openSaved(comparison());
+  const first = host.panels[0], second = await host.split(first.document);
+  host.pick = items => {
+    host.activePanel = second;
+    return items.find(item => item.mode === "file");
+  };
+  await host.open();
+  assert.equal(host.calls.filter(call => call.id === "vscode.openWith").length, 1);
+  assert.deepEqual(host.notifications, ["The active comparison changed. Open Show model changes again."]);
 });
 
 test("Swap opens a reversed resource while Change comparison restores baseline-to-anchor direction and retains filters", async t => {
   const { host } = setup(t), original = comparison(); await host.openSaved(original);
   const panel = host.panels[0], choices = { ...host.last().choices, search: "calibration", layout: "stacked", expanded: { "occurrence:1": true } };
-  host.message({ type: "choices", key: host.last().key, choices }); host.message({ type: "swap" }); await flush();
+  host.message({ type: "choices", key: host.last().key, choices }); host.invoke("swapComparisonSides"); await flush();
   const swapped = host.panels.at(-1), resource = swapped.document.resource;
   assert.deepEqual(resource.before, original.after); assert.deepEqual(resource.after, original.before); assert.deepEqual(resource.anchor, original.anchor);
   assert.equal(host.last(swapped).status, "ready");
   assert.equal(host.last(swapped).choices.search, "calibration"); assert.equal(Object.hasOwn(host.last(swapped).choices, "expanded"), false);
-  host.pick = items => items.find(item => item.mode === "file"); host.message({ type: "changeComparison" }, swapped); await flush();
+  host.pick = items => items.find(item => item.mode === "file"); host.invoke("openChanges", swapped); await flush();
   const changed = host.panels.at(-1).document.resource;
   assert.deepEqual(changed.after, original.anchor); assert.deepEqual(changed.before, working(baselineUri)); assert.equal(panel.disposed, false);
 });
@@ -329,9 +341,14 @@ test("baseline picker loads bounded pages, accepts a typed expression without an
 });
 
 test("a Git rename requires a choice and missing-root path recovery retains the fixed revision", async t => {
-  const { host } = setup(t); host.editor.document = host.document(Uri.joinPath(rootUri, "renamed.mod")); host.rename = { before: "main.mod", after: "renamed.mod" };
+  const { host } = setup(t), oldPath = path.join("archived", "main.mod"), newPath = path.join("models", "renamed.mod");
+  host.editor.document = host.document(Uri.joinPath(rootUri, "models", "renamed.mod"));
+  host.rename = { before: "archived/main.mod", after: "models/renamed.mod" };
   host.pick = items => items.find(item => item.mode === "revision") ?? items[0]; await host.open();
-  assert.match(host.picks[1].items[0].label, /main.mod.*renamed.mod/); assert.equal(host.captures[0].resource.before.root_file, "main.mod"); assert.equal(host.captures[0].resource.after.root_uri.endsWith("renamed.mod"), true);
+  assert.equal(host.picks[1].items[0].label, `Use ${oldPath} → ${newPath}`);
+  assert.ok(host.last().before.startsWith(`${path.join(rootUri.fsPath, oldPath)} · `));
+  assert.equal(host.captures[0].resource.before.root_file, "archived/main.mod");
+  assert.equal(host.captures[0].resource.after.root_uri.endsWith("models/renamed.mod"), true);
   const retained = host.panels[0]; host.pick = items => items.find(item => item.mode === "revision"); await host.open(); assert.equal(host.panels.length, 1); assert.equal(retained.disposed, false);
   host.capture = () => { throw new host.ComparisonFailure("MISSING_ROOT", "Before root is absent", "before", "renamed.mod"); };
   await host.openSaved(comparison(historical(commits.old, "renamed.mod"))); assert.equal(host.last().status, "failure");
@@ -354,7 +371,7 @@ test("historical include ownership uses a candidate root only after a proof at t
 test("Refresh retains selected commits after a branch moves", async t => {
   const { host, git } = setup(t); await host.openSaved(comparison(historical(commits.old, "main.mod", "release")));
   const nativeResolve = git.resolve; git.resolve = (repository, ref) => ref === "release" ? Promise.resolve({ hash: commits.moved, requested_ref: "release", parents: [], message: "new release" }) : nativeResolve(repository, ref);
-  host.message({ type: "refresh" }); await flush(); assert.equal(host.captures.at(-1).resource.before.commit, commits.old);
+  host.invoke("refreshComparison"); await flush(); assert.equal(host.captures.at(-1).resource.before.commit, commits.old);
 });
 
 test("an added row opens the verified Before file even though the row is absent", async t => {
@@ -380,7 +397,7 @@ test("an old source load or validation cannot stale a newer ready comparison", a
     const { host } = createHost(); host.install(); t.after(() => host.registration.dispose()); await host.openSaved(comparison()); const pending = deferred();
     if (kind === "load") host.loadText = () => pending.promise; else host.validate = () => pending.promise;
     host.source("after"); await flush(); host.loadText = undefined; host.validate = undefined;
-    host.message({ type: "refresh" }); await flush(); const token = host.last().token; pending.resolve(undefined); await flush();
+    host.invoke("refreshComparison"); await flush(); const token = host.last().token; pending.resolve(undefined); await flush();
     assert.equal(host.last().status, "ready"); assert.equal(host.last().token, token); assert.equal(host.shown.length, 0);
   }
 });
@@ -425,17 +442,17 @@ test("Open changes from a custom tab uses its recorded anchor while activeTextEd
 test("superseded capture is cancelled and its late result cannot replace the current generation", async t => {
   const { host, service } = setup(t); await host.openSaved(comparison()); const pending = deferred(); let calls = 0;
   host.capture = (resource, cancel, history) => ++calls === 1 ? pending.promise : captured(resource, history, host, service.currentInstance, false);
-  host.message({ type: "refresh" }); await flush(); const older = host.captures.at(-1);
-  host.message({ type: "refresh" }); await flush(); assert.equal(older.cancel.isCancellationRequested, true); assert.equal(host.last().status, "ready", host.last().message); assert.deepEqual(host.last().rows, []);
+  host.invoke("refreshComparison"); await flush(); const older = host.captures.at(-1);
+  host.invoke("refreshComparison"); await flush(); assert.equal(older.cancel.isCancellationRequested, true); assert.equal(host.last().status, "ready", host.last().message); assert.deepEqual(host.last().rows, []);
   const current = host.last().token; pending.resolve(captured(older.resource, older.history, host)); await flush(); assert.equal(host.last().token, current); assert.deepEqual(host.last().rows, []);
 });
 
 test("user progress cancellation has an explicit recovery state and disposal cancels capture and all subscriptions", async t => {
   const { host } = setup(t); await host.openSaved(comparison()); const pending = deferred();
-  host.capture = () => pending.promise; host.message({ type: "refresh" }); await flush(); const capture = host.captures.at(-1);
+  host.capture = () => pending.promise; host.invoke("refreshComparison"); await flush(); const capture = host.captures.at(-1);
   host.progress.at(-1).source.cancel(); pending.reject(new Error("cancelled capture")); await flush();
   assert.equal(capture.cancel.isCancellationRequested, true); assert.equal(host.last().status, "failure"); assert.match(host.last().message, /cancel|Refresh/i);
-  const later = deferred(); host.capture = () => later.promise; host.message({ type: "refresh" }); await flush(); const latest = host.captures.at(-1);
+  const later = deferred(); host.capture = () => later.promise; host.invoke("refreshComparison"); await flush(); const latest = host.captures.at(-1);
   host.registration.dispose(); assert.equal(latest.cancel.isCancellationRequested, true);
   assert.equal(host.changed.listeners.size, 0); assert.equal(host.configChanged.listeners.size, 0); assert.equal(host.panels[0].received.listeners.size, 0);
   assert.equal(host.panels[0].disposed, true); later.reject(new Error("disposed capture")); await flush();
@@ -449,14 +466,14 @@ test("Working dependency edits and missing-candidate creation stale only affecte
   host.source("before"); await flush(); assert.equal(host.shown.length, 0);
   await host.openSaved(comparison(historical(commits.old), historical())); const historyPanel = host.panels.at(-1), token = host.last().token;
   host.changed.fire({ reason: "file", uri: anchorUri.toString() }); assert.equal(host.last(historyPanel).status, "ready"); assert.equal(host.last(historyPanel).token, token);
-  host.message({ type: "openSource", token: ready.token, rowId: "/changed_equations/0", side: "after" }, host.panels[0]); await flush(); assert.equal(host.shown.length, 0);
+  host.message({ type: "openSource", token: ready.token, rowId: "/semantic/rows/0", side: "after" }, host.panels[0]); await flush(); assert.equal(host.shown.length, 0);
 });
 
 test("exact candidate file watchers and include settings invalidate, while presentation settings keep source actions current", async t => {
   const { host } = setup(t); await host.openSaved(comparison());
   const candidates = host.watchers.filter(watcher => watcher.pattern.baseUri.toString() === rootUri.toString()); assert.ok(candidates.length); assert.ok(candidates.every(watcher => watcher.pattern.pattern === "*"));
   for (const watcher of candidates) watcher.create.fire(Uri.joinPath(rootUri, "missing.data")); assert.equal(host.last().status, "stale");
-  host.message({ type: "refresh" }); await flush(); const token = host.last().token;
+  host.invoke("refreshComparison"); await flush(); const token = host.last().token;
   host.settings.set(anchorUri.toString(), { "diff.sections": [] }); host.configChanged.fire({ affectsConfiguration: key => key === "dynare.diff.sections" });
   assert.equal(host.last().status, "ready"); assert.equal(host.last().token, token); assert.equal(Object.hasOwn(host.last().choices, "sections"), false);
   await host.openSaved(comparison(historical(commits.old), historical())); const fixed = host.panels.at(-1);
@@ -471,7 +488,7 @@ test("literal candidate watchers accept bracket and brace names, ignore unrelate
   for (const watcher of watchers) watcher.create.fire(Uri.joinPath(rootUri, "missing1final.data")); assert.equal(host.last().status, "ready", "glob-looking names must not match a different path");
   for (const watcher of watchers) watcher.change.fire(Uri.joinPath(rootUri, "unrelated.data")); assert.equal(host.last().status, "ready");
   for (const watcher of watchers) watcher.create.fire(candidate); assert.equal(host.last().status, "stale");
-  host.message({ type: "refresh" }); await flush(); const current = host.watchers.filter(watcher => !watcher.disposed), varied = Uri.from({ scheme: candidate.scheme, path: candidate.path.toUpperCase() });
+  host.invoke("refreshComparison"); await flush(); const current = host.watchers.filter(watcher => !watcher.disposed), varied = Uri.from({ scheme: candidate.scheme, path: candidate.path.toUpperCase() });
   for (const watcher of current) watcher.remove.fire(varied); assert.equal(host.last().status, process.platform === "win32" ? "stale" : "ready");
 });
 
@@ -487,14 +504,14 @@ test("root notifications compare the model revision while diagnostic input token
 test("engine restart rejects fixed-history source actions and cancelled restart results cannot publish", async t => {
   const { host, service } = setup(t); await host.openSaved(comparison(historical(commits.old), historical()));
   service.currentInstance++; host.changed.fire({ reason: "restart" }); assert.equal(host.last().status, "stale"); host.source(); await flush(); assert.equal(host.shown.length, 0);
-  host.message({ type: "refresh" }); await flush(); assert.equal(host.last().status, "ready"); assert.equal(host.panels[0].document.instance, service.currentInstance);
+  host.invoke("refreshComparison"); await flush(); assert.equal(host.last().status, "ready"); assert.equal(host.panels[0].document.instance, service.currentInstance);
 });
 
 test("engine lifecycle invalidation stales fixed histories before a replacement can finish and cancels a loading result", async t => {
   const { host, service } = setup(t); await host.openSaved(comparison(historical(commits.old), historical())); const oldInstance = service.currentInstance;
   host.changed.fire({ reason: "lifecycle" }); assert.equal(service.currentInstance, oldInstance); assert.equal(host.last().status, "stale");
   host.source(); host.message({ type: "rootTextDiff" }); await flush(); assert.equal(host.shown.length, 0); assert.equal(host.calls.some(call => call.id === "vscode.diff"), false);
-  const pending = deferred(); host.capture = () => pending.promise; host.message({ type: "refresh" }); await flush(); const obsolete = host.captures.at(-1);
+  const pending = deferred(); host.capture = () => pending.promise; host.invoke("refreshComparison"); await flush(); const obsolete = host.captures.at(-1);
   host.changed.fire({ reason: "lifecycle" }); assert.equal(obsolete.cancel.isCancellationRequested, true); assert.equal(host.last().status, "stale");
   pending.resolve(captured(obsolete.resource, obsolete.history, host, oldInstance)); await flush(); assert.equal(host.last().status, "stale");
 });
@@ -508,9 +525,9 @@ test("source actions use retained side identity, exact bytes and UTF-16 ranges; 
   assert.equal(host.revalidations.length, 0);
   for (const message of [{ rowId: "missing" }, { side: "outside" }, { token: initial.token - 1 }]) host.source("before", host.panels[0], message);
   await flush(); assert.equal(host.shown.length, 2);
-  host.message({ type: "rootTextDiff", token: initial.token - 1 }); await flush();
+  await host.commands.get("dygnosis.comparisonTextDiff")(anchorUri);
   assert.equal(host.calls.some(call => call.id === "vscode.diff"), false);
-  host.message({ type: "rootTextDiff", token: host.last().token }); await flush(); const call = host.calls.find(call => call.id === "vscode.diff");
+  host.invoke("comparisonTextDiff"); await flush(); const call = host.calls.find(call => call.id === "vscode.diff");
   assert.equal(call.args[0].scheme, historyScheme); assert.equal(call.args[1].scheme, historyScheme); assert.equal(call.args[2], "main.mod (aaaaaaa) ↔ main.mod (bbbbbbb)");
 });
 
@@ -518,7 +535,7 @@ test("Working source navigation revalidates before and after document load and r
   const { host } = setup(t); await host.openSaved(comparison()); const pending = deferred();
   host.loadText = () => pending.promise; host.source("after"); await flush(); host.validate = () => undefined; pending.resolve(); await flush();
   assert.equal(host.shown.length, 0); assert.equal(host.last().status, "stale");
-  host.validate = undefined; host.loadText = undefined; host.message({ type: "refresh" }); await flush();
+  host.validate = undefined; host.loadText = undefined; host.invoke("refreshComparison"); await flush();
   const target = host.last().rows[0].navigation.after.written_locations[0], document = host.texts.get(target.uri); document.text += "modified";
   host.source("after"); await flush(); assert.equal(host.shown.length, 0); assert.equal(host.last().status, "stale");
   assert.equal(host.notifications.length, 2); assert.ok(host.notifications.every(message => /Comparison inputs changed/.test(message)));
@@ -526,7 +543,7 @@ test("Working source navigation revalidates before and after document load and r
 
 // Guards explicit webview actions bypassing the shared command boundary.
 test("reference, root text, captured text and Swap failures each show their cause once", async t => {
-  for (const type of ["openReference", "rootTextDiff", "capturedTextDiff", "swap"]) {
+  for (const type of ["openReference", "comparisonTextDiff", "swapComparisonSides"]) {
     const { host, service, vscode } = createHost(); host.install(); t.after(() => host.registration.dispose());
     host.capture = (resource, cancel, history) => {
       const result = captured(resource, history, host, service.currentInstance), row = result.snapshot.rows[0];
@@ -535,10 +552,12 @@ test("reference, root text, captured text and Swap failures each show their caus
       return result;
     };
     await host.openSaved(comparison());
-    if (type === "swap") vscode.commands.executeCommand = async () => { throw new Error("editor could not open comparison"); };
+    if (type === "swapComparisonSides") vscode.commands.executeCommand = async () => { throw new Error("editor could not open comparison"); };
     else host.validate = () => { throw new Error("source check failed"); };
-    host.message({ type, token: host.last().token, pointer: "/reference/0", side: "after" }); await flush();
-    assert.deepEqual(host.notifications, [type === "swap" ? "editor could not open comparison" : "source check failed"]);
+    if (type === "openReference") host.message({ type, token: host.last().token, pointer: "/reference/0", side: "after" });
+    else await host.commands.get("dygnosis." + type)();
+    await flush();
+    assert.deepEqual(host.notifications, [type === "swapComparisonSides" ? "editor could not open comparison" : "source check failed"]);
     assert.deepEqual(host.failures, []);
   }
 });
@@ -555,9 +574,10 @@ test("Text diff opens the sole exact captured file directly and keeps unavailabl
   };
   await host.openSaved(comparison());
   const baselinePicks = host.picks.length;
-  host.message({ type: "capturedTextDiff", token: host.last().token }); await flush();
+  host.invoke("comparisonTextDiff"); await flush();
   assert.equal(host.picks.length, baselinePicks, "one total changed file with exact captured text needs no file-selection step");
   assert.equal(host.calls.filter(call => call.id === "vscode.diff").length, 1);
+  assert.equal(host.revalidations.length, 1, "Text diff validates the Working source once before dispatch");
 
   host.capture = (resource, _cancel, history) => {
     const result = captured(resource, history, host);
@@ -570,14 +590,119 @@ test("Text diff opens the sole exact captured file directly and keeps unavailabl
     ] };
     return result;
   };
-  host.message({ type: "refresh" }); await flush();
+  host.invoke("refreshComparison"); await flush();
   const priorDiffs = host.calls.filter(call => call.id === "vscode.diff").length;
   host.pick = items => items.find(item => item.available);
-  host.message({ type: "capturedTextDiff", token: host.last().token }); await flush();
+  host.invoke("comparisonTextDiff"); await flush();
   const files = host.picks.at(-1).items;
   assert.equal(files.length, 2, "the picker retains every changed file");
   assert.ok(files.some(item => /Text diff unavailable/.test(item.description)), "the unavailable row remains visible with its reason");
   assert.equal(host.calls.filter(call => call.id === "vscode.diff").length, priorDiffs + 1);
+});
+
+test("refreshing during the Text diff picker explains the rejected selection once", async t => {
+  const { host } = setup(t);
+  host.capture = (resource, _cancel, history) => {
+    const result = captured(resource, history, host);
+    result.snapshot.sourceChanges.files = [0, 1].map(index => ({
+      pointer: "/source_changes/files/" + index, change: "changed", correspondence: index === 0 ? "selected_roots" : "proven_file_identity",
+      before: { file_key: result.inputs.before.file_keys[index], exact_text_available: true },
+      after: { file_key: result.inputs.after.file_keys[index], exact_text_available: true },
+      hunks: [],
+    }));
+    return result;
+  };
+  await host.openSaved(comparison());
+  const selection = deferred();
+  host.pick = () => selection.promise;
+  host.invoke("comparisonTextDiff"); await flush();
+  const selected = host.picks.at(-1).items[0];
+  await host.commands.get("dygnosis.refreshComparison")();
+  selection.resolve(selected); await flush();
+  assert.equal(host.calls.filter(call => call.id === "vscode.diff").length, 0);
+  assert.deepEqual(host.notifications, ["This comparison changed while the action was open. Run the action again."]);
+  assert.equal(host.last().status, "ready");
+  const load = deferred();
+  host.loadText = () => load.promise;
+  host.source("after"); await flush();
+  await host.commands.get("dygnosis.refreshComparison")();
+  load.reject(new Error("Original capture file could not be opened")); await flush();
+  assert.equal(host.shown.length, 0);
+  assert.equal(host.last().status, "ready");
+  assert.deepEqual(host.notifications, Array(2).fill("This comparison changed while the action was open. Run the action again."));
+});
+
+test("Text diff for matching Working roots opens immutable captured sides", async t => {
+  const { host, vscode } = setup(t);
+  const before = { ...working(), analysis: { defines: [{ name: "POLICY", expression: "0" }] } };
+  const after = { ...working(), analysis: { defines: [{ name: "POLICY", expression: "1" }] } };
+  host.capture = (resource, _cancel, history) => captured(resource, history, host, 1, false);
+  await host.openSaved(comparison(before, after));
+  const root = host.texts.get(anchorUri.toString()), original = root.getText();
+  await host.commands.get("dygnosis.comparisonTextDiff")();
+  const call = host.calls.find(item => item.id === "vscode.diff");
+  assert.ok(call);
+  const [originalUri, modifiedUri] = call.args;
+  assert.equal(originalUri.scheme, "dygnosis-captured");
+  assert.equal(modifiedUri.scheme, "dygnosis-captured");
+  assert.notEqual(originalUri.toString(), modifiedUri.toString());
+  root.text += "\n// Live edit";
+  for (const uri of [originalUri, modifiedUri]) {
+    assert.equal((await vscode.workspace.openTextDocument(uri)).getText(), original);
+  }
+});
+
+test("Macro context projects include additions, removals and edits with verified source links", async t => {
+  const { host } = setup(t);
+  const beforeRoot = Uri.joinPath(rootUri, "Before Models", "model.mod"), afterRoot = Uri.joinPath(rootUri, "After Models", "model.mod");
+  const removedPath = path.join(path.dirname(beforeRoot.fsPath), "baseline", "premium.inc");
+  const addedPath = path.join(path.dirname(afterRoot.fsPath), "policy", "premium.inc");
+  host.capture = (resource, _cancel, history) => {
+    const result = captured(resource, history, host, 1, false);
+    const [oldKey, newKey] = [result.inputs.before.file_keys[1], result.inputs.after.file_keys[1]];
+    const extra = (side, filename) => {
+      const uri = Uri.file(filename), file_key = filename.split(path.sep).join("/"), text = "// included\n";
+      result.texts[side][file_key] = text;
+      result.sourceUris[side].set(file_key, uri);
+      host.document(uri, text);
+      return { file_key, exact_text_available: true };
+    };
+    const removed = extra("before", removedPath), added = extra("after", addedPath);
+    result.snapshot.sourceChanges.executed_includes = { before: [oldKey, removed.file_key], after: [newKey, added.file_key] };
+    result.snapshot.sourceChanges.files = [{
+      pointer: "/source_changes/files/0", change: "changed", correspondence: "proven_file_identity",
+      before: { file_key: oldKey, exact_text_available: true }, after: { file_key: newKey, exact_text_available: true },
+      hunks: [{ before_start: 1, after_start: 1, before_lines: 2, after_lines: 2, lines: [{ role: "unchanged", text: "// context" }, { role: "removed", text: "y = 1;" }, { role: "added", text: "y = 2;" }] }],
+    }, { pointer: "/source_changes/files/1", change: "removed", correspondence: "unpaired", before: removed, after: null, hunks: [] },
+    { pointer: "/source_changes/files/2", change: "added", correspondence: "unpaired", before: null, after: added, hunks: [] }];
+    result.inputs.before.analysis = { configuration: { defines: [{ name: "POLICY", expression: "0" }] } };
+    result.inputs.after.analysis = { configuration: { defines: [{ name: "POLICY", expression: "1" }] } };
+    result.inputs.after.search_paths = ["shared/includes"];
+    return result;
+  };
+  await host.openSaved(comparison(working(beforeRoot), working(afterRoot)));
+  const view = host.last(), { rows } = view;
+  assert.equal(view.status, "ready", view.message);
+  assert.equal(view.before, `${beforeRoot.fsPath} · Working`);
+  assert.equal(view.after, `${afterRoot.fsPath} · Working`);
+  assert.deepEqual(view.inputNames, { before: path.join("Before Models", "model.mod"), after: path.join("After Models", "model.mod") });
+  assert.deepEqual(view.executedIncludes, {
+    before: [path.join(path.dirname(beforeRoot.fsPath), "model.data"), removedPath],
+    after: [path.join(path.dirname(afterRoot.fsPath), "model.data"), addedPath],
+  });
+  assert.equal(view.sourcePaths[Uri.file(addedPath).toString()], addedPath);
+  assert.deepEqual(view.analysisSummaries.after.search_paths, [path.join("shared", "includes")]);
+  assert.ok(rows.every(row => row.section === "macroContext" && row.includeFile));
+  assert.deepEqual(rows.map(row => row.kind), ["changed", "removed", "added"]);
+  assert.match(rows[0].sourceLabels.before, /\.data:2$/);
+  assert.match(rows[0].sourceLabels.after, /\.data:2$/);
+  assert.deepEqual(rows.slice(1).map(row => row.sourceLabels), [{ before: path.join("baseline", "premium.inc"), after: null }, { before: null, after: path.join("policy", "premium.inc") }]);
+  assert.deepEqual(view.configurationLabels, { before: "POLICY=0", after: "POLICY=1" });
+  host.source("before", host.panels[0], { rowId: rows[0].id }); await flush();
+  host.source("after", host.panels[0], { rowId: rows[2].id }); await flush();
+  assert.deepEqual(host.shown.map(source => source.options.selection.start), [{ line: 1, character: 0 }, { line: 0, character: 0 }]);
+  assert.equal(host.shown[0].document.uri.toString(), rows[0].navigation.before.written_locations[0].uri);
+  assert.equal(host.shown[1].document.uri.toString(), rows[2].navigation.after.written_locations[0].uri);
 });
 
 test("historical source tabs retain captured bytes after the comparison closes and restore through a fresh provider", async t => {
@@ -592,8 +717,8 @@ test("historical source tabs retain captured bytes after the comparison closes a
 test("failed or incomplete refresh clears authoritative rows and shows a distinct outcome", async t => {
   const { host } = setup(t); await host.openSaved(comparison());
   host.capture = () => { throw new host.ComparisonFailure("INCOMPLETE_INPUT", "Before model input is incomplete", "before"); };
-  host.message({ type: "refresh" }); await flush(); assert.equal(host.last().status, "incomplete"); assert.deepEqual(host.last().rows, []);
-  host.capture = () => { throw new Error("local object absent"); }; host.message({ type: "refresh" }); await flush(); assert.equal(host.last().status, "failure"); assert.deepEqual(host.last().rows, []);
+  host.invoke("refreshComparison"); await flush(); assert.equal(host.last().status, "incomplete"); assert.deepEqual(host.last().rows, []);
+  host.capture = () => { throw new Error("local object absent"); }; host.invoke("refreshComparison"); await flush(); assert.equal(host.last().status, "failure"); assert.deepEqual(host.last().rows, []);
 });
 
 test("incomplete refresh keeps read-only side summaries and removes source actions", async t => {
@@ -601,12 +726,12 @@ test("incomplete refresh keeps read-only side summaries and removes source actio
   const summaries = { before: { requested_analysis: { name: "Policy A", defines: [{ name: "ON", expression: "false" }] }, complete: true, counts: null, counts_cause: "Comparison stopped before counting." },
     after: { requested_analysis: { name: "Policy B", defines: [{ name: "ON", expression: "true" }] }, complete: false, counts: null, counts_cause: "The active include missing.inc is unavailable." } };
   host.capture = () => { throw new host.ComparisonFailure("INCOMPLETE_INPUT", "The active include missing.inc is unavailable.", "after", "missing.inc", summaries); };
-  host.message({ type: "refresh" }); await flush();
+  host.invoke("refreshComparison"); await flush();
   const shown = host.shown.length;
   assert.equal(host.last().status, "incomplete"); assert.deepEqual(host.last().rows, []);
   assert.deepEqual(host.last().analysisSummaries, summaries);
   assert.equal(host.panels[0].document.result, undefined);
-  host.source("before"); host.source("after"); host.message({ type: "rootTextDiff", token: host.last().token }); await flush();
+  host.source("before"); host.source("after"); host.invoke("comparisonTextDiff"); await flush();
   assert.equal(host.shown.length, shown); assert.equal(host.calls.filter(call => call.id === "vscode.diff").length, 0);
 });
 
@@ -712,17 +837,20 @@ test("capture validates both incomplete comparison summaries without retaining n
   const { host, service, vscode, git, token } = createHost(), { HistoricalSources } = load("history_sources", vscode), history = new HistoricalSources(async () => "unused"); t.after(() => history.dispose());
   const { captureComparison, ComparisonFailure } = load("snapshot_compare", vscode);
   const resource = comparison({ ...working(), analysis: { name: "Policy A", defines: [{ name: "ON", expression: "false" }] } }, { ...working(), analysis: { name: "Policy B", defines: [{ name: "ON", expression: "true" }] } });
+  const key = "parts/missing.inc", message = `Active include ${key} is absent or unreadable`;
   let malformed = false;
   host.engine = (_command, [request]) => {
     const result = snapshotResponse(request), before = result.inputs.before.analysis, after = result.inputs.after.analysis;
     after.model_complete = false;
     if (malformed) after.configuration.defines[0].expression = "false";
-    return { state: "failure", code: "INCOMPLETE_INPUT", side: "after", message: "The active include missing.inc is unavailable.", analysis_summaries: {
+    return { state: "failure", code: "INCOMPLETE_INPUT", side: "after", message, file_key: key, analysis_summaries: {
       before: { analysis: before, complete: true, counts: null, counts_cause: "Comparison stopped before counting." },
-      after: { analysis: after, complete: false, counts: null, counts_cause: "The active include missing.inc is unavailable." } } };
+      after: { analysis: after, complete: false, counts: null, counts_cause: message } } };
   };
   await assert.rejects(captureComparison(service, async () => git, history, resource, token()), error => {
     assert.ok(error instanceof ComparisonFailure); assert.equal(error.code, "INCOMPLETE_INPUT");
+    assert.equal(error.summaries.after.counts_cause, `Active include ${path.join("parts", "missing.inc")} is absent or unreadable`);
+    assert.equal(error.message, `After: ${error.summaries.after.counts_cause}`);
     assert.equal(error.summaries.before.analysis.configuration.name, "Policy A"); assert.equal(error.summaries.before.complete, true);
     assert.equal(error.summaries.after.analysis.configuration.name, "Policy B"); assert.equal(error.summaries.after.complete, false);
     assert.equal(error.summaries.before.counts, null); assert.equal(error.summaries.after.counts, null);

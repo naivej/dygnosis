@@ -1,5 +1,5 @@
 import { Location, location, record } from "../client/protocol";
-import { Coverage, parseSemantic, Reference, Semantic, SemanticRow, SourceChanges, SourceRegistry } from "./semantic_view";
+import { ComparisonSummary, Coverage, parseSemantic, Reference, Semantic, SemanticRow, SourceChanges, SourceRegistry } from "./semantic_view";
 
 export const diffSections = ["symbols", "parameters", "equations", "shockSetup", "shockAnalysisSetup"] as const;
 export const changeKinds = ["added", "removed", "changed"] as const;
@@ -23,7 +23,7 @@ export interface DiffRow {
   semantic?: SemanticRow;
 }
 export interface DiffReference extends Reference { navigation: DiffNavigationRow }
-export interface DiffSnapshot { before: DiffEnvelope; after: DiffEnvelope; rows: DiffRow[]; complete: boolean; semantic: Semantic; sourceChanges: SourceChanges; coverage: Coverage; references: DiffReference[] }
+export interface DiffSnapshot { before: DiffEnvelope; after: DiffEnvelope; rows: DiffRow[]; complete: boolean; semantic: Semantic; sourceChanges: SourceChanges; coverage: Coverage; summary: ComparisonSummary; references: DiffReference[] }
 
 /** Read supported change kinds from stored selections. */
 export function normalizeChangeKinds(value: unknown, fallback: ChangeKind[]): ChangeKind[] {
@@ -63,87 +63,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, ids:
     }
   }
   const rows: DiffRow[] = [];
-  const add = (id: string, section: DiffSection, group: string, kind: SemanticRow["change"], label: string, old: string | null, next: string | null, dimension: string | null = null, sideDimensions?: { before: string | null | undefined; after: string | null | undefined }): void => {
-    const source = navigation.get(id);
-    if (!source) malformed();
-    const expected = section === "parameters" ? "parameter" : section === "equations" ? "equation" : section === "symbols" ? "symbol" : "shock";
-    if (source.kind !== expected || (old === null && source.before !== null) || (next === null && source.after !== null)) malformed();
-    const scope = (side: DiffSide): string => (source[side] ? source[side].dimension : sideDimensions?.[side] ?? dimension ?? source.dimension) ?? "aggregate";
-    const sideScopes = { before: old === null ? null : scope("before"), after: next === null ? null : scope("after") };
-    const scopes = [...new Set([sideScopes.before, sideScopes.after].filter((scope): scope is string => scope !== null))];
-    rows.push({ id, section, group, kind, label, before: old, after: next, scopes, sideScopes, navigation: source });
-  };
-  for (const category of ["endogenous", "exogenous", "parameters"]) {
-    for (const kind of ["added", "removed", "common"] as const) {
-      array(result[`${kind}_${category}`]).forEach((raw, index) => {
-        const name = string(raw);
-        if (kind !== "common") add(`/${kind}_${category}/${index}`, "symbols", "Symbols", kind, `${name} · ${category}`, kind === "removed" ? name : null, kind === "added" ? name : null);
-      });
-    }
-  }
-  array(result.symbols_changed).forEach((raw, index) => {
-    const row = object(raw);
-    const metadata = (rawSide: unknown): string => {
-      const side = object(rawSide);
-      return [string(side.kind), nullableString(side.long_name) === null ? "" : `long_name: ${string(side.long_name)}`, nullableString(side.tex_name) === null ? "" : `TeX: ${string(side.tex_name)}`].filter(Boolean).join("\n");
-    };
-    add(`/symbols_changed/${index}`, "symbols", "Symbols", "changed", string(row.name), metadata(row.before), metadata(row.after));
-  });
-  array(result.changed_parameter_values).forEach((raw, index) => {
-    const row = object(raw);
-    const valueText = (raw: unknown, numeric: unknown): string => {
-      if (numeric !== null && (typeof numeric !== "number" || !Number.isFinite(numeric))) malformed();
-      const text = string(raw);
-      return numeric === null ? text : `${text}\nValue: ${String(numeric)}`;
-    };
-    add(`/changed_parameter_values/${index}`, "parameters", "Parameter values", "changed", string(row.name), valueText(row.old_raw, row.old_value), valueText(row.new_raw, row.new_value));
-  });
-  function equations(owner: Record<string, unknown>, prefix: string, dimension: string | null): void {
-    const section = "equations", group = "Equations";
-    const suffix = prefix ? "" : "_equations";
-    const text = (raw: unknown): string => {
-      const row = object(raw);
-      if (!Number.isSafeInteger(row.index) || (row.index as number) < 0) malformed();
-      const name = nullableString(row.name);
-      return `[${String(row.index)}]${name ? ` ${name}` : ""}\n${string(row.text)}\nTags: ${JSON.stringify(object(row.tags))}`;
-    };
-    for (const kind of ["added", "removed"] as const) array(owner[`${kind}${suffix}`]).forEach((raw, index) => {
-      const row = object(raw);
-      add(`${prefix}/${kind}${suffix}/${index}`, section, group, kind, nullableString(row.name) ?? `Equation ${String(row.index)}`, kind === "removed" ? text(row) : null, kind === "added" ? text(row) : null, dimension);
-    });
-    array(owner[`changed${suffix}`]).forEach((raw, index) => {
-      const row = object(raw);
-      const side = (key: string): string => text({ index: row[`index_${key}`], name: row[`name_${key}`], tags: row[`tags_${key}`], text: row[`text_${key}`] });
-      add(`${prefix}/changed${suffix}/${index}`, section, group, "changed", nullableString(row.name_old) ?? nullableString(row.name_new) ?? "Equation", side("old"), side("new"), dimension);
-    });
-    array(owner.unmatched_same_name).forEach((raw, groupIndex) => {
-      const unmatched = object(raw), name = string(unmatched.name);
-      for (const kind of ["removed", "added"] as const) array(unmatched[kind]).forEach((row, index) => {
-        add(`${prefix}/unmatched_same_name/${groupIndex}/${kind}/${index}`, section, group, kind, name, kind === "removed" ? text(row) : null, kind === "added" ? text(row) : null, dimension);
-      });
-    });
-  }
-  equations(result, "", null);
-  array(result.heterogeneous_equations).forEach((raw, index) => {
-    const row = object(raw); equations(row, `/heterogeneous_equations/${index}`, string(row.dimension));
-  });
-  array(result.shock_setup_changes).forEach((raw, index) => {
-    const row = object(raw), kind = string(row.change);
-    if (!changeKinds.includes(kind as ChangeKind)) malformed();
-    const form = string(row.form);
-    const section = form === "endval" ? "steadyState" : ["shock_group", "init2shocks"].includes(form) ? "shockAnalysisSetup" : "shockSetup";
-    const side = (raw: unknown): string | null => {
-      if (raw === undefined || raw === null) return null;
-      const fields = Object.entries(object(raw)).filter(([key]) => !["location", "group_location", "origin_uri"].includes(key));
-      return JSON.stringify(Object.fromEntries(fields), null, 2);
-    };
-    const dimension = (raw: unknown): string | null | undefined => {
-      if (raw === undefined || raw === null) return undefined;
-      const value = object(raw).heterogeneity;
-      return value === undefined ? undefined : nullableString(value);
-    };
-    add(`/shock_setup_changes/${index}`, section, semanticGroup(section), kind as SemanticRow["change"], `${string(row.target)} · ${form} · ${string(row.role)}`, side(row.before), side(row.after), null, { before: dimension(row.before), after: dimension(row.after) });
-  });
+  const commandRows = new Map<string, DiffRow[]>();
   const complete = before.complete && after.complete && !!before.revision && !!after.revision;
   const registry: SourceRegistry = { before: {}, after: {} };
   if (result.sources !== undefined) {
@@ -151,14 +71,13 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, ids:
     for (const side of ["before", "after"] as const) registry[side] = Object.fromEntries(Object.entries(object(sources[side])).map(([key, value]) => [key, string(value)]));
   }
   const details = parseSemantic(result, ids, registry);
-  const rowMap = new Map(rows.map(row => [row.id, row]));
   const isLocal = (row: SemanticRow): boolean => row.family === "symbols" && row.fields.some(field => field.name === "role" && [field.before, field.after].some(side => side.value?.kind === "text" && ["model_local_definition", "model_local_declaration"].includes(side.value.value)));
   const section = (row: SemanticRow): DiffSection => {
     // An instruction's retained facts and residual context use the same tab.
     const instructions: Partial<Record<string, DiffSection>> = {
       initval: "steadyState", endval: "steadyState", histval: "steadyState", steady_state_model: "steadyState",
       varobs: "data", varexobs: "data", observation_trends: "data",
-      estimation: "commands",
+      estimation: "commands", stoch_simul: "commands",
       forecast: "forecast", bvar_forecast: "forecast", conditional_forecast: "forecast", conditional_forecast_paths: "forecast", plot_conditional_forecast: "forecast",
       estimated_params: "priors", estimated_params_init: "priors", estimated_params_bounds: "priors",
       method_of_moments: "moments", matched_moments: "moments", matched_irfs: "moments", matched_irfs_weights: "moments", moment_calibration: "moments", irf_calibration: "moments", generate_irfs: "moments",
@@ -167,22 +86,39 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, ids:
       const instruction = [row.before, row.after].map(side => side?.context && instructions[side.context.name]).find(Boolean);
       if (instruction) return instruction;
     }
+    if (row.family === "shocks") {
+      const form = row.fields.find(field => field.name === "form");
+      const name = form?.after.value?.value ?? form?.before.value?.value;
+      if (name === "endval") return "steadyState";
+      if (name === "shock_group" || name === "init2shocks") return "shockAnalysisSetup";
+    }
     const mapped: Record<string, DiffSection> = { symbols: "symbols", parameters: "parameters", shocks: "shockSetup", steady_state: "steadyState", priors: "priors", commands: "commands", observables: "data", data: "data", occbin: "occbin", policy: "policy", semi_structural: "semiStructural", moments: "moments", ms_sbvar: "msSbvar", heterogeneity: "heterogeneity", external_functions: "externalFunctions", trends: "trends", operations: "operations", macro_context: "macroContext" };
     return row.family === "equations" || isLocal(row) ? "equations" : mapped[row.family];
   };
   for (const [index, row] of details.semantic.rows.entries()) {
-    const source = navigation.get(row.pointer), structural = rowMap.get(row.pointer);
-    if (!structural && row.pointer !== `/semantic/rows/${index}`) malformed();
-    if (structural && row.family === "equations" && structural.id.startsWith("/heterogeneous_equations/") !== Boolean(row.before?.scope.dimension || row.after?.scope.dimension)) malformed();
-    if (!source || structural && (structural.kind !== row.change || section(row) !== structural.section && row.family !== "shocks") || !structural && (source.kind !== "semantic" || source.family !== row.family || source.name !== row.name)) malformed();
+    const source = navigation.get(row.pointer);
+    if (row.pointer !== `/semantic/rows/${index}` || !source || source.kind !== "semantic" || source.family !== row.family || source.name !== row.name) malformed();
     for (const side of ["before", "after"] as const) {
       if (!row[side] && source[side] || row[side] && source[side] && (source[side].domain !== (row[side].scope.dimension === null ? "aggregate" : "heterogeneous") || source[side].dimension !== row[side].scope.dimension)) malformed();
       const opener = source.block_openers?.[side], other = row[side === "before" ? "after" : "before"];
       if (opener && (row[side] || !other || opener.dimension !== other.scope.dimension || opener.domain !== (other.scope.dimension === null ? "aggregate" : "heterogeneous"))) malformed();
     }
     const sideScopes = { before: row.before?.scope.dimension ?? (row.before ? row.before.scope.domain : null), after: row.after?.scope.dimension ?? (row.after ? row.after.scope.domain : null) };
-    const projected: DiffRow = { id: row.pointer, section: structural?.section ?? section(row), group: isLocal(row) ? "Model-local variables" : row.family === "parameters" ? "Parameters" : structural?.group ?? semanticGroup(section(row)), kind: row.change, label: row.name, before: row.before?.name ?? null, after: row.after?.name ?? null, scopes: [...new Set(Object.values(sideScopes).filter((s): s is string => s !== null))], sideScopes, navigation: source, semantic: row };
-    if (structural) Object.assign(structural, projected); else rows.push(projected);
+    const targetSection = section(row);
+    const projected: DiffRow = { id: row.pointer, section: targetSection, group: isLocal(row) ? "Model-local variables" : semanticGroup(targetSection), kind: row.change, label: row.name, before: row.before?.name ?? null, after: row.after?.name ?? null, scopes: [...new Set(Object.values(sideScopes).filter((s): s is string => s !== null))], sideScopes, navigation: source, semantic: row };
+    rows.push(projected);
+    if (row.statement_group) {
+      if (!commandRows.has(row.statement_group)) commandRows.set(row.statement_group, []);
+      commandRows.get(row.statement_group)!.push(projected);
+    }
+  }
+  for (const members of commandRows.values()) {
+    if (members.length < 2) continue;
+    const { section, group } = members.find(row => row.semantic?.family === "commands") ?? members[0];
+    for (const row of members) {
+      row.section = section;
+      row.group = group;
+    }
   }
   const equationOwners = new Map(rows.filter(row => row.section === "equations").map(row => [row.id, row]));
   const references = details.semantic.references.map(ref => {
@@ -191,9 +127,10 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, ids:
     const equationTarget = navigation.get(ref.equation_pointer);
     const equationOwner = equationOwners.get(ref.equation_pointer);
     if (ref.equation_pointer !== ref.pointer && (!equationOwner || equationOwner[ref.side] === null)) malformed();
-    if (ref.equation_pointer !== ref.pointer && !(equationTarget?.kind === "equation" || equationTarget?.kind === "semantic" && equationTarget.family === "equations")) malformed();
+    if (ref.equation_pointer !== ref.pointer && !(equationTarget?.kind === "semantic" && equationTarget.family === "equations")) malformed();
     return { ...ref, navigation: source };
   });
+  if (navigation.size !== rows.length + references.length) malformed();
   return { before, after, rows: complete ? rows : [], complete, ...details, references: complete ? references : [] };
 }
 

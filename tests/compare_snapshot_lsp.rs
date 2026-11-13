@@ -74,7 +74,12 @@ fn snapshot_capability_is_additive_and_advertises_bounded_source_negotiation() {
             "coverage_schema_version",
         ] {
             assert_eq!(
-                extensions["dygnosis"][command][field], 1,
+                extensions["dygnosis"][command][field],
+                if field == "coverage_schema_version" {
+                    1
+                } else {
+                    2
+                },
                 "{command}.{field}"
             );
         }
@@ -118,10 +123,12 @@ async fn working_revision_remains_pinned_across_source_rounds_and_uses_unsaved_i
     let result = command(server, "dynare/compareModelSnapshots", request.clone()).await;
     assert_eq!(result["state"], "result", "{result}");
     assert_eq!(
-        result["diff"]["changed_equations"]
+        result["diff"]["semantic"]["rows"]
             .as_array()
             .unwrap()
-            .len(),
+            .iter()
+            .filter(|row| row["family"] == "equations" && row["change"] == "changed")
+            .count(),
         1
     );
     assert_eq!(

@@ -74,7 +74,7 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
         (/\.(mod|dyn)$/i.test(gitPath) || client.knownOwners(vscode.Uri.file(gitPath)).length > 0)));
     void vscode.commands.executeCommand("setContext", "dygnosis.changesContext", custom || historical || !!expanded);
     void vscode.commands.executeCommand("setContext", "dygnosis.knownIncludedPaths", client.knownIncludedFiles());
-    const actions = listSetting("editorActions", document?.uri, ["toolbar", "contextMenu"], ["toolbar", "contextMenu"], client.log);
+    const actions = listSetting("editorActions", custom ? tab.uri : document?.uri, ["toolbar", "contextMenu"], ["toolbar", "contextMenu"], client.log);
     void vscode.commands.executeCommand("setContext", "dygnosis.analysisDocument", ordinary);
     void vscode.commands.executeCommand("setContext", "dygnosis.modelContext", false);
     void vscode.commands.executeCommand("setContext", "dygnosis.toolbarActions", actions.includes("toolbar"));
