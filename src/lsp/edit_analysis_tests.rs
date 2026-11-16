@@ -57,6 +57,66 @@ async fn formatting_uses_request_indentation_for_documents_and_selections() {
 }
 
 #[tokio::test]
+async fn formatting_splits_only_complete_selected_constructs() {
+    let uri = Url::parse("untitled:compact-format.mod").unwrap();
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    let source = "var y; parameters a abc;\na=1; abc=2;\nmodel; y=a+abc; end;\n";
+    open_source(server, &uri, source.into(), 1).await;
+    let options = FormattingOptions {
+        tab_size: 2,
+        insert_spaces: true,
+        ..Default::default()
+    };
+    let document = TextDocumentIdentifier { uri: uri.clone() };
+    server.lock_inner().settings.apply(&json!({
+        "format": { "splitStatements": true, "alignAssignments": true }
+    }));
+    let document_edits = server
+        .formatting(DocumentFormattingParams {
+            text_document: document.clone(),
+            options: options.clone(),
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let expected = "var y;\nparameters a abc;\na   = 1;\nabc = 2;\nmodel;\n  y = a + abc;\nend;\n";
+    assert_eq!(document_edits[0].new_text, expected);
+    let full = server
+        .range_formatting(DocumentRangeFormattingParams {
+            text_document: document.clone(),
+            range: Range::new(Position::new(2, 0), Position::new(3, 0)),
+            options: options.clone(),
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(full[0].new_text, "model;\n  y = a + abc;\nend;");
+    let (cut, splits, withheld) = server
+        .format_document_edits(
+            &uri,
+            Some(Range::new(Position::new(2, 1), Position::new(2, 18))),
+            "  ",
+        )
+        .unwrap();
+    assert_eq!(splits, 0);
+    assert!(withheld > 0);
+    assert!(cut.is_none_or(|edits| !edits[0].new_text.contains('\n')));
+    change_source(server, &uri, expected.into(), 2).await;
+    let unchanged = server
+        .formatting(DocumentFormattingParams {
+            text_document: document,
+            options,
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap();
+    assert!(unchanged.is_none());
+}
+
+#[tokio::test]
 async fn native_tint_maps_mixed_lines_and_verbatim_bodies() {
     // Guards tint leaking onto Dynare prefixes, verbatim delimiters or macro directives.
     let uri = Url::parse("untitled:native-tint.mod").unwrap();

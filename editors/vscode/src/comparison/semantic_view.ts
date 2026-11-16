@@ -11,12 +11,12 @@ export type FieldValue = { kind: "text"; value: string } | { kind: "number" | "i
 export interface FieldState { state: "absent" | "empty" | "unknown" | "present"; value: FieldValue | null }
 export interface FieldChange { name: string; label: string; before: FieldState; after: FieldState; changed: boolean; comparison_availability: Availability; numeric_difference: number | null }
 export interface TokenRun { text: string; role: "unchanged" | "added" | "removed" }
-export interface ExpressionSide { text: string; runs: TokenRun[] }
+export interface ExpressionSide { text: string; runs: TokenRun[]; display_runs: TokenRun[] | null }
 export interface Expression { field: string; before: ExpressionSide | null; after: ExpressionSide | null; highlight_basis: "paired_expression" | "unpaired_text_only" | "none"; availability: Availability; reason: string | null }
 export interface TimingSide { name: string; class: string; written_offset: number; converted_offset: number; occurrence: number }
 export interface Reference { pointer: string; symbol: string; side: "before" | "after"; equation_pointer: string; equation_index: number; label: string; scope: Scope; occurrence: number; timing: TimingSide }
 export interface SemanticRow { pointer: string; family: SemanticFamily; change: "added" | "removed" | "changed"; name: string; count_unit: "final_fact" | "accepted_occurrence" | "operation"; facets: typeof facets[number][]; before: RowSide | null; after: RowSide | null; fields: FieldChange[]; expressions: Expression[]; timing: { before: TimingSide | null; after: TimingSide | null }[]; references: string[]; limits: Limit[]; statement_group: string | null }
-export interface Semantic { schema_version: 2; availability: Availability; budgets: Record<string, number>; rows: SemanticRow[]; references: Reference[]; limits: Limit[] }
+export interface Semantic { schema_version: 3; availability: Availability; budgets: Record<string, number>; rows: SemanticRow[]; references: Reference[]; limits: Limit[] }
 export interface SourceSide { input_id: string | null; file_key: string; exact_text_available: boolean }
 export interface SourceHunk { before_start: number; before_lines: number; after_start: number; after_lines: number; lines: TokenRun[] }
 export interface SourceFile { pointer: string; change: SemanticRow["change"]; correspondence: "selected_roots" | "proven_file_identity" | "unpaired"; before: SourceSide | null; after: SourceSide | null; availability: Availability; hunks: SourceHunk[]; omitted_hunks: number | null; limits: Limit[] }
@@ -81,12 +81,12 @@ function field(value: unknown): FieldChange {
   return result;
 }
 function runs(value: unknown, side?: "before" | "after"): TokenRun[] { return array(value).map(value => { const r = object(value, ["text", "role"]), role = one(r.role, roles); if (side === "before" && role === "added" || side === "after" && role === "removed") invalid(); return { text: text(r.text), role }; }); }
-function expressionSide(value: unknown, side: "before" | "after"): ExpressionSide { const r = object(value, ["text", "runs"]), result = { text: text(r.text), runs: runs(r.runs, side) }; if (result.runs.map(run => run.text).join("") !== result.text) invalid(); return result; }
+function expressionSide(value: unknown, side: "before" | "after"): ExpressionSide { if (!record(value) || Object.keys(value).some(key => !["text", "runs", "display_runs"].includes(key)) || !Object.hasOwn(value, "text") || !Object.hasOwn(value, "runs")) invalid(); const r = value, result = { text: text(r.text), runs: runs(r.runs, side), display_runs: r.display_runs === undefined ? null : runs(r.display_runs, side) }; if (result.runs.map(run => run.text).join("") !== result.text) invalid(); return result; }
 function expression(value: unknown): Expression {
   const r = object(value, ["field", "before", "after", "highlight_basis", "availability", "reason"]);
   const result = { field: text(r.field), before: nullable(r.before, v => expressionSide(v, "before")), after: nullable(r.after, v => expressionSide(v, "after")), highlight_basis: one(r.highlight_basis, ["paired_expression", "unpaired_text_only", "none"]), availability: one(r.availability, availability), reason: nullable(r.reason, text) };
   if (result.availability !== "complete" && (result.highlight_basis !== "none" || !result.reason)) invalid();
-  if (result.highlight_basis === "none" && [result.before, result.after].some(side => side?.runs.some(run => run.role !== "unchanged"))) invalid();
+  if (result.highlight_basis === "none" && [result.before, result.after].some(side => [...(side?.runs ?? []), ...(side?.display_runs ?? [])].some(run => run.role !== "unchanged"))) invalid();
   return result;
 }
 function timing(value: unknown): TimingSide { const r = object(value, ["name", "class", "written_offset", "converted_offset", "occurrence"]); return { name: text(r.name), class: text(r.class), written_offset: integer(r.written_offset, -2147483648), converted_offset: integer(r.converted_offset, -2147483648), occurrence: integer(r.occurrence) }; }
@@ -101,22 +101,22 @@ function reference(value: unknown): Reference { const r = object(value, ["pointe
 /** Require the semantic schemas supported by current snapshot results. */
 export function validateSemanticCapability(value: unknown): void {
   if (!record(value)) invalid();
-  if (value.semantic_schema_version !== 2 || value.source_changes_schema_version !== 2 || value.coverage_schema_version !== 1) invalid();
+  if (value.semantic_schema_version !== 3 || value.source_changes_schema_version !== 2 || value.coverage_schema_version !== 1) invalid();
 }
 /** Validate comparison data before it can enter the webview or source-action registry. */
 export function parseSemantic(value: Record<string, unknown>, ids: Record<"before" | "after", string | null>, registry: SourceRegistry): SemanticPayload {
   const present = ["comparison_versions", "semantic", "source_changes", "coverage"].some(key => Object.hasOwn(value, key));
   if (!present) invalid();
   const versions = object(value.comparison_versions, ["semantic", "source_changes", "coverage"]);
-  if (versions.semantic !== 2 || versions.source_changes !== 2 || versions.coverage !== 1) invalid();
+  if (versions.semantic !== 3 || versions.source_changes !== 2 || versions.coverage !== 1) invalid();
   const s = object(value.semantic, ["schema_version", "availability", "budgets", "rows", "references", "limits"]);
   const budgetKeys = ["token_alignment_cells", "source_alignment_cells", "references_per_side", "source_hunks", "serialized_output_bytes"];
   const budget = object(s.budgets, budgetKeys);
-  const semantic: Semantic = { schema_version: 2, availability: one(s.availability, availability), budgets: Object.fromEntries(Object.entries(budget).map(([k, v]) => [k, integer(v)])), rows: array(s.rows).map(semanticRow), references: array(s.references).map(reference), limits: array(s.limits).map(limit) };
+  const semantic: Semantic = { schema_version: 3, availability: one(s.availability, availability), budgets: Object.fromEntries(Object.entries(budget).map(([k, v]) => [k, integer(v)])), rows: array(s.rows).map(semanticRow), references: array(s.references).map(reference), limits: array(s.limits).map(limit) };
   const c = object(value.coverage, ["schema_version", "availability", "source_boundary", "families", "limits"]);
   const coverage: Coverage = { schema_version: 1, availability: one(c.availability, availability), source_boundary: text(c.source_boundary), families: array(c.families).map(v => { const f = object(v, ["family", "availability", "fields", "limits"]); return { family: one(f.family, semanticFamilies), availability: one(f.availability, availability), fields: unique(array(f.fields).map(text)), limits: array(f.limits).map(limit) }; }), limits: array(c.limits).map(limit) };
   const source = object(value.source_changes, ["schema_version", "availability", "files", "limits", "root_text", "executed_includes"]);
-  if (s.schema_version !== 2 || c.schema_version !== 1 || source.schema_version !== 2) invalid();
+  if (s.schema_version !== 3 || c.schema_version !== 1 || source.schema_version !== 2) invalid();
   const executed_includes = nullable(source.executed_includes, raw => {
     const includes = object(raw, ["before", "after"]);
     const keys = (side: "before" | "after"): string[] => unique(array(includes[side]).map(raw => {

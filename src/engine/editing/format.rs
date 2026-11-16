@@ -1,27 +1,385 @@
 //! Semantics-preserving formatter. Whitespace only; comments and `@#` stay verbatim.
 
 use serde_json::Value;
+use std::ops::Range;
 
 use crate::engine::language::lexer::{TokenKind, tokenize};
+use crate::engine::language::model::{Model, StatementKind};
+use crate::engine::workspace::EffectiveOrigins;
+
+mod layout;
+pub(crate) mod spacing;
 
 const UNSAFE_CHARS: &[char] = &['\'', '"', '[', ']', '{', '}', '@', '#', '%', ':', '\\', '!'];
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct SourceLine {
     preserve: bool,
+    keep_blank: bool,
     opens: bool,
     closes: bool,
+    spacing: Option<Vec<(usize, usize, &'static str)>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct FormatStyle {
+    pub split_statements: bool,
+    pub align_assignments: bool,
+}
+
+pub(crate) struct FormatOwner<'a> {
+    pub model: &'a Model,
+    pub origins: &'a EffectiveOrigins,
+}
+
+pub(crate) struct SourceFormat {
+    pub replacement: Option<(Range<usize>, String)>,
+    pub splits: usize,
+    pub withheld: usize,
+}
+
+pub(crate) const SPLIT_REFUSED: &str = "No formatting edits are available. The formatter could not verify the statement boundaries, source ownership or selection.";
+
+pub(crate) fn split_notice(splits: usize) -> String {
+    format!(
+        "Formatting edits include {splits} statement splits. The formatter skipped possible splits where it could not verify boundaries, source ownership or the selection."
+    )
+}
+
+fn accepted_units(model: &Model) -> impl Iterator<Item = (Range<usize>, layout::Edge)> {
+    model
+        .format_rows
+        .iter()
+        .cloned()
+        .map(|range| (range, layout::Edge::Row))
+        .chain(model.format_blocks.iter().flat_map(|(open, close)| {
+            [
+                (open.clone(), layout::Edge::Open),
+                (close.clone(), layout::Edge::Close),
+            ]
+        }))
+}
+
+/// Format the selected source over the current owner analyses. The optional
+/// byte range is the original selection, before expanding ordinary layout to
+/// whole lines.
+pub(crate) fn format_source(
+    text: &str,
+    file: &str,
+    selection: Option<Range<usize>>,
+    indent: &str,
+    style: FormatStyle,
+    owners: &[FormatOwner<'_>],
+    work_limit: crate::engine::macro_work::MacroWorkLimit,
+) -> Result<SourceFormat, &'static str> {
+    let mut result = SourceFormat {
+        replacement: None,
+        splits: 0,
+        withheld: 0,
+    };
+    if text.trim().is_empty() {
+        return Ok(result);
+    }
+    const UNSAFE: &str =
+        "The formatter cannot preserve the selected source while changing whitespace.";
+    let normalised = normalise_line_breaks(text);
+    let written_lines = split_line_breaks(text);
+    let starts: Vec<_> = written_lines
+        .iter()
+        .map(|line| line.as_ptr() as usize - text.as_ptr() as usize)
+        .collect();
+    let stripped = blank_comments_macros(&normalised);
+    let stripped_lines: Vec<_> = stripped.split('\n').collect();
+    if written_lines.len() != stripped_lines.len() {
+        return Err(UNSAFE);
+    }
+    let selected = selection.clone().unwrap_or(0..text.len());
+    if selected.start > selected.end || selected.end > text.len() {
+        return Err("The formatting range is outside the document or reversed.");
+    }
+    let first = starts.partition_point(|at| *at <= selected.start) - 1;
+    let mut last = starts.partition_point(|at| *at <= selected.end) - 1;
+    if selection.is_some() && last > first && starts[last] == selected.end {
+        last -= 1;
+    }
+    let views: Vec<_> = owners
+        .iter()
+        .map(|owner| layout::Owner {
+            model: owner.model,
+            origins: Some(owner.origins),
+        })
+        .collect();
+    let complete = !views.is_empty()
+        && views
+            .iter()
+            .all(|view| !view.model.macro_incomplete() && !view.model.is_analysis_preview());
+    let (mut structure, initial_depth) = if complete {
+        retained_lines(text, file, &starts, &views)
+    } else {
+        (source_lines(&normalised, work_limit), 0)
+    };
+    let splits = (style.split_statements && complete)
+        .then(|| layout::splits(text, file, &starts, selected, &views));
+    if style.split_statements && !complete {
+        result.withheld = 1;
+    }
+    if let Some(splits) = &splits {
+        result.withheld = splits.withheld;
+        for index in &splits.blocked_lines {
+            structure[*index].preserve = true;
+        }
+    }
+    let depth = depth_before_from(&structure, first, initial_depth);
+    let mut original = Vec::new();
+    let mut mask = Vec::new();
+    let mut lines = Vec::new();
+    let mut endings = Vec::new();
+    let default_eol = line_ending(text);
+    for index in first..=last {
+        let source = written_lines[index];
+        let stripped = stripped_lines[index];
+        let line = &structure[index];
+        let ending = source_ending(text, &starts, index, source.len());
+        let cuts = splits.as_ref().and_then(|splits| splits.cuts.get(&index));
+        if let Some(cuts) = cuts.filter(|_| !line.preserve) {
+            let mut start = 0;
+            let mut stripped = stripped;
+            let mut closes = cuts[0].left_closes;
+            for cut in cuts {
+                let end = cut.gap.start - starts[index];
+                let matched = prefix_chars(stripped, source[start..end].chars().count());
+                push_fragment(
+                    &mut original,
+                    &mut mask,
+                    &mut lines,
+                    source,
+                    matched,
+                    line,
+                    start..end,
+                    cut.opens,
+                    closes,
+                );
+                endings.push(if ending.is_empty() {
+                    default_eol
+                } else {
+                    ending
+                });
+                start = cut.gap.end - starts[index];
+                stripped = stripped.get(matched.len() + start - end..).ok_or(UNSAFE)?;
+                closes = cut.closes;
+            }
+            push_fragment(
+                &mut original,
+                &mut mask,
+                &mut lines,
+                source,
+                stripped,
+                line,
+                start..source.len(),
+                cuts.last().is_some_and(|cut| cut.right_opens),
+                closes,
+            );
+            result.splits += cuts.len();
+        } else {
+            result.withheld += cuts.map_or(0, Vec::len);
+            original.push(source.to_owned());
+            mask.push(stripped.to_owned());
+            lines.push(line.clone());
+        }
+        endings.push(ending);
+    }
+    let mut formatted = format_lines(
+        &original,
+        &mask,
+        &lines,
+        indent,
+        depth,
+        style.align_assignments,
+    )
+    .ok_or(UNSAFE)?;
+    let document = selection.is_none();
+    let finish_document = document
+        && !structure
+            .iter()
+            .zip(&written_lines)
+            .rev()
+            .take_while(|(line, source)| line.preserve || source.is_empty())
+            .any(|(line, _)| line.preserve);
+    if finish_document {
+        while formatted.last().is_some_and(|(_, text)| text.is_empty()) {
+            formatted.pop();
+        }
+    }
+    let span = if document {
+        0..text.len()
+    } else {
+        starts[first]..starts[last] + written_lines[last].len()
+    };
+    let replacement = join_formatted(
+        &formatted,
+        &endings,
+        document,
+        finish_document.then_some(default_eol),
+    );
+    if canonical(&replacement) != canonical(&text[span.clone()]) {
+        return Err(UNSAFE);
+    }
+    if replacement != text[span.clone()] {
+        result.replacement = Some((span, replacement));
+    }
+    Ok(result)
+}
+
+fn source_ending<'a>(text: &'a str, starts: &[usize], line: usize, line_len: usize) -> &'a str {
+    &text[starts[line] + line_len..starts.get(line + 1).copied().unwrap_or(text.len())]
+}
+
+fn join_formatted(
+    lines: &[(usize, String)],
+    endings: &[&str],
+    include_last_ending: bool,
+    default_last_ending: Option<&str>,
+) -> String {
+    let mut output = String::new();
+    for (index, (source, text)) in lines.iter().enumerate() {
+        output.push_str(text);
+        let ending = endings[*source];
+        if index + 1 < lines.len() {
+            output.push_str(ending);
+        } else if include_last_ending {
+            output.push_str(if ending.is_empty() {
+                default_last_ending.unwrap_or("")
+            } else {
+                ending
+            });
+        }
+    }
+    output
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_fragment(
+    original: &mut Vec<String>,
+    mask: &mut Vec<String>,
+    lines: &mut Vec<SourceLine>,
+    source: &str,
+    stripped: &str,
+    line: &SourceLine,
+    bytes: Range<usize>,
+    opens: bool,
+    closes: bool,
+) {
+    let fragment = &source[bytes.clone()];
+    original.push(fragment.to_owned());
+    mask.push(stripped.to_owned());
+    let spacing = line.spacing.as_ref().map(|edits| {
+        let first = edits.partition_point(|&(start, _, _)| start < bytes.start);
+        edits[first..]
+            .iter()
+            .take_while(|&&(start, _, _)| start <= bytes.end)
+            .filter_map(|&(start, end, gap)| {
+                (start >= bytes.start && end <= bytes.end)
+                    .then(|| (start - bytes.start, end - bytes.start, gap))
+            })
+            .collect()
+    });
+    lines.push(SourceLine {
+        opens,
+        closes,
+        spacing,
+        preserve: false,
+        keep_blank: false,
+    });
+}
+
+fn retained_lines(
+    text: &str,
+    file: &str,
+    starts: &[usize],
+    views: &[layout::Owner<'_>],
+) -> (Vec<SourceLine>, usize) {
+    let line_at = |offset: u32| starts.partition_point(|&at| at <= offset as usize) - 1;
+    let mut depths = Vec::new();
+    let mut actual = Vec::new();
+    for owner in views {
+        let model = owner.model;
+        let tokens = &model.expanded_tokens;
+        let mut lines = vec![SourceLine::default(); starts.len()];
+        spacing::collect(text, file, owner, starts, &mut lines);
+        let first_token = tokens.iter().position(|token| {
+            token.kind != TokenKind::Eof && owner.written(file, token.span).is_some()
+        });
+        let depth = first_token.map_or(0, |index| layout::body_depth(model, index));
+        depths.push(depth);
+        for statement in &model.statements {
+            if statement.kind != StatementKind::Block
+                || statement.native
+                || statement.name == "verbatim"
+            {
+                continue;
+            }
+            let open = statement
+                .opener_range
+                .end
+                .checked_sub(1)
+                .and_then(|index| tokens.get(index))
+                .filter(|token| token.kind == TokenKind::Semi)
+                .and_then(|token| owner.literal(file, token))
+                .map(|span| line_at(span.start));
+            let close = statement
+                .complete
+                .then_some(statement.token_range.end)
+                .and_then(|end| end.checked_sub(2))
+                .and_then(|index| tokens.get(index))
+                .filter(|token| token.kind == TokenKind::Ident)
+                .and_then(|token| owner.literal(file, token))
+                .map(|span| line_at(span.start));
+            if open != close {
+                if let Some(open) = open {
+                    lines[open].opens = true;
+                }
+                if let Some(close) = close {
+                    lines[close].closes = true;
+                }
+            }
+        }
+        let mut marks = vec![0i64; starts.len() + 1];
+        layout::protected(owner, file, |span| {
+            if !span.is_empty() && span.end as usize <= text.len() {
+                marks[line_at(span.start)] += 1;
+                marks[line_at(span.end - 1) + 1] -= 1;
+            }
+        });
+        let mut active = 0;
+        for (line, mark) in lines.iter_mut().zip(marks) {
+            active += mark;
+            line.preserve = active > 0;
+        }
+        if actual.is_empty() {
+            actual = lines;
+        } else {
+            for (current, next) in actual.iter_mut().zip(lines) {
+                current.preserve |=
+                    next.preserve || current.opens != next.opens || current.closes != next.closes;
+                current.keep_blank |= next.keep_blank;
+                if current.spacing != next.spacing {
+                    current.spacing = Some(Vec::new());
+                }
+            }
+        }
+    }
+    let depth = depths[0];
+    let ambiguous_depth = depths.iter().any(|other| *other != depth);
+    for (index, line) in actual.iter_mut().enumerate() {
+        let end = starts.get(index + 1).copied().unwrap_or(text.len());
+        line.preserve |= ambiguous_depth || text[starts[index]..end].contains("@#");
+    }
+    (actual, depth)
 }
 
 /// Whole-file format result. `format_text` is `Some` only for [`FormatOutcome::Changed`].
 pub enum FormatOutcome {
     Changed(String),
-    Unchanged,
-    Unsupported(&'static str),
-}
-
-pub(crate) enum RangeFormatOutcome {
-    Changed(u32, u32, String),
     Unchanged,
     Unsupported(&'static str),
 }
@@ -96,32 +454,9 @@ pub fn format_range(
     end_line: u32,
     indent_unit: &str,
 ) -> Option<(u32, u32, String)> {
-    match format_range_outcome(text, start_line, end_line, indent_unit) {
-        RangeFormatOutcome::Changed(start, end, text) => Some((start, end, text)),
-        RangeFormatOutcome::Unchanged | RangeFormatOutcome::Unsupported(_) => None,
-    }
-}
-
-pub(crate) fn format_range_outcome(
-    text: &str,
-    start_line: u32,
-    end_line: u32,
-    indent_unit: &str,
-) -> RangeFormatOutcome {
-    format_range_outcome_with_limit(text, start_line, end_line, indent_unit, Default::default())
-}
-
-pub(crate) fn format_range_outcome_with_limit(
-    text: &str,
-    start_line: u32,
-    end_line: u32,
-    indent_unit: &str,
-    work_limit: crate::engine::macro_work::MacroWorkLimit,
-) -> RangeFormatOutcome {
     if text.trim().is_empty() {
-        return RangeFormatOutcome::Unchanged;
+        return None;
     }
-    let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let raw_lines: Vec<&str> = text.split('\n').collect();
     let orig_lines: Vec<String> = raw_lines
         .iter()
@@ -135,37 +470,29 @@ pub(crate) fn format_range_outcome_with_limit(
     let start = start_line as usize;
     let end = (end_line as usize).min(orig_lines.len() - 1);
     if start > end {
-        return RangeFormatOutcome::Unsupported(
-            "The formatting range is outside the document or reversed.",
-        );
+        return None;
     }
-    let structure = source_lines(text, work_limit);
+    let structure = source_lines(text, Default::default());
     let depth = depth_before(&structure, start);
-    let Some(formatted) = format_lines(
+    let formatted = format_lines(
         &orig_lines[start..=end],
         &stripped_lines[start..=end],
         &structure[start..=end],
         indent_unit,
         depth,
-    ) else {
-        return RangeFormatOutcome::Unsupported(
-            "The formatter cannot preserve the selected source while changing whitespace.",
-        );
-    };
+        false,
+    )?;
     let original_slice = raw_lines[start..=end].join("\n");
-    let mut replacement = formatted.join(eol);
+    let endings: Vec<_> = raw_lines[start..=end]
+        .iter()
+        .map(|line| if line.ends_with('\r') { "\r\n" } else { "\n" })
+        .collect();
+    let mut replacement = join_formatted(&formatted, &endings, false, None);
     if raw_lines[end].ends_with('\r') {
         replacement.push('\r');
     }
-    if replacement == original_slice {
-        return RangeFormatOutcome::Unchanged;
-    }
-    if canonical(&replacement) != canonical(&original_slice) {
-        return RangeFormatOutcome::Unsupported(
-            "Formatting would change more than whitespace in the selected source.",
-        );
-    }
-    RangeFormatOutcome::Changed(start as u32, end as u32, replacement)
+    (replacement != original_slice && canonical(&replacement) == canonical(&original_slice))
+        .then_some((start as u32, end as u32, replacement))
 }
 
 fn reformat(
@@ -173,7 +500,6 @@ fn reformat(
     indent_unit: &str,
     work_limit: crate::engine::macro_work::MacroWorkLimit,
 ) -> Option<String> {
-    let eol = line_ending(text);
     let orig_lines = split_line_breaks(text);
     let normalised = normalise_line_breaks(text);
     let stripped = blank_comments_macros(&normalised);
@@ -184,11 +510,32 @@ fn reformat(
     let orig_owned: Vec<String> = orig_lines.iter().map(|s| s.to_string()).collect();
     let stripped_owned: Vec<String> = stripped_lines.iter().map(|s| s.to_string()).collect();
     let structure = source_lines(&normalised, work_limit);
-    let mut out = format_lines(&orig_owned, &stripped_owned, &structure, indent_unit, 0)?;
-    while out.last().is_some_and(|s| s.is_empty()) {
+    let mut out = format_lines(
+        &orig_owned,
+        &stripped_owned,
+        &structure,
+        indent_unit,
+        0,
+        false,
+    )?;
+    while out.last().is_some_and(|(_, text)| text.is_empty()) {
         out.pop();
     }
-    Some(out.join(eol) + eol)
+    let starts: Vec<_> = orig_lines
+        .iter()
+        .map(|line| line.as_ptr() as usize - text.as_ptr() as usize)
+        .collect();
+    let endings: Vec<_> = orig_lines
+        .iter()
+        .enumerate()
+        .map(|(line, source)| source_ending(text, &starts, line, source.len()))
+        .collect();
+    Some(join_formatted(
+        &out,
+        &endings,
+        true,
+        Some(line_ending(text)),
+    ))
 }
 
 fn line_ending(text: &str) -> &str {
@@ -284,6 +631,11 @@ fn source_lines(
         &model
     };
     let mut lines = vec![SourceLine::default(); starts.len()];
+    let owner = layout::Owner {
+        model: &model,
+        origins: None,
+    };
+    spacing::collect(text, "", &owner, &starts, &mut lines);
     let line_at = |offset: u32| starts.partition_point(|&at| at <= offset as usize) - 1;
     for statement in &structure.statements {
         if statement.kind != crate::engine::language::model::StatementKind::Block
@@ -341,6 +693,7 @@ fn source_lines(
         )
         .chain(model.inactive_macro_spans().iter().copied())
         .collect();
+    layout::protected_literals(&owner, "", |span| spans.push(span));
     if model.macro_incomplete() {
         // Failed expansion cannot prove block ownership. Preserve possible
         // command arguments even in text whose execution could not be read.
@@ -394,7 +747,10 @@ fn source_lines(
 }
 
 fn depth_before(structure: &[SourceLine], upto: usize) -> usize {
-    let mut depth = 0usize;
+    depth_before_from(structure, upto, 0)
+}
+
+fn depth_before_from(structure: &[SourceLine], upto: usize, mut depth: usize) -> usize {
     for line in structure.iter().take(upto) {
         if line.preserve {
             continue;
@@ -415,18 +771,24 @@ fn format_lines(
     structure: &[SourceLine],
     indent_unit: &str,
     start_depth: usize,
-) -> Option<Vec<String>> {
+    align_assignments: bool,
+) -> Option<Vec<(usize, String)>> {
     if orig_lines.len() != stripped_lines.len() || orig_lines.len() != structure.len() {
         return None;
     }
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<(usize, String)> = Vec::new();
     let mut depth = start_depth;
     let mut assign_run: Vec<(usize, String, String)> = Vec::new();
 
-    for ((orig, stripped), source_line) in orig_lines.iter().zip(stripped_lines).zip(structure) {
-        if source_line.preserve {
+    for (index, ((orig, stripped), source_line)) in orig_lines
+        .iter()
+        .zip(stripped_lines)
+        .zip(structure)
+        .enumerate()
+    {
+        if source_line.preserve || source_line.keep_blank && orig.trim().is_empty() {
             flush_run(&mut out, &mut assign_run);
-            out.push(orig.clone());
+            out.push((index, orig.clone()));
             continue;
         }
         let code = stripped.trim_end();
@@ -434,12 +796,12 @@ fn format_lines(
         if code.trim().is_empty() {
             flush_run(&mut out, &mut assign_run);
             if orig.trim().is_empty() {
-                if out.last().is_some_and(|s| s.is_empty()) {
+                if out.last().is_some_and(|(_, text)| text.is_empty()) {
                     continue;
                 }
-                out.push(String::new());
+                out.push((index, String::new()));
             } else {
-                out.push(orig.trim_end().to_string());
+                out.push((index, orig.trim_end().to_string()));
             }
             continue;
         }
@@ -447,7 +809,10 @@ fn format_lines(
         if source_line.closes {
             flush_run(&mut out, &mut assign_run);
             depth = depth.saturating_sub(1);
-            out.push(format!("{}{}", indent_unit.repeat(depth), orig.trim()));
+            out.push((
+                index,
+                format!("{}{}", indent_unit.repeat(depth), orig.trim()),
+            ));
             if source_line.opens {
                 depth += 1;
             }
@@ -461,7 +826,7 @@ fn format_lines(
 
         if !trailing.is_empty() && !comment_prefix(trailing) {
             flush_run(&mut out, &mut assign_run);
-            out.push(format!("{}{}", indent, orig.trim()));
+            out.push((index, format!("{}{}", indent, orig.trim())));
             if source_line.opens {
                 depth += 1;
             }
@@ -470,7 +835,21 @@ fn format_lines(
 
         let no_midline_comment = prefix_chars(orig, code_end) == prefix_chars(stripped, code_end);
         let spaced = if no_midline_comment {
-            space_line(body.trim())
+            if let Some(edits) = &source_line.spacing {
+                let mut result = body.to_string();
+                for &(start, end, replacement) in edits.iter().rev() {
+                    if end > result.len()
+                        || !result.is_char_boundary(start)
+                        || !result.is_char_boundary(end)
+                    {
+                        return None;
+                    }
+                    result.replace_range(start..end, replacement);
+                }
+                Some(result.trim().to_string())
+            } else {
+                space_line(body.trim())
+            }
         } else {
             None
         };
@@ -481,9 +860,9 @@ fn format_lines(
             line.push_str(trailing);
         }
         let line_index = out.len();
-        out.push(line);
+        out.push((index, line));
 
-        let assign = if spaced.is_some() && trailing.is_empty() {
+        let assign = if align_assignments && spaced.is_some() && trailing.is_empty() {
             assignment_parts(&line_body)
         } else {
             None
@@ -511,7 +890,7 @@ fn comment_prefix(trailing: &str) -> bool {
     trailing.starts_with("//") || trailing.starts_with('%') || trailing.starts_with("/*")
 }
 
-fn flush_run(out: &mut [String], assign_run: &mut Vec<(usize, String, String)>) {
+fn flush_run(out: &mut [(usize, String)], assign_run: &mut Vec<(usize, String, String)>) {
     if assign_run.len() > 1 {
         let width = assign_run
             .iter()
@@ -519,12 +898,12 @@ fn flush_run(out: &mut [String], assign_run: &mut Vec<(usize, String, String)>) 
             .max()
             .unwrap_or(0);
         for (idx, lhs, rest) in assign_run.iter() {
-            let line = &out[*idx];
+            let line = &mut out[*idx].1;
             let Some(at) = line.find(lhs) else {
                 continue;
             };
             let prefix = &line[..at];
-            out[*idx] = format!("{prefix}{:<width$} = {rest}", lhs);
+            *line = format!("{prefix}{:<width$} = {rest}", lhs);
         }
     }
     assign_run.clear();
@@ -535,7 +914,14 @@ fn space_line(code: &str) -> Option<String> {
         return None;
     }
     let tokens = simple_tokens(code)?;
-    Some(join_tokens(&tokens))
+    let refs: Vec<&str> = tokens.iter().map(String::as_str).collect();
+    let gaps = spacing::gaps(&refs);
+    Some(
+        gaps.into_iter()
+            .zip(tokens)
+            .map(|(gap, token)| format!("{gap}{token}"))
+            .collect(),
+    )
 }
 
 fn simple_tokens(code: &str) -> Option<Vec<String>> {
@@ -592,74 +978,6 @@ fn simple_kind(kind: TokenKind) -> bool {
             | TokenKind::LParen
             | TokenKind::RParen
     )
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Binop,
-    Unary,
-    LParen,
-    RParen,
-    Comma,
-    Semi,
-    Operand,
-}
-
-fn join_tokens(tokens: &[String]) -> String {
-    let mut result = String::new();
-    let mut prev: Option<Kind> = None;
-    for tok in tokens {
-        let kind = classify(tok, prev);
-        result.push_str(separator(prev, kind));
-        result.push_str(tok);
-        prev = Some(kind);
-    }
-    result
-}
-
-fn classify(tok: &str, prev: Option<Kind>) -> Kind {
-    if tok == "+" || tok == "-" {
-        return match prev {
-            None | Some(Kind::Binop) | Some(Kind::Unary) | Some(Kind::LParen)
-            | Some(Kind::Comma) => Kind::Unary,
-            _ => Kind::Binop,
-        };
-    }
-    if matches!(
-        tok,
-        "*" | "/" | "^" | "=" | "<" | ">" | "<=" | ">=" | "==" | "!=" | "**"
-    ) {
-        return Kind::Binop;
-    }
-    match tok {
-        "(" => Kind::LParen,
-        ")" => Kind::RParen,
-        "," => Kind::Comma,
-        ";" => Kind::Semi,
-        _ => Kind::Operand,
-    }
-}
-
-fn separator(prev: Option<Kind>, kind: Kind) -> &'static str {
-    let Some(prev) = prev else {
-        return "";
-    };
-    if matches!(kind, Kind::RParen | Kind::Comma | Kind::Semi) {
-        return "";
-    }
-    if matches!(prev, Kind::LParen | Kind::Unary) {
-        return "";
-    }
-    if matches!(prev, Kind::Comma | Kind::Semi) {
-        return " ";
-    }
-    if kind == Kind::LParen {
-        return if prev == Kind::Binop { " " } else { "" };
-    }
-    if kind == Kind::Binop || prev == Kind::Binop {
-        return " ";
-    }
-    " "
 }
 
 fn assignment_parts(line_body: &str) -> Option<(&str, &str)> {
@@ -1048,5 +1366,243 @@ mod tests {
     fn starstar_stays_one_token() {
         assert_eq!(space_line("a**b;").as_deref(), Some("a ** b;"));
         assert_eq!(canonical("a**b;"), canonical("a ** b;"));
+    }
+
+    #[test]
+    fn formats_accepted_tags_locals_and_metadata_without_changing_values() {
+        // Guards rejecting whole Dynare lines solely because they contain a
+        // quoted tag or TeX label, and guards changing their written values.
+        let source = "var y $y$ (long_name='Output level');\nmodel;\n#lagged=rho*y(-1);\n[name='Demand',endogenous='y'] y=lagged+eps;\nend;\nestimation(datafile='observations.mat',first_obs=5,nobs=100);\n";
+        let formatted = format_text(source, "    ").unwrap();
+        assert!(
+            formatted.contains("long_name = 'Output level'"),
+            "{formatted}"
+        );
+        assert!(formatted.contains("#lagged = rho * y(-1);"), "{formatted}");
+        assert!(
+            formatted.contains("[name = 'Demand', endogenous = 'y'] y = lagged + eps;"),
+            "{formatted}"
+        );
+        assert!(
+            formatted.contains("datafile = 'observations.mat', first_obs = 5, nobs = 100"),
+            "{formatted}"
+        );
+    }
+
+    #[test]
+    fn preserves_written_timing_and_list_separators() {
+        // Guards interpreting a timing suffix or a signed list value as an
+        // ordinary binary expression while formatting accepted rows.
+        let source = "model;\n[name='timing'] y=x( - 1 )+z;\nend;\nshocks;\nvar e;\nperiods 1 2;\nvalues 1 -2;\nend;\n";
+        let formatted = format_text(source, "    ").unwrap();
+        assert!(formatted.contains("x( - 1 )"), "{formatted}");
+        assert!(formatted.contains("values 1 -2;"), "{formatted}");
+    }
+
+    fn format_overlay(
+        files: &[(&str, &str)],
+        file: &str,
+        selection: Option<Range<usize>>,
+    ) -> SourceFormat {
+        let sources = files
+            .iter()
+            .map(|(key, text)| (key.to_string(), text.to_string()))
+            .collect();
+        let mut workspace = crate::engine::workspace::Workspace::overlay_documents(&sources);
+        let model = workspace.effective_model_snapshot("run.mod").unwrap();
+        let origins = workspace.retained_effective_origins("run.mod").unwrap();
+        let builds = &crate::engine::language::parser::PARSE_EXPANDED_BUILDS;
+        let before = builds.with(std::cell::Cell::get);
+        let result = format_source(
+            &sources[file],
+            file,
+            selection,
+            "  ",
+            FormatStyle {
+                split_statements: true,
+                align_assignments: false,
+            },
+            &[FormatOwner {
+                model: &model,
+                origins: &origins,
+            }],
+            Default::default(),
+        )
+        .unwrap();
+        assert_eq!(builds.with(std::cell::Cell::get), before);
+        result
+    }
+
+    #[test]
+    fn splits_one_written_copy_when_active_executions_agree() {
+        let input = "parameters a longer;\n@#for i in 1:2\na=1; longer=2;\n@#endfor\n";
+        let output = format_overlay(&[("run.mod", input)], "run.mod", None);
+        assert_eq!(output.splits, 1);
+        assert_eq!(output.withheld, 0);
+        let (_, text) = output.replacement.unwrap();
+        assert_eq!(
+            text,
+            "parameters a longer;\n@#for i in 1:2\na = 1;\nlonger = 2;\n@#endfor\n"
+        );
+    }
+
+    #[test]
+    fn preserves_written_line_when_another_macro_copy_uses_it_as_a_string() {
+        let input = concat!(
+            "parameters a b;\n@#for mode in [0,1]\n@#if mode\n",
+            "@{\"var y (long_name='\"}\n@#endif\n  a=1; b=2;\n",
+            "@#if mode\n@{\"');\"}\n@#endif\n@#endfor\n",
+        );
+        let result = format_overlay(&[("run.mod", input)], "run.mod", None);
+        assert_eq!(result.splits, 0);
+        assert!(result.withheld > 0);
+        assert!(
+            result
+                .replacement
+                .is_none_or(|(_, text)| text.contains("\n  a=1; b=2;\n"))
+        );
+    }
+
+    #[test]
+    fn preserves_every_physical_line_of_multiline_dynare_text() {
+        let input = "var y(long_name='first\n  a=1; b=2;  \nlast');\nmodel; y=0; end;\n";
+        let result = format_overlay(&[("run.mod", input)], "run.mod", None);
+        let (_, text) = result.replacement.unwrap();
+        assert!(text.contains("long_name='first\n  a=1; b=2;  \nlast')"));
+        assert!(text.contains("model;\n  y = 0;\nend;"));
+        assert!(format_text(input, "  ").is_none_or(|text| text.contains("\n  a=1; b=2;  \n")));
+    }
+
+    #[test]
+    fn keeps_mixed_line_endings_inside_literals_and_native_text() {
+        let input = "var y(long_name='top\r\n  middle  \nlast');\r\nmodel; y=0; end;\r\n  disp( ...\n  'native');";
+        let expected = "var y(long_name='top\r\n  middle  \nlast');\r\nmodel;\r\n  y = 0;\r\nend;\r\n  disp( ...\n  'native');";
+        let result = format_overlay(&[("run.mod", input)], "run.mod", None);
+        assert_eq!(result.replacement.unwrap().1, expected);
+        assert!(
+            format_overlay(&[("run.mod", expected)], "run.mod", None)
+                .replacement
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn keeps_blank_lines_inside_a_multiline_equation_after_splitting() {
+        let input = "var y;\nmodel; y=1\n\n\n+2; end;\n";
+        let result = format_overlay(&[("run.mod", input)], "run.mod", None);
+        assert_eq!(
+            result.replacement.unwrap().1,
+            "var y;\nmodel;\n  y = 1\n\n\n  + 2;\nend;\n"
+        );
+    }
+
+    #[test]
+    fn keeps_blank_lines_inside_an_equation_with_macro_interpolation() {
+        let input = "@#define X = 1\nvar y;\nmodel;\ny=@{X}\n\n\n+2;\nend;\n";
+        let result = format_overlay(&[("run.mod", input)], "run.mod", None);
+        assert!(
+            result
+                .replacement
+                .is_none_or(|(_, text)| text.contains("y=@{X}\n\n\n"))
+        );
+    }
+
+    #[test]
+    fn formats_signs_only_in_verified_scalar_expressions() {
+        let input = "parameters p; var y; varexo e;\np=1+-2;\nmodel; y=e; end;\ninitval; y=1-2; end;\nshocks; var e; periods 1 2; values 1 -2; end;\n";
+        let result = format_overlay(&[("run.mod", input)], "run.mod", None);
+        let text = result.replacement.unwrap().1;
+        assert!(text.contains("\np = 1 + -2;\n"), "{text}");
+        assert!(text.contains("\n  y = 1 - 2;\n"), "{text}");
+        assert!(text.contains("\n  values 1 -2;\n"), "{text}");
+    }
+
+    #[test]
+    fn keeps_indent_across_block_openers_and_closers_on_the_same_line() {
+        let input = "var y;\nmodel;\ny=1;\nend; model; y=2; end; initval;\ny=3;\nend;\n";
+        let result = format_overlay(&[("run.mod", input)], "run.mod", None);
+        assert_eq!(result.withheld, 0);
+        let (_, text) = result.replacement.unwrap();
+        assert_eq!(
+            text,
+            "var y;\nmodel;\n  y = 1;\nend;\nmodel;\n  y = 2;\nend;\ninitval;\n  y = 3;\nend;\n"
+        );
+        let repeated = format_overlay(&[("run.mod", &text)], "run.mod", None);
+        assert!(repeated.replacement.is_none());
+    }
+
+    #[test]
+    fn splits_body_boundaries_with_zero_model_changes() {
+        use crate::engine::comparison::compare_models;
+        use crate::engine::language::parser::parse;
+
+        let input = "var y; varexo e;\nparameters a; a=0.5;\nmodel; [name='transition'] y=a*y(-1)\n+e; end;\ninitval; y=0; end;\nendval; y=1; end;\nshocks; var e; stderr 0.1; end;\n";
+        let result = format_overlay(&[("run.mod", input)], "run.mod", None);
+        assert_eq!(result.withheld, 0);
+        let (_, text) = result.replacement.unwrap();
+        assert!(
+            text.contains("  [name = 'transition'] y = a * y(-1)\n  + e;\nend;"),
+            "{text}"
+        );
+        assert!(
+            text.contains("shocks;\n  var e;\n  stderr 0.1;\nend;"),
+            "{text}"
+        );
+        assert!(text.contains("endval;\n  y = 1;\nend;"), "{text}");
+        let comparison = compare_models(&parse(input), &parse(&text));
+        assert!(
+            comparison.semantic.rows.is_empty(),
+            "{:?}",
+            comparison.semantic.rows
+        );
+        assert_ne!(input, text);
+    }
+
+    #[test]
+    fn splits_verified_boundaries_across_dynare_block_readers() {
+        let prefix =
+            "var y; varexo e; parameters a; a=.5;\nmodel; [name='main'] y=a*y(-1)+e; end;\n";
+        for (suffix, expected) in [
+            (
+                "steady_state_model; y=1; end; steady;",
+                "\n  y = 1;\nend;\nsteady;",
+            ),
+            ("histval; y(-1)=1; end;", "\n  y(-1) = 1;\nend;"),
+            (
+                "model_replace('main'); [name='main'] y=2*e; end;",
+                "\n  [name = 'main'] y = 2 * e;\nend;",
+            ),
+            (
+                "shocks(surprise); var e; periods 1; values .1; end;",
+                "\n  var e;\n  periods 1;\n  values .1;\nend;",
+            ),
+            (
+                "mshocks; var e; periods 1:3; values .1; end;",
+                "\n  var e;\n  periods 1:3;\n  values .1;\nend;",
+            ),
+            (
+                "conditional_forecast_paths; var y; periods 1:3; values 1; end;",
+                "\n  var y;\n  periods 1:3;\n  values 1;\nend;",
+            ),
+            (
+                "occbin_constraints; name 'lower'; bind y<0; relax y>0; end;",
+                "\n  name 'lower';\n  bind y < 0;\n  relax y > 0;\nend;",
+            ),
+            ("estimated_params; a,.5,0,1; end;", "\n  a, .5, 0, 1;\nend;"),
+            (
+                "estimated_params_init(use_calibration); a,.5; end;",
+                "\n  a, .5;\nend;",
+            ),
+            ("estimated_params_bounds; a,0,1; end;", "\n  a, 0, 1;\nend;"),
+            ("homotopy_setup; a,.1,.9; end;", "\n  a, .1, .9;\nend;"),
+        ] {
+            let input = format!("{prefix}{suffix}\n");
+            let result = format_overlay(&[("run.mod", &input)], "run.mod", None);
+            assert_eq!(result.withheld, 0, "{suffix}");
+            let (_, formatted) = result.replacement.unwrap();
+            assert!(formatted.contains(expected), "{suffix}\n{formatted}");
+            let again = format_overlay(&[("run.mod", &formatted)], "run.mod", None);
+            assert!(again.replacement.is_none(), "{suffix}");
+        }
     }
 }

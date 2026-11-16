@@ -1296,6 +1296,10 @@ impl Parser<'_> {
             }
             let from = self.i;
             let mut recognized = true;
+            let mut format_fallback = false;
+            let format_rows_before = self.model.format_rows.len();
+            let format_issues_before = self.model.parse_issues.len();
+            let format_shapes_before = self.model.shape_refuses.len();
             let parameters_before = self.model.param_assignments.len();
             let helpers_before = self.model.helper_assignments.len();
             let dotted_before = self.model.dotted_statements.len();
@@ -1510,6 +1514,7 @@ impl Parser<'_> {
             } else if let Some(command) = self.at_policy_command() {
                 self.parse_policy_command(command);
             } else if self.at_skipped_block() {
+                format_fallback = true;
                 self.record_skipped_block_opener();
                 self.skip_block();
             } else if self.at_ident("end") {
@@ -1526,7 +1531,24 @@ impl Parser<'_> {
                         self.lexeme(&self.tokens[from]),
                     )
                     && self.at_statement_boundary();
+                format_fallback = true;
                 self.skip_until_semi();
+                // These commands have an accepted no-argument production.
+                // The recovery reader does not prove their option forms.
+                if recognized
+                    && self.i == from + 2
+                    && self.tokens[from + 1].kind == TokenKind::Semi
+                    && ["steady", "check", "resid", "model_diagnostics"]
+                        .iter()
+                        .any(|word| self.lexeme(&self.tokens[from]).eq_ignore_ascii_case(word))
+                {
+                    format_fallback = false;
+                }
+            }
+            if self.model.parse_issues.len() != format_issues_before
+                || self.model.shape_refuses.len() != format_shapes_before
+            {
+                self.model.format_rows.truncate(format_rows_before);
             }
             self.capture_shape_orders(from, shapes_before, identifications_before, paths_before);
             self.advance_initial_source_cursor();
@@ -1546,6 +1568,28 @@ impl Parser<'_> {
                 let dotted_index =
                     (self.model.dotted_statements.len() > dotted_before).then_some(dotted_before);
                 self.record_statement(from, assignment, dotted_index);
+                let statement = self.model.statements.last().unwrap();
+                if !format_fallback
+                    && statement.complete
+                    && !statement.native
+                    && self.model.parse_issues.len() == format_issues_before
+                    && self.model.shape_refuses.len() == format_shapes_before
+                {
+                    if statement.kind == crate::engine::language::model::StatementKind::Block {
+                        if let Some((end, after)) = self.completed_block_separator {
+                            if statement.opener_range.end > from
+                                && self.tokens[statement.opener_range.end - 1].kind
+                                    == TokenKind::Semi
+                            {
+                                self.model
+                                    .format_blocks
+                                    .push((statement.opener_range.clone(), end..after));
+                            }
+                        }
+                    } else {
+                        self.model.format_rows.push(from..self.i);
+                    }
+                }
             } else if from < self.i {
                 let span = self.covering_tokens(from..self.i);
                 self.model.opaque_tokens.insert(
@@ -2318,6 +2362,9 @@ impl Parser<'_> {
         self.in_equation_body = true;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
             if let Some((eq, range)) = self.parse_equation_statement() {
+                if self.i > range.end && self.tokens[self.i - 1].kind == TokenKind::Semi {
+                    self.model.format_rows.push(range.start..self.i);
+                }
                 self.record_written_equation(&eq, &range, None);
                 self.eq_token_ranges.push(range);
                 self.model.equations.push(eq);
@@ -2766,6 +2813,9 @@ impl Parser<'_> {
         self.in_equation_body = true;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
             if let Some((eq, range)) = self.parse_equation_statement() {
+                if self.i > range.end && self.tokens[self.i - 1].kind == TokenKind::Semi {
+                    self.model.format_rows.push(range.start..self.i);
+                }
                 self.record_written_equation(&eq, &range, None);
                 self.eq_token_ranges.push(range);
                 self.model.equations.push(eq);
@@ -3267,6 +3317,7 @@ impl Parser<'_> {
             if self.refuse_active_row_with_embedded_end(true, end_in_targets) {
                 continue;
             }
+            let row_start = self.i;
             if let Some(eq) = self.parse_ss_equation() {
                 let valid_rhs = eq
                     .rhs_expr
@@ -3275,6 +3326,13 @@ impl Parser<'_> {
                     .steady_state_targets
                     .iter()
                     .all(|target| self.model.steady_state_target_is_valid(target));
+                if valid_rhs
+                    && valid_targets
+                    && self.i > row_start
+                    && self.tokens[self.i - 1].kind == TokenKind::Semi
+                {
+                    self.model.format_rows.push(row_start..self.i);
+                }
                 completed_assignment |= valid_rhs && valid_targets;
                 refused_assignment |= !valid_rhs || !valid_targets;
                 self.model.steady_state_equations.push(eq);
@@ -3647,6 +3705,17 @@ impl Parser<'_> {
             }
             let before = self.i;
             if let Some(a) = self.parse_named_assignment() {
+                if self.i > before
+                    && self.tokens[self.i - 1].kind == TokenKind::Semi
+                    && a.expr.is_some_and(|expr| {
+                        self.model
+                            .assignment_syntax
+                            .get(&expr)
+                            .is_some_and(|syntax| syntax.full_rhs)
+                    })
+                {
+                    self.model.format_rows.push(before..self.i);
+                }
                 self.model.initval.push(a);
             }
             if self.i <= before {
@@ -3716,6 +3785,9 @@ impl Parser<'_> {
             }
             let before = self.i;
             if let Some(entry) = self.parse_histval_entry(body_end_i) {
+                if self.i > before && self.tokens[self.i - 1].kind == TokenKind::Semi {
+                    self.model.format_rows.push(before..self.i);
+                }
                 self.model.histval.push(entry);
             }
             if self.i <= before {
@@ -4432,6 +4504,9 @@ impl Parser<'_> {
             }
             let before = self.i;
             if let Some(row) = self.parse_homotopy_row(body_end_i) {
+                if self.i > before && self.tokens[self.i - 1].kind == TokenKind::Semi {
+                    self.model.format_rows.push(before..self.i);
+                }
                 self.model.homotopy_rows.push(row);
             }
             if self.i <= before {
@@ -7971,6 +8046,7 @@ impl Parser<'_> {
         if !self.at_ident_ci("var") {
             return None;
         }
+        let row_start = self.i;
         let start = self.current_start();
         let shape_parse_order = self.token_origins[self.i].start;
         let parse_issues_before = self.model.parse_issues.len();
@@ -7989,6 +8065,7 @@ impl Parser<'_> {
         self.bump();
         let name = self.intern.intern(name_tok.text(self.src));
         self.eat(TokenKind::Semi);
+        let var_end = self.i;
         if self.eat_refused_collected_row_end() {
             return None;
         }
@@ -8038,6 +8115,7 @@ impl Parser<'_> {
         if self.eat_refused_collected_row_end() {
             return None;
         }
+        let periods_end = self.i;
         let mut values = Vec::new();
         let mut values_span = Span {
             start: periods_span.end,
@@ -8070,6 +8148,24 @@ impl Parser<'_> {
                 && value_expressions.iter().all(|value| value.completed))
             .then(|| self.token_origins[self.i].start);
             self.eat(TokenKind::Semi);
+        }
+        if parse_order.is_some()
+            && has_periods
+            && !periods.is_empty()
+            && has_values
+            && !values.is_empty()
+            && var_end > row_start
+            && self.tokens[var_end - 1].kind == TokenKind::Semi
+            && periods_end > var_end
+            && self.tokens[periods_end - 1].kind == TokenKind::Semi
+            && self.i > periods_end
+            && self.tokens[self.i - 1].kind == TokenKind::Semi
+        {
+            self.model.format_rows.extend([
+                row_start..var_end,
+                var_end..periods_end,
+                periods_end..self.i,
+            ]);
         }
         Some(ConditionalForecastPath {
             parse_order,
@@ -8593,6 +8689,22 @@ impl Parser<'_> {
         }
         if rejected {
             return;
+        }
+        if name_tokens.end > name_tokens.start
+            && self.tokens[name_tokens.end - 1].kind == TokenKind::Semi
+            && !clauses.is_empty()
+            && clauses.iter().all(|(_, clause)| {
+                clause.expr.is_some()
+                    && clause.active_tokens.end > clause.active_tokens.start
+                    && self.tokens[clause.active_tokens.end - 1].kind == TokenKind::Semi
+            })
+        {
+            self.model.format_rows.push(name_tokens.clone());
+            self.model.format_rows.extend(
+                clauses
+                    .iter()
+                    .map(|(_, clause)| clause.active_tokens.clone()),
+            );
         }
         self.model.occbin_constraints.push(OccbinConstraint {
             parse_order,
@@ -9630,6 +9742,7 @@ impl Parser<'_> {
                 continue;
             }
             if let Some(mut entry) = self.parse_estimated_param_entry(stmt_start, i, target) {
+                self.model.format_rows.push(stmt_start..i + 1);
                 entry.span = Span {
                     start: entry_start,
                     end: entry_end,
@@ -10033,20 +10146,35 @@ impl Parser<'_> {
                 self.bump();
             }
         }
-        let (mut rhs_expr, rhs) = if self.at(TokenKind::Eq) {
+        let single = names.len() == 1 && self.i == row_i + 2;
+        let covariance = names.len() == 2
+            && self.i == row_i + 4
+            && self.tokens[row_i + 2].kind == TokenKind::Comma;
+        let has_eq = self.at(TokenKind::Eq);
+        let (mut rhs_expr, rhs) = if has_eq {
             self.bump();
             self.parse_folded_rhs()
         } else {
             (None, None)
         };
+        let simple_rhs_complete = self.at(TokenKind::Semi) && self.i < end_i && rhs_expr.is_some();
+        let name_complete = !has_eq && single && self.at(TokenKind::Semi) && self.i < end_i;
         let mut end = self.finish_shock_stmt(end_i);
         let mut is_stderr = false;
         if rhs_expr.is_none() && names.len() == 1 && self.i < end_i && self.at_ident_ci("stderr") {
+            let stderr_i = self.i;
             self.bump();
             let (expr, _) = self.parse_folded_rhs();
             rhs_expr = expr;
+            if name_complete && self.at(TokenKind::Semi) && self.i < end_i && expr.is_some() {
+                self.model
+                    .format_rows
+                    .extend([row_i..stderr_i, stderr_i..self.i + 1]);
+            }
             end = self.finish_shock_stmt(end_i);
             is_stderr = true;
+        } else if has_eq && (single || covariance) && simple_rhs_complete {
+            self.model.format_rows.push(row_i..self.i);
         }
         if names.is_empty() {
             return None;
@@ -10088,6 +10216,9 @@ impl Parser<'_> {
                 self.bump();
             }
         }
+        let pair = names.len() == 2
+            && self.i == row_i + 4
+            && self.tokens[row_i + 2].kind == TokenKind::Comma;
         let has_eq = self.at(TokenKind::Eq);
         let (rhs_expr, rhs) = if has_eq {
             self.bump();
@@ -10095,6 +10226,9 @@ impl Parser<'_> {
         } else {
             (None, None)
         };
+        if has_eq && pair && self.at(TokenKind::Semi) && self.i < end_i && rhs_expr.is_some() {
+            self.model.format_rows.push(row_i..self.i + 1);
+        }
         let end = self.finish_shock_stmt(end_i);
         if names.len() < 2 || !has_eq {
             return None;
@@ -13113,6 +13247,12 @@ impl Parser<'_> {
                     }
                     if cmd.eq_ignore_ascii_case("stoch_simul") {
                         stoch_options = Some((from, self.i));
+                    }
+                    if crate::engine::language::command_skip::is_pin_statement_keyword(cmd)
+                        && self.i > from + 1
+                        && self.tokens[self.i - 1].kind == TokenKind::RParen
+                    {
+                        self.model.format_options.push(opener_order..self.i);
                     }
                     saw_datafile =
                         self.record_skip_command_options(cmd, from, self.i) || saw_datafile;

@@ -138,7 +138,7 @@
   }
   function codeLines(parent, expression, side, writtenMacro = false) {
     if (!expression) return;
-    const display = writtenMacro ? { runs: expression.runs, compact: false } : displayedCode(expression.runs);
+    const display = writtenMacro ? { runs: expression.runs, compact: false } : displayedCode(expression.display_runs ?? expression.runs);
     let lines = [[]];
     // The host validates runs. Text insertion never creates HTML or actions.
     for (const run of display.runs) run.text.split("\n").forEach((text, index) => {
@@ -637,17 +637,18 @@
   }
   function excerpt(side, aroundChange = true) {
     if (!side?.text) return "";
+    const shown = side.display_runs ?? side.runs;
     let first = 0;
-    for (const run of aroundChange ? side.runs : []) {
+    for (const run of aroundChange ? shown : []) {
       if (run.role !== "unchanged") break;
       first += run.text.length;
     }
-    const text = side.text;
+    const text = shown.map(run => run.text).join("");
     let start = Math.max(0, (first === text.length ? 0 : first) - 12);
     if (start > 0 && /[\uDC00-\uDFFF]/.test(text[start])) start -= 1;
     let end = Math.min(text.length, start + 52);
     if (end < text.length && /[\uDC00-\uDFFF]/.test(text[end])) end += 1;
-    return (start ? "…" : "") + side.text.slice(start, end).trim().replace(/\s+/g, " ") + (end < side.text.length ? "…" : "");
+    return (start ? "…" : "") + text.slice(start, end).trim().replace(/\s+/g, " ") + (end < side.text.length ? "…" : "");
   }
   function compactRow(row, { child = false, context = false, dependents = [] } = {}) {
     const article = node("article", undefined, "change-item" + (child ? " dependent-row" : ""));

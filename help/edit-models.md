@@ -38,7 +38,11 @@ name displays its written or macro-expanded expression.
 - **Format Document** and **Format Selection** use the indentation shown in the
   VS Code status bar. Click the indentation indicator to change it for the
   current file, or use Dynare language-specific editor settings for a project.
-  Formatting preserves native MATLAB and Octave lines and `verbatim` blocks.
+  Enable **Split Statements** or **Align Assignments** in Dygnosis Editing
+  settings to use those layouts; both are off by default. Formatting keeps
+  existing line breaks within expressions and preserves native MATLAB and
+  Octave lines and `verbatim` blocks. It skips statement splits when it cannot
+  verify their boundaries, source ownership or selection.
 - **Expand Selection** from the Command Palette: Select an expression or
   statement, then expand the selection to its enclosing statement or block.
 - **Linked Editing**: Enable **Editor: Linked Editing** (`editor.linkedEditing`)

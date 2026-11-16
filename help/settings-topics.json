@@ -10,6 +10,8 @@
   "dynare.nameDetails.longName": "appearance",
   "dynare.nameDetails.tex": "appearance",
   "dynare.parameterValueHints": "appearance",
+  "dynare.format.splitStatements": "edit-models",
+  "dynare.format.alignAssignments": "edit-models",
   "dynare.editorActions": "effective-model",
   "dynare.effectiveModel.macroTint": "effective-model",
   "dynare.inactiveCode.enabled": "appearance",

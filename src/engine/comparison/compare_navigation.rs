@@ -1078,7 +1078,11 @@ fn push_macro_change(
                 role: *role,
             })
             .collect();
-        ExpressionSide { text, runs }
+        ExpressionSide {
+            text,
+            runs,
+            display_runs: None,
+        }
     };
     row.expressions.push(ExpressionDetail {
         field: "written_directives".into(),
@@ -1318,7 +1322,7 @@ pub(crate) fn semantic_wire(
         .map(|(index, row)| (row.pointer.as_str(), format!("/semantic/rows/{index}")))
         .collect();
     let mut semantic = serde_json::to_value(&diff.semantic).expect("serializable comparison");
-    semantic["schema_version"] = json!(2);
+    semantic["schema_version"] = json!(3);
     let mut navigation =
         Vec::with_capacity(diff.semantic.rows.len() + diff.semantic.references.len());
     for (index, row) in diff.semantic.rows.iter().enumerate() {
@@ -1380,7 +1384,7 @@ pub(crate) fn semantic_wire(
     source_changes["schema_version"] = json!(2);
     (
         json!({
-            "comparison_versions":{"semantic":2,"source_changes":2,"coverage":1},
+            "comparison_versions":{"semantic":3,"source_changes":2,"coverage":1},
             "semantic":semantic, "source_changes":source_changes, "coverage":diff.coverage, "summary":summary
         }),
         json!({

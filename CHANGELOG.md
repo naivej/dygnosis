@@ -3,6 +3,20 @@
 Each entry describes the release at the time. Feature names and interfaces can
 change in later releases; see Dygnosis Help for current guidance.
 
+## v0.12.4
+
+**Format Document** and **Format Selection** format more Dynare syntax,
+including equation tags, model locals and command options. In Dygnosis Editing
+settings, enable **Split Statements** to put statements on separate lines or
+**Align Assignments** to align consecutive assignments. Both are off by
+default. MCP `dynare_format` offers the same choices through
+`splitStatements` and `alignAssignments`.
+
+**Dygnosis: Show model changes** displays equation excerpts and **Before**
+and **After** equations with more readable spacing. Model checks report E001
+for ungrouped power chains such as `a ^ b ^ c`; add parentheses to specify
+the intended grouping.
+
 ## v0.12.3
 
 **Dygnosis: Show model changes** shows changed values and equation excerpts in

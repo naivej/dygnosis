@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -578,6 +578,18 @@
         "title": "Editing",
         "order": 1,
         "properties": {
+          "dynare.format.splitStatements": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "description": "Put verified Dynare statements on separate lines when formatting."
+          },
+          "dynare.format.alignAssignments": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "description": "Align consecutive assignments when formatting."
+          },
           "dynare.editorActions": {
             "type": "array",
             "items": {

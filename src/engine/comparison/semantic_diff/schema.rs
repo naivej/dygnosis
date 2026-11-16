@@ -356,12 +356,15 @@ pub struct TokenRun {
 pub struct ExpressionSide {
     pub text: String,
     pub runs: Vec<TokenRun>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_runs: Option<Vec<TokenRun>>,
 }
 
 impl ExpressionSide {
     pub fn plain(text: &str) -> Self {
         Self {
             text: text.into(),
+            display_runs: None,
             runs: vec![TokenRun {
                 text: text.into(),
                 role: TokenRole::Unchanged,

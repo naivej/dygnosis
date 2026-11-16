@@ -127,6 +127,12 @@ pub(crate) struct Params {
     /// Formatting indentation: tab or a whole number from 1 to 8.
     #[serde(rename = "formatIndent")]
     pub format_indent: Option<Value>,
+    /// Split verified statements onto separate lines. Defaults to false.
+    #[serde(default, rename = "splitStatements")]
+    pub split_statements: bool,
+    /// Align consecutive assignments. Defaults to false.
+    #[serde(default, rename = "alignAssignments")]
+    pub align_assignments: bool,
     /// Snapshot-bound selected diagnostic identity.
     pub diagnostic_id: Option<String>,
     #[serde(default)]
@@ -192,7 +198,13 @@ fn fields(tool: &str) -> Vec<&'static str> {
             "file",
         ],
         "dynare_expand" => &["line_range", "expanded_range", "equation_id"],
-        "dynare_format" => &["file", "line_range", "formatIndent"],
+        "dynare_format" => &[
+            "file",
+            "line_range",
+            "formatIndent",
+            "splitStatements",
+            "alignAssignments",
+        ],
         "dynare_extract" => &["names", "tags", "dimension", "equation_id", "equation"],
         "dynare_auto_fix" => &["code", "diagnostic_id", "target"],
         "dynare_code_actions" => &[

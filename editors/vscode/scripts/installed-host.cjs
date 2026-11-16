@@ -95,6 +95,78 @@ async function checkTintTable(extension) {
   await config().update(dimensionKey, undefined, vscode.ConfigurationTarget.Global);
 }
 
+async function checkFormatting(workspace) {
+  // Guard the installed client passing both style settings and editor indentation
+  // to document, selection, save, and range formatting.
+  const input = "var y; parameters a abc;\na=1; abc=2;\nmodel; y=a+abc; end;\n";
+  const expected = "var y;\nparameters a abc;\na   = 1;\nabc = 2;\nmodel;\n  y = a + abc;\nend;\n";
+  const file = path.join(workspace, "formatting model.mod");
+  await fs.writeFile(file, input);
+  const document = await vscode.workspace.openTextDocument(file);
+  const dynare = vscode.workspace.getConfiguration("dynare", document.uri);
+  const editorConfig = vscode.workspace.getConfiguration("editor", document.uri);
+  await dynare.update("format.splitStatements", true, vscode.ConfigurationTarget.WorkspaceFolder);
+  await dynare.update("format.alignAssignments", true, vscode.ConfigurationTarget.WorkspaceFolder);
+  const editorPreferences = [
+    ["tabSize", 2], ["insertSpaces", true], ["detectIndentation", false],
+    ["defaultFormatter", "CoconutWater.dygnosis"], ["formatOnSave", true], ["formatOnPaste", true],
+  ];
+  for (const [key, value] of editorPreferences) {
+    await editorConfig.update(key, value, vscode.ConfigurationTarget.WorkspaceFolder);
+  }
+  const replace = async text => {
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), text);
+    assert.equal(await vscode.workspace.applyEdit(edit), true);
+  };
+  const formattedWith = edits => (edits ?? [])
+    .map(edit => ({ start: document.offsetAt(edit.range.start), end: document.offsetAt(edit.range.end), text: edit.newText }))
+    .sort((a, b) => b.start - a.start)
+    .reduce((text, edit) => text.slice(0, edit.start) + edit.text + text.slice(edit.end), document.getText());
+  const selectionExpected = "var y; parameters a abc;\na=1; abc=2;\nmodel;\n  y = a + abc;\nend;\n";
+  try {
+    // Wait for configuration synchronization as well as provider registration.
+    let preview;
+    try {
+      await waitFor(async () => {
+        const edits = await vscode.commands.executeCommand("vscode.executeFormatDocumentProvider", document.uri, { tabSize: 2, insertSpaces: true });
+        preview = formattedWith(edits);
+        return preview === expected;
+      }, "installed formatting provider receives style settings");
+    } catch (error) {
+      assert.equal(preview, expected, error.message);
+      throw error;
+    }
+    const editor = await vscode.window.showTextDocument(document, { preserveFocus: false });
+    await waitFor(() => vscode.window.activeTextEditor?.document === document && editor.options.tabSize === 2,
+      "formatting editor is active with two-space indentation");
+    await vscode.commands.executeCommand("editor.action.formatDocument");
+    assert.equal(document.getText(), expected, "Format Document applies compact statement formatting");
+    const secondPass = await vscode.commands.executeCommand("vscode.executeFormatDocumentProvider", document.uri, { tabSize: 2, insertSpaces: true });
+    assert.equal(secondPass?.length ?? 0, 0, "a second format pass must have no edits");
+
+    await replace(input);
+    editor.selection = new vscode.Selection(2, 0, 3, 0);
+    await vscode.commands.executeCommand("editor.action.formatSelection");
+    assert.equal(document.getText(), selectionExpected, "Format Selection changes only the selected complete line");
+
+    await replace(input);
+    const range = new vscode.Range(2, 0, 3, 0);
+    const rangeEdits = await vscode.commands.executeCommand("vscode.executeFormatRangeProvider", document.uri, range, { tabSize: 2, insertSpaces: true });
+    assert.equal(formattedWith(rangeEdits), selectionExpected, "the native range provider must support the range used by format on paste");
+
+    assert.equal(await document.save(), true);
+    assert.equal(document.getText(), expected, "Format on Save must apply both opted-in styles");
+    assert.equal(await fs.readFile(file, "utf8"), expected, "Format on Save must persist the formatted text");
+  } finally {
+    await dynare.update("format.splitStatements", undefined, vscode.ConfigurationTarget.WorkspaceFolder);
+    await dynare.update("format.alignAssignments", undefined, vscode.ConfigurationTarget.WorkspaceFolder);
+    for (const [key] of editorPreferences) {
+      await editorConfig.update(key, undefined, vscode.ConfigurationTarget.WorkspaceFolder);
+    }
+  }
+}
+
 exports.run = async function run() {
   const source = JSON.parse(process.env.DYGNOSIS_PACKAGE_SOURCE);
   const evidence = { runId: process.env.DYGNOSIS_PACKAGE_RUN_ID, vscode: vscode.version, platform: process.platform, arch: process.arch, target: source.target, version: source.version, commit: source.commit, checks: [], passed: false };
@@ -176,6 +248,9 @@ exports.run = async function run() {
     await vscode.workspace.applyEdit(edit);
     await waitFor(() => vscode.languages.getDiagnostics(document.uri).some(diagnostic => diagnostic.severity === vscode.DiagnosticSeverity.Error), "real bundled LSP error reaches VS Code Problems");
     evidence.checks.push("bundled language-client handshake, model counts, native symbols and Problems diagnostics");
+    await checkpoint("installed native formatting");
+    await checkFormatting(workspace);
+    evidence.checks.push("Format Document, Format Selection and Format on Save apply opted-in styles; native range formatting supports paste ranges and a second pass has no edits");
     await checkpoint("explicit user override LSP and MCP launch");
     const overrideRoot = path.join(workspace, "explicit override with spaces");
     const override = path.join(overrideRoot, binaryName(source.target));

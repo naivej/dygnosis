@@ -1273,6 +1273,12 @@ pub struct Model {
     /// Confirmed native ranges in parser input, before projecting written origins.
     pub(crate) native_tint_spans: Vec<Span>,
     pub intern: Interner,
+    /// Accepted statement and block-body token ranges, including their separator.
+    pub(crate) format_rows: Vec<Range<usize>>,
+    /// Catalogued command option ranges for horizontal spacing only.
+    pub(crate) format_options: Vec<Range<usize>>,
+    /// Accepted block opener and closer token ranges, including semicolons.
+    pub(crate) format_blocks: Vec<(Range<usize>, Range<usize>)>,
     pub statements: Vec<Statement>,
     pub execution_steps: Vec<ExecutionStep>,
     pub assignment_syntax: HashMap<ExprId, AssignmentSyntax>,

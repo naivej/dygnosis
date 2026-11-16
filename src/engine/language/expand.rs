@@ -113,7 +113,7 @@ pub(crate) struct SpliceSegment {
 }
 
 impl SpliceSegment {
-    fn written_intersection(&self, span: Span) -> Option<Span> {
+    pub(crate) fn written_intersection(&self, span: Span) -> Option<Span> {
         let start = span.start.max(self.spliced.start);
         let end = span.end.min(self.spliced.end);
         (start < end).then(|| Span {

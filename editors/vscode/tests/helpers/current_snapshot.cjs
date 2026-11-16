@@ -2,8 +2,8 @@
 /* global structuredClone */
 const clone = value => structuredClone(value);
 const emptySemantic = () => ({
-  comparison_versions: { semantic: 2, source_changes: 2, coverage: 1 },
-  semantic: { schema_version: 2, availability: "complete", budgets: { token_alignment_cells: 1, source_alignment_cells: 1, references_per_side: 1, source_hunks: 1, serialized_output_bytes: 1 }, rows: [], references: [], limits: [] },
+  comparison_versions: { semantic: 3, source_changes: 2, coverage: 1 },
+  semantic: { schema_version: 3, availability: "complete", budgets: { token_alignment_cells: 1, source_alignment_cells: 1, references_per_side: 1, source_hunks: 1, serialized_output_bytes: 1 }, rows: [], references: [], limits: [] },
   source_changes: { schema_version: 2, availability: "complete", files: [], limits: [], root_text: "matching", executed_includes: { before: [], after: [] } },
   coverage: { schema_version: 1, availability: "complete", source_boundary: "captured_roots_and_executed_includes", families: [], limits: [] },
 });

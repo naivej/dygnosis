@@ -241,6 +241,8 @@ impl Parser<'_> {
         block_kind: ShockBlockKind,
     ) -> Option<ScheduledShock> {
         let row_i = self.i;
+        let shapes_before = self.model.shape_refuses.len();
+        let issues_before = self.model.parse_issues.len();
         let start = self.bump().span.start; // var
         let name_tok = self.tokens.get(self.i)?.clone();
         if name_tok.kind != TokenKind::Ident {
@@ -254,11 +256,13 @@ impl Parser<'_> {
             return None;
         }
         self.bump();
+        let var_end = self.i;
         if !self.at_ident_ci("periods") {
             return None;
         }
         self.bump();
         let periods = self.read_periods_until_semi(false);
+        let periods_end = self.i;
         let operation = if self.at_ident_ci("values") {
             ShockOperation::Values
         } else if self.at_ident_ci("add") {
@@ -292,6 +296,21 @@ impl Parser<'_> {
         } else {
             self.current_start()
         };
+        if !periods.is_empty()
+            && !values.is_empty()
+            && self.model.shape_refuses.len() == shapes_before
+            && self.model.parse_issues.len() == issues_before
+            && periods_end > var_end
+            && self.tokens[periods_end - 1].kind == TokenKind::Semi
+            && self.i > periods_end
+            && self.tokens[self.i - 1].kind == TokenKind::Semi
+        {
+            self.model.format_rows.extend([
+                row_i..var_end,
+                var_end..periods_end,
+                periods_end..self.i,
+            ]);
+        }
         self.retain_fact_receipt(
             "shock_instruction",
             row_i,
@@ -717,6 +736,11 @@ impl Parser<'_> {
     }
 
     fn written_value(&mut self, from: usize, to: usize) -> Option<WrittenValue> {
+        self.written_value_with_proof(from, to)
+            .map(|(value, _)| value)
+    }
+
+    fn written_value_with_proof(&mut self, from: usize, to: usize) -> Option<(WrittenValue, bool)> {
         if from >= to {
             return None;
         }
@@ -730,15 +754,27 @@ impl Parser<'_> {
         let path_refs = Vec::new();
         let saved = self.i;
         self.i = from;
+        let issues_before = self.model.parse_issues.len();
         let expr = self.parse_expr();
+        let complete = self.i == to
+            && expr.is_some_and(|id| {
+                !matches!(
+                    self.model.exprs.get(id).kind,
+                    crate::engine::language::expr::ExprKind::Error
+                )
+            })
+            && self.model.parse_issues.len() == issues_before;
         self.i = saved;
-        Some(WrittenValue {
-            text,
-            span,
-            expr,
-            completed: expr.is_some(),
-            path_refs,
-        })
+        Some((
+            WrittenValue {
+                text,
+                span,
+                expr,
+                completed: expr.is_some(),
+                path_refs,
+            },
+            complete,
+        ))
     }
 
     fn written_values(&mut self, from: usize, to: usize) -> Vec<WrittenValue> {
@@ -1809,13 +1845,17 @@ impl Parser<'_> {
                 self.bump();
             }
             let value_end = self.i;
-            let value = self.written_value(value_start, value_end);
+            let value = self.written_value_with_proof(value_start, value_end);
             let row_end = if self.at(TokenKind::Semi) {
                 self.bump().span.end
             } else {
                 self.current_start()
             };
-            if let Some(value) = value {
+            if let Some((value, complete)) = value {
+                if complete && self.i > value_end && self.tokens[self.i - 1].kind == TokenKind::Semi
+                {
+                    self.model.format_rows.push(start..self.i);
+                }
                 self.retain_fact_receipt(
                     "shock_instruction",
                     start,

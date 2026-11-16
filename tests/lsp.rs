@@ -3135,10 +3135,16 @@ async fn compare_models_trend_vs_sims_no_ss_fields() {
         .await;
     let snapshot = compare_working(service.inner(), &uri_a, &uri_b).await;
     assert_eq!(snapshot["state"], "result", "{snapshot}");
-    let value = snapshot["diff"].clone();
-    let obj = value.as_object().expect("json object");
-    assert!(obj.contains_key("added_endogenous") || obj.contains_key("removed_endogenous"));
-    assert!(obj.contains_key("added_equations") || obj.contains_key("removed_equations"));
+    let diff = &snapshot["diff"];
+    let rows = diff["semantic"]["rows"].as_array().expect("semantic rows");
+    for family in ["symbols", "equations"] {
+        assert!(
+            rows.iter().any(|row| row["family"] == family
+                && matches!(row["change"].as_str(), Some("added" | "removed"))),
+            "{family} additions or removals"
+        );
+    }
+    let obj = diff.as_object().expect("json object");
     for key in obj.keys() {
         let lower = key.to_ascii_lowercase();
         assert!(
@@ -3172,21 +3178,31 @@ async fn compare_shock_locations_follow_open_document_edits() {
         .await;
     let snapshot = compare_working(service.inner(), &uri_a, &uri_b).await;
     assert_eq!(snapshot["state"], "result", "{snapshot}");
-    let diff = snapshot["diff"].clone();
-    let changes = diff["shock_setup_changes"]
+    let diff = &snapshot["diff"];
+    let changes: Vec<_> = diff["semantic"]["rows"]
         .as_array()
-        .expect("shock changes");
+        .expect("semantic rows")
+        .iter()
+        .filter(|row| row["family"] == "shocks" && row["name"] == "e")
+        .collect();
     assert_eq!(changes.len(), 1, "{diff}");
-    let row = &changes[0];
-    assert_eq!(row["before"]["location"]["line"], 3);
-    assert_eq!(row["after"]["location"]["line"], 4);
-    assert_eq!(row["before"]["origin_uri"], uri_a.as_str());
-    assert_eq!(row["after"]["origin_uri"], uri_b.as_str());
-    assert!(diff["markdown"].as_str().unwrap().contains("after line 4"));
+    let navigation = &snapshot["navigation"];
+    let target = navigation["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == changes[0]["pointer"])
+        .expect("shock navigation");
+    for (side, line) in [("before", 2), ("after", 3)] {
+        let location = &target[side]["written_locations"][0];
+        assert_eq!(location["range"]["start"]["line"], line, "{target}");
+        assert_eq!(location["file_key"], navigation[side]["root_file"]);
+        assert_eq!(location["input_id"], side);
+    }
 }
 
 #[tokio::test]
-async fn format_indent_config_uses_four_spaces() {
+async fn format_indent_request_uses_four_spaces() {
     let text = "var y;\nmodel;\ny=c;\nend;\n";
     let uri = archive_url("trend_rbc_gov_inv");
     let (service, _socket) = new_service();
@@ -3194,37 +3210,21 @@ async fn format_indent_config_uses_four_spaces() {
         .inner()
         .did_open(open_params(uri.clone(), text.to_string(), 1))
         .await;
-    service
-        .inner()
-        .did_change_configuration(DidChangeConfigurationParams {
-            settings: serde_json::json!({ "dynare": { "formatIndent": 4 } }),
-        })
-        .await;
     let edits = service
         .inner()
         .formatting(DocumentFormattingParams {
             text_document: TextDocumentIdentifier { uri },
-            options: fmt_opts(),
+            options: FormattingOptions {
+                insert_spaces: true,
+                ..fmt_opts()
+            },
             work_done_progress_params: WorkDoneProgressParams::default(),
         })
         .await
-        .expect("format rpc");
-    let expected = dygnosis::format_text(text, "    ");
-    match (edits, expected) {
-        (None, None) => {}
-        (Some(edits), None) => assert!(edits.is_empty()),
-        (None, Some(formatted)) => {
-            panic!("LSP declined after formatIndent 4; library produced {formatted:?}")
-        }
-        (Some(edits), Some(formatted)) => {
-            assert_eq!(edits.len(), 1);
-            assert_eq!(edits[0].new_text, formatted);
-            assert!(
-                formatted.contains("    ") || formatted.contains("y"),
-                "expected 4-space indent in {formatted:?}"
-            );
-        }
-    }
+        .expect("format rpc")
+        .expect("formatting edit");
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].new_text, "var y;\nmodel;\n    y = c;\nend;\n");
 }
 
 #[tokio::test]

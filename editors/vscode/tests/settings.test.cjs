@@ -45,6 +45,18 @@ test("invalid values fall back and empty presentation lists remain empty", () =>
   assert.deepEqual(listSetting("sections", undefined, ["one"], ["one"], () => {}), []);
 });
 
+test("format preferences follow resource scope and default off", () => {
+  const { serverSettingsChanged } = require(compiledModule("settings"));
+  globals["format.splitStatements"] = true;
+  workspace["format.alignAssignments"] = true;
+  try {
+    const snapshot = configurationSnapshot(() => {}).dynare.configuration;
+    assert.deepEqual(snapshot.loose.format, { splitStatements: true, alignAssignments: false });
+    assert.deepEqual(snapshot.folders[0].settings.format, { splitStatements: true, alignAssignments: true });
+    assert.equal(serverSettingsChanged({ affectsConfiguration: key => key === "dynare.format" }), true);
+  } finally { delete globals["format.splitStatements"]; delete workspace["format.alignAssignments"]; }
+});
+
 test("Outline activity choices resolve by resource and invalid values use Both", () => {
   const logged = [];
   globals["outline.activity"] = "inactive";

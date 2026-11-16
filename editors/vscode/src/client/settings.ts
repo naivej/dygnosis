@@ -18,7 +18,7 @@ export function analysisSettingsChanged(event: vscode.ConfigurationChangeEvent, 
     .some(key => event.affectsConfiguration(`dynare.${key}`, resource));
 }
 export function serverSettingsChanged(event: vscode.ConfigurationChangeEvent): boolean {
-  return analysisSettingsChanged(event) || ["nameDetails", "outline", "parameterValueHints"]
+  return analysisSettingsChanged(event) || ["nameDetails", "outline", "parameterValueHints", "format"]
     .some(key => event.affectsConfiguration(`dynare.${key}`));
 }
 function valueSetting(key: string, resource: vscode.Uri | undefined, fallback: unknown): unknown {
@@ -72,6 +72,10 @@ export function engineSettings(resource: vscode.Uri | undefined, log: Log) {
       activity: outlineActivitySetting(resource, log),
     },
     parameterValueHints: booleanSetting("parameterValueHints", resource, true, log),
+    format: {
+      splitStatements: booleanSetting("format.splitStatements", resource, false, log),
+      alignAssignments: booleanSetting("format.alignAssignments", resource, false, log),
+    },
   };
 }
 export function configurationSnapshot(log: Log) {

@@ -396,6 +396,38 @@ struct PendingMacroTrace {
 pub(crate) struct EffectiveOrigins(Arc<SplicedSource>);
 
 impl EffectiveOrigins {
+    pub(crate) fn visit_written_in(&self, file: &str, span: Span, mut visit: impl FnMut(Span)) {
+        let segments = &self.0.segments;
+        let first = segments.partition_point(|segment| segment.spliced.end <= span.start);
+        for segment in &segments[first..] {
+            if segment.spliced.start >= span.end {
+                break;
+            }
+            if segment.file.as_deref() == Some(file)
+                && let Some(written) = segment.written_intersection(span)
+            {
+                visit(written);
+            }
+        }
+    }
+
+    pub(crate) fn copied_in(&self, file: &str, span: Span) -> Option<Span> {
+        let segments = &self.0.segments;
+        let segment = segments.get(segments.partition_point(|s| s.spliced.end <= span.start))?;
+        if segment.file.as_deref() != Some(file)
+            || span.end > segment.spliced.end
+            || segment.spliced.end - segment.spliced.start
+                != segment.origin.end - segment.origin.start
+        {
+            return None;
+        }
+        let delta = span.start - segment.spliced.start;
+        Some(Span {
+            start: segment.origin.start + delta,
+            end: segment.origin.start + delta + span.end - span.start,
+        })
+    }
+
     pub(crate) fn map_segments(
         &self,
         span: Span,
@@ -1597,6 +1629,24 @@ impl Workspace {
             .collect()
     }
 
+    pub(crate) fn has_snapshot_source(&self, root: &str, file: &str) -> bool {
+        if !self.docs.contains_key(file) {
+            return false;
+        }
+        let key = if self.overlay_only {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
+        key == file
+            || self.records.get(&key).is_some_and(|records| {
+                records
+                    .resolved
+                    .iter()
+                    .any(|record| self.include_key(&record.path) == file)
+            })
+    }
+
     pub(crate) fn snapshot_search_paths(&self, root: &str) -> Vec<String> {
         let key = if self.overlay_only {
             root.to_owned()
@@ -2739,6 +2789,24 @@ impl Workspace {
     pub(crate) fn effective_origins(&mut self, uri: &str) -> Option<EffectiveOrigins> {
         let key = self.ensure_loaded(uri)?;
         Some(EffectiveOrigins(self.spliced_source(&key)))
+    }
+
+    pub(crate) fn retained_effective_origins(&self, root: &str) -> Option<EffectiveOrigins> {
+        let key = if self.overlay_only {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
+        self.spliced.get(&key).cloned().map(EffectiveOrigins)
+    }
+
+    pub(crate) fn retained_effective_model(&self, root: &str) -> Option<&Model> {
+        let key = if self.overlay_only {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
+        self.effective.get(&key).map(Arc::as_ref)
     }
 
     /// Literal joined-source positions for a written cursor. Repeated include

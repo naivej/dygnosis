@@ -464,7 +464,63 @@ fn runs(text: &str, tokens: &[LexToken], roles: &[TokenRole]) -> ExpressionSide 
     ExpressionSide {
         text: text.into(),
         runs,
+        display_runs: None,
     }
+}
+
+fn display_side(
+    text: &str,
+    tokens: &[LexToken],
+    roles: &[TokenRole],
+    display: bool,
+) -> ExpressionSide {
+    let mut side = runs(text, tokens, roles);
+    if !display || tokens.is_empty() {
+        return side;
+    }
+    let words: Vec<_> = tokens.iter().map(|token| token.key.as_str()).collect();
+    let gaps = crate::engine::editing::format::spacing::gaps(&words);
+    let mut display_runs = Vec::new();
+    let mut position = 0;
+    for (index, token) in tokens.iter().enumerate() {
+        let gap = &text[position..token.start];
+        if !gap.chars().all(char::is_whitespace) {
+            return side;
+        }
+        let joined_power = gap.is_empty()
+            && index > 0
+            && tokens[index - 1].kind == TokenKind::Star
+            && token.kind == TokenKind::Star;
+        append_run(
+            &mut display_runs,
+            if joined_power || gap.contains(['\r', '\n']) {
+                gap
+            } else {
+                gaps[index]
+            },
+            TokenRole::Unchanged,
+        );
+        append_run(
+            &mut display_runs,
+            &text[token.start..token.end],
+            roles[index],
+        );
+        position = token.end;
+    }
+    let tail = &text[position..];
+    if !tail.chars().all(|ch| ch == ' ' || ch == '\t') {
+        return side;
+    }
+    append_run(&mut display_runs, tail, TokenRole::Unchanged);
+    if display_runs
+        .iter()
+        .map(|run| run.text.as_str())
+        .collect::<String>()
+        != text
+    {
+        side.display_runs = Some(display_runs);
+    }
+    side
 }
 
 fn plain(
@@ -492,6 +548,16 @@ pub fn expression_detail(
     field: &str,
     before: Option<&str>,
     after: Option<&str>,
+) -> ExpressionDetail {
+    expression_detail_impl(semantic, field, before, after, false)
+}
+
+fn expression_detail_impl(
+    semantic: &mut SemanticDiff,
+    field: &str,
+    before: Option<&str>,
+    after: Option<&str>,
+    display: bool,
 ) -> ExpressionDetail {
     if before == after {
         return plain(field, before, after, Availability::Complete, None);
@@ -536,8 +602,8 @@ pub fn expression_detail(
     }
     ExpressionDetail {
         field: field.into(),
-        before: before.map(|text| runs(text, &old, &old_roles)),
-        after: after.map(|text| runs(text, &new, &new_roles)),
+        before: before.map(|text| display_side(text, &old, &old_roles, display)),
+        after: after.map(|text| display_side(text, &new, &new_roles, display)),
         highlight_basis: HighlightBasis::PairedExpression,
         availability: Availability::Complete,
         reason: None,
@@ -706,7 +772,7 @@ fn unpaired_runs(text: &str, opposite: &CandidateTokens, role: TokenRole) -> Exp
             roles[index + 1] = role;
         }
     }
-    runs(text, &tokens, &roles)
+    display_side(text, &tokens, &roles, true)
 }
 
 fn unpaired_detail(
@@ -1089,11 +1155,12 @@ fn populate_rows(
                 ));
                 row.limits.push(ComparisonLimit::new("equation_correspondence_unpaired", "Text-only highlights do not establish equation, reference or timing correspondence.", "semantic_equations"));
             } else {
-                row.expressions.push(expression_detail(
+                row.expressions.push(expression_detail_impl(
                     &mut diff.semantic,
                     "expression",
                     before_text,
                     after_text,
+                    true,
                 ));
                 let sides = (
                     row.before
@@ -1629,5 +1696,83 @@ pub(crate) fn populate_local_references(before: &Model, after: &Model, diff: &mu
         );
         limit.omitted = Some(omitted);
         super::occurrences::record_limit(diff, SemanticFamily::Equations, limit);
+    }
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::*;
+
+    // A token replacement retains exact runs and colors no inserted space.
+    #[test]
+    fn readable_runs_preserve_token_roles() {
+        let old = "y=a+b+c(-1)";
+        let new = "y=a+d+c(-1)";
+        let mut semantic = SemanticDiff::new(ComparisonBudgets::default());
+        let detail =
+            expression_detail_impl(&mut semantic, "expression", Some(old), Some(new), true);
+        for (side, expected, changed, role) in [
+            (
+                detail.before.unwrap(),
+                "y = a + b + c(-1)",
+                "b",
+                TokenRole::Removed,
+            ),
+            (
+                detail.after.unwrap(),
+                "y = a + d + c(-1)",
+                "d",
+                TokenRole::Added,
+            ),
+        ] {
+            assert_eq!(
+                side.runs
+                    .iter()
+                    .map(|run| run.text.as_str())
+                    .collect::<String>(),
+                side.text
+            );
+            let display = side.display_runs.unwrap();
+            assert_eq!(
+                display
+                    .iter()
+                    .map(|run| run.text.as_str())
+                    .collect::<String>(),
+                expected
+            );
+            assert_eq!(
+                display
+                    .iter()
+                    .filter(|run| run.role == role)
+                    .map(|run| run.text.as_str())
+                    .collect::<String>(),
+                changed
+            );
+        }
+    }
+
+    #[test]
+    fn readable_power_keeps_the_operator_joined() {
+        let mut semantic = SemanticDiff::new(ComparisonBudgets::default());
+        let detail = expression_detail_impl(
+            &mut semantic,
+            "expression",
+            Some("y=2**2"),
+            Some("y=2**3"),
+            true,
+        );
+        for (side, expected) in [
+            (detail.before.unwrap(), "y = 2 ** 2"),
+            (detail.after.unwrap(), "y = 2 ** 3"),
+        ] {
+            let display = side.display_runs.unwrap();
+            assert_eq!(
+                display
+                    .iter()
+                    .map(|run| run.text.as_str())
+                    .collect::<String>(),
+                expected
+            );
+        }
     }
 }

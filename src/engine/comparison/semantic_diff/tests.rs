@@ -527,7 +527,16 @@ fn serialized_budget_reports_highlight_only_omission() {
     };
     let mut diff = compare_models(&model(1), &model(2));
     assert_eq!(diff.semantic.rows.len(), 1);
-    let row_size = serde_json::to_vec(&diff.semantic.rows[0]).unwrap().len();
+    let mut exact_row = diff.semantic.rows[0].clone();
+    for expression in &mut exact_row.expressions {
+        for side in [&mut expression.before, &mut expression.after]
+            .into_iter()
+            .flatten()
+        {
+            side.display_runs = None;
+        }
+    }
+    let row_size = serde_json::to_vec(&exact_row).unwrap().len();
     diff.semantic.budgets.serialized_output_bytes = row_size - 1;
     enforce_output_budget(&mut diff);
     assert_eq!(
@@ -834,5 +843,74 @@ fn actual_final_detail_json_stays_within_budget_after_reference_limit_metadata()
             .limits
             .iter()
             .any(|limit| limit.code == "reference_limit")
+    );
+}
+
+// A display copy must not displace exact highlights at the detail limit.
+#[test]
+fn display_runs_yield_before_exact_detail() {
+    let before = parse("var y; parameters a b c; model; [name='eq'] y=a+b+c(-1); end;");
+    let after = parse("var y; parameters a b c d; model; [name='eq'] y=a+d+c(-1); end;");
+    let mut diff = compare_models(&before, &after);
+    let mut exact = diff.clone();
+    assert!(
+        exact
+            .semantic
+            .rows
+            .iter()
+            .flat_map(|r| &r.expressions)
+            .flat_map(|e| [&e.before, &e.after])
+            .flatten()
+            .any(|s| s.display_runs.is_some())
+    );
+    for side in exact
+        .semantic
+        .rows
+        .iter_mut()
+        .flat_map(|r| &mut r.expressions)
+        .flat_map(|e| [&mut e.before, &mut e.after])
+        .flatten()
+    {
+        side.display_runs = None;
+    }
+    let bytes = |d: &crate::engine::comparison::ModelDiff| {
+        d.semantic
+            .rows
+            .iter()
+            .map(|r| serde_json::to_vec(r).unwrap().len())
+            .chain(
+                d.semantic
+                    .references
+                    .iter()
+                    .map(|r| serde_json::to_vec(r).unwrap().len()),
+            )
+            .sum::<usize>()
+    };
+    diff.semantic.budgets.serialized_output_bytes = bytes(&exact);
+    enforce_output_budget(&mut diff);
+    assert_eq!(diff.semantic.rows, exact.semantic.rows);
+    assert_eq!(diff.semantic.references, exact.semantic.references);
+}
+
+#[test]
+fn display_runs_yield_after_reference_repair_grows_a_row() {
+    let before = parse("var y; parameters a b c; model; [name='eq'] y=a+b+c(-1); end;");
+    let after = parse("var y; parameters a b c; model; [name='eq'] y=a+c+c(-1); end;");
+    let mut diff = compare_models(&before, &after);
+    diff.source_changes.files.clear();
+    assert_eq!(diff.semantic.rows.len(), 1);
+    diff.semantic.references = vec![reference(0, Side::Before)];
+    diff.semantic.rows[0].references = vec!["/semantic/references/0".into()];
+    diff.semantic.budgets.references_per_side = 0;
+    diff.semantic.budgets.serialized_output_bytes =
+        serde_json::to_vec(&diff.semantic.rows[0]).unwrap().len();
+    enforce_output_budget(&mut diff);
+    assert_eq!(diff.semantic.rows.len(), 1);
+    assert!(diff.semantic.references.is_empty());
+    assert!(
+        diff.semantic.rows[0]
+            .limits
+            .iter()
+            .any(|limit| limit.code == "references_partial")
     );
 }

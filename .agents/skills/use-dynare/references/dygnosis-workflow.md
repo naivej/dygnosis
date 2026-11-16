@@ -218,6 +218,9 @@ Actions has two selections:
 Alternatives remain separate. Bulk fixes preserve verification, staged repair
 and conflicts, and report skipped and remaining work. Rename and Format have
 their own direct tools. Unsafe Rename inputs withhold its complete proposal.
+For Format, set `splitStatements` to put verified statements on separate
+lines or `alignAssignments` to align consecutive assignments. Both default to
+false; `formatIndent` selects tabs or one to eight spaces.
 
 Before applying, verify the proposal revision, source policy, checked owners,
 include folders, selected analysis, macro work limit, every input guard and every edit's

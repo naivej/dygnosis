@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
+const { URL } = require("node:url");
 const vm = require("node:vm");
 const { parseSemantic, validateSemanticCapability, semanticFamilies } = require(compiledModule("semantic_view"));
 const { parseSnapshotDiff, normalizeChoices, allDiffSections, changeKinds } = require(compiledModule("diff_view"));
@@ -16,8 +17,8 @@ const value = value => ({ state: "present", value: { kind: "text", value } });
 const registry = { before: { [roots.before]: "var y;\n// old\n" }, after: { [roots.after]: "var y;\n// new\n" } };
 function fixture() {
   const result = {
-    comparison_versions: { semantic: 2, source_changes: 2, coverage: 1 },
-    semantic: { schema_version: 2, availability: "partial", budgets: { token_alignment_cells: 250000, source_alignment_cells: 1000000, references_per_side: 2000, source_hunks: 2000, serialized_output_bytes: 8388608 },
+    comparison_versions: { semantic: 3, source_changes: 2, coverage: 1 },
+    semantic: { schema_version: 3, availability: "partial", budgets: { token_alignment_cells: 250000, source_alignment_cells: 1000000, references_per_side: 2000, source_hunks: 2000, serialized_output_bytes: 8388608 },
       rows: [{ pointer: "/semantic/rows/0", family: "priors", change: "changed", name: "rho", count_unit: "accepted_occurrence", statement_group: null, facets: ["prior", "expression"], before: side("rho"), after: side("rho"),
         fields: [{ name: "mean", label: "Prior mean", before: value("0.8"), after: value("0.9"), changed: true, comparison_availability: "complete", numeric_difference: null }],
         expressions: [{ field: "mean", before: { text: "0.8", runs: [{ text: "0.8", role: "removed" }] }, after: { text: "0.9", runs: [{ text: "0.9", role: "added" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }],
@@ -114,9 +115,9 @@ test("closed schemas reject malformed advertised versions, values, runs and cros
 });
 test("current semantic advertisement is required and partial or unsupported advertisements fail", () => {
   assert.throws(() => validateSemanticCapability({ schema_version: 1 }), /unsupported/);
-  assert.doesNotThrow(() => validateSemanticCapability({ semantic_schema_version: 2, source_changes_schema_version: 2, coverage_schema_version: 1 }));
+  assert.doesNotThrow(() => validateSemanticCapability({ semantic_schema_version: 3, source_changes_schema_version: 2, coverage_schema_version: 1 }));
   assert.throws(() => validateSemanticCapability({ semantic_schema_version: 1 }), /unsupported/);
-  assert.throws(() => validateSemanticCapability({ semantic_schema_version: 2, source_changes_schema_version: 1, coverage_schema_version: 1 }), /unsupported/);
+  assert.throws(() => validateSemanticCapability({ semantic_schema_version: 3, source_changes_schema_version: 1, coverage_schema_version: 1 }), /unsupported/);
 });
 test("wrong navigation kind, identity and reference side fail before rendering", () => {
   for (const mutate of [r => r.navigation.rows[0].family = "commands", r => r.navigation.rows[0].after.dimension = "firms", r => r.navigation.rows[1].before = r.navigation.rows[1].after, r => r.navigation.rows[1].equation_pointer = "/bad"]) {
@@ -1379,4 +1380,27 @@ test("unavailable captured text has a picker reason and cannot open a partial te
   assert.match(host.picks.at(-1).items[0].description, /unavailable.*complete captured text/i);
   assert.match(host.logs.at(-1), /complete captured text is unavailable/);
   assert.equal(host.calls.some(call => call.id === "vscode.diff"), false);
+});
+
+// Display runs are accepted independently from exact runs; wrong-side roles fail.
+test("readable equation runs retain exact text and reject wrong-side roles", () => {
+  const r = fixture(), expression = r.semantic.rows[0].expressions[0];
+  expression.after.display_runs = [{ text: " = ", role: "unchanged" }, { text: "0.9", role: "added" }];
+  const parsed = parseSemantic(r, { before: null, after: null }, registry);
+  assert.equal(parsed.semantic.rows[0].expressions[0].after.text, "0.9");
+  assert.equal(parsed.semantic.rows[0].expressions[0].after.display_runs[0].text, " = ");
+  expression.after.display_runs[1].role = "removed";
+  assert.throws(() => parseSemantic(r, { before: null, after: null }, registry), /unsupported comparison/);
+});
+
+// Equation cards use readable runs while exact source text remains intact.
+test("equation excerpts and panels use display runs", () => {
+  const r = uncertainEquations(), side = r.diff.semantic.rows[2].expressions[0].after;
+  side.text = "k=y+1"; side.runs = [{ text: "k=y+", role: "unchanged" }, { text: "1", role: "added" }];
+  side.display_runs = [{ text: "k = y + ", role: "unchanged" }, { text: "1", role: "added" }];
+  const parsed = parseCurrent(r), env = webview(); env.render(parsed);
+  assert.ok(descendants(env.elements.results).some(node => node.className === "row-summary" && node.textContent.includes("k = y + 1")));
+  env.elements.results.querySelectorAll(".change-row")[2].fire("click");
+  assert.ok(descendants(env.elements.results).some(node => node.className?.includes("expression") && node.textContent.includes("k = y + 1")));
+  assert.equal(parsed.rows[2].semantic.expressions[0].after.text, "k=y+1");
 });

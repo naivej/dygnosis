@@ -127,6 +127,7 @@ pub fn enforce_output_budget(diff: &mut ModelDiff) {
         omit_hunks(file, omitted, "source_hunk_limit");
     }
 
+    let display = take_display_runs(&mut diff.semantic.rows);
     let limit = diff.semantic.budgets.serialized_output_bytes;
     let mut bytes = detail_bytes(diff);
     let mut omitted_rows = 0;
@@ -251,6 +252,70 @@ pub fn enforce_output_budget(diff: &mut ModelDiff) {
     {
         diff.source_changes.availability = Availability::Partial;
         diff.coverage.availability = Availability::Partial;
+    }
+    restore_display_runs(diff, display, limit);
+}
+
+struct DisplayRuns {
+    row: usize,
+    expression: usize,
+    side: Side,
+    runs: Vec<TokenRun>,
+}
+
+fn take_display_runs(rows: &mut [SemanticRow]) -> Vec<DisplayRuns> {
+    let mut display = Vec::new();
+    for (row, detail) in rows.iter_mut().enumerate() {
+        for (expression, detail) in detail.expressions.iter_mut().enumerate() {
+            for (side, value) in [
+                (Side::Before, &mut detail.before),
+                (Side::After, &mut detail.after),
+            ] {
+                if let Some(runs) = value.as_mut().and_then(|value| value.display_runs.take()) {
+                    display.push(DisplayRuns {
+                        row,
+                        expression,
+                        side,
+                        runs,
+                    });
+                }
+            }
+        }
+    }
+    display
+}
+
+fn restore_display_runs(diff: &mut ModelDiff, display: Vec<DisplayRuns>, limit: usize) {
+    if display.is_empty() {
+        return;
+    }
+    // Reference repair can grow rows. Admit display data after the exact
+    // detail and its repaired links have settled.
+    let mut remaining = limit.saturating_sub(detail_bytes(diff));
+    for display in display {
+        let Some(detail) = diff
+            .semantic
+            .rows
+            .get_mut(display.row)
+            .and_then(|row| row.expressions.get_mut(display.expression))
+            .filter(|detail| detail.availability != Availability::LimitExceeded)
+        else {
+            continue;
+        };
+        let value = match display.side {
+            Side::Before => &mut detail.before,
+            Side::After => &mut detail.after,
+        };
+        if let Some(value) = value {
+            let exact = json_bytes(value);
+            value.display_runs = Some(display.runs);
+            let extra = json_bytes(value).saturating_sub(exact);
+            if extra <= remaining {
+                remaining -= extra;
+            } else {
+                value.display_runs = None;
+            }
+        }
     }
 }
 

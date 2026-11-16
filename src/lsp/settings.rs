@@ -66,6 +66,8 @@ pub struct PresentationSettings {
     pub name_details: NameDetails,
     pub outline: OutlinePreferences,
     pub parameter_value_hints: bool,
+    pub split_statements: bool,
+    pub align_assignments: bool,
 }
 
 impl Default for PresentationSettings {
@@ -81,6 +83,8 @@ impl Default for PresentationSettings {
                 activity: OutlineActivity::Both,
             },
             parameter_value_hints: true,
+            split_statements: false,
+            align_assignments: false,
         }
     }
 }
@@ -320,6 +324,33 @@ fn read_settings(value: &Value, settings: &mut ResourceSettings, explanations: &
             MacroWorkLimit::default()
         });
     }
+    if let Some(format) = object.get("format") {
+        if !format.is_object() {
+            explanations.push(
+                "Invalid dynare.format; disable split statements and assignment alignment."
+                    .to_owned(),
+            );
+            settings.presentation.split_statements = false;
+            settings.presentation.align_assignments = false;
+        }
+        for (key, setting) in [
+            (
+                "splitStatements",
+                &mut settings.presentation.split_statements,
+            ),
+            (
+                "alignAssignments",
+                &mut settings.presentation.align_assignments,
+            ),
+        ] {
+            if let Some(raw) = format.get(key) {
+                *setting = raw.as_bool().unwrap_or_else(|| {
+                    explanations.push(format!("Invalid dynare.format.{key}; use false."));
+                    false
+                });
+            }
+        }
+    }
     if let Some(details) = object.get("nameDetails") {
         if !details.is_object() {
             explanations.push("Invalid dynare.nameDetails; show long names and TeX.".to_owned());
@@ -419,4 +450,27 @@ fn read_paths(raw: &Value, explanations: &mut Vec<String>) -> Vec<PathBuf> {
         }
     }
     paths
+}
+
+#[cfg(test)]
+mod formatting_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn formatting_preferences_resolve_and_invalid_values_default_off() {
+        let mut store = SettingsStore::default();
+        let uri = Url::parse("file:///model.mod").unwrap();
+        assert!(!store.resolve(&uri).presentation.split_statements);
+        assert!(!store.resolve(&uri).presentation.align_assignments);
+        assert!(
+            store
+                .apply(&json!({"format": {"splitStatements": true, "alignAssignments": "bad"}}))
+                .iter()
+                .any(|message| message.contains("alignAssignments"))
+        );
+        let presentation = store.resolve(&uri).presentation;
+        assert!(presentation.split_statements);
+        assert!(!presentation.align_assignments);
+    }
 }

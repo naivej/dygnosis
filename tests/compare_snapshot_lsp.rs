@@ -67,22 +67,15 @@ fn snapshot_capability_is_additive_and_advertises_bounded_source_negotiation() {
             .contains(&"dynare/compareModelSnapshots".to_owned())
     );
     let extensions = capabilities.experimental.unwrap();
-    for command in ["compareModelSnapshots"] {
-        for field in [
-            "semantic_schema_version",
-            "source_changes_schema_version",
-            "coverage_schema_version",
-        ] {
-            assert_eq!(
-                extensions["dygnosis"][command][field],
-                if field == "coverage_schema_version" {
-                    1
-                } else {
-                    2
-                },
-                "{command}.{field}"
-            );
-        }
+    for (field, version) in [
+        ("semantic_schema_version", 3),
+        ("source_changes_schema_version", 2),
+        ("coverage_schema_version", 1),
+    ] {
+        assert_eq!(
+            extensions["dygnosis"]["compareModelSnapshots"][field], version,
+            "compareModelSnapshots.{field}"
+        );
     }
     assert!(extensions["dygnosis"].get("compareModels").is_none());
     assert_eq!(

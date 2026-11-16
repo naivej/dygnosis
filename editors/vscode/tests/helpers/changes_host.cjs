@@ -228,7 +228,7 @@ function createHost() {
       showTextDocument: async (document, options) => { host.shown.push({ document, options }); return { document }; },
     },
   };
-  const service = { currentInstance: 1, client: { initializeResult: { capabilities: { experimental: { dygnosis: { compareModelSnapshots: { schema_version: 1, navigation_schema_version: 2, semantic_schema_version: 2, source_changes_schema_version: 2, coverage_schema_version: 1 } } }, executeCommandProvider: { commands: ["dynare/showEffectiveModel"] } } } },
+  const service = { currentInstance: 1, client: { initializeResult: { capabilities: { experimental: { dygnosis: { compareModelSnapshots: { schema_version: 1, navigation_schema_version: 2, semantic_schema_version: 3, source_changes_schema_version: 2, coverage_schema_version: 1 } } }, executeCommandProvider: { commands: ["dynare/showEffectiveModel"] } } } },
     onDidInvalidate: host.changed.event, onDidChange: host.changed.event, onDidUpdateModelInfo: host.modelUpdated.event, log: message => host.logs.push(message), failure: async message => host.failures.push(message), ensureStarted: async () => {},
     rootForDocument: async document => host.rootFor ? host.rootFor(document) : document.uri,
     knownOwners: uri => host.knownOwners?.(uri) ?? [], knownIncludedFiles: () => host.includedFiles ?? [],

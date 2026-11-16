@@ -95,8 +95,7 @@ fn chosen_file(params: &Params, snapshot: &mut SourceSnapshot) -> Result<String,
         .to_owned();
     if !snapshot
         .workspace
-        .snapshot_sources(&snapshot.root)
-        .contains_key(&file)
+        .has_snapshot_source(&snapshot.root, &file)
     {
         return Err(invalid(
             "The selected source file does not belong to the selected model",
@@ -146,7 +145,7 @@ fn format_request(params: &Params, snapshot: &mut SourceSnapshot) -> Result<Tool
         .map(format::parse_format_indent)
         .unwrap_or_else(|| Some("\t".into()))
         .ok_or_else(|| invalid("formatIndent must be tab or a whole number from 1 to 8"))?;
-    let edit = if let Some(range) = &params.line_range {
+    let selection = if let Some(range) = &params.line_range {
         let starts: Vec<_> = std::iter::once(0)
             .chain(text.match_indices('\n').map(|(at, _)| at + 1))
             .collect();
@@ -158,49 +157,84 @@ fn format_request(params: &Params, snapshot: &mut SourceSnapshot) -> Result<Tool
                 "line_range must be ordered, one-based and inside the selected file",
             ));
         }
-        match format::format_range_outcome_with_limit(
-            text,
-            range.start_line - 1,
-            range.end_line - 1,
-            &indent,
-            snapshot.workspace.root_macro_work_limit(&snapshot.root),
-        ) {
-            format::RangeFormatOutcome::Changed(start, end, replacement) => {
-                let start = starts[start as usize];
-                let end = starts
-                    .get(end as usize + 1)
-                    .map_or(text.len(), |end| end - 1);
-                Some(source_edit(
-                    snapshot,
-                    &file,
-                    Span::new(start, end),
-                    replacement,
-                )?)
-            }
-            format::RangeFormatOutcome::Unchanged => None,
-            format::RangeFormatOutcome::Unsupported(message) => {
-                return Ok(ToolResult::refused("FORMAT_UNSUPPORTED", message));
-            }
-        }
+        Some(
+            starts[range.start_line as usize - 1]
+                ..starts
+                    .get(range.end_line as usize)
+                    .copied()
+                    .unwrap_or(text.len()),
+        )
     } else {
-        match format::format_outcome_with_limit(
-            text,
-            &indent,
-            snapshot.workspace.root_macro_work_limit(&snapshot.root),
-        ) {
-            format::FormatOutcome::Changed(replacement) => Some(source_edit(
+        None
+    };
+    // A complete owner that never acquired this file cannot participate. An
+    // incomplete owner remains relevant because a missing include may own it.
+    let relevant: Vec<_> = snapshot
+        .analyses
+        .iter()
+        .filter(|(root, analysis)| {
+            *root == &snapshot.root
+                || analysis.coverage["includes_complete"] != true
+                || snapshot.workspace.has_snapshot_source(root, &file)
+        })
+        .collect();
+    let origins: Option<Vec<_>> = relevant
+        .iter()
+        .map(|(root, _)| snapshot.workspace.retained_effective_origins(root))
+        .collect();
+    let owners: Vec<_> = origins
+        .as_ref()
+        .map(|origins| {
+            relevant
+                .iter()
+                .zip(origins)
+                .map(|((_, analysis), origins)| format::FormatOwner {
+                    model: &analysis.model,
+                    origins,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let formatted = match format::format_source(
+        text,
+        &file,
+        selection,
+        &indent,
+        format::FormatStyle {
+            split_statements: params.split_statements,
+            align_assignments: params.align_assignments,
+        },
+        &owners,
+        snapshot.workspace.root_macro_work_limit(&snapshot.root),
+    ) {
+        Ok(formatted) => formatted,
+        Err(message) => return Ok(ToolResult::refused("FORMAT_UNSUPPORTED", message)),
+    };
+    let edit = formatted
+        .replacement
+        .map(|(range, replacement)| {
+            source_edit(
                 snapshot,
                 &file,
-                Span::new(0, text.len()),
+                Span::new(range.start, range.end),
                 replacement,
-            )?),
-            format::FormatOutcome::Unchanged => None,
-            format::FormatOutcome::Unsupported(message) => {
-                return Ok(ToolResult::refused("FORMAT_UNSUPPORTED", message));
-            }
-        }
-    };
+            )
+        })
+        .transpose()?;
+    if formatted.withheld > 0 && edit.is_none() {
+        return Ok(ToolResult::refused(
+            "FORMAT_UNSUPPORTED",
+            format::SPLIT_REFUSED,
+        ));
+    }
     let mut result = proposed(snapshot, &edit.into_iter().collect::<Vec<_>>())?;
+    if formatted.withheld > 0 {
+        result.cause(
+            "partial",
+            "FORMAT_SPLITS_WITHHELD",
+            format::split_notice(formatted.splits),
+        );
+    }
     result.data["status"] = json!(result.outcome.status);
     if let Some(file_text) = result
         .data
@@ -1234,6 +1268,89 @@ mod tests {
         }
     }
 
+    #[test]
+    fn format_styles_return_guarded_split_and_alignment() {
+        // Guards style options being ignored or a proposal losing its captured text.
+        let source = "parameters a longer;\na=1; longer=2;\n";
+        let mut snapshot = text_snapshot(source);
+        let result = edit_request(
+            "dynare_format",
+            &params(json!({
+                "splitStatements": true, "alignAssignments": true, "formatIndent": 2
+            })),
+            &mut snapshot,
+        )
+        .unwrap();
+        assert_eq!(result.outcome.status, "changed", "{:?}", result.outcome);
+        let formatted = result.data["formatted_text"].as_str().unwrap();
+        assert!(
+            formatted.contains("a      = 1;\nlonger = 2;"),
+            "{formatted}"
+        );
+        let proposal = result.proposal.unwrap();
+        assert_eq!(proposal["edits"][0]["expected_text"], source);
+        assert_eq!(proposal["edits"][0]["new_text"], formatted);
+        assert_eq!(proposal["revision"], snapshot.revision);
+    }
+
+    #[test]
+    fn format_split_preserves_native_tail_and_reports_withheld_work() {
+        // Guards reporting an unsafe native split as complete or changing the native line.
+        let source = "parameters a b;\na=1; b=2;\na=3; disp('keep   this');\n";
+        let mut snapshot = text_snapshot(source);
+        let result = edit_request(
+            "dynare_format",
+            &params(json!({"splitStatements":true})),
+            &mut snapshot,
+        )
+        .unwrap();
+        assert_eq!(result.outcome.status, "partial", "{:?}", result.outcome);
+        let formatted = result.data["formatted_text"].as_str().unwrap();
+        assert!(
+            formatted.contains("a=3; disp('keep   this');"),
+            "{formatted}"
+        );
+        assert!(result.proposal.is_some());
+        assert!(
+            result
+                .outcome
+                .reasons
+                .iter()
+                .any(|reason| reason.code == "FORMAT_SPLITS_WITHHELD")
+        );
+    }
+    #[test]
+    fn split_selected_include_returns_captured_guard_and_is_idempotent() {
+        // Guards proposing edits to the root, losing the include guard, or splitting outside selection.
+        let root = "@#include \"body.inc\"\n";
+        let body = "parameters a b;\na=1; b=2;\na=3; b=4;\n";
+        let mut snapshot = map_snapshot("root.mod", &[("root.mod", root), ("body.inc", body)]);
+        let options = params(
+            json!({"file":"body.inc", "line_range":{"start_line":2,"end_line":2}, "splitStatements":true, "formatIndent":2}),
+        );
+        let result = edit_request("dynare_format", &options, &mut snapshot).unwrap();
+        assert_eq!(result.outcome.status, "changed", "{:?}", result.outcome);
+        let formatted = result.data["formatted_text"].as_str().unwrap();
+        assert_eq!(formatted, "parameters a b;\na = 1;\nb = 2;\na=3; b=4;\n");
+        let proposal = result.proposal.unwrap();
+        assert_eq!(proposal["edits"][0]["file"], "body.inc");
+        assert_eq!(proposal["edits"][0]["expected_text"], "a=1; b=2;");
+        assert!(
+            proposal["inputs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|guard| guard["file"] == "body.inc")
+        );
+        let mut again = map_snapshot("root.mod", &[("root.mod", root), ("body.inc", formatted)]);
+        let repeated = edit_request("dynare_format", &params(json!({"file":"body.inc", "line_range":{"start_line":2,"end_line":3}, "splitStatements":true, "formatIndent":2})), &mut again).unwrap();
+        assert_eq!(
+            repeated.outcome.status, "unchanged",
+            "{:?}",
+            repeated.outcome
+        );
+        assert!(repeated.proposal.is_none());
+    }
     #[test]
     fn selected_include_fix_repairs_its_diagnostic_and_keeps_root_unchanged() {
         // Guards a stored include fix being applied to the root or accepted without repairing its exact owner.

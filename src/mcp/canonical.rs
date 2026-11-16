@@ -176,6 +176,12 @@ struct Params {
     expanded_range: Option<ExpandedRange>,
     #[serde(rename = "formatIndent")]
     format_indent: Option<Value>,
+    /// Split verified statements onto separate lines. Defaults to false.
+    #[serde(default, rename = "splitStatements")]
+    split_statements: bool,
+    /// Align consecutive assignments. Defaults to false.
+    #[serde(default, rename = "alignAssignments")]
+    align_assignments: bool,
     #[serde(default)]
     families: Vec<String>,
     #[serde(default)]
@@ -245,7 +251,13 @@ fn fields(tool: &str) -> Vec<&'static str> {
             "fixes",
         ],
         "dynare_rename" => &["symbol", "new_name"],
-        "dynare_format" => &["file", "line_range", "formatIndent"],
+        "dynare_format" => &[
+            "file",
+            "line_range",
+            "formatIndent",
+            "splitStatements",
+            "alignAssignments",
+        ],
         "dynare_extract" => &["names", "tags", "dimension", "equation"],
         "dynare_compare_models" => &[
             "comparison",
@@ -356,7 +368,7 @@ pub(super) fn advertised_tools(structured: bool) -> Vec<Tool> {
             "dynare_expand"=>"Show include/macro-expanded text with verified written origins. Focus with inclusive line_range, exclusive-end expanded_range or an equation identity. A range cutting a row omits its origin and states why. Partial expansion retains available text and its causes.",
             "dynare_actions"=>"Discover source action summaries or request a complete verified proposal. Select action_id with its expected_revision for one alternative. Set fixes=true to propose compatible proven diagnostic fixes, optionally by code, target or diagnostic_ids, without a discovery call. Alternatives are never combined automatically. Skipped and remaining work is explained. No file is written.",
             "dynare_rename"=>"Propose a complete rename of one resolved binding. A unique name works directly; a target or binding identity can disambiguate. Incomplete sources, collisions, generated names or incompatible checked owners withhold the complete proposal with a cause. No file is written.",
-            "dynare_format"=>"Propose whitespace formatting for the root or selected source file. Optional whole-line line_range is one-based and inclusive. formatIndent is tab or one to eight spaces. Native text and source outside the selected lines retain their layout. No file is written.",
+            "dynare_format"=>"Propose whitespace formatting for the root or selected source file. Optional whole-line line_range is one-based and inclusive. formatIndent is tab or one to eight spaces. Set splitStatements to put verified statements on separate lines or alignAssignments to align consecutive assignments; both default to false. Native text and source outside the selected lines retain their layout. No file is written.",
             "dynare_extract"=>"Produce a selected equation fragment with required declarations, local definitions and model context. Names combine with OR; tags combine with AND. Select a returned identity or scoped zero-based index for unnamed equations. Omitted setup is explicit; no numerical or runnable-model claim is inferred.",
             "dynare_compare_models"=>"Compare two model snapshots with independent analysis_a and analysis_b choices. Same source text can produce different model facts; both choices and revisions remain explicit. Sources use text/map/disk inputs; current disk inputs share validated positive and negative file facts. Repository input selects local Git or saved Working versions on the server host; no fetch or editor-buffer read occurs. Historical targets use that side's source revisions. Default sections include semantic changes and their direct locations. Request references explicitly to include usages. Semantic changes, references and changed source files share page_size; detail does not select additional sections. Filters select the same changes across sections. Request source for whole-file change context, or source_text for captured file contents. Reference owners are snapshot_pointer keys scoped to the two input revisions, including changes on other pages. Navigation needs semantic or reference facts in the selected sections. No numerical equivalence is inferred.",
             _=>unreachable!(),

@@ -60,9 +60,7 @@ use crate::engine::diagnostics::{DiagnosticSet, check_file, check_in_workspace_w
 use crate::engine::editing::equation_names::{
     equation_name_plan, long_name_plan, metadata_completion,
 };
-use crate::engine::editing::format::{
-    FormatOutcome, RangeFormatOutcome, format_outcome_with_limit, format_range_outcome_with_limit,
-};
+use crate::engine::editing::format::{FormatOwner, FormatStyle, format_source};
 use crate::engine::editing::refs::{
     enclosing_paren_has_ident, ident_at, is_legal_ident, option_command_at, option_owner_at,
 };
@@ -2169,61 +2167,88 @@ impl Backend {
         })
     }
 
-    fn format_document(&self, uri: &Url, indent: &str) -> Result<Option<Vec<TextEdit>>> {
-        let inner = self.lock_inner();
-        let doc = inner.document(uri).ok_or_else(|| {
-            tower_lsp::jsonrpc::Error::invalid_params(
-                "The formatting document is unavailable. Open it and try again.",
-            )
-        })?;
-        let settings = inner.settings.resolve(uri);
-        match format_outcome_with_limit(&doc.text, indent, settings.macro_work_limit) {
-            FormatOutcome::Changed(formatted) => {
-                Ok(Some(vec![full_document_edit(&doc.text, formatted)]))
-            }
-            FormatOutcome::Unchanged => Ok(None),
-            FormatOutcome::Unsupported(reason) => {
-                Err(tower_lsp::jsonrpc::Error::invalid_params(reason))
-            }
-        }
-    }
-
-    fn format_line_range(
+    async fn format_document(
         &self,
         uri: &Url,
-        range: Range,
+        range: Option<Range>,
         indent: &str,
     ) -> Result<Option<Vec<TextEdit>>> {
+        let (edits, splits, withheld) = self.format_document_edits(uri, range, indent)?;
+        if withheld > 0 {
+            if edits.is_none() {
+                return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                    crate::engine::editing::format::SPLIT_REFUSED,
+                ));
+            }
+            let message = crate::engine::editing::format::split_notice(splits);
+            self.client.log_message(MessageType::WARNING, message).await;
+        }
+        Ok(edits)
+    }
+
+    fn format_document_edits(
+        &self,
+        uri: &Url,
+        range: Option<Range>,
+        indent: &str,
+    ) -> Result<(Option<Vec<TextEdit>>, usize, usize)> {
+        use crate::engine::workspace::include_resolver::normalize_uri;
         let inner = self.lock_inner();
         let doc = inner.document(uri).ok_or_else(|| {
             tower_lsp::jsonrpc::Error::invalid_params(
                 "The formatting document is unavailable. Open it and try again.",
             )
         })?;
-        let mut end_line = range.end.line;
-        if range.end.character == 0 && end_line > range.start.line {
-            end_line -= 1;
-        }
         let settings = inner.settings.resolve(uri);
-        let (start_line, end_line, replacement) = match format_range_outcome_with_limit(
+        let index = LineIndex::new(&crate::engine::language::parser::normalize_newlines(
             &doc.text,
-            range.start.line,
-            end_line,
-            indent,
-            settings.macro_work_limit,
-        ) {
-            RangeFormatOutcome::Changed(start, end, replacement) => (start, end, replacement),
-            RangeFormatOutcome::Unchanged => return Ok(None),
-            RangeFormatOutcome::Unsupported(reason) => {
-                return Err(tower_lsp::jsonrpc::Error::invalid_params(reason));
-            }
+        ));
+        let selection = range.map(|range| {
+            let start = index.offset_utf16(&doc.text, span_pos(range.start)) as usize;
+            let end = index.offset_utf16(&doc.text, span_pos(range.end)) as usize;
+            start..end
+        });
+        let mut roots = inner.context_roots(uri);
+        roots.extend(inner.known_owner_roots(uri));
+        let mut observed = HashSet::new();
+        roots.retain(|root| observed.insert(inner.workspace_checks.observed_identity(root)));
+        let captured: Vec<_> = roots
+            .iter()
+            .filter_map(|root| {
+                let model = inner.workspace.retained_effective_model(root.as_str())?;
+                let origins = inner.workspace.retained_effective_origins(root.as_str())?;
+                Some((model, origins))
+            })
+            .collect();
+        let owners: Vec<_> = if captured.len() == roots.len() {
+            captured
+                .iter()
+                .map(|(model, origins)| FormatOwner { model, origins })
+                .collect()
+        } else {
+            Vec::new()
         };
-        Ok(Some(vec![line_range_edit(
+        let style = FormatStyle {
+            split_statements: settings.presentation.split_statements,
+            align_assignments: settings.presentation.align_assignments,
+        };
+        let result = format_source(
             &doc.text,
-            start_line,
-            end_line,
-            replacement,
-        )]))
+            &normalize_uri(uri.as_str()),
+            selection,
+            indent,
+            style,
+            &owners,
+            settings.macro_work_limit,
+        )
+        .map_err(tower_lsp::jsonrpc::Error::invalid_params)?;
+        let edits = result.replacement.map(|(bytes, new_text)| {
+            vec![TextEdit {
+                range: span_range(&index, &doc.text, Span::new(bytes.start, bytes.end)),
+                new_text,
+            }]
+        });
+        Ok((edits, result.splits, result.withheld))
     }
 
     fn execute(&self, command: &str, arguments: &[Value]) -> Result<Value> {
@@ -3593,7 +3618,12 @@ impl LanguageServer for Backend {
         ordering::ready().await;
         self.wait_document_analysis(Some(&params.text_document.uri))
             .await;
-        self.format_document(&params.text_document.uri, &request_indent(&params.options))
+        self.format_document(
+            &params.text_document.uri,
+            None,
+            &request_indent(&params.options),
+        )
+        .await
     }
 
     async fn range_formatting(
@@ -3603,11 +3633,12 @@ impl LanguageServer for Backend {
         ordering::ready().await;
         self.wait_document_analysis(Some(&params.text_document.uri))
             .await;
-        self.format_line_range(
+        self.format_document(
             &params.text_document.uri,
-            params.range,
+            Some(params.range),
             &request_indent(&params.options),
         )
+        .await
     }
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
@@ -3832,7 +3863,7 @@ pub fn initialize_result() -> InitializeResult {
                 "outlineActivity": {"notification":"dynare/outlineActivityChanged", "schema_version":1},
                 "analysisConfiguration": {"schema_version":1,"context_command":"dynare/analysisContext","set_command":"dynare/setAnalysisConfiguration","source_candidates_command":"dynare/sourceCandidates"},
                 "rename": {"command":"dynare/captureRename", "schema_version":1, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES},
-                "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES,"semantic_schema_version":2,"source_changes_schema_version":2,"coverage_schema_version":1},
+                "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES,"semantic_schema_version":3,"source_changes_schema_version":2,"coverage_schema_version":1},
                 "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::engine::preview::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::engine::preview::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true, "macro_messages":true, "document_symbols":true, "hover":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
                 ,"workspaceDiagnostics": {"schema_version":workspace_checks::SCHEMA_VERSION,"status_command":"dynare/workspaceStatus","recheck_command":"dynare/recheckWorkspace","cancel_command":"dynare/cancelWorkspace","active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/workspaceStatusChanged","typing_pause_ms":250}
@@ -5068,21 +5099,6 @@ fn request_indent(options: &FormattingOptions) -> String {
         _ => 4,
     };
     " ".repeat(width as usize)
-}
-
-fn full_document_edit(old_text: &str, new_text: String) -> TextEdit {
-    TextEdit {
-        range: full_document_range(old_text),
-        new_text,
-    }
-}
-
-fn line_range_edit(text: &str, start_line: u32, end_line: u32, replacement: String) -> TextEdit {
-    let end = line_end_utf16(text, end_line);
-    TextEdit {
-        range: Range::new(Position::new(start_line, 0), Position::new(end_line, end)),
-        new_text: replacement,
-    }
 }
 
 fn equation_at_byte(model: &Model, byte: u32) -> Option<&Equation> {
