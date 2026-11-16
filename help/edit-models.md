@@ -43,6 +43,11 @@ name displays its written or macro-expanded expression.
   existing line breaks within expressions and preserves native MATLAB and
   Octave lines and `verbatim` blocks. It skips statement splits when it cannot
   verify their boundaries, source ownership or selection.
+- To format automatically, search VS Code Settings for `@lang:dynare`, then
+  enable **Editor: Format On Save** or **Editor: Format On Paste** for Dynare.
+  If needed, select Dygnosis as **Editor: Default Formatter** in the same
+  language-specific settings. Automatic formatting uses your indentation and
+  Dygnosis formatting settings.
 - **Expand Selection** from the Command Palette: Select an expression or
   statement, then expand the selection to its enclosing statement or block.
 - **Linked Editing**: Enable **Editor: Linked Editing** (`editor.linkedEditing`)

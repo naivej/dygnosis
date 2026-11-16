@@ -14,7 +14,7 @@ configuration, and `@#include` files.
 Browse **Equations**, **Parameters**, and other groups. Choose **Added**,
 **Removed**, or **Changed**, or press Ctrl+F (Cmd+F on macOS) for **Find changes**.
 Open one or more rows to review their **Before** and **After** details and
-source links together. Equation excerpts and details use readable spacing when available. A changed parameter can group
+source links together. A changed parameter can group
 its direct dependents, and a history card can group several written periods.
 **Macro context** counts edits to each macro name separately and groups them
 with added, removed, and edited `@#include` files. Open a source link to review
