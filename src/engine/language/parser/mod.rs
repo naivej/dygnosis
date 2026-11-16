@@ -274,6 +274,8 @@ pub(crate) fn parse_expanded_context_controlled(
         symbol_list_id: 1,
         in_model: false,
         in_equation_body: false,
+        nonassociative_power: false,
+        ungrouped_power_refusals: 0,
         in_native_assignment: false,
         in_steady_state_rhs: false,
         in_dynare_block: false,
@@ -1144,6 +1146,10 @@ struct Parser<'a> {
     in_model: bool,
     /// Inside a `model` / `model_replace` body, whose rows are expressions.
     in_equation_body: bool,
+    /// Set by readers that can discard a row after an ungrouped power refusal.
+    nonassociative_power: bool,
+    /// Lets the surrounding reader discard the refused statement after recovery.
+    ungrouped_power_refusals: usize,
     /// Native MATLAB assignment text is retained for guidance, but declares no symbols.
     in_native_assignment: bool,
     /// Ordinary expression grammar while reading a steady-state assignment RHS.
@@ -1511,7 +1517,9 @@ impl Parser<'_> {
                 self.eat(TokenKind::Semi);
                 recognized = false;
             } else if self.at(TokenKind::Ident) && self.peek_kind(1) == Some(TokenKind::Eq) {
+                let power_refusals_before = self.ungrouped_power_refusals;
                 self.parse_top_assignment();
+                recognized &= self.ungrouped_power_refusals == power_refusals_before;
             } else {
                 recognized = self.at(TokenKind::Ident)
                     && crate::engine::language::command_skip::is_pin_statement_keyword(
@@ -2754,6 +2762,7 @@ impl Parser<'_> {
         }
         let body_i = self.i;
         let mut n_equations = 0usize;
+        let power_refusals_before = self.ungrouped_power_refusals;
         self.in_equation_body = true;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
             if let Some((eq, range)) = self.parse_equation_statement() {
@@ -2764,7 +2773,7 @@ impl Parser<'_> {
             }
         }
         self.in_equation_body = false;
-        if n_equations == 0 {
+        if n_equations == 0 && self.ungrouped_power_refusals == power_refusals_before {
             let issue_span = self.tokens.get(self.i).map(|tok| tok.span).unwrap_or(span);
             self.record_issue(ParseIssue {
                 kind: ParseIssueKind::EmptyReplaceBody,
@@ -3469,6 +3478,7 @@ impl Parser<'_> {
         }
         self.bump();
         let rhs_start = self.i;
+        let power_refusals_before = self.ungrouped_power_refusals;
         self.in_steady_state_rhs = true;
         let (rhs, clean, _) = self.parse_expr_side(ExprStop::Semi);
         self.in_steady_state_rhs = false;
@@ -3483,6 +3493,9 @@ impl Parser<'_> {
         };
         let completed = self.at(TokenKind::Semi);
         self.eat(TokenKind::Semi);
+        if self.ungrouped_power_refusals != power_refusals_before {
+            return None;
+        }
         let rhs_expr = Some(if clean {
             rhs.unwrap_or_else(|| self.alloc_error(span))
         } else {
@@ -10421,7 +10434,12 @@ impl Parser<'_> {
         let rhs_start = self.tokens[self.i].span.end;
         self.eat(TokenKind::Eq);
         let expr_i = self.i;
-        let expr = self.parse_expr();
+        let power_refusals_before = self.ungrouped_power_refusals;
+        let expr = self.parse_expr_with_nonassociative_power();
+        if self.ungrouped_power_refusals != power_refusals_before {
+            self.eat(TokenKind::Semi);
+            return None;
+        }
         let parsed_end_i = self.i;
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
             // A declared assignment keeps a following `name =` in the same
@@ -10683,6 +10701,7 @@ impl Parser<'_> {
         }
 
         let issues_before = self.model.parse_issues.len();
+        let power_refusals_before = self.ungrouped_power_refusals;
         let mut endogenous_tag = None;
         let stmt_i = self.i;
         let stmt_start = self.current_start();
@@ -10738,7 +10757,7 @@ impl Parser<'_> {
             self.bump();
             let comp_i = self.i;
             let comp_start = self.current_start();
-            let comp_expr = self.parse_expr();
+            let comp_expr = self.parse_expr_with_nonassociative_power();
             let comp_end_i = self.i;
             let comp_end = self.current_start();
             let text = join_lexemes(self.src, &self.tokens[comp_i..comp_end_i]);
@@ -10768,7 +10787,7 @@ impl Parser<'_> {
         let completed = self.at(TokenKind::Semi);
         self.eat(TokenKind::Semi);
 
-        if lhs_refused || rhs_refused {
+        if lhs_refused || rhs_refused || self.ungrouped_power_refusals != power_refusals_before {
             return None;
         }
 
@@ -10958,7 +10977,7 @@ impl Parser<'_> {
         let issues_before = self.model.parse_issues.len();
         let previous_args = self.in_model_call_args;
         self.in_model_call_args = true;
-        let rhs = self.parse_expr();
+        let rhs = self.parse_expr_with_nonassociative_power();
         self.in_model_call_args = previous_args;
         if self.model.parse_issues.len() > issues_before {
             self.skip_to_stmt_end();
@@ -10985,7 +11004,7 @@ impl Parser<'_> {
     }
 
     fn parse_expr_side(&mut self, stop: ExprStop) -> (Option<ExprId>, bool, bool) {
-        let id = self.parse_expr();
+        let id = self.parse_expr_with_nonassociative_power();
         let clean = match stop {
             ExprStop::EqOrSemi => {
                 self.at(TokenKind::Eq)
@@ -11803,6 +11822,14 @@ impl Parser<'_> {
         self.parse_bp(0)
     }
 
+    fn parse_expr_with_nonassociative_power(&mut self) -> Option<ExprId> {
+        let previous = self.nonassociative_power;
+        self.nonassociative_power = !self.in_native_assignment;
+        let expression = self.parse_expr();
+        self.nonassociative_power = previous;
+        expression
+    }
+
     fn parse_bp(&mut self, min_bp: u8) -> Option<ExprId> {
         let mut lhs = self.parse_prefix()?;
         while !self
@@ -11824,6 +11851,20 @@ impl Parser<'_> {
                     self.alloc_error(self.expr_span(lhs))
                 }
             };
+            // The power's right binding power leaves a second caret at this
+            // level. Dynare refuses it before constructing the first power.
+            if op == BinOp::Pow && self.nonassociative_power && self.at(TokenKind::Caret) {
+                let span = self.tokens[self.i].span;
+                self.push_bison(span, "syntax error, unexpected POWER".into());
+                self.ungrouped_power_refusals += 1;
+                // An unmatched group in the refused operand must not consume
+                // the following row or the block closer.
+                while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) && !self.at_block_stop()
+                {
+                    self.bump();
+                }
+                return Some(self.alloc_error(span));
+            }
             let span = Span {
                 start: self.expr_span(lhs).start,
                 end: self.expr_span(rhs).end,
@@ -12232,6 +12273,7 @@ impl Parser<'_> {
     fn parse_call(&mut self, callee: Name, kw: Token, callee_order: usize) -> ExprId {
         let callee_token = self.i - 1;
         let parse_issues_before = self.model.parse_issues.len();
+        let power_refusals_before = self.ungrouped_power_refusals;
         if self.model_function_context
             && self.intern.get(callee).eq_ignore_ascii_case("EXPECTATION")
         {
@@ -12349,6 +12391,9 @@ impl Parser<'_> {
             );
         }
         self.in_model_call_args = previous_argument_scope;
+        if self.ungrouped_power_refusals != power_refusals_before {
+            return self.alloc_error(kw.span);
+        }
         let closed = self.at(TokenKind::RParen);
         let end = if closed {
             self.bump().span.end
@@ -12653,7 +12698,11 @@ impl Parser<'_> {
             TokenKind::Minus => Some((3, 4, BinOp::Sub)),
             TokenKind::Star => Some((5, 6, BinOp::Mul)),
             TokenKind::Slash => Some((5, 6, BinOp::Div)),
-            TokenKind::Caret => Some((9, 8, BinOp::Pow)),
+            TokenKind::Caret => Some((
+                9,
+                if self.nonassociative_power { 10 } else { 8 },
+                BinOp::Pow,
+            )),
             TokenKind::Lt => Some((1, 2, BinOp::Lt)),
             TokenKind::Gt => Some((1, 2, BinOp::Gt)),
             TokenKind::Le => Some((1, 2, BinOp::Le)),

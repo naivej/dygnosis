@@ -223,6 +223,85 @@ fn official_parse(source: &str, accepted: bool) {
     }
 }
 
+// Guards non-associative power and recovery of the following equation.
+#[test]
+fn ungrouped_powers_refuse_the_second_caret() {
+    let prefix = "var y z; parameters a b c;\na=2; b=3; c=2;\nmodel;\n";
+    for expression in ["a^b^c", "(a^b^c)", "exp(a^b^c)", "a^-b^c^a", "a^b^exp(c"] {
+        let source = format!("{prefix}y={expression};\nz=1;\nend;\n");
+        let model = parse(&source);
+        let diagnostics = analyze(&model);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|row| row.severity == Severity::Error)
+            .collect();
+        let caret = prefix.len() + 2 + expression.rfind('^').unwrap();
+        assert_eq!(errors.len(), 1, "{source}: {diagnostics:?}");
+        assert_eq!(errors[0].code, "E001", "{source}");
+        assert_eq!(errors[0].message, "syntax error, unexpected POWER");
+        assert_eq!(errors[0].span.start as usize, caret, "{source}");
+        assert_eq!(errors[0].span.end as usize, caret + 1, "{source}");
+        assert_eq!(model.equations.len(), 1, "{source}");
+        assert_eq!(model.equations[0].text, "z = 1", "{source}");
+        official_parse(&source, false);
+    }
+
+    for expression in ["(a^b)^c", "a^(b^c)", "a^b*c^b", "a^-b^c", "-a^b"] {
+        let source = format!("{prefix}y={expression};\nz=1;\nend;\n");
+        let model = parse(&source);
+        let diagnostics = analyze(&model);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|row| row.severity != Severity::Error),
+            "{source}: {diagnostics:?}"
+        );
+        assert_eq!(model.equations.len(), 2, "{source}");
+        official_parse(&source, true);
+    }
+
+    let source = "var y z; parameters a b c;\na=2; b=3; c=2;\nmodel; [name='target'] y=0; z=1; end;\nmodel_replace('target'); y=a^b^c; end;\n";
+    let parsed = parse(source);
+    let diagnostics = analyze(&parsed);
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|row| row.severity == Severity::Error)
+        .collect();
+    assert_eq!(errors.len(), 1, "{diagnostics:?}");
+    assert_eq!(errors[0].message, "syntax error, unexpected POWER");
+    assert_eq!(parsed.equations.len(), 1);
+    assert_eq!(parsed.equations[0].text, "z = 1");
+    official_parse(source, false);
+}
+
+// The same refusal prevents writes from ordinary and steady-state assignments.
+#[test]
+fn ungrouped_powers_discard_refused_assignments() {
+    let source = "var y; parameters a b c;\na=extern_case(b^c^b); b=3; c=2;\nmodel; y=b; end;\n";
+    let parsed = parse(source);
+    assert_eq!(parsed.param_assignments.len(), 2);
+    assert!(parsed.external_function_names.is_empty());
+    assert!(parsed.statements.iter().all(|row| row.name != "a"));
+    assert_code(source, "E001", "syntax error, unexpected POWER");
+
+    let source = "var y; parameters a b c;\na=2; b=3; c=2;\nmodel; y=a; end;\nsteady_state_model;\ny=a^b^c;\ny=1;\nend;\n";
+    let parsed = parse(source);
+    assert_eq!(parsed.steady_state_equations.len(), 1);
+    assert_eq!(parsed.steady_state_equations[0].rhs, "1");
+    assert_code(source, "E001", "syntax error, unexpected POWER");
+
+    let source = "var y; parameters a b c;\na=2; b=3; c=2;\noutside=a^b^c;\nmodel; y=a; end;\n";
+    let parsed = parse(source);
+    assert!(parsed.helper_assignments.iter().any(|row| row.native));
+    assert_eq!(parsed.equations.len(), 1);
+    assert!(
+        analyze(&parsed)
+            .iter()
+            .all(|row| row.severity != Severity::Error)
+    );
+    official_parse(source, true);
+}
+
 // A bare signed number must not consume a Pratt power operand. Full
 // expressions are legal only between the value-list parentheses.
 #[test]
