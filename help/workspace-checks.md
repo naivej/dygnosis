@@ -11,9 +11,9 @@ You can also switch this filter from the Command Palette with **Dygnosis: Show
 not fully checked models** and **Dygnosis: Show all workspace files**. The
 view restores your choice when you reopen the workspace.
 
-Expand an incomplete model and select the reason beneath it to open the
-source of the check. For a missing include, the reason opens the
-`@#include` directive, including when it is in another file.
+Expand an incomplete model and select the reason beneath it to preview the
+source beside your current editor. For a missing include, the reason selects
+the `@#include` directive, including when it is in another file.
 
 ## Scope and exclusions
 

@@ -116,6 +116,7 @@ interface CachedRequest {
 export interface ModelSnapshot extends ModelInfo { client_instance: number }
 export interface NavigationDecision { isCurrent(): boolean }
 export type NavigationGuard = (loadedDocument: vscode.TextDocument) => boolean | NavigationDecision | Promise<boolean | NavigationDecision>;
+type SourceNavigationOptions = Pick<vscode.TextDocumentShowOptions, "viewColumn" | "preserveFocus" | "preview"> & { reuseOpen?: boolean };
 export interface InputInvalidation { root?: string; reason: "input" | "file" | "lifecycle"; uri?: string; inputRevision?: string; modelRevision?: string }
 
 /** Shared service for status, view, tint, diagnostics and previews. */
@@ -978,12 +979,12 @@ export class DygnosisClient implements vscode.Disposable {
     this.changed.fire(); this.scheduleRootRefresh();
   }
   treatAsRoot(document: vscode.Uri): void { this.clearDocumentContext(document.toString()); this.rememberStandalone(document); }
-  async openLocation(location: { uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } }, root?: vscode.Uri, guard?: NavigationGuard, options?: { viewColumn?: vscode.ViewColumn; reuseOpen?: boolean }): Promise<void> {
+  async openLocation(location: { uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } }, root?: vscode.Uri, guard?: NavigationGuard, options?: SourceNavigationOptions): Promise<void> {
     const uri = vscode.Uri.parse(location.uri);
     const range = new vscode.Range(location.range.start.line, location.range.start.character, location.range.end.line, location.range.end.character);
     await this.openSource(uri, root, guard, range, options);
   }
-  private async openSource(uri: vscode.Uri, root?: vscode.Uri, guard?: NavigationGuard, selection?: vscode.Range, options?: { viewColumn?: vscode.ViewColumn; reuseOpen?: boolean }): Promise<void> {
+  private async openSource(uri: vscode.Uri, root?: vscode.Uri, guard?: NavigationGuard, selection?: vscode.Range, options?: SourceNavigationOptions): Promise<void> {
     if (!["file", "untitled"].includes(uri.scheme)) throw new Error("This source location is unavailable to native analysis.");
     if (root) await this.ensureStarted();
     const document = await vscode.workspace.openTextDocument(uri);
@@ -997,8 +998,9 @@ export class DygnosisClient implements vscode.Disposable {
       vscode.window.activeTextEditor === editor && (typeof decision === "boolean" ? decision : decision.isCurrent());
     if (root && !sameUri(document.uri, root)) await this.applyOwner(document, root, undefined, current);
     if (!current()) refuse("The model or source changed while preparing this location. Request the source jump again.");
-    const viewColumn = options?.reuseOpen ? reuseOpenViewColumn(document.uri) : options?.viewColumn;
-    await vscode.window.showTextDocument(document, { viewColumn, selection });
+    const { reuseOpen, ...presentation } = options ?? {};
+    const viewColumn = reuseOpen ? reuseOpenViewColumn(document.uri) : presentation.viewColumn;
+    await vscode.window.showTextDocument(document, { ...presentation, viewColumn, selection });
   }
   async failure(error: unknown): Promise<void> {
     const message = failureText(error);

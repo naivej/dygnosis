@@ -653,7 +653,7 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
             refuse("The written source changed since the workspace check.");
           }
           return { isCurrent };
-        }, { reuseOpen: true });
+        }, { viewColumn: vscode.ViewColumn.Beside, preview: true, preserveFocus: true });
       } finally { opening.dispose(); }
     } catch (error) {
       if (selected === navigation && !disposed) unavailable(failureText(error));

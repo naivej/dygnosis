@@ -300,6 +300,10 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   const directive = '@#include "missing-workspace-check.inc"';
   await fs.writeFile(calibrationPath, `// Calibration.\r\n${directive}\r\n`);
   await fs.writeFile(policyPath, '@#include "../../includes/calibration.inc"\n');
+  // A source tab in the current group must not absorb the reason's side preview.
+  await vscode.window.showTextDocument(vscode.Uri.file(calibrationPath), { viewColumn: vscode.ViewColumn.One, preview: false });
+  const anchor = await vscode.window.showTextDocument(vscode.Uri.file(policyPath), { viewColumn: vscode.ViewColumn.One });
+  const initialGroupCount = vscode.window.tabGroups.all.length;
   await waitFor(async () => {
     workspaceStatus = await status(service);
     return workspaceStatus?.complete && workspaceStatus.counts.incomplete === 1;
@@ -309,12 +313,10 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   const causeLocation = "calibration.inc:2";
   assert.equal(uriPath(incompletePolicy.reason.location.uri), calibrationPath.toLowerCase());
   assert.match(incompletePolicy.reason.message, /missing-workspace-check\.inc/);
-  const selectedDirective = () => {
-    const editor = vscode.window.activeTextEditor;
-    return editor?.document.uri.fsPath.toLowerCase() === calibrationPath.toLowerCase() &&
+  const selectedDirective = () => vscode.window.visibleTextEditors.find(editor =>
+    editor.viewColumn !== anchor.viewColumn && editor.document.uri.fsPath.toLowerCase() === calibrationPath.toLowerCase() &&
       editor.selection.start.line === 1 && editor.selection.start.character === 0 &&
-      editor.document.getText(editor.selection) === directive;
-  };
+      editor.document.getText(editor.selection) === directive);
   const clickFilter = async title => {
     const clicked = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare Workspace')); const action=[...pane.querySelectorAll('.pane-header .action-label')].find(value=>(value.getAttribute('aria-label')||value.title||'').includes(${JSON.stringify(title)})); if(!action) return false; action.click(); return true; })()`);
     assert.equal(clicked, true, `native workspace toolbar contains ${title}`);
@@ -340,10 +342,16 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
     await send("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: number });
     await send("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: number });
   });
-  await waitFor(selectedDirective, "click selects the exact missing include directive in the nested source");
+  await waitFor(selectedDirective, "click selects the exact missing include directive in a side editor");
+  const sideEditor = selectedDirective();
+  const sideColumn = sideEditor.viewColumn;
+  const sideGroup = () => vscode.window.tabGroups.all.find(group => group.viewColumn === sideColumn);
+  assert.equal(vscode.window.tabGroups.all.length, initialGroupCount + 1, "the reason opens a split even when its source has a tab in the current group");
+  assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), anchor.document.uri.toString(), "the model editor stays active");
+  assert.equal(sideGroup()?.activeTab?.isPreview, true, "the split opens a preview tab");
   await waitFor(async () => (await status(service))?.complete && rowTextIncludes(await treeRows(), reason.label),
     "workspace refresh restores the reason row after the include opens");
-  vscode.window.activeTextEditor.selection = new vscode.Selection(0, 0, 0, 0);
+  sideEditor.selection = new vscode.Selection(0, 0, 0, 0);
   const focused = () => nativeValue(`${selector}.classList.contains('focused')`);
   await nativeValue(`${selector}.closest('.monaco-list').focus()`);
   if (!await focused()) {
@@ -352,8 +360,10 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   }
   assert.equal(await focused(), true, "keyboard focus reaches the cause row");
   await press("Enter", 13);
-  await waitFor(selectedDirective, "Enter selects the same written directive");
-  evidence.checks.push("the reason row shows the written cause on hover, and click and Enter select the exact nested include directive");
+  await waitFor(() => selectedDirective()?.viewColumn === sideColumn, "Enter selects the same written directive in the same split");
+  assert.equal(vscode.window.tabGroups.all.length, initialGroupCount + 1, "repeating the action keeps the existing split");
+  assert.equal(sideGroup()?.tabs.length, 1, "repeating the action reuses its preview tab");
+  evidence.checks.push("click and Enter preview the exact nested include directive in one side editor, even with its source already open in the model group");
   assert.ok(rowTextIncludes(filteredRows, "models") && rowTextIncludes(filteredRows, "variants"));
   for (const name of ["root.mod", "root.dyn", "same.mod", "shared.inc", "Open Dygnosis Help"])
     assert.ok(!rowTextIncludes(filteredRows, name), `${name} is absent from the affected-model list`);

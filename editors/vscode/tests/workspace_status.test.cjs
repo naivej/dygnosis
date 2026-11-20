@@ -46,6 +46,7 @@ const vscode = {
   TreeItem: class { constructor(label, collapsibleState) { this.label = label; this.collapsibleState = collapsibleState; } },
   TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 }, StatusBarAlignment: { Left: 1 },
   FileType: { File: 1 },
+  ViewColumn: { Beside: -2 },
   RelativePattern: class { constructor(baseUri, pattern) { this.baseUri = baseUri; this.pattern = pattern; } },
   ConfigurationTarget: { WorkspaceFolder: 3 },
   window: {
@@ -419,8 +420,9 @@ test("a workspace reason opens only its verified written range", async () => {
     return proof;
   };
   const target = { ...document(location.uri), getText: () => source.replaceAll("\n", "\r\n") };
-  env.service.openLocation = async (place, rootUri, guard) => {
+  env.service.openLocation = async (place, rootUri, guard, options) => {
     assert.equal(rootUri, undefined, "the jump keeps the user's explicit model context");
+    assert.deepEqual(options, { viewColumn: vscode.ViewColumn.Beside, preview: true, preserveFocus: true });
     const result = await guard(target);
     if (result.isCurrent()) opened.push(place);
   };

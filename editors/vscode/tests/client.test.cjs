@@ -1207,12 +1207,15 @@ test("native Beside placement is forwarded only after a source loader guard acce
   const root = Uri.parse("file:///workspace/root.mod"), target = Uri.parse("file:///workspace/part.inc");
   const loaded = { uri: target, languageId: "dynare", version: 1 }, originalOpen = vscode.workspace.openTextDocument;
   const location = { uri: target.toString(), range: { start: { line: 2, character: 3 }, end: { line: 2, character: 5 } } };
+  const presentation = { viewColumn: vscode.ViewColumn.Beside, preview: true, preserveFocus: true };
   vscode.workspace.openTextDocument = () => pending.promise;
-  const rejected = client.openLocation(location, root, () => false, { viewColumn: vscode.ViewColumn.Beside });
+  const rejected = client.openLocation(location, root, () => false, presentation);
   pending.resolve(loaded); await assert.rejects(rejected, /source changed/); assert.equal(host.reveals.length, 0);
-  await client.openLocation(location, root, document => document === loaded, { viewColumn: vscode.ViewColumn.Beside });
-  assert.equal(host.reveals.length, 1); assert.equal(host.reveals[0].options.viewColumn, vscode.ViewColumn.Beside);
-  assert.deepEqual(host.reveals[0].options.selection.coordinates, [2, 3, 2, 5]);
+  await client.openLocation(location, root, document => document === loaded, presentation);
+  assert.equal(host.reveals.length, 1);
+  const { selection, ...shown } = host.reveals[0].options;
+  assert.deepEqual(shown, presentation);
+  assert.deepEqual(selection.coordinates, [2, 3, 2, 5]);
   vscode.workspace.openTextDocument = originalOpen; await client.shutdown();
 });
 
