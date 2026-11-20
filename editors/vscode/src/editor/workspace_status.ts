@@ -1,24 +1,25 @@
 import { refuse, runCommand } from "../client/refusal";
+import { failureText, reasonText } from "../client/failure";
+import { createHash } from "node:crypto";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { record } from "../client/protocol";
+import { location, record, type Location } from "../client/protocol";
 import { analysisSettingsChanged, workspaceDiagnosticsSetting } from "../client/settings";
 import { automaticConfigurationName } from "../client/analysis_presentation";
-import type { ModelSnapshot } from "../client/client";
+import type { DygnosisClient, ModelSnapshot } from "../client/client";
 import { displaySourcePath } from "../client/source_uri";
 
 const states = ["pending", "checking", "checked", "incomplete", "failed", "excluded"] as const;
 type RootState = typeof states[number];
 type DiscoveryState = "pending" | "discovering" | "complete" | "cancelled" | "disabled";
+interface WorkspaceReason { message: string; location: Location | null }
 export interface WorkspaceRoot {
   root_uri: string; state: RootState; revision: string | null;
-  errors: number; warnings: number; failure: string | null; dependency_candidates: string[];
-  cause?: string | null;
-  cause_message?: string | null;
+  errors: number; warnings: number; reason: WorkspaceReason | null; dependency_candidates: string[];
   analysis?: {name: string | null; label?: string; preview: boolean; source: boolean};
 }
 export interface WorkspaceStatus {
-  schema_version: 1; pass_revision: number; enabled: boolean; discovery: DiscoveryState;
+  schema_version: 2; pass_revision: number; enabled: boolean; discovery: DiscoveryState;
   cancelled: boolean; complete: boolean; coverage_complete: boolean;
   counts: Record<RootState, number>; roots: WorkspaceRoot[];
   discovery_failures: { folder_uri: string; failure: string }[];
@@ -27,9 +28,10 @@ export interface WorkspaceStatus {
   metrics: { discovery_ms: number; analysis_ms: number; completed_jobs: number; reused_jobs: number; elapsed_ms: number | null };
 }
 export interface WorkspaceCapability {
-  schema_version: 1; status_command: "dynare/workspaceStatus"; recheck_command: "dynare/recheckWorkspace";
+  schema_version: 2; status_command: "dynare/workspaceStatus"; recheck_command: "dynare/recheckWorkspace";
   cancel_command: "dynare/cancelWorkspace"; active_model_notification: "dynare/activeModelChanged";
   status_notification: "dynare/workspaceStatusChanged";
+  check_location_command: "dynare/workspaceCheckLocation";
 }
 interface WorkspaceConnection {
   readonly initializeResult?: unknown;
@@ -38,7 +40,7 @@ interface WorkspaceConnection {
   isRunning?(): boolean;
 }
 /** Root selection is a synchronous read of proven context, never owner discovery. */
-export interface WorkspaceClientPort {
+export interface WorkspaceClientPort extends Pick<DygnosisClient, "openLocation"> {
   readonly client: WorkspaceConnection | undefined; readonly currentInstance: number;
   readonly onDidChange: vscode.Event<void>; readonly onDidReady?: vscode.Event<void>;
   readonly onDidUpdateModelInfo: vscode.Event<ModelSnapshot>;
@@ -58,11 +60,21 @@ function identity(uri: vscode.Uri): string {
   return uri.scheme === "file" && process.platform === "win32" ? uri.fsPath.toLowerCase().replace(/[\\/]+$/, "") : uri.toString().replace(/\/+$/, "");
 }
 function nullableText(value: unknown): value is string | null { return value === null || typeof value === "string"; }
+function writtenLocation(value: unknown): value is Location { return location(value) && fileUri(value.uri); }
+function workspaceReason(value: unknown): value is WorkspaceReason {
+  return record(value) && typeof value.message === "string" && !!value.message.trim() &&
+    (value.location === null || writtenLocation(value.location));
+}
+function sameLocation(left: Location, right: Location): boolean {
+  return left.uri === right.uri && left.range.start.line === right.range.start.line &&
+    left.range.start.character === right.range.start.character && left.range.end.line === right.range.end.line &&
+    left.range.end.character === right.range.end.character;
+}
 function diagnostics(count: number, noun: "Error" | "Warning"): string { return `${count} ${noun}${count === 1 ? "" : "s"}`; }
 /** All required fields are checked; future additive fields are harmless. */
 export function parseWorkspaceStatus(value: unknown): WorkspaceStatus {
   const invalid = (): never => { throw new Error("Unsupported workspace status. Use the bundled binary or update dynare.serverPath."); };
-  if (!record(value) || value.schema_version !== 1 || !integer(value.pass_revision) ||
+  if (!record(value) || value.schema_version !== 2 || !integer(value.pass_revision) ||
       typeof value.enabled !== "boolean" || typeof value.cancelled !== "boolean" || typeof value.complete !== "boolean" ||
       typeof value.coverage_complete !== "boolean" || typeof value.discovery !== "string" || !["pending", "discovering", "complete", "cancelled", "disabled"].includes(value.discovery) ||
       !record(value.counts) || !Array.isArray(value.roots) || !Array.isArray(value.discovery_failures) || !record(value.metrics)) return invalid();
@@ -71,15 +83,18 @@ export function parseWorkspaceStatus(value: unknown): WorkspaceStatus {
   const rootKeys = new Set<string>();
   const roots = value.roots.map((root: unknown): WorkspaceRoot => {
     if (!record(root) || !fileUri(root.root_uri) || !states.includes(root.state as RootState) || !nullableText(root.revision) ||
-        !integer(root.errors) || !integer(root.warnings) || !nullableText(root.failure) ||
-        !(root.cause === undefined || nullableText(root.cause)) || !(root.cause_message === undefined || nullableText(root.cause_message)) ||
+        !integer(root.errors) || !integer(root.warnings) ||
         !Array.isArray(root.dependency_candidates) ||
         !root.dependency_candidates.every(fileUri)) return invalid();
+    const reason = root.reason;
+    if (root.state === "incomplete" || root.state === "failed") {
+      if (!workspaceReason(reason) || (reason.location && (root.state === "failed" || !root.revision))) return invalid();
+    } else if (reason !== null) return invalid();
     const key = identity(vscode.Uri.parse(root.root_uri));
     if (rootKeys.has(key)) return invalid(); rootKeys.add(key);
     if (root.analysis !== undefined && (!record(root.analysis) || !nullableText(root.analysis.name) || !(root.analysis.label === undefined || typeof root.analysis.label === "string") || typeof root.analysis.preview !== "boolean" || typeof root.analysis.source !== "boolean")) return invalid();
     return { root_uri: root.root_uri, state: root.state as RootState, revision: root.revision, errors: root.errors,
-      warnings: root.warnings, failure: root.failure, cause: root.cause, cause_message: root.cause_message,
+      warnings: root.warnings, reason,
       dependency_candidates: root.dependency_candidates, analysis: root.analysis as WorkspaceRoot["analysis"] };
   });
   if (states.some(state => roots.filter(root => root.state === state).length !== counts[state])) return invalid();
@@ -104,7 +119,7 @@ export function parseWorkspaceStatus(value: unknown): WorkspaceStatus {
   if ((!value.enabled && (value.discovery !== "disabled" || value.complete || value.coverage_complete)) ||
       (value.complete && (value.cancelled || value.discovery !== "complete" || counts.pending > 0 || counts.checking > 0)) ||
       (value.coverage_complete && (!value.complete || failures.length > 0 || counts.failed > 0 || counts.incomplete > 0))) return invalid();
-  return { schema_version: 1, pass_revision: value.pass_revision, enabled: value.enabled, discovery: value.discovery as DiscoveryState,
+  return { schema_version: 2, pass_revision: value.pass_revision, enabled: value.enabled, discovery: value.discovery as DiscoveryState,
     cancelled: value.cancelled, complete: value.complete, coverage_complete: value.coverage_complete, counts, roots, include_files: includeFiles, discovery_failures: failures,
     non_default_roots: value.non_default_roots, metrics: { discovery_ms: metrics.discovery_ms, analysis_ms: metrics.analysis_ms, completed_jobs: metrics.completed_jobs,
       reused_jobs: metrics.reused_jobs, elapsed_ms: metrics.elapsed_ms } };
@@ -114,11 +129,12 @@ export function parseWorkspaceCapability(initializeResult: unknown): WorkspaceCa
   const capabilities = initializeResult.capabilities, experimental = capabilities.experimental;
   if (!record(experimental) || !record(experimental.dygnosis) || !record(experimental.dygnosis.workspaceDiagnostics)) return undefined;
   const capability = experimental.dygnosis.workspaceDiagnostics;
-  const expected: WorkspaceCapability = { schema_version: 1, status_command: "dynare/workspaceStatus", recheck_command: "dynare/recheckWorkspace",
-    cancel_command: "dynare/cancelWorkspace", active_model_notification: "dynare/activeModelChanged", status_notification: "dynare/workspaceStatusChanged" };
+  const expected: WorkspaceCapability = { schema_version: 2, status_command: "dynare/workspaceStatus", recheck_command: "dynare/recheckWorkspace",
+    cancel_command: "dynare/cancelWorkspace", check_location_command: "dynare/workspaceCheckLocation",
+    active_model_notification: "dynare/activeModelChanged", status_notification: "dynare/workspaceStatusChanged" };
   const commands = record(capabilities.executeCommandProvider) ? capabilities.executeCommandProvider.commands : undefined;
   if (Object.entries(expected).some(([key, value]) => capability[key] !== value) || !Array.isArray(commands) ||
-      [expected.status_command, expected.recheck_command, expected.cancel_command].some(command => !commands.includes(command))) return undefined;
+      [expected.status_command, expected.recheck_command, expected.cancel_command, expected.check_location_command].some(command => !commands.includes(command))) return undefined;
   return expected;
 }
 interface StatusContent { text: string; tooltip: vscode.MarkdownString; accessibilityLabel: string }
@@ -216,14 +232,14 @@ function treeRows(status: WorkspaceStatus, currentFolders: readonly vscode.Works
       const configuration = analysis ? analysis.label ?? analysis.name ?? "Custom configuration" : "";
       const name = analysis?.name;
       const configurationDetail = name && !automaticConfigurationName(name) ? name : configuration;
-      const cause = root.failure ?? (root.state === "incomplete" ? root.cause : undefined);
+      const cause = root.reason ? reasonText(root.reason) : undefined;
       const children: WorkspaceItem[] = [];
-      if (cause) {
-        const message = (root.failure ?? root.cause_message)?.split(/\r?\n/, 1)[0].trim() || "Check details";
-        const reason = new WorkspaceItem(`${key}:check-details`, message, "info");
+      if (root.reason) {
+        const message = root.reason.message.trim().split(/\r?\n/, 1)[0].slice(0, 160);
+        const reason = new WorkspaceItem(`${key}:check-details`, message, root.reason.location ? "go-to-file" : "info");
         reason.tooltip = cause;
         reason.accessibilityInformation = { label: `Check details for ${label}. ${cause}` };
-        reason.command = { command: "dygnosis.openWorkspaceCheckDetails", title: "Open check details", arguments: [cause] };
+        reason.command = { command: "dygnosis.openWorkspaceCheckDetails", title: "Open check details", arguments: [root] };
         children.push(reason);
       }
       const item = new WorkspaceItem(key, label, root.state === "failed" || root.state === "incomplete" ? "warning" :
@@ -583,6 +599,66 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
     if (kind === "recheck") { status = undefined; render(); }
     return refresh(kind === "recheck" ? capability.recheck_command : capability.cancel_command);
   };
+  let navigation = 0;
+  const openCheckDetails = async (root: WorkspaceRoot): Promise<void> => {
+    const selected = ++navigation;
+    if (!root?.reason) refuse("Choose a reason in Dynare Workspace.");
+    const cause = reasonText(root.reason);
+    if (root.state === "failed") {
+      await vscode.window.showInformationMessage(cause);
+      return;
+    }
+    const unavailable = (message: string): never => refuse(`${cause}\n\n${message}`, "WORKSPACE_CHECK_LOCATION");
+    const target = root.reason.location, command = capability?.check_location_command;
+    if (!target || !command || !root.revision) return unavailable("The written source location is unavailable.");
+    const currentRoot = (): WorkspaceRoot | undefined => status?.roots.find(entry => entry.root_uri === root.root_uri);
+    const matchingReason = (shown?: WorkspaceRoot): boolean => shown?.state === "incomplete" && !!shown.reason?.location &&
+      shown.reason.message === root.reason?.message && sameLocation(shown.reason.location, target);
+    const matchingReport = (shown = currentRoot()): boolean => shown?.revision === root.revision && matchingReason(shown);
+    if (!matchingReport()) return unavailable("The workspace check result changed.");
+    const client = connection, expectedGeneration = generation, editor = vscode.window.activeTextEditor;
+    const currentNavigation = (): boolean => !disposed && selected === navigation && generation === expectedGeneration &&
+      connection === client && service.client === client && service.currentInstance === instance && vscode.window.activeTextEditor === editor;
+    try {
+      const proof = await service.execute(command, [{ root_uri: root.root_uri, revision: root.revision }]);
+      if (selected !== navigation || disposed) return;
+      if (!currentNavigation() || !matchingReport()) refuse("The workspace check result changed.");
+      if (!record(proof) || proof.status !== "ready" || !writtenLocation(proof.location) || !sameLocation(proof.location, target) ||
+          typeof proof.text_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(proof.text_sha256)) {
+        refuse(record(proof) && proof.status === "unavailable" && typeof proof.message === "string" ? proof.message : "The written source location is unavailable.");
+      }
+      const expectedText = proof.text_sha256;
+      const targetKey = identity(vscode.Uri.parse(target.uri));
+      let openedTarget: vscode.TextDocument | undefined;
+      const opening = vscode.workspace.onDidOpenTextDocument(document => {
+        if (identity(document.uri) === targetKey) openedTarget = document;
+      });
+      try {
+        await service.openLocation(target, undefined, async document => {
+          const version = document.version;
+          const currentCheck = (): boolean => {
+            if (!currentNavigation()) return false;
+            const shown = currentRoot();
+            if (matchingReport(shown)) return true;
+            // Loading this file can replace the saved check with an overlay check.
+            // The document's text proof must still match before its range can open.
+            return openedTarget === document && (shown?.state === "pending" || shown?.state === "checking" || matchingReason(shown));
+          };
+          const info = await vscode.workspace.fs.stat(document.uri);
+          if (!(info.type & vscode.FileType.File)) refuse("The written source file is unavailable.");
+          if (!currentCheck()) refuse("The workspace check result changed.");
+          const isCurrent = (): boolean => currentCheck() && !document.isClosed && document.version === version;
+          const text = document.getText().replace(/\r\n?/g, "\n");
+          if (!isCurrent() || createHash("sha256").update(text).digest("hex") !== expectedText) {
+            refuse("The written source changed since the workspace check.");
+          }
+          return { isCurrent };
+        }, { reuseOpen: true });
+      } finally { opening.dispose(); }
+    } catch (error) {
+      if (selected === navigation && !disposed) unavailable(failureText(error));
+    }
+  };
   const subscriptions = [
     view.onDidCollapseElement(event => { if (event.element.id) collapsed.add(event.element.id); }),
     view.onDidExpandElement(event => { if (event.element.id) collapsed.delete(event.element.id); }),
@@ -595,8 +671,8 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
     vscode.workspace.onDidCloseTextDocument(documentChanged),
     vscode.workspace.onDidChangeConfiguration(event => { if (analysisSettingsChanged(event)) reconfigure(); }),
     vscode.commands.registerCommand("dygnosis.workspaceStatus", () => vscode.commands.executeCommand("dygnosis.workspace.focus")),
-    vscode.commands.registerCommand("dygnosis.openWorkspaceCheckDetails", (cause: string) =>
-      vscode.window.showInformationMessage("Workspace check details", { modal: true, detail: cause })),
+    vscode.commands.registerCommand("dygnosis.openWorkspaceCheckDetails", (root: WorkspaceRoot) =>
+      runCommand(service, () => openCheckDetails(root), () => !disposed)),
     vscode.commands.registerCommand("dygnosis.showNotFullyCheckedModels", async () => { await filterModels(true); await vscode.commands.executeCommand("dygnosis.workspace.focus"); }),
     vscode.commands.registerCommand("dygnosis.showAllWorkspaceFiles", async () => { await filterModels(false); await vscode.commands.executeCommand("dygnosis.workspace.focus"); }),
     vscode.commands.registerCommand("dygnosis.recheckWorkspace", () => runCommand(service, () => runAction("recheck"), () => !disposed)),

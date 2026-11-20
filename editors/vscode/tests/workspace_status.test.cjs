@@ -1,5 +1,6 @@
 const { compiledModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
+const { createHash } = require("node:crypto");
 const { MarkdownString, tooltipText } = require("./helpers/markdown.cjs");
 const test = require("node:test");
 const Module = require("node:module");
@@ -44,10 +45,14 @@ const vscode = {
   Uri: { parse: uri, file }, ThemeIcon: class { constructor(id) { this.id = id; } },
   TreeItem: class { constructor(label, collapsibleState) { this.label = label; this.collapsibleState = collapsibleState; } },
   TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 }, StatusBarAlignment: { Left: 1 },
+  FileType: { File: 1 },
   RelativePattern: class { constructor(baseUri, pattern) { this.baseUri = baseUri; this.pattern = pattern; } },
   ConfigurationTarget: { WorkspaceFolder: 3 },
   window: {
-    showInformationMessage: async (message, options) => { host.notifications.push(message); host.notificationOptions.push(options); },
+    showInformationMessage: async (message, ...options) => {
+      host.notifications.push(message); host.notificationOptions.push(options);
+      return options.find(option => option === host.notificationChoice);
+    },
     get activeTextEditor() { return host.editor; },
     createStatusBarItem: (id, alignment, priority) => {
       const item = { id, alignment, priority, visible: false, disposed: false, show() { this.visible = true; }, hide() { this.visible = false; }, dispose() { this.disposed = true; } };
@@ -66,6 +71,11 @@ const vscode = {
     showInputBox: async options => { host.inputs.push(options); return host.inputValues.shift(); },
   },
   workspace: {
+    fs: { stat: async target => {
+      if (host.missing === target.toString()) throw new Error("File not found.");
+      await host.beforeStat?.();
+      return { type: 1 };
+    } },
     get workspaceFolders() { return host.freshFolders ? host.folders.map(folder => ({ ...folder })) : host.folders; },
     asRelativePath: (value, includeFolder) => {
       host.relativePaths.push({ value, includeFolder });
@@ -86,6 +96,7 @@ const vscode = {
       host.watchers.push(watcher); return watcher;
     },
     onDidChangeWorkspaceFolders: listener => host.folderChanged.event(listener),
+    onDidOpenTextDocument: listener => host.opened.event(listener),
     onDidChangeConfiguration: listener => host.configured.event(listener),
     onDidChangeTextDocument: listener => host.edited.event(event => listener({ contentChanges: [{ text: "changed" }], ...event })),
     onDidCloseTextDocument: listener => host.closed.event(listener),
@@ -101,20 +112,22 @@ const { parseWorkspaceStatus, parseWorkspaceCapability, workspaceStatusContent, 
 Module._load = originalLoad;
 
 function root(state = "checked", extra = {}) {
-  return { root_uri: `${workspace}/main.mod`, state, revision: "model-input-1", errors: 0, warnings: 0, failure: null, dependency_candidates: [], ...extra };
+  const reason = ["incomplete", "failed"].includes(state) ? { message: "Check did not finish.", location: null } : null;
+  return { root_uri: `${workspace}/main.mod`, state, revision: "model-input-1", errors: 0, warnings: 0, reason, dependency_candidates: [], ...extra };
 }
 function facts(roots = [root()], extra = {}) {
   const counts = { pending: 0, checking: 0, checked: 0, incomplete: 0, failed: 0, excluded: 0 };
   for (const entry of roots) ++counts[entry.state];
   const complete = counts.pending === 0 && counts.checking === 0;
-  return { schema_version: 1, pass_revision: 1, enabled: true, discovery: "complete", cancelled: false, complete,
+  return { schema_version: 2, pass_revision: 1, enabled: true, discovery: "complete", cancelled: false, complete,
     coverage_complete: complete && !counts.incomplete && !counts.failed, counts, roots, include_files: [], discovery_failures: [],
     metrics: { discovery_ms: 5, analysis_ms: 20, completed_jobs: 1, reused_jobs: 0, elapsed_ms: 25 }, ...extra };
 }
-const capability = { schema_version: 1, status_command: "dynare/workspaceStatus", recheck_command: "dynare/recheckWorkspace", cancel_command: "dynare/cancelWorkspace",
+const capability = { schema_version: 2, status_command: "dynare/workspaceStatus", recheck_command: "dynare/recheckWorkspace", cancel_command: "dynare/cancelWorkspace",
+  check_location_command: "dynare/workspaceCheckLocation",
   active_model_notification: "dynare/activeModelChanged", status_notification: "dynare/workspaceStatusChanged", typing_pause_ms: 250 };
 function initializeResult(extra = {}) { return { capabilities: { experimental: { dygnosis: { workspaceDiagnostics: { ...capability, ...extra } } },
-  executeCommandProvider: { commands: [capability.status_command, capability.recheck_command, capability.cancel_command] } } }; }
+  executeCommandProvider: { commands: [capability.status_command, capability.recheck_command, capability.cancel_command, capability.check_location_command] } } }; }
 function connection(result = initializeResult()) {
   const value = { initializeResult: result, running: true, subscriptions: new Map(), sent: [], isRunning() { return this.running; },
     onNotification(name, callback) { const emitter = this.subscriptions.get(name) ?? new Emitter(); this.subscriptions.set(name, emitter); return emitter.event(callback); },
@@ -127,7 +140,7 @@ function setup(options = {}) {
   const stored = options.stored ?? new Map();
   host = { folders: options.folders ?? [folder()], settings: options.settings ?? {}, resources: new Map(), scopes: [],
     editor: options.editor, items: [], views: [], watchers: [], picks: [], choices: [], inputs: [], inputValues: [], updates: [], executed: [], relativePaths: [], commands: new Map(), notifications: [], notificationOptions: [],
-    collapsed: new Emitter(), expanded: new Emitter(), active: new Emitter(), folderChanged: new Emitter(), configured: new Emitter(), edited: new Emitter(), closed: new Emitter() };
+    collapsed: new Emitter(), expanded: new Emitter(), active: new Emitter(), folderChanged: new Emitter(), configured: new Emitter(), opened: new Emitter(), edited: new Emitter(), closed: new Emitter() };
   host.workspaceState = { get: key => stored.get(key), update: async (key, value) => { stored.set(key, value); } };
   const changed = new Emitter(), updated = new Emitter();
   const service = { client: options.client, currentInstance: 1, starts: 0, queries: [], logged: [], status: options.status ?? facts(), onDidChange: changed.event,
@@ -176,7 +189,7 @@ function liveWatchers(env, pattern) { return env.host.watchers.filter(watcher =>
 test("capability requires supported schema, exact commands, notification names and command advertisement", () => {
   assert.ok(parseWorkspaceCapability(initializeResult()));
   assert.ok(parseWorkspaceCapability(initializeResult({ future_field: true })));
-  for (const extra of [{ schema_version: 2 }, { cancel_command: "somewhere/else" }, { active_model_notification: "other/active" }]) assert.equal(parseWorkspaceCapability(initializeResult(extra)), undefined);
+  for (const extra of [{ schema_version: 1 }, { cancel_command: "somewhere/else" }, { active_model_notification: "other/active" }]) assert.equal(parseWorkspaceCapability(initializeResult(extra)), undefined);
   const result = initializeResult(); result.capabilities.executeCommandProvider.commands.pop();
   assert.equal(parseWorkspaceCapability(result), undefined);
   assert.equal(parseWorkspaceCapability({ capabilities: {} }), undefined);
@@ -185,7 +198,7 @@ test("status schema checks required fields, counts and consistency but allows ad
   assert.equal(parseWorkspaceStatus({ ...facts(), future_field: 7 }).counts.checked, 1);
   assert.equal(parseWorkspaceStatus(facts([], { metrics: { discovery_ms: 0, analysis_ms: 0, completed_jobs: 0, reused_jobs: 0, elapsed_ms: null } })).roots.length, 0);
   const cases = [
-    { schema_version: 2 }, { pass_revision: -1 }, { counts: { checked: 1 } }, { metrics: {} }, { discovery: "guessing" },
+    { schema_version: 1 }, { pass_revision: -1 }, { counts: { checked: 1 } }, { metrics: {} }, { discovery: "guessing" },
     { roots: [root("checked", { dependency_candidates: ["http://external/file"] })] }, { roots: [root(), root()] },
     { roots: [root("checked", { revision: undefined })] }, { counts: { ...facts().counts, pending: 1 } },
     { enabled: false }, { discovery_failures: [{ folder_uri: workspace, failure: 10 }] },
@@ -193,6 +206,9 @@ test("status schema checks required fields, counts and consistency but allows ad
   for (const extra of cases) assert.throws(() => parseWorkspaceStatus({ ...facts(), ...extra }), /Unsupported workspace status/);
   assert.throws(() => parseWorkspaceStatus(facts([root("pending")], { complete: true })), /Unsupported/);
   assert.throws(() => parseWorkspaceStatus(facts([root("failed")], { coverage_complete: true })), /Unsupported/);
+  for (const target of [null, { message: "Missing include", location: { uri: "http://invalid", range: {} } }]) {
+    assert.throws(() => parseWorkspaceStatus(facts([root("incomplete", { reason: target })])), /Unsupported/);
+  }
 });
 test("coverage is independent of diagnostics and distinguishes failure, incomplete, pending, cancellation, off and no roots", () => {
   const checked = workspaceStatusContent(parseWorkspaceStatus(facts([root("checked", { errors: 3, warnings: 2 })])));
@@ -356,10 +372,8 @@ test("check detail rows expose causes and retain their collapse state", async ()
   // Guards losing the readable cause or keyboard action and collapsing it on refresh.
   const configurationName = "Low persistence with separate productivity assumptions for households and firms";
   const configurationLabel = `${configurationName.slice(0, 70)}…`;
-  const entries = [root("incomplete", { cause: "main.mod:1: Cannot open missing.inc\nSearched the model folder",
-    cause_message: "Cannot open missing.inc\nSearched the model folder" }),
-    root("incomplete", { root_uri: workspace + "/legacy.mod", cause: "legacy.mod:2: Missing include" }),
-    root("failed", { root_uri: workspace + "/failed.mod", failure: "Could not read model" }),
+  const entries = [root("incomplete", { reason: { message: "Cannot open missing.inc\nSearched the model folder", location: null } }),
+    root("failed", { root_uri: workspace + "/failed.mod", revision: null, reason: { message: "Could not read model", location: null } }),
     root("checked", { root_uri: workspace + "/configured.mod", errors: 1, warnings: 2,
       analysis: { source: false, preview: false, name: configurationName, label: configurationLabel } }),
     root("checked", { root_uri: workspace + "/preview.mod", warnings: 75,
@@ -367,14 +381,17 @@ test("check detail rows expose causes and retain their collapse state", async ()
   const env = setup({ status: facts(entries) }); const registration = registerWorkspaceStatus(env.service); await flush();
   const model = child(rows(env)[0], "main.mod"), reason = model.children[0];
   assert.equal(model.command.command, "vscode.open"); assert.equal(model.collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
-  assert.equal(reason.label, "Cannot open missing.inc"); assert.equal(reason.tooltip, entries[0].cause);
+  assert.equal(reason.label, "Cannot open missing.inc"); assert.equal(reason.tooltip, entries[0].reason.message);
   assert.match(reason.accessibilityInformation.label, /main.mod.*Cannot open missing.inc/);
   assert.equal(reason.command.command, "dygnosis.openWorkspaceCheckDetails");
   await env.host.commands.get(reason.command.command)(...reason.command.arguments);
-  assert.equal(env.host.notificationOptions.at(-1).detail, entries[0].cause);
-  assert.equal(child(rows(env)[0], "legacy.mod").children[0].label, "Check details");
-  assert.equal(child(rows(env)[0], "legacy.mod").children[0].tooltip, entries[1].cause);
-  assert.equal(child(rows(env)[0], "failed.mod").children[0].label, entries[2].failure);
+  assert.match(env.host.notifications.at(-1), /Cannot open missing.inc.*\n[\s\S]*location is unavailable/);
+  assert.deepEqual(env.host.notificationOptions.at(-1), ["Recheck workspace"]);
+  const failed = child(rows(env)[0], "failed.mod").children[0];
+  assert.equal(failed.label, entries[1].reason.message);
+  await env.host.commands.get(failed.command.command)(...failed.command.arguments);
+  assert.equal(env.host.notifications.at(-1), entries[1].reason.message);
+  assert.deepEqual(env.host.notificationOptions.at(-1), [], "a read failure shows a non-modal message");
   // A clipped configuration must leave the counts first and the full name in the hover.
   const configured = child(rows(env)[0], "configured.mod");
   assert.equal(configured.description, `1 error · 2 warnings · ${configurationLabel}`);
@@ -387,10 +404,71 @@ test("check detail rows expose causes and retain their collapse state", async ()
   registration.dispose();
 });
 
+test("a workspace reason opens only its verified written range", async () => {
+  // Guards opening a stale row, a shifted directive, or a deleted file still loaded in the editor.
+  const source = '// Calibration\n@#include "missing.inc"\n';
+  const location = { uri: `${workspace}/blocks/calibration.inc`,
+    range: { start: { line: 1, character: 0 }, end: { line: 1, character: 23 } } };
+  const entry = root("incomplete", { reason: { message: "Could not open missing.inc.", location } });
+  const env = setup({ client: connection(), status: facts([entry]) });
+  const execute = env.service.execute, proofs = [], opened = [];
+  const proof = { status: "ready", location, text_sha256: createHash("sha256").update(source).digest("hex") };
+  env.service.execute = async (command, args, token) => {
+    if (command !== capability.check_location_command) return execute(command, args, token);
+    proofs.push(args);
+    return proof;
+  };
+  const target = { ...document(location.uri), getText: () => source.replaceAll("\n", "\r\n") };
+  env.service.openLocation = async (place, rootUri, guard) => {
+    assert.equal(rootUri, undefined, "the jump keeps the user's explicit model context");
+    const result = await guard(target);
+    if (result.isCurrent()) opened.push(place);
+  };
+  const registration = registerWorkspaceStatus(env.service);
+  try {
+    await flush();
+    const row = child(rows(env)[0], "main.mod").children[0];
+    const click = () => env.host.commands.get(row.command.command)(...row.command.arguments);
+    await click();
+    assert.deepEqual(proofs[0], [{ root_uri: entry.root_uri, revision: entry.revision }]);
+    assert.deepEqual(opened, [location]);
+    assert.deepEqual(env.host.notifications, []);
+
+    const unchanged = target.getText;
+    target.getText = () => "\n" + unchanged();
+    await click();
+    assert.match(env.host.notifications.at(-1), /Could not open missing.inc\.[\s\S]*written source changed/);
+    assert.deepEqual(env.host.notificationOptions.at(-1), ["Recheck workspace"]);
+
+    target.getText = unchanged;
+    env.host.missing = location.uri;
+    env.host.notificationChoice = "Recheck workspace";
+    await click();
+    assert.match(env.host.notifications.at(-1), /Could not open missing.inc\.[\s\S]*File not found/);
+    assert.equal(env.host.executed.at(-1).name, "dygnosis.recheckWorkspace");
+    env.host.notificationChoice = undefined;
+
+    env.host.missing = undefined;
+    const started = deferred(), blocked = deferred();
+    env.host.beforeStat = () => { started.resolve(); return blocked.promise; };
+    const opening = click();
+    await started.promise;
+    env.service.client.notify(facts([root("checked", { revision: "model-input-2" })], { pass_revision: 2 }));
+    blocked.resolve();
+    await opening;
+    assert.match(env.host.notifications.at(-1), /Could not open missing.inc\.[\s\S]*check result changed/);
+
+    await click();
+    assert.match(env.host.notifications.at(-1), /Could not open missing.inc\.[\s\S]*check result changed/);
+    assert.equal(proofs.length, 4, "a stale row never requests a new location");
+    assert.deepEqual(opened, [location], "unavailable targets never reveal an editor range");
+  } finally { registration.dispose(); }
+});
+
 test("not fully checked filter reveals affected paths and restores full-tree collapse choices", async () => {
   // Guards hiding affected models beneath collapsed folders or mixing queued/diagnostic-error models into the filter.
   const entries = [root("incomplete", { root_uri: `${workspace}/models/deep/partial.mod` }),
-    root("failed", { root_uri: `${other}/broken.dyn`, failure: "Could not read model" }),
+    root("failed", { root_uri: `${other}/broken.dyn`, reason: { message: "Could not read model", location: null } }),
     root("checked", { root_uri: `${workspace}/checked.mod`, errors: 2 }),
     ...["pending", "checking", "excluded"].map(state => root(state, { root_uri: `${workspace}/${state}.mod` }))];
   const env = setup({ folders: [folder(), folder(other, "other"), folder("file:///C:/empty", "empty")],
@@ -439,7 +517,7 @@ test("filtered results follow current status and retain unreadable-folder failur
   assert.equal(rows(env)[0].children[0].label, "Discovery failed");
   assert.equal(rows(env)[0].children[0].tooltip, "Permission denied");
   assert.match(env.host.views[0].message, /folder discovery failed/);
-  env.service.client.notify(facts([root("failed", { root_uri: `${workspace}/new.dyn`, failure: "Read failed" })]));
+  env.service.client.notify(facts([root("failed", { root_uri: `${workspace}/new.dyn`, reason: { message: "Read failed", location: null } })]));
   assert.equal(rows(env)[0].children[0].label, "new.dyn");
   assert.equal(env.host.views[0].description, "1 failed");
   registration.dispose();

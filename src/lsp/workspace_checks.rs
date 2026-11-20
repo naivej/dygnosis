@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use tower_lsp::Client;
 use tower_lsp::lsp_types::{Diagnostic, Url, notification};
 
@@ -16,13 +17,14 @@ use super::{
     prepare_root_report,
 };
 use crate::Workspace;
-use crate::engine::diagnostics::check_in_workspace_with_origins;
+use crate::engine::diagnostics::workspace_check;
 use crate::engine::workspace::InputStamps;
 use crate::engine::workspace::check_walk::{collect_workspace_files, is_include_path};
 use crate::engine::workspace::include_resolver::{normalize_uri, path_key};
 use crate::lsp::settings::SettingsStore;
 
-pub(super) const SCHEMA_VERSION: u32 = 1;
+pub(super) const SCHEMA_VERSION: u32 = 2;
+pub(super) const CHECK_LOCATION_COMMAND: &str = "dynare/workspaceCheckLocation";
 const TYPING_PAUSE: Duration = Duration::from_millis(250);
 pub(super) const RETAINED_REQUEST_ROOTS: usize = 8;
 
@@ -197,8 +199,15 @@ impl WorkspaceCheckState {
             *counts.entry(entry.state).or_default() += 1;
             let analysis = workspace.root_analysis_configuration(uri.as_str());
             if entry.selected && !analysis.is_source() { non_default_roots += 1; }
-            json!({"root_uri": uri, "state": entry.state, "revision": entry.revision, "errors": entry.errors, "warnings": entry.warnings, "failure": entry.failure,
-                "cause": entry.cause.as_ref().map(|cause| &cause.detail), "cause_message": entry.cause.as_ref().map(|cause| &cause.message),
+            let reason = match entry.state {
+                "incomplete" => json!({
+                    "message": entry.cause.as_ref().map_or("The workspace check could not finish for this model.", |cause| &cause.message),
+                    "location": entry.cause.as_ref().and_then(|cause| cause.target.as_ref()).map(|target| &target.location)
+                }),
+                "failed" => json!({"message": entry.failure, "location": null}),
+                _ => Value::Null,
+            };
+            json!({"root_uri": uri, "state": entry.state, "revision": entry.revision, "errors": entry.errors, "warnings": entry.warnings, "reason": reason,
                 "analysis":{"name":analysis.name,"label":analysis.display_label(),"preview":analysis.is_preview(),"source":analysis.is_source()},
                 "dependency_candidates": entry.dependency_uris})
         }).collect();
@@ -523,6 +532,55 @@ impl Backend {
         inner
             .workspace_checks
             .status(inner.settings.workspace_diagnostics, &inner.workspace)
+    }
+
+    pub(super) fn workspace_check_location(&self, arguments: &[Value]) -> Value {
+        let [request] = arguments else {
+            return json!({"status":"unavailable","message":"Choose a reason in Dynare Workspace."});
+        };
+        let Some((root, revision)) = request["root_uri"]
+            .as_str()
+            .and_then(|uri| Url::parse(uri).ok())
+            .zip(request["revision"].as_str())
+        else {
+            return json!({"status":"unavailable","message":"Choose a reason in Dynare Workspace."});
+        };
+        let target = {
+            let inner = self.lock_inner();
+            let current = inner.settings.workspace_diagnostics
+                && inner
+                    .workspace_checks
+                    .roots
+                    .get(&root)
+                    .is_some_and(|entry| {
+                        entry.selected
+                            && entry.state == "incomplete"
+                            && entry.revision.as_deref() == Some(revision)
+                    });
+            if !current {
+                return json!({"status":"unavailable","message":"The workspace check result changed."});
+            }
+            inner
+                .reports
+                .get(&root)
+                .filter(|report| report.revision == revision)
+                .and_then(|report| report.incomplete_cause.as_ref()?.target.clone())
+        };
+        let Some(target) = target else {
+            return json!({"status":"unavailable","message":"The written source location is unavailable."});
+        };
+        // VS Code can normalize line endings when it loads a document.
+        // Hash the retained text only for the selected report, outside the lock.
+        let mut text = target.source.as_ref();
+        let mut hash = Sha256::new();
+        while let Some((line, rest)) = text.split_once('\r') {
+            hash.update(line);
+            hash.update(b"\n");
+            text = rest.strip_prefix('\n').unwrap_or(rest);
+        }
+        hash.update(text);
+        let digest = format!("{:x}", hash.finalize());
+        json!({"status":"ready","location":target.location,"text_sha256":digest})
     }
 
     pub async fn active_model_changed(&self, params: Value) {
@@ -1071,7 +1129,7 @@ pub(super) fn compute(
             _ => format!("Cannot read root model: {root}"),
         }
     })?;
-    let set = check_in_workspace_with_origins(&mut workspace, root.as_str());
+    let check = workspace_check(&mut workspace, root.as_str());
     let complete = workspace.includes_complete(root.as_str())
         && workspace
             .expand_report(root.as_str())
@@ -1102,7 +1160,7 @@ pub(super) fn compute(
         .collect();
     let mut report = prepare_root_report(
         root,
-        set,
+        check,
         text,
         revision,
         &workspace.root_analysis_configuration(root.as_str()),

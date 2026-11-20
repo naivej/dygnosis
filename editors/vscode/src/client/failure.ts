@@ -27,6 +27,7 @@ export function recoveryActions(error: unknown): { label: string; command: strin
   if (!(error instanceof ActionFailure) || typeof error.code !== "string") return [];
   if (error.code.startsWith("ANALYSIS_")) return [{ label: "Analysis Configuration", command: "dygnosis.selectAnalysisConfiguration" }];
   if (["ENGINE_UNSUPPORTED", "ENGINE_INCOMPATIBLE", "ENGINE_PATH_UNAVAILABLE"].includes(error.code)) return [{ label: "Engine Settings", command: "dygnosis.openSettings" }];
+  if (error.code === "WORKSPACE_CHECK_LOCATION") return [{ label: "Recheck workspace", command: "dygnosis.recheckWorkspace" }];
   if (error.code === "ENGINE_UNAVAILABLE") return [{ label: "Restart server", command: "dygnosis.restartServer" }];
   return [];
 }

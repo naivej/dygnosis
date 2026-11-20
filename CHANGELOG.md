@@ -3,6 +3,16 @@
 Each entry describes the release at the time. Feature names and interfaces can
 change in later releases; see Dygnosis Help for current guidance.
 
+## v0.12.5
+
+In **Dynare Workspace**, select the reason under an incomplete model to open
+the source that stopped the check. For a missing include, Dygnosis opens the
+exact `@#include` directive, even in a nested file. If the location is no
+longer available, the message gives the cause and a **Recheck workspace**
+action. Read failures show their details without interrupting editing.
+If you use a custom engine through `dynare.serverPath`, update it with the
+extension to keep workspace checks available.
+
 ## v0.12.4
 
 **Format Document** and **Format Selection** format more Dynare syntax,

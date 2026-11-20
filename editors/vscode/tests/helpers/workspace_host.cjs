@@ -296,16 +296,25 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
 
   // The filter must reveal a model under a collapsed branch and restore that branch afterwards.
   const policyPath = path.join(workspaceRoot, policyKey);
-  await fs.writeFile(policyPath, '@#include "missing-workspace-check.inc"\n');
+  const calibrationPath = path.join(workspaceRoot, "includes/calibration.inc");
+  const directive = '@#include "missing-workspace-check.inc"';
+  await fs.writeFile(calibrationPath, `// Calibration.\r\n${directive}\r\n`);
+  await fs.writeFile(policyPath, '@#include "../../includes/calibration.inc"\n');
   await waitFor(async () => {
     workspaceStatus = await status(service);
     return workspaceStatus?.complete && workspaceStatus.counts.incomplete === 1;
   }, "missing include produces one model that is not fully checked");
   const incompletePolicy = workspaceStatus.roots.find(root => vscode.Uri.parse(root.root_uri).fsPath.toLowerCase() === policyPath.toLowerCase());
   assert.ok(incompletePolicy, "the incomplete root uses the policy file identity");
-  const causeLocation = `${policyName}:1`;
-  assert.ok(incompletePolicy.cause.includes(causeLocation) && incompletePolicy.cause.includes("missing-workspace-check.inc"));
-  if (incompletePolicy.cause_message != null) assert.match(incompletePolicy.cause_message, /missing-workspace-check\.inc/);
+  const causeLocation = "calibration.inc:2";
+  assert.equal(uriPath(incompletePolicy.reason.location.uri), calibrationPath.toLowerCase());
+  assert.match(incompletePolicy.reason.message, /missing-workspace-check\.inc/);
+  const selectedDirective = () => {
+    const editor = vscode.window.activeTextEditor;
+    return editor?.document.uri.fsPath.toLowerCase() === calibrationPath.toLowerCase() &&
+      editor.selection.start.line === 1 && editor.selection.start.character === 0 &&
+      editor.document.getText(editor.selection) === directive;
+  };
   const clickFilter = async title => {
     const clicked = await nativeValue(`(() => { const pane=[...document.querySelectorAll('.pane')].find(value=>value.textContent.includes('Dynare Workspace')); const action=[...pane.querySelectorAll('.pane-header .action-label')].find(value=>(value.getAttribute('aria-label')||value.title||'').includes(${JSON.stringify(title)})); if(!action) return false; action.click(); return true; })()`);
     assert.equal(clicked, true, `native workspace toolbar contains ${title}`);
@@ -327,16 +336,14 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
     await send("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", buttons: 1, clickCount: 1, ...point });
     await send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", buttons: 0, clickCount: 1, ...point });
   });
-  // The extension test host suppresses dialogs. Its refusal identifies the
-  // invoked command. The provider test verifies the exact detail payload.
-  const invoked = () => nativeValue("Array.from(document.querySelectorAll('.notification-list-item-message')).some(item=>item.textContent.includes('refused to show dialog in tests. Contents: Workspace check details'))");
   const press = (key, number) => nativeWorkbench(async send => {
     await send("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: number });
     await send("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: number });
   });
-  await waitFor(invoked, "click invokes the check details command");
-  await vscode.commands.executeCommand("notifications.clearAll");
-  await waitFor(async () => !await invoked(), "the test host notice clears");
+  await waitFor(selectedDirective, "click selects the exact missing include directive in the nested source");
+  await waitFor(async () => (await status(service))?.complete && rowTextIncludes(await treeRows(), reason.label),
+    "workspace refresh restores the reason row after the include opens");
+  vscode.window.activeTextEditor.selection = new vscode.Selection(0, 0, 0, 0);
   const focused = () => nativeValue(`${selector}.classList.contains('focused')`);
   await nativeValue(`${selector}.closest('.monaco-list').focus()`);
   if (!await focused()) {
@@ -345,9 +352,8 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   }
   assert.equal(await focused(), true, "keyboard focus reaches the cause row");
   await press("Enter", 13);
-  await waitFor(invoked, "Enter invokes the same check details command");
-  await vscode.commands.executeCommand("notifications.clearAll");
-  evidence.checks.push("reason child row shows the cause on hover and activates by click and Enter");
+  await waitFor(selectedDirective, "Enter selects the same written directive");
+  evidence.checks.push("the reason row shows the written cause on hover, and click and Enter select the exact nested include directive");
   assert.ok(rowTextIncludes(filteredRows, "models") && rowTextIncludes(filteredRows, "variants"));
   for (const name of ["root.mod", "root.dyn", "same.mod", "shared.inc", "Open Dygnosis Help"])
     assert.ok(!rowTextIncludes(filteredRows, name), `${name} is absent from the affected-model list`);
@@ -389,6 +395,7 @@ async function checkWorkspaceHost(service, workspaceRoot, evidence, { waitFor, c
   await revealRow("models", waitFor);
   await waitFor(async () => (await findRows("models"))[0]?.expanded === "false", "clearing the filter restores the collapsed models folder");
   await fs.writeFile(policyPath, files.get(policyKey));
+  await fs.writeFile(calibrationPath, files.get("includes/calibration.inc"));
   await waitFor(async () => {
     workspaceStatus = await status(service);
     return workspaceStatus?.coverage_complete;

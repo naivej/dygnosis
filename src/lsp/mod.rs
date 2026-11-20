@@ -56,7 +56,7 @@ use crate::engine::analysis::model_info::{
 };
 use crate::engine::catalog::{HET_SHOCKS_OVERWRITE, HETEROGENEITY_OPTION, option_doc};
 use crate::engine::diagnostics::explain;
-use crate::engine::diagnostics::{DiagnosticSet, check_file, check_in_workspace_with_origins};
+use crate::engine::diagnostics::{WorkspaceCheck, check_file, workspace_check};
 use crate::engine::editing::equation_names::{
     equation_name_plan, long_name_plan, metadata_completion,
 };
@@ -102,8 +102,14 @@ struct RootReport {
 
 #[derive(Clone)]
 struct WorkspaceCause {
-    detail: String,
     message: String,
+    target: Option<WorkspaceCauseTarget>,
+}
+
+#[derive(Clone)]
+struct WorkspaceCauseTarget {
+    location: Location,
+    source: Arc<str>,
 }
 
 #[derive(serde::Deserialize)]
@@ -596,7 +602,7 @@ impl Inner {
             }) {
                 continue;
             }
-            let set = check_in_workspace_with_origins(&mut self.workspace, uri.as_str());
+            let check = workspace_check(&mut self.workspace, uri.as_str());
             let revision = self
                 .workspace
                 .input_revision(uri.as_str())
@@ -607,7 +613,7 @@ impl Inner {
                 .or_else(|| self.workspace.get_source(uri.as_str()).map(Arc::from))
                 .unwrap_or_default();
             let choices = self.workspace.root_analysis_configuration(uri.as_str());
-            let mut report = prepare_root_report(uri, set, text, revision, &choices);
+            let mut report = prepare_root_report(uri, check, text, revision, &choices);
             report.reusable = self.workspace.includes_complete(uri.as_str())
                 && self
                     .workspace
@@ -3654,6 +3660,9 @@ impl LanguageServer for Backend {
                 self.set_analysis_configuration(&params.arguments).await,
             ));
         }
+        if params.command == workspace_checks::CHECK_LOCATION_COMMAND {
+            return Ok(Some(self.workspace_check_location(&params.arguments)));
+        }
         if matches!(
             params.command.as_str(),
             "dynare/workspaceStatus" | "dynare/recheckWorkspace" | "dynare/cancelWorkspace"
@@ -3843,6 +3852,7 @@ pub fn initialize_result() -> InitializeResult {
                     "dynare/workspaceStatus".into(),
                     "dynare/recheckWorkspace".into(),
                     "dynare/cancelWorkspace".into(),
+                    workspace_checks::CHECK_LOCATION_COMMAND.into(),
                 ],
                 work_done_progress_options: WorkDoneProgressOptions::default(),
             }),
@@ -3866,7 +3876,7 @@ pub fn initialize_result() -> InitializeResult {
                 "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES,"semantic_schema_version":3,"source_changes_schema_version":2,"coverage_schema_version":1},
                 "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::engine::preview::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::engine::preview::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true, "macro_messages":true, "document_symbols":true, "hover":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
-                ,"workspaceDiagnostics": {"schema_version":workspace_checks::SCHEMA_VERSION,"status_command":"dynare/workspaceStatus","recheck_command":"dynare/recheckWorkspace","cancel_command":"dynare/cancelWorkspace","active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/workspaceStatusChanged","typing_pause_ms":250}
+                ,"workspaceDiagnostics": {"schema_version":workspace_checks::SCHEMA_VERSION,"status_command":"dynare/workspaceStatus","recheck_command":"dynare/recheckWorkspace","cancel_command":"dynare/cancelWorkspace","check_location_command":workspace_checks::CHECK_LOCATION_COMMAND,"active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/workspaceStatusChanged","typing_pause_ms":250}
             }})),
             ..ServerCapabilities::default()
         },
@@ -3882,10 +3892,13 @@ pub fn diagnostics_for(uri: &str, text: &str) -> Vec<Diagnostic> {
     library_to_lsp(text, &check_file(text, uri))
 }
 
-fn library_to_lsp(text: &str, diags: &[crate::Diagnostic]) -> Vec<Diagnostic> {
+fn library_to_lsp<'a>(
+    text: &str,
+    diags: impl IntoIterator<Item = &'a crate::Diagnostic>,
+) -> Vec<Diagnostic> {
     let index = LineIndex::new(text);
     diags
-        .iter()
+        .into_iter()
         .filter(|d| !is_dropped_code(&d.code))
         .map(|d| {
             let start = index.position_utf16(text, d.span.start);
@@ -3909,14 +3922,18 @@ fn library_to_lsp(text: &str, diags: &[crate::Diagnostic]) -> Vec<Diagnostic> {
 }
 
 /// Convert one root once, outside the background commit lock. Each written
-/// file has one shared source snapshot and one line-index construction.
+/// file has one shared source snapshot and line index for diagnostic routing.
 fn prepare_root_report(
     root: &Url,
-    set: DiagnosticSet,
+    check: WorkspaceCheck,
     text: Arc<str>,
     revision: String,
     analysis: &crate::engine::analysis_configuration::AnalysisConfiguration,
 ) -> RootReport {
+    let WorkspaceCheck {
+        set,
+        incomplete_row,
+    } = check;
     let errors = set
         .diagnostics
         .iter()
@@ -3927,12 +3944,20 @@ fn prepare_root_report(
         .iter()
         .filter(|diag| diag.severity == Severity::Warning)
         .count();
-    let mut files: HashMap<Url, (Arc<str>, Vec<crate::Diagnostic>)> = HashMap::new();
+    struct DiagnosticToRoute {
+        diagnostic: crate::Diagnostic,
+        written: bool,
+        index: usize,
+    }
+    type FileDiagnostics = (Arc<str>, Vec<DiagnosticToRoute>);
+    let mut files: HashMap<Url, FileDiagnostics> = HashMap::new();
+    let mut cause_row: Option<(u8, usize)> = None;
     for (index, mut diagnostic) in set.diagnostics.into_iter().enumerate() {
         if is_dropped_code(&diagnostic.code) {
             continue;
         }
-        let (uri, source) = if let Some(origin) = set.origins.get(index).and_then(Option::as_ref) {
+        let origin = set.origins.get(index).and_then(Option::as_ref);
+        let (uri, source) = if let Some(origin) = origin {
             let Some(uri) = (if origin.file
                 == crate::engine::workspace::include_resolver::normalize_uri(root.as_str())
             {
@@ -3947,48 +3972,67 @@ fn prepare_root_report(
         } else {
             (root.clone(), Arc::clone(&text))
         };
+        let rank = if incomplete_row == Some(index) {
+            Some(0)
+        } else {
+            match diagnostic.code.as_str() {
+                "E061" => Some(1),
+                "E001" => Some(2),
+                "I211" => Some(3),
+                _ => None,
+            }
+        };
+        if let Some(rank) = rank
+            && cause_row.is_none_or(|(prior, _)| rank < prior)
+        {
+            cause_row = Some((rank, index));
+        }
         files
             .entry(uri)
             .or_insert_with(|| (source, Vec::new()))
             .1
-            .push(diagnostic);
+            .push(DiagnosticToRoute {
+                diagnostic,
+                written: origin.is_some(),
+                index,
+            });
     }
-    let mut incomplete_cause: Option<(u8, WorkspaceCause)> = None;
+    let mut incomplete_cause = None;
     let configuration_label = analysis.display_label();
     let routes = files
         .into_iter()
         .map(|(uri, (source, diagnostics))| {
-            let converted = library_to_lsp(&source, &diagnostics);
+            let converted = library_to_lsp(&source, diagnostics.iter().map(|row| &row.diagnostic));
             let rows = diagnostics
                 .into_iter()
                 .zip(converted)
-                .map(|(diagnostic, mut item)| {
-                    let rank = match diagnostic.code.as_str() {
-                        "E061" => Some(0),
-                        "E001" => Some(1),
-                        "I211" => Some(2),
-                        _ => None,
-                    };
-                    if let Some(rank) = rank
-                        && incomplete_cause
-                            .as_ref()
-                            .is_none_or(|(prior, _)| rank < *prior)
-                    {
-                        incomplete_cause = Some((
-                            rank,
-                            WorkspaceCause {
-                                detail: format!(
-                                    "{}:{} — {}",
-                                    uri.path().rsplit('/').next().unwrap_or("model"),
-                                    item.range.start.line + 1,
-                                    item.message
-                                )
-                                .chars()
-                                .take(512)
-                                .collect(),
-                                message: item.message.chars().take(160).collect(),
-                            },
-                        ));
+                .map(|(row, mut item)| {
+                    let DiagnosticToRoute {
+                        diagnostic,
+                        written,
+                        index,
+                    } = row;
+                    if cause_row.is_some_and(|(_, chosen)| chosen == index) {
+                        let target = if written && uri.scheme() == "file" {
+                            workspace_cause_range(&source, diagnostic.span, item.range).map(
+                                |range| {
+                                    // Stored fixes still use the established diagnostic coordinates.
+                                    if diagnostic.fix.is_none() {
+                                        item.range = range;
+                                    }
+                                    WorkspaceCauseTarget {
+                                        location: Location::new(uri.clone(), range),
+                                        source: Arc::clone(&source),
+                                    }
+                                },
+                            )
+                        } else {
+                            None
+                        };
+                        incomplete_cause = Some(WorkspaceCause {
+                            message: item.message.chars().take(512).collect(),
+                            target,
+                        });
                     }
                     if !analysis.is_source() {
                         item.source = Some(format!("Dygnosis · {configuration_label}"));
@@ -4021,10 +4065,25 @@ fn prepare_root_report(
         revision,
         errors,
         warnings,
-        incomplete_cause: incomplete_cause.map(|(_, cause)| cause),
+        incomplete_cause,
         reusable: false,
         stamps: crate::engine::workspace::InputStamps::new(),
         owner_files: HashSet::new(),
+    }
+}
+
+fn workspace_cause_range(source: &str, span: Span, routed: Range) -> Option<Range> {
+    source.get(span.start as usize..span.end as usize)?;
+    let preceding = &source[..span.end as usize];
+    // The ordinary diagnostic index already handles LF and CRLF. Only an
+    // earlier bare CR needs the written-source projection used by navigation.
+    if preceding
+        .match_indices('\r')
+        .any(|(offset, _)| source.as_bytes().get(offset + 1) != Some(&b'\n'))
+    {
+        model_map::written_range(source, span)
+    } else {
+        Some(routed)
     }
 }
 

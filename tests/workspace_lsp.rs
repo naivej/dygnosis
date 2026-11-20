@@ -132,7 +132,7 @@ impl Wire {
             "initializationOptions":{"dynare":{"configuration":{"schemaVersion":1,"loose":loose,"folders":scoped}}}})).await;
         assert_eq!(
             response["capabilities"]["experimental"]["dygnosis"]["workspaceDiagnostics"]["schema_version"],
-            1
+            2
         );
         self.notify("initialized", json!({}));
     }
@@ -568,7 +568,12 @@ async fn mod_helper_context_routes_real_macro_cause_and_keeps_workspace_inventor
             0
         );
         let before = if workspace {
-            Some(wire.complete().await)
+            let status = wire.complete().await;
+            let cause = &root(&status, &p)["reason"];
+            let refusal = notes.iter().find(|note| note["code"] == "E285").unwrap();
+            assert_eq!(cause["message"], refusal["message"]);
+            assert_eq!(cause["location"], json!({"uri":h,"range":refusal["range"]}));
+            Some(status)
         } else {
             None
         };
@@ -1351,6 +1356,72 @@ async fn shared_arbitrary_include_overlays_close_to_disk_and_single_report_owner
 }
 
 #[tokio::test]
+async fn workspace_reason_targets_the_written_nested_include_and_its_check_revision() {
+    // Guards dropping the nested URI, selecting a stale range, and using a new report for an old row.
+    let files = Files::new();
+    let child = "parts/child.inc";
+    let text = "// Calibration\r@#include \"absent.inc\"\r\n";
+    files.write(
+        "root.mod",
+        "@#include \"parts/child.inc\"\nvar y; model; y=0; end;\n",
+    );
+    files.write(child, text);
+    let root_uri = files.uri("root.mod");
+    let child_uri = files.uri(child);
+    let mut wire = Wire::new();
+    wire.start(vec![files.folder("")], json!({}), vec![], false)
+        .await;
+    let status = wire.complete().await;
+    let entry = root(&status, &root_uri);
+    assert_eq!(entry["state"], "incomplete");
+    let reason = &entry["reason"];
+    assert!(
+        reason["message"]
+            .as_str()
+            .unwrap()
+            .contains("Could not open absent.inc")
+    );
+    let location = json!({"uri":child_uri,"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":22}}});
+    assert_eq!(reason["location"], location);
+    let request = json!({"root_uri":root_uri,"revision":entry["revision"]});
+    let target = wire
+        .command_args("dynare/workspaceCheckLocation", request.clone())
+        .await;
+    assert_eq!(target["status"], "ready", "{target}");
+    assert_eq!(target["location"], location);
+    let expected =
+        <sha2::Sha256 as sha2::Digest>::digest("// Calibration\n@#include \"absent.inc\"\n");
+    assert_eq!(target["text_sha256"], format!("{expected:x}"));
+    let diagnostics = wire.pull(&child_uri).await;
+    let note = diagnostics
+        .iter()
+        .find(|note| note["code"] == "E061")
+        .expect("E061 in the written include");
+    assert_eq!(note["range"], location["range"]);
+
+    files.write(child, &format!("// Edited\r\n{text}"));
+    wire.changed(&child_uri, 2);
+    let moved = wire.complete().await;
+    assert_eq!(
+        root(&moved, &root_uri)["reason"]["location"]["range"]["start"]["line"],
+        2
+    );
+    assert_eq!(
+        wire.command_args("dynare/workspaceCheckLocation", request)
+            .await["status"],
+        "unavailable"
+    );
+
+    fs::remove_file(files.0.join(child)).unwrap();
+    wire.changed(&child_uri, 3);
+    let deleted = wire.complete().await;
+    assert_eq!(
+        root(&deleted, &root_uri)["reason"]["location"]["uri"],
+        root_uri
+    );
+}
+
+#[tokio::test]
 async fn missing_search_candidates_companion_creation_and_incomplete_coverage() {
     let files = Files::new();
     files.write("search/.keep", "");
@@ -1715,9 +1786,19 @@ async fn directory_and_loader_reads_are_revision_inputs() {
     wire.start(vec![files.folder("")], json!({}), vec![], false)
         .await;
     let before = wire.complete().await;
-    let previous_revision = root(&before, &files.uri("root.mod"))["revision"].clone();
+    let before = root(&before, &files.uri("root.mod"));
+    let previous_revision = before["revision"].clone();
     let items = wire.pull(&files.uri("root.mod")).await;
-    assert!(has_code(&items, "E304"));
+    let refusal = items
+        .iter()
+        .find(|note| note["code"] == "E304")
+        .expect("E304");
+    assert_eq!(before["state"], "incomplete");
+    assert_eq!(before["reason"]["message"], refusal["message"]);
+    assert_eq!(
+        before["reason"]["location"],
+        json!({"uri":files.uri("root.mod"),"range":refusal["range"]})
+    );
     assert!(!has_code(&items, "E306"));
     fs::create_dir(files.0.join("missing")).unwrap();
     wire.changed(&files.uri("missing"), 1);

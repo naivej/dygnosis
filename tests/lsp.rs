@@ -2392,6 +2392,7 @@ fn initialize_capabilities_wave_c() {
             "dynare/showEffectiveModel",
             "dynare/sourceCandidates",
             "dynare/validateComparisonInputs",
+            "dynare/workspaceCheckLocation",
             "dynare/workspaceStatus",
         ]
     );

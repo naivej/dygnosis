@@ -661,6 +661,25 @@ pub fn check_file_with_origins(text: &str, abs_path: &str) -> DiagnosticSet {
 /// Same families as [`check_file`] on an existing workspace (open overlays),
 /// with the written source of each diagnostic retained for presentation.
 pub(crate) fn check_in_workspace_with_origins(ws: &mut Workspace, abs_path: &str) -> DiagnosticSet {
+    workspace_check(ws, abs_path).set
+}
+
+pub(crate) struct WorkspaceCheck {
+    pub set: DiagnosticSet,
+    pub incomplete_row: Option<usize>,
+}
+
+impl WorkspaceCheck {
+    fn new(set: DiagnosticSet, incomplete_row: Option<usize>) -> Self {
+        Self {
+            set,
+            incomplete_row,
+        }
+    }
+}
+
+/// Keep the row that stopped the check alongside its diagnostic and origin.
+pub(crate) fn workspace_check(ws: &mut Workspace, abs_path: &str) -> WorkspaceCheck {
     try_workspace_check(ws, abs_path).unwrap_or_else(|| {
         let text = ws.get_source(abs_path).unwrap_or("").to_string();
         let model = crate::engine::language::parser::parse_with_budget(
@@ -670,11 +689,14 @@ pub(crate) fn check_in_workspace_with_origins(ws: &mut Workspace, abs_path: &str
                 ws.cancellation(),
             ),
         );
-        DiagnosticSet {
-            root: root_key(ws, abs_path),
-            diagnostics: analyze(&model),
-            origins: Vec::new(),
-        }
+        WorkspaceCheck::new(
+            DiagnosticSet {
+                root: root_key(ws, abs_path),
+                diagnostics: analyze(&model),
+                origins: Vec::new(),
+            },
+            None,
+        )
     })
 }
 
@@ -686,42 +708,47 @@ pub(crate) fn check_in_workspace_with_origins_controlled(
     ws.set_cancellation(Arc::clone(cancelled));
     crate::engine::control::run(Some(Arc::clone(cancelled)), || {
         // No fallback parser should run after a stopped acquisition.
-        try_workspace_check(ws, abs_path).unwrap_or_else(|| {
-            if crate::engine::control::cancelled() {
-                return DiagnosticSet {
+        try_workspace_check(ws, abs_path)
+            .map(|check| check.set)
+            .unwrap_or_else(|| {
+                if crate::engine::control::cancelled() {
+                    return DiagnosticSet {
+                        root: root_key(ws, abs_path),
+                        diagnostics: Vec::new(),
+                        origins: Vec::new(),
+                    };
+                }
+                let text = ws.get_source(abs_path).unwrap_or("").to_string();
+                let model = crate::engine::language::parser::parse_with_budget(
+                    &text,
+                    &mut crate::engine::language::macro_expr::MacroBudget::with_limit(
+                        ws.root_macro_work_limit(abs_path),
+                        Some(Arc::clone(cancelled)),
+                    ),
+                );
+                DiagnosticSet {
                     root: root_key(ws, abs_path),
-                    diagnostics: Vec::new(),
+                    diagnostics: analyze(&model),
                     origins: Vec::new(),
-                };
-            }
-            let text = ws.get_source(abs_path).unwrap_or("").to_string();
-            let model = crate::engine::language::parser::parse_with_budget(
-                &text,
-                &mut crate::engine::language::macro_expr::MacroBudget::with_limit(
-                    ws.root_macro_work_limit(abs_path),
-                    Some(Arc::clone(cancelled)),
-                ),
-            );
-            DiagnosticSet {
-                root: root_key(ws, abs_path),
-                diagnostics: analyze(&model),
-                origins: Vec::new(),
-            }
-        })
+                }
+            })
     })
 }
 
-fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticSet> {
+fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<WorkspaceCheck> {
     let revision = ws.input_revision(abs_path)?;
     if let Some((file, span, code, message)) = ws.macro_file_refusal(abs_path) {
         let text: Arc<str> = Arc::from(crate::engine::language::parser::normalize_newlines(
             ws.get_source(&file)?,
         ));
-        return Some(DiagnosticSet {
-            root: root_key(ws, abs_path),
-            diagnostics: vec![Diagnostic::new(span, Severity::Error, code, message)],
-            origins: vec![Some(DiagnosticOrigin { file, text, span })],
-        });
+        return Some(WorkspaceCheck::new(
+            DiagnosticSet {
+                root: root_key(ws, abs_path),
+                diagnostics: vec![Diagnostic::new(span, Severity::Error, code, message)],
+                origins: vec![Some(DiagnosticOrigin { file, text, span })],
+            },
+            Some(0),
+        ));
     }
     if let Some((site, reason, chain)) = ws.macro_file_limit(abs_path) {
         let text: Arc<str> = Arc::from(crate::engine::language::parser::normalize_newlines(
@@ -747,15 +774,18 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
             &mut diagnostics,
             &mut HashMap::new(),
         );
-        return Some(DiagnosticSet {
-            root: root_key(ws, abs_path),
-            diagnostics,
-            origins: vec![Some(DiagnosticOrigin {
-                file: site.file,
-                text,
-                span: site.span,
-            })],
-        });
+        return Some(WorkspaceCheck::new(
+            DiagnosticSet {
+                root: root_key(ws, abs_path),
+                diagnostics,
+                origins: vec![Some(DiagnosticOrigin {
+                    file: site.file,
+                    text,
+                    span: site.span,
+                })],
+            },
+            Some(0),
+        ));
     }
     let model = ws.get_effective_model(abs_path)?.clone();
     let mut diags = analyze_positions(&model);
@@ -770,20 +800,27 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
         // next include, the same way `IncludePath::interpret` does.
         let include_dirs =
             crate::engine::diagnostics::check_d_open::check_workspace_d_open(ws, &model, abs_path);
-        if include_dirs.iter().any(|diag| diag.code == "E304") {
+        let incomplete_row = if include_dirs.iter().any(|diag| diag.code == "E304") {
             diags.retain(|diag| diag.code != "I211");
+            let row = diags.len();
             diags.extend(include_dirs.into_iter().filter(|diag| diag.code == "E304"));
-        }
+            Some(row)
+        } else {
+            (!diags.is_empty()).then_some(0)
+        };
         let mut source_texts = HashMap::new();
         let origins = diags
             .iter()
             .map(|diag| diagnostic_origin(ws, abs_path, diag, &mut source_texts))
             .collect();
-        return Some(DiagnosticSet {
-            root: root_key(ws, abs_path),
-            diagnostics: diags,
-            origins,
-        });
+        return Some(WorkspaceCheck::new(
+            DiagnosticSet {
+                root: root_key(ws, abs_path),
+                diagnostics: diags,
+                origins,
+            },
+            incomplete_row,
+        ));
     }
     diags.extend(
         crate::engine::diagnostics::check_d_open::check_workspace_d_open(ws, &model, abs_path),
@@ -864,9 +901,27 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
         &mut diags,
         &mut source_texts,
     );
+    let mut incomplete_row = None;
+    let mut missing_includes = records.unresolved.iter();
     let origins: Vec<Option<DiagnosticOrigin>> = diags
         .iter()
-        .map(|diag| diagnostic_origin(ws, abs_path, diag, &mut source_texts))
+        .enumerate()
+        .map(|(index, diag)| {
+            if diag.code == "E061" {
+                // E061 uses the root anchor for direct diagnostic consumers.
+                // The same include record also owns its exact written directive.
+                let miss = missing_includes.next()?;
+                incomplete_row.get_or_insert(index);
+                let file = miss.site.file.clone();
+                let text = diagnostic_source(ws, &file, &mut source_texts)?;
+                return Some(DiagnosticOrigin {
+                    file,
+                    text,
+                    span: miss.site.span,
+                });
+            }
+            diagnostic_origin(ws, abs_path, diag, &mut source_texts)
+        })
         .collect();
     // Preserve check_file's written coordinates for writing notes. Their file
     // and source snapshot are now per diagnostic in the ordinary origins list.
@@ -885,11 +940,14 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
                 .and_then(|owner| remap_stored_fix(ws, abs_path, &model.source, &fix, owner));
         }
     }
-    Some(DiagnosticSet {
-        root,
-        diagnostics: diags,
-        origins,
-    })
+    Some(WorkspaceCheck::new(
+        DiagnosticSet {
+            root,
+            diagnostics: diags,
+            origins,
+        },
+        incomplete_row,
+    ))
 }
 
 /// A display keyword must be continuous and have the same spelling in its
@@ -927,13 +985,7 @@ fn diagnostic_origin(
         return None;
     }
     let (file, mut span) = ws.map_effective_origin(root, diag.span)?;
-    let text = if let Some(cached) = source_texts.get(&file) {
-        cached.clone()
-    } else {
-        let snapshot: Arc<str> = Arc::from(ws.get_source(&file)?);
-        source_texts.insert(file.clone(), snapshot.clone());
-        snapshot
-    };
+    let text = diagnostic_source(ws, &file, source_texts)?;
     // An anchor spanning two splice segments has no continuous source range.
     // Keep the first source character so the diagnostic still points at its cause.
     if diag.span.end > diag.span.start.saturating_add(1) {
@@ -957,6 +1009,19 @@ fn diagnostic_origin(
         }
     }
     Some(DiagnosticOrigin { file, text, span })
+}
+
+fn diagnostic_source(
+    ws: &mut Workspace,
+    file: &str,
+    source_texts: &mut HashMap<String, Arc<str>>,
+) -> Option<Arc<str>> {
+    if let Some(cached) = source_texts.get(file) {
+        return Some(Arc::clone(cached));
+    }
+    let snapshot: Arc<str> = Arc::from(ws.get_source(file)?);
+    source_texts.insert(file.to_owned(), Arc::clone(&snapshot));
+    Some(snapshot)
 }
 
 /// Stored fixes use scalar line/column positions in the effective file. Keep

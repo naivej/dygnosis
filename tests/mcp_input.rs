@@ -85,6 +85,37 @@ fn diagnostic_rows(reply: &Value) -> Vec<Value> {
 }
 
 #[test]
+fn single_and_batch_checks_locate_the_same_unresolved_include_in_coverage() {
+    // A failed root must still identify the written directive without counting it as a diagnostic row.
+    let mut wire = McpWire::new();
+    let files = json!({
+        "root.mod": "@#include \"parts/child.inc\"\nvar y; model; y=0; end;\n",
+        "parts/child.inc": "// Calibration\r\n@#include \"absent.inc\"\r\n"
+    });
+    let mut sources = Vec::new();
+    for arguments in [
+        json!({"source":{"kind":"map","root":"root.mod","files":files}}),
+        json!({"batch":{"kind":"map","roots":["root.mod"],"files":files}}),
+    ] {
+        let reply = wire.call("dynare_diagnose", arguments);
+        let result: Value =
+            serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let report = &result["data"]["roots"][0];
+        assert_eq!(report["status"], "failed", "{reply}");
+        assert_eq!(report["diagnostics"], json!([]), "{report}");
+        let reason = &result["coverage"]["roots"][0]["reasons"][0];
+        assert_eq!(reason["code"], "E061", "{reason}");
+        assert_eq!(reason["source"]["file"], "parts/child.inc");
+        assert_eq!(
+            reason["source"]["range"],
+            json!({"line":2,"column":1,"end_line":2,"end_column":23})
+        );
+        sources.push(reason["source"].clone());
+    }
+    assert_eq!(sources[0], sources[1]);
+}
+
+#[test]
 fn partial_model_tools_keep_the_actual_macro_cause_and_written_source_over_stdio() {
     // Guards generic I211 replacements, missing source ownership and invented
     // limit receipts on ordinary missing-file or official type failures.
