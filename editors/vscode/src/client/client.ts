@@ -116,7 +116,7 @@ interface CachedRequest {
 export interface ModelSnapshot extends ModelInfo { client_instance: number }
 export interface NavigationDecision { isCurrent(): boolean }
 export type NavigationGuard = (loadedDocument: vscode.TextDocument) => boolean | NavigationDecision | Promise<boolean | NavigationDecision>;
-type SourceNavigationOptions = Pick<vscode.TextDocumentShowOptions, "viewColumn" | "preserveFocus" | "preview"> & { reuseOpen?: boolean };
+type SourceNavigationOptions = Pick<vscode.TextDocumentShowOptions, "viewColumn" | "preview"> & { reuseOpen?: boolean };
 export interface InputInvalidation { root?: string; reason: "input" | "file" | "lifecycle"; uri?: string; inputRevision?: string; modelRevision?: string }
 
 /** Shared service for status, view, tint, diagnostics and previews. */
@@ -998,9 +998,8 @@ export class DygnosisClient implements vscode.Disposable {
       vscode.window.activeTextEditor === editor && (typeof decision === "boolean" ? decision : decision.isCurrent());
     if (root && !sameUri(document.uri, root)) await this.applyOwner(document, root, undefined, current);
     if (!current()) refuse("The model or source changed while preparing this location. Request the source jump again.");
-    const { reuseOpen, ...presentation } = options ?? {};
-    const viewColumn = reuseOpen ? reuseOpenViewColumn(document.uri) : presentation.viewColumn;
-    await vscode.window.showTextDocument(document, { ...presentation, viewColumn, selection });
+    const viewColumn = options?.reuseOpen ? reuseOpenViewColumn(document.uri) : options?.viewColumn;
+    await vscode.window.showTextDocument(document, { viewColumn, selection, preview: options?.preview });
   }
   async failure(error: unknown): Promise<void> {
     const message = failureText(error);

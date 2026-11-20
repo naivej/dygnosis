@@ -617,8 +617,11 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
     const matchingReport = (shown = currentRoot()): boolean => shown?.revision === root.revision && matchingReason(shown);
     if (!matchingReport()) return unavailable("The workspace check result changed.");
     const client = connection, expectedGeneration = generation, editor = vscode.window.activeTextEditor;
+    const viewColumn = vscode.window.tabGroups.activeTabGroup.viewColumn;
+    const groupChanged = (): boolean => vscode.window.tabGroups.activeTabGroup.viewColumn !== viewColumn;
     const currentNavigation = (): boolean => !disposed && selected === navigation && generation === expectedGeneration &&
-      connection === client && service.client === client && service.currentInstance === instance && vscode.window.activeTextEditor === editor;
+      connection === client && service.client === client && service.currentInstance === instance &&
+      vscode.window.activeTextEditor === editor && !groupChanged();
     try {
       const proof = await service.execute(command, [{ root_uri: root.root_uri, revision: root.revision }]);
       if (selected !== navigation || disposed) return;
@@ -653,10 +656,12 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
             refuse("The written source changed since the workspace check.");
           }
           return { isCurrent };
-        }, { viewColumn: vscode.ViewColumn.Beside, preview: true, preserveFocus: true });
+        }, { viewColumn, preview: false });
       } finally { opening.dispose(); }
     } catch (error) {
-      if (selected === navigation && !disposed) unavailable(failureText(error));
+      if (selected !== navigation || disposed) return;
+      if (groupChanged()) refuse(`${cause}\n\nThe active editor group changed. Select the reason again in the group you want.`);
+      unavailable(failureText(error));
     }
   };
   const subscriptions = [

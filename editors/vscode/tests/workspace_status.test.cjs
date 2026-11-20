@@ -46,7 +46,6 @@ const vscode = {
   TreeItem: class { constructor(label, collapsibleState) { this.label = label; this.collapsibleState = collapsibleState; } },
   TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 }, StatusBarAlignment: { Left: 1 },
   FileType: { File: 1 },
-  ViewColumn: { Beside: -2 },
   RelativePattern: class { constructor(baseUri, pattern) { this.baseUri = baseUri; this.pattern = pattern; } },
   ConfigurationTarget: { WorkspaceFolder: 3 },
   window: {
@@ -55,6 +54,7 @@ const vscode = {
       return options.find(option => option === host.notificationChoice);
     },
     get activeTextEditor() { return host.editor; },
+    tabGroups: { get activeTabGroup() { return { viewColumn: host.viewColumn ?? 2 }; } },
     createStatusBarItem: (id, alignment, priority) => {
       const item = { id, alignment, priority, visible: false, disposed: false, show() { this.visible = true; }, hide() { this.visible = false; }, dispose() { this.disposed = true; } };
       host.items.push(item); return item;
@@ -422,7 +422,7 @@ test("a workspace reason opens only its verified written range", async () => {
   const target = { ...document(location.uri), getText: () => source.replaceAll("\n", "\r\n") };
   env.service.openLocation = async (place, rootUri, guard, options) => {
     assert.equal(rootUri, undefined, "the jump keeps the user's explicit model context");
-    assert.deepEqual(options, { viewColumn: vscode.ViewColumn.Beside, preview: true, preserveFocus: true });
+    assert.deepEqual(options, { viewColumn: vscode.window.tabGroups.activeTabGroup.viewColumn, preview: false });
     const result = await guard(target);
     if (result.isCurrent()) opened.push(place);
   };
@@ -451,6 +451,12 @@ test("a workspace reason opens only its verified written range", async () => {
     env.host.notificationChoice = undefined;
 
     env.host.missing = undefined;
+    env.host.beforeStat = async () => { env.host.viewColumn = 3; };
+    await click();
+    assert.match(env.host.notifications.at(-1), /The active editor group changed/);
+    assert.deepEqual(env.host.notificationOptions.at(-1), []);
+
+    env.host.viewColumn = 2;
     const started = deferred(), blocked = deferred();
     env.host.beforeStat = () => { started.resolve(); return blocked.promise; };
     const opening = click();
@@ -462,7 +468,7 @@ test("a workspace reason opens only its verified written range", async () => {
 
     await click();
     assert.match(env.host.notifications.at(-1), /Could not open missing.inc\.[\s\S]*check result changed/);
-    assert.equal(proofs.length, 4, "a stale row never requests a new location");
+    assert.equal(proofs.length, 5, "a stale row never requests a new location");
     assert.deepEqual(opened, [location], "unavailable targets never reveal an editor range");
   } finally { registration.dispose(); }
 });
