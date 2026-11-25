@@ -7,7 +7,8 @@ const { downloadAndUnzipVSCode } = require("@vscode/test-electron");
 const { inspectVsix } = require("./vsix.cjs");
 const { resolveCli } = require("./vscode-cli.cjs");
 const { runHost } = require("./package-host.cjs");
-const { assertNative, binaryName, mcpBinaryName, execute, extensionRoot, hostFacts, probeBinary, probeMcp, sha256, writeJson } = require("./common.cjs");
+const { assertNative, execute, extensionRoot, hostFacts, probeBinary, probeMcp, sha256, writeJson } = require("./common.cjs");
+const { inspectStandalone } = require("../../../scripts/standalone-package.cjs");
 
 async function main() {
   const { values } = parseArgs({ options: { target: { type: "string" }, vscode: { type: "string", default: "stable" }, executable: { type: "string" }, "native-only": { type: "boolean" } } });
@@ -24,24 +25,9 @@ async function main() {
   const root = path.join(extensionRoot, ".test-data", `installed package with spaces ${runId}`);
   const unpacked = path.join(root, "standalone with spaces");
   const workspace = path.join(root, "workspace with spaces");
-  for (const directory of [unpacked, workspace]) await fs.mkdir(directory, { recursive: true });
-  const archiveRoot = path.basename(archive, ".tar.gz");
-  const archiveEntries = execute("tar", ["-tzf", archive]).trim().split(/\r?\n/);
-  assert.ok(archiveEntries.every(entry => entry.startsWith(archiveRoot + "/") && !entry.split("/").includes("..") && !entry.includes("\\")), "Unsafe standalone archive entry");
-  execute("tar", ["-xzf", archive, "-C", unpacked]);
-  const unpackedRoot = path.join(unpacked, archiveRoot);
-  assert.deepEqual(JSON.parse(await fs.readFile(path.join(unpackedRoot, "SOURCE.json"), "utf8")), provenance);
-  assert.equal(source.license.standalone_path, "LICENSE");
-  assert.equal(await sha256(path.join(unpackedRoot, source.license.standalone_path)), source.license.source_sha256);
-  const binary = path.join(unpackedRoot, binaryName(source.target));
-  const mcpBinary = path.join(unpackedRoot, mcpBinaryName(source.target));
-  assert.equal(await sha256(binary), source.binary_sha256);
-  assert.equal(await sha256(mcpBinary), source.mcp_binary_sha256);
-  assert.equal((await fs.stat(mcpBinary)).size, source.mcp_binary_size);
-  if (process.platform !== "win32") {
-    for (const executable of [binary, mcpBinary]) assert.ok((await fs.stat(executable)).mode & 0o111, "Standalone archive lost an executable permission");
-  }
-  const launch = { ...await probeBinary(binary, source.version, workspace), mcp: await probeMcp(mcpBinary, source.version) };
+  await fs.mkdir(workspace, { recursive: true });
+  const { lsp, mcp } = await inspectStandalone(archive, unpacked, provenance);
+  const launch = { ...await probeBinary(lsp, source.version, workspace), mcp: await probeMcp(mcp, source.version) };
   const evidence = { schema_version: 1, runId, target: source.target, version: source.version, commit: source.commit, release: source.release, host: hostFacts(), package: packageInspection, standalone: { sha256: await sha256(archive), launch }, passed: true };
   await writeJson(path.join(output, "verification-native.json"), evidence);
   if (values["native-only"]) {

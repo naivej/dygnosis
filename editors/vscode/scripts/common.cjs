@@ -1,44 +1,21 @@
 const assert = require("node:assert/strict");
 const { Buffer } = require("node:buffer");
-const { execFileSync, spawn } = require("node:child_process");
-const crypto = require("node:crypto");
+const { spawn } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { clearTimeout } = require("node:timers");
+const { targets, targetInfo, execute, sha256, writeJson, binaryName, mcpBinaryName } = require("../../../scripts/package-common.cjs");
 
 const extensionRoot = path.resolve(__dirname, "..");
 const productRoot = path.resolve(extensionRoot, "../..");
-const targets = {
-  "win32-x64": { rust: "x86_64-pc-windows-msvc", platform: "win32", arch: "x64", vscode: "win32-x64-archive" },
-  "win32-arm64": { rust: "aarch64-pc-windows-msvc", platform: "win32", arch: "arm64", vscode: "win32-arm64-archive" },
-  "darwin-x64": { rust: "x86_64-apple-darwin", platform: "darwin", arch: "x64", vscode: "darwin" },
-  "darwin-arm64": { rust: "aarch64-apple-darwin", platform: "darwin", arch: "arm64", vscode: "darwin-arm64" },
-  "linux-x64": { rust: "x86_64-unknown-linux-gnu", platform: "linux", arch: "x64", vscode: "linux-x64" },
-  "linux-arm64": { rust: "aarch64-unknown-linux-gnu", platform: "linux", arch: "arm64", vscode: "linux-arm64" },
-};
-function targetInfo(target) {
-  assert.ok(Object.hasOwn(targets, target), `Unsupported target: ${target}`);
-  return targets[target];
-}
 function assertNative(target) {
   const info = targetInfo(target);
   assert.equal(process.platform, info.platform, "Launch checks require the target OS");
   assert.equal(process.arch, info.arch, "Launch checks require a native target Node process");
   return info;
 }
-function execute(file, args, options = {}) {
-  if (file === "tar" && process.platform === "win32") {
-    assert.ok(process.env.SystemRoot, "Windows archive checks require SystemRoot");
-    file = path.join(process.env.SystemRoot, "System32", "tar.exe");
-  }
-  return execFileSync(file, args, { encoding: "utf8", windowsHide: true, timeout: 120000, maxBuffer: 32 * 1024 * 1024, ...options });
-}
-async function sha256(file) { return crypto.createHash("sha256").update(await fs.readFile(file)).digest("hex"); }
-async function writeJson(file, value) { await fs.writeFile(file, JSON.stringify(value, null, 2) + "\n"); }
-function binaryName(target) { return targetInfo(target).platform === "win32" ? "dygnosis.exe" : "dygnosis"; }
-function mcpBinaryName(target) { return targetInfo(target).platform === "win32" ? "dygnosis-mcp.exe" : "dygnosis-mcp"; }
 function hostFacts() { return { platform: process.platform, arch: process.arch, os: os.release(), node: process.version }; }
 
 // Both protocols have bounded buffers and waits. A failed/early exit cannot count

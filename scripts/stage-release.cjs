@@ -6,7 +6,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { pipeline } = require("node:stream/promises");
 const { parseArgs } = require("node:util");
-const { targets, mcpBinaryName } = require("../editors/vscode/scripts/common.cjs");
+const { targets, mcpBinaryName } = require("./package-common.cjs");
 
 function contains(parent, child) {
   const relative = path.relative(parent, child);

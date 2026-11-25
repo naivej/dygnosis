@@ -8,6 +8,7 @@ const { bundle } = require("./bundle.cjs");
 const { sourceFileHashes } = require("./source-hash.cjs");
 const { assertNative, execute, extensionRoot, productRoot, binaryName, mcpBinaryName, hostFacts, sha256, writeJson } = require("./common.cjs");
 const { buildEngine } = require("../../../scripts/build-engine.cjs");
+const { createStandalone } = require("../../../scripts/standalone-package.cjs");
 const { checkVersion } = require("../../../scripts/version.cjs");
 
 async function main() {
@@ -64,7 +65,7 @@ async function main() {
     .replace(/\]\((docs\/[^)]+)\)/g, '](https://github.com/naivej/dygnosis/blob/v0.11.6/$1)')
     .replace(/\]\((help\/[^)]+)\)/g, `](https://github.com/naivej/dygnosis/blob/${commit}/$1)`));
   const client = await bundle();
-  await collectLicenses(info.rust, client.dependencies.map(dependency => dependency.packagePath));
+  const notices = await collectLicenses(info.rust, client.dependencies.map(dependency => dependency.packagePath));
   const cargoLock = await sourceFileHashes(productRoot, commit, "Cargo.lock");
   const npmLock = await sourceFileHashes(productRoot, commit, "editors/vscode/package-lock.json");
   const provenance = {
@@ -90,20 +91,7 @@ async function main() {
     baseImagesUrl: `https://github.com/naivej/dygnosis/raw/${commit}/editors/vscode` });
   const { inspectVsix } = require("./vsix.cjs");
   await inspectVsix(vsix, provenance);
-  const standalone = path.join(output, `dygnosis-${version}-${target}`);
-  assert.equal(path.dirname(path.resolve(standalone)), path.resolve(output));
-  await fs.rm(standalone, { recursive: true, force: true });
-  await fs.mkdir(standalone, { recursive: true });
-  for (const file of ["LICENSE", "SOURCE.json", "THIRD-PARTY-NOTICES.json"]) await fs.copyFile(path.join(extensionRoot, file), path.join(standalone, file));
-  await fs.cp(path.join(extensionRoot, "licenses"), path.join(standalone, "licenses"), { recursive: true });
-  for (const [kind, name] of [["lsp", binaryName(target)], ["mcp", mcpBinaryName(target)]]) {
-    const destination = path.join(standalone, name);
-    await fs.copyFile(binaries[kind], destination);
-    if (info.platform !== "win32") await fs.chmod(destination, 0o755);
-  }
-  await fs.writeFile(path.join(standalone, "README.txt"), `Dygnosis ${version} (${target})\nSource: ${provenance.source}\nLicense: GPL-3.0-or-later; see LICENSE and THIRD-PARTY-NOTICES.json.\n\nExtract the archive to a persistent directory. No Rust, Node.js, VS Code, MATLAB or Dynare install is needed.\nConfigure your MCP client's executable field with the absolute path to ${mcpBinaryName(target)}. No arguments are required. Each tool describes its inputs.\nUse --version to identify each executable. Reconnect your MCP client after replacing it.\nAn LSP client starts ${binaryName(target)} without arguments.\nAbout and support: https://github.com/naivej/dygnosis/blob/${commit}/help/about.md\n`);
-  const archive = `${standalone}.tar.gz`;
-  execute("tar", ["-czf", archive, "-C", output, path.basename(standalone)]);
+  const archive = await createStandalone({ output, binaries, provenance, licenseSource: extensionRoot, notices });
   const files = [vsix, archive];
   await fs.writeFile(path.join(output, "SHA256SUMS.txt"), (await Promise.all(files.map(async file => `${await sha256(file)}  ${path.basename(file)}`))).join("\n") + "\n");
   await writeJson(path.join(output, "artifacts.json"), { ...provenance, vsix: path.basename(vsix), standalone: path.basename(archive) });
