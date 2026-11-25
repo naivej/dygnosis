@@ -101,7 +101,7 @@ async function main() {
     await fs.copyFile(binaries[kind], destination);
     if (info.platform !== "win32") await fs.chmod(destination, 0o755);
   }
-  await fs.writeFile(path.join(standalone, "README.txt"), `Dygnosis ${version} (${target})\nSource: ${provenance.source}\nLicense: GPL-3.0-or-later; see LICENSE and THIRD-PARTY-NOTICES.json.\n\nExtract the archive to a persistent directory. No Rust, Node.js, VS Code, MATLAB or Dynare install is needed.\nConfigure your MCP client's executable field with the absolute path to ${mcpBinaryName(target)}. No arguments are required. Each tool describes its inputs.\nUse --version to identify each executable. Reconnect your MCP client after replacing it.\nAn LSP client starts ${binaryName(target)} without arguments.\nInstallation and runtime requirements: https://github.com/naivej/dygnosis/blob/${commit}/help/get-started.md\n`);
+  await fs.writeFile(path.join(standalone, "README.txt"), `Dygnosis ${version} (${target})\nSource: ${provenance.source}\nLicense: GPL-3.0-or-later; see LICENSE and THIRD-PARTY-NOTICES.json.\n\nExtract the archive to a persistent directory. No Rust, Node.js, VS Code, MATLAB or Dynare install is needed.\nConfigure your MCP client's executable field with the absolute path to ${mcpBinaryName(target)}. No arguments are required. Each tool describes its inputs.\nUse --version to identify each executable. Reconnect your MCP client after replacing it.\nAn LSP client starts ${binaryName(target)} without arguments.\nAbout and support: https://github.com/naivej/dygnosis/blob/${commit}/help/about.md\n`);
   const archive = `${standalone}.tar.gz`;
   execute("tar", ["-czf", archive, "-C", output, path.basename(standalone)]);
   const files = [vsix, archive];

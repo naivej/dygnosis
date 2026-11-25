@@ -10,6 +10,5 @@
   {"id":"workspace-checks","title":"Check workspace models","keywords":["workspace checks","coverage","background","saved","exclude","cancel","Recheck"]},
   {"id":"agents","title":"Work with an agent","keywords":["MCP","tools",".mcp.json","managed binary","approval","standalone","executable"]},
   {"id":"reference","title":"Reference","keywords":["commands","checks","options","keyboard","shortcut","index","reference"]},
-  {"id":"troubleshoot","title":"Support and problem reports","keywords":["support","report","issue","version","restart","Output","settings"]},
-  {"id":"about","title":"About Dygnosis","keywords":["Dynare 7.2","license","credits","MATLAB","Marketplace","MCP"]}
+  {"id":"about","title":"About and support","keywords":["Dynare 7.2","license","credits","MATLAB","Marketplace","MCP","support","report","issue","version","restart","Output","settings"]}
 ]

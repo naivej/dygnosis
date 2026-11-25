@@ -1,8 +1,8 @@
 {
   "dygnosis.openHelp": "get-started",
-  "dygnosis.restartServer": "troubleshoot",
-  "dygnosis.showOutput": "troubleshoot",
-  "dygnosis.openSettings": "appearance",
+  "dygnosis.restartServer": "about",
+  "dygnosis.showOutput": "about",
+  "dygnosis.openSettings": "about",
   "dygnosis.editSettingsJson": "appearance",
   "dygnosis.showEffectiveModel": "effective-model",
   "dygnosis.treatAsRoot": "model-and-includes",

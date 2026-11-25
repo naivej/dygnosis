@@ -5,8 +5,8 @@
   const saved = api.getState();
   const history = Array.isArray(saved?.history) ? saved.history.filter(entry => typeof entry?.destination === 'string').slice(-100).map(entry => ({ destination: entry.destination, scroll: Number.isFinite(entry.scroll) && entry.scroll >= 0 ? entry.scroll : 0, explanation: entry.explanation })) : [];
   const state = { history: history.length ? history : [{ destination: 'get-started', scroll: 0 }], index: Number.isInteger(saved?.index) && saved.index >= 0 && saved.index < history.length ? saved.index : 0, query: typeof saved?.query === 'string' ? saved.query.slice(0, 300) : '' };
-  const controls = Object.fromEntries(['edition', 'back', 'forward', 'permalink', 'search', 'clear', 'contents', 'topics', 'main', 'breadcrumb', 'results', 'article', 'notice', 'enlarged', 'close-image'].map(id => [id, document.getElementById(id)]));
-  let topics = [], version = '';
+  const controls = Object.fromEntries(['edition', 'back', 'forward', 'permalink', 'search', 'clear', 'contents', 'topics', 'main', 'breadcrumb', 'results', 'result-count', 'result-list', 'article', 'notice', 'enlarged', 'close-image'].map(id => [id, document.getElementById(id)]));
+  let topics = [], searchable = [];
   const narrow = window.matchMedia('(max-width: 700px)');
   const updateTopicsLayout = () => { controls.topics.open = !narrow.matches; };
   updateTopicsLayout();
@@ -14,58 +14,121 @@
   const node = (tag, text) => { const result = document.createElement(tag); result.textContent = text; return result; };
   const remember = () => api.setState({ ...state, history: state.history.map(({ destination, scroll, explanation }) => ({ destination, scroll, explanation })) });
   const current = () => state.history[state.index];
+  const saveScroll = () => { if (!controls.article.hidden) current().scroll = controls.main.scrollTop; };
+  function restoreScroll(scroll = current().scroll) {
+    const anchor = current().destination.split('#')[1];
+    if (anchor && !scroll) document.getElementById(anchor)?.scrollIntoView();
+    else controls.main.scrollTop = scroll;
+  }
+
   function render(focus = false) {
-    const destination = current().destination, [id, anchor] = destination.split('#');
+    const id = current().destination.split('#')[0];
     const topic = current().extra ?? topics.find(topic => topic.id === id) ?? topics.find(topic => topic.id === 'reference');
     if (!topic) return;
-    controls.edition.textContent = topic.edition ?? `Edition ${version}`;
-    controls.breadcrumb.textContent = `Help › ${topic.title}`;
+    controls.edition.textContent = topic.edition ?? '';
+    const parent = id.startsWith('tool:') ? 'agents' : id.includes(':') ? 'reference' : undefined;
+    controls.breadcrumb.replaceChildren();
+    if (parent) {
+      const link = node('a', parent === 'agents' ? 'Work with an agent' : 'Reference');
+      link.href = '#';
+      link.dataset.link = `help:${parent}`;
+      controls.breadcrumb.append(link);
+    }
     controls.article.innerHTML = topic.html;
     controls.permalink.disabled = !topics.some(topic => topic.id === id);
-    controls.permalink.title = controls.permalink.disabled ? 'This check is not in this Help edition. A topic link is unavailable.' : '';
+    controls.permalink.title = controls.permalink.disabled ? 'This check is not in this Help edition. A topic link is unavailable.' :
+      current().extra ? 'Copy a link to the bundled check explanation.' : '';
     controls.back.disabled = state.index === 0; controls.forward.disabled = state.index === state.history.length - 1;
-    for (const button of controls.contents.querySelectorAll('button')) { if (button.dataset.topic === id) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); }
-    search();
+    for (const button of controls.contents.querySelectorAll('button')) {
+      if (button.dataset.topic === (parent ?? id)) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    }
+    renderSearch();
+    const entry = current();
+    const scroll = entry.scroll;
     requestAnimationFrame(() => {
-      if (anchor && !current().scroll) document.getElementById(anchor)?.scrollIntoView(); else window.scrollTo(0, current().scroll ?? 0);
+      if (current() !== entry || controls.article.hidden) return;
+      restoreScroll(scroll);
       if (focus) controls.main.focus({ preventScroll: true });
     });
     remember();
   }
   function open(destination, extra) {
     if (!topics.some(topic => topic.id === destination.split('#')[0]) && extra?.id !== destination.split('#')[0]) return;
-    current().scroll = window.scrollY;
-    if (current().destination !== destination || JSON.stringify(current().explanation) !== JSON.stringify(extra?.explanation)) { state.history = state.history.slice(0, state.index + 1); state.history.push({ destination, scroll: 0, extra, explanation: extra?.explanation }); state.history = state.history.slice(-100); state.index = state.history.length - 1; }
-    state.query = ''; controls.search.value = ''; render(true);
+    saveScroll();
+    if (current().destination !== destination || JSON.stringify(current().explanation) !== JSON.stringify(extra?.explanation)) {
+      state.history = state.history.slice(0, state.index + 1);
+      state.history.push({ destination, scroll: 0, extra, explanation: extra?.explanation });
+      state.history = state.history.slice(-100);
+      state.index = state.history.length - 1;
+    } else if (destination.includes('#')) current().scroll = 0;
+    setQuery('');
+    render(true);
   }
-  function search() {
-    state.query = controls.search.value.slice(0, 300);
-    controls.results.replaceChildren();
-    const query = state.query.trim().toLowerCase(); controls.article.hidden = !!query;
-    if (query) {
-      const words = query.split(/\s+/);
-      const found = topics.filter(topic => words.every(word => `${topic.title} ${topic.keywords.join(' ')} ${topic.markdown}`.toLowerCase().includes(word))).slice(0, 50);
-      controls.results.append(node('p', found.length ? `${found.length} matching ${found.length === 1 ? 'topic' : 'topics'}` : `No Help results for “${state.query.trim()}”.`));
-      if (!found.length) {
-        const clear = node('button', 'Clear search'); clear.type = 'button';
-        clear.addEventListener('click', () => { controls.search.value = ''; search(); controls.search.focus(); }); controls.results.append(clear);
-      }
-      for (const topic of found) {
-        const button = node('button', topic.title); button.type = 'button'; button.addEventListener('click', () => open(topic.id));
-        const text = topic.markdown.replace(/[#`*[\]]/g, ' ').replace(/\s+/g, ' '), position = text.toLowerCase().indexOf(words[0]);
-        button.append(node('small', ` — ${text.slice(Math.max(0, position - 30), Math.max(0, position - 30) + 160)}`)); controls.results.append(button);
-      }
+
+  function setQuery(value) {
+    state.query = value.slice(0, 300);
+    controls.search.value = state.query;
+  }
+
+  function renderSearch() {
+    const query = state.query.trim();
+    controls.clear.hidden = state.query === '';
+    controls.article.hidden = !!query;
+    controls.results.hidden = !query;
+    controls.edition.hidden = !!query || !controls.edition.textContent;
+    controls.breadcrumb.hidden = !!query || !controls.breadcrumb.firstChild;
+    controls['result-list'].replaceChildren();
+    if (!query) {
+      controls['result-count'].textContent = '';
+      return;
     }
+    const words = query.toLowerCase().split(/\s+/);
+    // Page order breaks ties. Classify before applying the display limit.
+    const byRank = [[], [], []];
+    for (const entry of searchable) {
+      const { title, keywords, body } = entry;
+      if (words.every(word => title.includes(word))) byRank[0].push(entry);
+      else if (words.every(word => title.includes(word) || keywords.includes(word))) byRank[1].push(entry);
+      else if (words.every(word => title.includes(word) || keywords.includes(word) || body.includes(word))) byRank[2].push(entry);
+    }
+    const matches = byRank.flat(), shown = matches.slice(0, 50);
+    controls['result-count'].textContent = matches.length > shown.length ? `Showing ${shown.length} of ${matches.length} matching topics`
+      : matches.length ? `${matches.length} matching ${matches.length === 1 ? 'topic' : 'topics'}`
+      : `No Help results for “${query}”.`;
+    for (const { topic } of shown) {
+      const visible = topic.text.toLowerCase();
+      const match = words.map(word => visible.indexOf(word)).find(position => position !== -1) ?? 0;
+      const start = Math.max(0, match - 30), end = start + 160;
+      const excerpt = `${start ? '…' : ''}${topic.text.slice(start, end).trim()}${end < topic.text.length ? '…' : ''}`;
+      const item = node('li'), button = node('button', topic.title);
+      button.type = 'button';
+      button.addEventListener('click', () => open(topic.id));
+      if (excerpt) button.append(node('small', excerpt));
+      item.append(button);
+      controls['result-list'].append(item);
+    }
+  }
+
+  function search(value) {
+    saveScroll();
+    setQuery(value);
+    renderSearch();
+    if (controls.article.hidden) controls.main.scrollTop = 0;
+    else restoreScroll();
     remember();
   }
-  controls.search.value = typeof state.query === 'string' ? state.query : '';
-  controls.search.addEventListener('input', search);
-  controls.clear.addEventListener('click', () => { controls.search.value = ''; search(); controls.search.focus(); });
+  setQuery(state.query);
+  controls.search.addEventListener('input', () => search(controls.search.value));
+  controls.clear.addEventListener('click', () => { search(''); controls.search.focus(); });
   controls.permalink.addEventListener('click', () => api.postMessage({ type: 'permalink', destination: current().destination }));
   for (const [id, step] of [['back', -1], ['forward', 1]]) controls[id].addEventListener('click', () => {
-    current().scroll = window.scrollY; state.index = Math.min(state.history.length - 1, Math.max(0, state.index + step)); render(true);
+    saveScroll();
+    setQuery('');
+    state.index = Math.min(state.history.length - 1, Math.max(0, state.index + step));
+    render(true);
   });
-  window.addEventListener('scroll', () => { current().scroll = window.scrollY; remember(); }, { passive: true });
+  controls.main.addEventListener('scroll', () => { saveScroll(); remember(); }, { passive: true });
   document.addEventListener('click', event => {
     const link = event.target.closest('[data-link]');
     if (link) {
@@ -85,8 +148,16 @@
   window.addEventListener('message', event => {
     const message = event.data;
     if (message.type === 'bundle') {
-      topics = message.topics; version = message.version; controls.contents.replaceChildren();
-      for (const [index, entry] of state.history.entries()) entry.extra = message.historyExtras?.[index];
+      topics = message.topics; controls.contents.replaceChildren();
+      searchable = topics.map(topic => ({ topic, title: topic.title.toLowerCase(), keywords: topic.keywords.join(' ').toLowerCase(), body: topic.body }));
+      for (const [index, entry] of state.history.entries()) {
+        const details = message.historyDetails?.[index];
+        if (details && details.destination !== entry.destination) {
+          entry.destination = details.destination;
+          entry.scroll = 0;
+        }
+        entry.extra = details?.extra;
+      }
       for (const topic of topics.filter(topic => !topic.id.includes(':'))) { const button = node('button', topic.title); button.type = 'button'; button.dataset.topic = topic.id; button.addEventListener('click', () => { if (narrow.matches) controls.topics.open = false; open(topic.id); }); controls.contents.append(button); }
       render();
     } else if (message.type === 'open') open(message.destination, message.extra);

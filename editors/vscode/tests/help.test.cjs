@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { helpMarkdown, helpPages } = require(compiledModule("help_content"));
+const { helpMarkdown, helpPages, helpSearchText } = require(compiledModule("help_content"));
 const bundle = require('../help/bundle.json');
 
 test('Help uses every current command, check, option and setting feature owner without mutating its source', () => {
@@ -28,6 +28,9 @@ test('Help uses every current command, check, option and setting feature owner w
   const referenceHtml = helpMarkdown(referencePage.markdown, () => undefined);
   for (const code of bundle.reference.codes) assert.match(referenceHtml, new RegExp(`data-link="check:${code.code}"`), code.code);
   assert.match(referenceHtml, /planner_discount outside \(0, 1\]/);
+  for (const section of ['commands', 'dygnosis-shortcuts', 'diagnostic-codes', 'command-options']) {
+    assert.ok(referenceHtml.includes(`data-link="#${section}"`) && referenceHtml.includes(`id="${section}"`), section);
+  }
 });
 
 test('untrusted engine explanations cannot execute HTML, links or remote images', () => {
@@ -41,6 +44,20 @@ test('untrusted engine explanations cannot execute HTML, links or remote images'
   assert.match(html, /&lt;script&gt;/); assert.match(html, /data-copy/);
   assert.match(html, /data-link="help:diagnostics"/); assert.match(html, /data-link="settings:dynare.serverPath"/);
   assert.match(helpMarkdown('[Feature](appearance.md#expression-value-hints)', () => undefined), /data-link="help:appearance#expression-value-hints"/);
+});
+
+test('search excerpts read visible text without including link targets or copy controls', () => {
+  const html = helpMarkdown('[Search Paths](settings:dynare.searchPaths) & [Details](https://example.org/a_(b))\n\n```mod\nvar y;\n```', () => undefined);
+  assert.equal(helpSearchText(html), 'Search Paths & Details var y;');
+});
+
+test('Help prose can reflow while separate paragraphs and example lines stay intact', () => {
+  const markdown = ['A sentence  ', 'with an authored break\\', 'and another.', '', 'A second paragraph.',
+    '', '```mod', 'var y;', 'parameters beta;', '```'].join('\n');
+  const html = helpMarkdown(markdown, () => undefined);
+  assert.match(html, /<p>A sentence with an authored break and another\.<\/p>/);
+  assert.match(html, /<p>A second paragraph\.<\/p>/);
+  assert.match(html, /<pre><code>var y;\nparameters beta;<\/code><\/pre>/);
 });
 
 test('tool Help uses the authored task summary without exposing MCP contracts', () => {
@@ -58,11 +75,15 @@ test('tool Help uses the authored task summary without exposing MCP contracts', 
   assert.match(helpMarkdown(page.markdown, () => undefined), /data-link="help:agents"/);
 });
 
-test('Help About and the extension listing use the product README without its logo', () => {
+test('Help About uses its bundled topic and the extension listing uses the product README', () => {
   const product = fs.readFileSync(path.join(__dirname, '../../../README.md'), 'utf8').replace(/!\[[^\]]*\]\([^)]*logo[^)]*\)\s*/g, '');
-  assert.equal(bundle.topics.find(topic => topic.id === 'about').markdown, product);
+  const about = fs.readFileSync(path.join(__dirname, '../../../help/about.md'), 'utf8');
+  assert.equal(bundle.topics.find(topic => topic.id === 'about').markdown.replaceAll('\r\n', '\n'), about.replaceAll('\r\n', '\n'));
+  const page = helpPages(bundle).find(topic => topic.id === 'about');
+  assert.ok(page.markdown.trimEnd().endsWith(`Help edition ${bundle.version}`));
+  assert.match(helpMarkdown(page.markdown, () => undefined), /data-link="action:settings">Dygnosis: Open Settings<\/a>/);
+  assert.ok(!bundle.topics.some(topic => topic.id === 'troubleshoot'));
   assert.equal(fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8'), product);
-  assert.doesNotMatch(product, /!\[[^\]]*\]\(/);
 });
 
 test('every authored topic has balanced code examples and valid internal destinations', () => {

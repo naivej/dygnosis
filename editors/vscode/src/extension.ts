@@ -12,7 +12,7 @@ import { registerAnalysisConfigurations } from "./editor/analysis_configuration"
 import { registerSourceCandidates } from "./editor/source_candidates";
 import { registerOutlineFilter } from "./editor/outline";
 import * as vscode from "vscode";
-import { DygnosisClient, isAnalysisDocument } from "./client/client";
+import { DygnosisClient, isAnalysisDocument, isRootUri } from "./client/client";
 import { registerMcp } from "./mcp/mcp";
 import { registerEffectivePreview } from "./editor/preview";
 import { listSetting } from "./client/settings";
@@ -45,6 +45,7 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
     })),
   );
   let contextGeneration = 0;
+  let walkthroughModelOpened = false;
   const updateSourceMenu = (document = vscode.window.activeTextEditor?.document): vscode.Uri[] => {
     const ordinary = document && isAnalysisDocument(document);
     const owners = ordinary ? client.knownOwners(document.uri) : [];
@@ -57,6 +58,10 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
     const generation = ++contextGeneration;
     const document = vscode.window.activeTextEditor?.document;
     const ordinary = document ? isAnalysisDocument(document) : false;
+    if (!walkthroughModelOpened && ordinary && document?.uri.scheme === "file" && isRootUri(document.uri)) {
+      walkthroughModelOpened = true;
+      void vscode.commands.executeCommand("setContext", "dygnosis.walkthroughModelOpened", true);
+    }
     const expanded = document ? previews.get(document.uri) : undefined;
     const tab = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
     const custom = tab instanceof vscode.TabInputCustom && tab.viewType === changesViewType;

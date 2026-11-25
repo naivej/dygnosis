@@ -7,10 +7,8 @@ workspace.
 
 ## Find a problem
 
-Click an entry in **Problems** to jump to its file and line, or hover over an
-underlined token in the editor to read the message. Press `Alt+F8` to step
-through problems in the active file with details expanded, or `F8` to move
-across files.
+Press `Alt+F8` to step through problems in the active file with details
+expanded, or `F8` to move across files.
 
 | Severity | Meaning |
 |---|---|
@@ -18,11 +16,10 @@ across files.
 | Warning | A likely modeling mistake or inconsistency that Dynare accepts with a warning or without stopping. |
 | Information | A style or completeness note, such as missing equation `name` tags (`I208`), missing `long_name` labels (`I209`) or incomplete macro expansion (`I211`). |
 
-Each diagnostic has a code such as `W031`. Search for the code in Help or
-browse the [diagnostic code list](reference.md). A clean **Problems** panel shows
-no visible issues. Hidden checks and unchecked models can still have problems.
-Run official Dynare in MATLAB or Octave to verify steady states and solver
-conditions.
+Search Help for a code such as `W031` or browse the
+[diagnostic code list](reference.md). Hidden checks and unchecked models
+can still have problems. Verify steady states and solver conditions in
+Dynare.
 
 ## Follow a related location
 
@@ -37,9 +34,7 @@ var y;
 
 ## Actions
 
-To fix a reported issue, select it in **Problems** to open its location. Place
-the cursor on the underlined text and press `Ctrl+.` (or click the lightbulb)
-to open **Quick Fix...**.
+Press `Ctrl+.` on the underlined text to open **Quick Fix...**.
 
 | Action | Result |
 |---|---|
@@ -47,5 +42,4 @@ to open **Quick Fix...**.
 | **Ignore this check (`<code>`)** | Hides all diagnostics with that code in the current window ([Dynare › Diagnostic Actions: Ignore](settings:dynare.diagnosticActions.ignore)). |
 | **Dygnosis: Show a hidden check** / **Dygnosis: Show all hidden checks** | Restores one or all hidden check codes from the Command Palette. |
 
-Hidden checks apply only to the current window and can also be restored by
-clicking the **`hidden check`** count in the status bar.
+The **`hidden check`** count in the status bar also restores hidden checks.

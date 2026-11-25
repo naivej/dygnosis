@@ -1,25 +1,9 @@
 # Dynare workflow
 
-Dygnosis adds Dynare language support to VS Code for `.mod`, `.dyn` and `.inc`
-files. Editing and source analysis work without a separate Dynare, MATLAB or
-Octave installation.
-
-Open a model file and check that the language mode in the bottom-right status
-bar is **Dynare**. If it shows another language, click it and select
-**Dynare**.
-
-Press `F1` and run **Dygnosis: Open Help**. You can also open **Extensions**,
-find **Dygnosis**, and choose **Open Help** from its gear or context menu.
-
-Press `F1` and search for **Dygnosis** to find actions in the **Command
-Palette**. Editor commands depend on the active file. Common actions also
-appear in the editor title bar, the editor context menu, **Outline**,
-**Problems**, and **Dynare Workspace** in Explorer.
-
-In **Dygnosis Help**, **Search** finds features, commands, settings and check
-codes; setting links open the matching VS Code Settings entry.
-
-## Workflow guide
+Use Dygnosis to edit and check `.mod`, `.dyn` and `.inc` files before
+running Dynare. If syntax highlighting is missing, select **Dynare** in
+the language mode picker. For a guided start, choose **Get started with
+Dygnosis** from **Getting Started** in VS Code.
 
 | Dynare workflow | VS Code and Dygnosis tools | Topic |
 |---|---|---|
@@ -34,30 +18,17 @@ codes; setting links open the matching VS Code Settings entry.
 
 ## Numerical work and agents
 
-Official Dynare in MATLAB or Octave computes steady states, checks the
-Blanchard-Kahn conditions, and runs simulations and estimation. Dygnosis checks
-and navigates the source files before you run them; a clean **Problems** panel
-does not guarantee that Dynare will solve the model numerically.
+Run Dynare in MATLAB or Octave for steady states, Blanchard-Kahn conditions,
+simulations and estimation. For MATLAB integration, see the
+[MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode)
+and [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit).
+[Work with an agent](agents.md) covers Dygnosis MCP setup and the `use-dynare`
+skill.
 
-[Work with an agent](agents.md) provides the same source analysis and editing
-tools through MCP and the `use-dynare` skill.
+## File support
 
-Run **Dygnosis: Open Settings** to browse all settings. The
-[reference](reference.md) lists commands, shortcuts, diagnostic codes and
-command options; [support](troubleshoot.md) covers output logs, server restarts
-and problem reports; [About Dygnosis](about.md) lists compatibility and license
-details.
-
-## Availability
-
-Requires **VS Code 1.102.0 or later**. Install from the [VS Code
-Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis)
-or download packages and standalone bundles from [GitHub
-Releases](https://github.com/naivej/dygnosis/releases).
-
-The standalone bundle includes `dygnosis` for LSP and `dygnosis-mcp` for MCP clients.
-
-Unsaved (`Untitled`) files support single-file editing and checks; save the
-file to resolve `@#include` and companion file paths through its
+Editing and checks work without MATLAB, Octave or Dynare installed.
+Untitled files support single-file checks. Save the file to resolve
+`@#include` and companion file paths through its
 [model owner](model-and-includes.md#model-roots-and-includes). Virtual
 filesystems provide syntax highlighting only.

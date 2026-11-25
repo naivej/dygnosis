@@ -273,7 +273,7 @@ exports.run = async function run() {
     evidence.selected_lsp_paths = launchLogs.filter(message => message.startsWith("LSP executable:"));
     evidence.checks.push("explicit user override with spaces launches LSP and MCP");
     await service.shutdown();
-    await vscode.commands.executeCommand("dygnosis.openHelp", "troubleshoot");
+    await vscode.commands.executeCommand("dygnosis.openHelp", "about#support");
     assert.equal(service.client, undefined, "Help does not start the stopped engine");
     evidence.checks.push("installed Help remains available after engine shutdown");
     checksPassed = true;

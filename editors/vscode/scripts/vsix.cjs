@@ -93,7 +93,12 @@ async function inspectVsix(file, expected) {
   assert.equal(hash(data(`extension/${source.client.entry}`)), source.client.sha256, "Changed client bundle");
   assert.deepEqual([...entries.keys()].filter(name => name.startsWith("extension/out/")), [`extension/${source.client.entry}`]);
   data("extension/language-configuration.json"); data("extension/syntaxes/dynare.tmLanguage.json");
-  data("extension/media/help.css"); data("extension/media/help.js"); data("extension/media/welcome.md");
+  data("extension/media/help.css"); data("extension/media/help.js");
+  for (const walkthrough of manifest.contributes.walkthroughs ?? []) {
+    for (const step of walkthrough.steps) {
+      if (step.media.markdown) data(`extension/${step.media.markdown}`);
+    }
+  }
   const help = json("help/bundle.json");
   assert.equal(help.version, source.version); assert.equal(help.reference.version, source.version);
   assert.deepEqual(help.reference.tools, JSON.parse(await require("node:fs/promises").readFile(path.join(productRoot, "help/reference.json"), "utf8")).tools);

@@ -17,6 +17,12 @@ $hostRoot = Join-Path $testRoot $runId
 $workspaceRoot = Join-Path $hostRoot 'workspace'
 New-Item -ItemType Directory -Force -Path $workspaceRoot | Out-Null
 $workspaceTarget = $workspaceRoot
+$helpContext = $env:DYGNOSIS_HELP_HOST_CONTEXT
+if ($helpContext) {
+    if ($scope -ne 'help' -or $helpContext -notin @('empty', 'model')) { throw 'DYGNOSIS_HELP_HOST_CONTEXT accepts empty or model in the help scope.' }
+    if ($helpContext -eq 'empty') { $workspaceTarget = $null }
+    else { Set-Content -LiteralPath (Join-Path $workspaceRoot 'help-model.mod') -Value 'var y; model; y = 1; end;' -Encoding ascii }
+}
 if ($env:DYGNOSIS_HOST_MULTI_ROOT -eq '1') {
     if ($scope -ne 'analysis') { throw 'Multi-root native acceptance currently supports only the analysis scope.' }
     New-Item -ItemType Directory -Force -Path (Join-Path $hostRoot 'other') | Out-Null
@@ -60,13 +66,14 @@ $hostSettings | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $hostUser '
 $env:DYGNOSIS_HOST_RESULT = Join-Path $hostRoot 'result.json'
 $env:DYGNOSIS_HOST_RUN_ID = $runId
 $arguments = @(
-    ('"' + $workspaceTarget + '"'),
     ('--extensionDevelopmentPath="' + $testedExtension + '"'),
     ('--extensionTestsPath="' + (Join-Path $PSScriptRoot 'host.cjs') + '"'),
     ('--user-data-dir="' + (Join-Path $hostRoot 'profile') + '"'),
     ('--extensions-dir="' + (Join-Path $hostRoot 'extensions') + '"'),
     '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--disable-gpu'
 )
+if ($workspaceTarget) { $arguments = @(('"' + $workspaceTarget + '"')) + $arguments }
+else { $arguments += '--new-window' }
 $arguments += '--no-sandbox'
 if ($visualEnabled) {
     $arguments += @('--remote-debugging-address=127.0.0.1', "--remote-debugging-port=$cdpPort")

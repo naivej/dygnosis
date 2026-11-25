@@ -168,5 +168,5 @@ server does not install this skill.
 
 - [Connect an agent](https://github.com/naivej/dygnosis/blob/main/help/agents.md) (VS Code native MCP and
   project setup)
-- [Troubleshooting](https://github.com/naivej/dygnosis/blob/main/help/troubleshoot.md) (executable
-  override, workspace trust, startup)
+- [About and support](https://github.com/naivej/dygnosis/blob/main/help/about.md#support) (engine
+  startup and executable override)

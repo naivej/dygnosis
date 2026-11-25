@@ -16,7 +16,11 @@ const baselineActions = ["Model file…", "Configuration…"];
 function activateHost(env) {
   const { host, service, vscode } = env; host.registeredChanges = 0;
   const registrations = { "changes_editor": { registerChanges: value => { assert.equal(value, service); host.registeredChanges++; return new Disposable(); } },
-    "client": { DygnosisClient: class { constructor() { return service; } }, isAnalysisDocument: document => document.uri.scheme === "file" },
+    "client": {
+      DygnosisClient: class { constructor() { return service; } },
+      isAnalysisDocument: document => document.uri.scheme === "file",
+      isRootUri: uri => /\.(mod|dyn)$/i.test(uri.path),
+    },
   };
   for (const [module, name] of [["workspace_status", "registerWorkspaceStatus"], ["workspace_mcp", "registerWorkspaceMcp"], ["origin_jumps", "registerOriginJumps"], ["quickfix", "registerDiagnosticActions"], ["color", "registerColors"], ["model_navigation", "registerModelNavigation"], ["status", "registerStatus"], ["mcp", "registerMcp"], ["help", "registerHelp"]]) registrations[module] = { [name]: () => new Disposable() };
   registrations.preview = { registerEffectivePreview: () => Object.assign(new Disposable(), { get: () => undefined }) };

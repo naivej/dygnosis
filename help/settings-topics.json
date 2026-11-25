@@ -1,5 +1,5 @@
 {
-  "dynare.serverPath": "troubleshoot",
+  "dynare.serverPath": "about",
   "dynare.searchPaths": "model-and-includes",
   "dynare.macroWorkLimit": "effective-model",
   "dynare.outline.sections": "navigate-code",

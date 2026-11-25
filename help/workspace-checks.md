@@ -5,16 +5,10 @@ workspace folders, including unopened models (skipping Dynare's generated
 `+model` output directories). Enable background checking in [Dynare: Workspace
 Diagnostics](settings:dynare.workspaceDiagnostics).
 
-Open **Dynare Workspace** in Explorer, or run **Dygnosis: Show workspace
-checks** from the Command Palette. Click **Show not fully checked models**in the view title bar to filter for incomplete or failed checks.
-You can also switch this filter from the Command Palette with **Dygnosis: Show
-not fully checked models** and **Dygnosis: Show all workspace files**. The
-view restores your choice when you reopen the workspace.
-
-Expand an incomplete model and select the reason beneath it to open the
-source in a regular tab in the current editor group. For a missing include,
-the reason selects the `@#include` directive, including when it is in another
-file.
+Use **Dynare Workspace** in Explorer or run **Dygnosis: Show workspace
+checks**. Use **Show not fully checked models** to focus on incomplete or
+failed checks. Select the reason under an incomplete model to find its
+cause, such as the `@#include` directive for a missing file.
 
 ## Scope and exclusions
 
@@ -23,6 +17,5 @@ Workspace Exclude Paths](settings:dynare.workspaceExcludePaths). Exclusions
 skip unopened models in those folders while still checking open files and
 `@#include` files used by other models.
 
-Each model root is checked using its selected [analysis
-configuration](effective-model.md#choose-the-analysis-configuration); models
-using a custom configuration display its name or selected choices beside the file.
+Each model root is checked with its selected [analysis
+configuration](effective-model.md#choose-the-analysis-configuration).

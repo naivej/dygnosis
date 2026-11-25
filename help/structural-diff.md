@@ -7,25 +7,19 @@ configuration](effective-model.md#choose-the-analysis-configuration)
 editor title bar, or a model file's context menu in **Source
 Control**.
 
-In **Dygnosis Changes**, your active model appears under **After** and the
-selected baseline under **Before**. Open either input for its full path,
-configuration, and `@#include` files.
+The selected baseline is **Before**. The active model is **After**.
 
 Browse **Equations**, **Parameters**, and other groups. Choose **Added**,
 **Removed**, or **Changed**, or press Ctrl+F (Cmd+F on macOS) for **Find changes**.
-Open one or more rows to review their **Before** and **After** details and
-source links together. A changed parameter can group
-its direct dependents, and a history card can group several written periods.
+Expand a row for **Before**, **After** and source links. A changed parameter
+can group its direct dependents, and a history card can group several written periods.
 **Macro context** counts edits to each macro name separately and groups them
-with added, removed, and edited `@#include` files. Open a source link to review
-an edit.
+with added, removed, and edited `@#include` files.
 Configure default filters in
 [Dynare › Diff: Default Change Kinds](settings:dynare.diff.defaultChangeKinds).
 
-Use **Swap sides**, **Refresh comparison**, and **Text diff** from the editor
-title bar or the Command Palette while Changes is active. **Text diff** opens
-the captured files side by side in VS Code. Run **Dygnosis: Show model changes**
-to choose a different baseline.
+Use **Text diff** to inspect textual changes in the captured files. Run
+**Dygnosis: Show model changes** to choose a different baseline.
 
 ## Comparison scope
 

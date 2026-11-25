@@ -1,26 +1,17 @@
 # Inspect macro expansion
 
-With a model or included file active, run **Dygnosis: Expand macros** from the
-Command Palette, or click **Expand macros** in the editor title bar.
-
-Dygnosis opens a read-only preview beside your file with `@#include` files,
-`@#for` loops, `@#if` branches and `@{...}` substitutions expanded before
-Dynare's internal equation transformations.
-
-Hover over names, commands and options in the preview to inspect them.
-Right-click the preview and choose **Dygnosis: Go to written source** to return
-to written code. Use **Refresh macro expansion** in the preview title bar or
-**Dygnosis: Refresh macro expansion** in the Command Palette after editing.
+Run **Dygnosis: Expand macros** with a model or included file active. The
+read-only preview expands `@#include` files, `@#for` loops, `@#if` branches
+and `@{...}` substitutions before Dynare's internal equation transformations.
 
 | Action | Shortcut | Result |
 |---|---|---|
 | **Dygnosis: Go to written source** | `Ctrl+Alt+G` (`Cmd+Alt+G` on macOS) | Jumps from the preview to the written line that produced it (for example `beta_1` → `beta_@{j}`). |
 | **Dygnosis: Refresh macro expansion** | `Ctrl+Alt+R` (`Cmd+Alt+R` on macOS) | Updates the preview after you edit the model or an include. |
 
-`@#echo` and `@#echomacrovars` output appears in the **Dygnosis** channel in
-[Output](action:output) when the preview opens or refreshes;
-`@#echomacrovars(save)` inserts assignment lines into the preview. Related
-settings: [Dynare › Effective Model: Macro
+`@#echo` and `@#echomacrovars` write to the **Dygnosis** channel in
+[Output](action:output). `@#echomacrovars(save)` inserts assignments in
+the preview. Related settings include [Dynare › Effective Model: Macro
 Tint](settings:dynare.effectiveModel.macroTint), [Dynare: Editor
 Actions](settings:dynare.editorActions), and [Dynare: Macro Work
 Limit](settings:dynare.macroWorkLimit).

@@ -9,7 +9,7 @@ const { readVersion, syncMetadata, syncVersion } = require('../../../scripts/ver
 const { buildEngine } = require('../../../scripts/build-engine.cjs');
 const source = path.join(productRoot, 'help');
 
-/** Marketplace listing and Help About. Both omit the logo: the listing already shows the extension icon, and Help only packs images under help/assets. */
+/** The Marketplace listing already shows the extension icon. */
 function productIntroduction(markdown) {
   return markdown.replace(/!\[[^\]]*\]\([^)]*logo[^)]*\)\s*/g, '');
 }
@@ -176,7 +176,7 @@ async function build() {
   const topics = [];
   for (const topic of registry) {
     assert.match(topic.id, /^[a-z][a-z-]+$/);
-    const markdown = topic.id === 'about' ? introduction : await fs.readFile(path.join(source, `${topic.id}.md`), 'utf8');
+    const markdown = await fs.readFile(path.join(source, `${topic.id}.md`), 'utf8');
     assert.equal([...markdown.matchAll(/^```/gm)].length % 2, 0, `Unclosed code fence in ${topic.id}`);
     for (const [, key] of markdown.matchAll(/\]\(settings:([^)]*)\)/g)) assert.ok(Object.hasOwn(settings, key), `Unknown setting ${key}`);
     topics.push({ ...topic, markdown });

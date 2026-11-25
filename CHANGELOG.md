@@ -3,6 +3,18 @@
 Each entry describes the release at the time. Feature names and interfaces can
 change in later releases; see Dygnosis Help for current guidance.
 
+## v0.12.6
+
+**Dygnosis: Open Help** opens beside a Dynare model, macro expansion or
+comparison. Run the command again to resume reading in the same Help tab.
+Search puts matches in topic titles first and shows the total when more
+than 50 topics match. **Reference** links directly to its
+commands, shortcuts, diagnostic codes and command options.
+
+Open **Get started with Dygnosis** from **Getting Started** to open a model,
+inspect **Problems**, check a folder in **Dynare Workspace** and find Help.
+The walkthrough replaces the startup notification.
+
 ## v0.12.5
 
 In **Dynare Workspace**, select the reason under an incomplete model to open

@@ -1,14 +1,9 @@
 # Read labels, hints and colors
 
-Dygnosis uses metadata labels, inline value hints, block shading and semantic
-colors to make models easier to read. Click any setting link below to open it
-in VS Code's Settings editor.
-
 ## File icons
 
-Your selected file icon theme determines the icons for Dynare files. Seti can
-show a blue Dynare icon for `.mod`, `.inc` and `.dyn`. Run **Preferences: File
-Icon Theme** to choose a theme.
+**Seti** can show Dynare icons on `.mod`, `.inc` and `.dyn` files. Choose
+it in **Preferences: File Icon Theme**.
 
 ## Name details
 

@@ -13,8 +13,20 @@ export interface HelpBundle {
   settingsTopics: Record<string, string>;
   commandsTopics: Record<string, string>;
 }
-export const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]!));
+const htmlEntities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const textEntities = new Map(Object.entries(htmlEntities).map(([char, entity]) => [entity, char]));
+export const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, char => htmlEntities[char as keyof typeof htmlEntities]);
 export const headingId = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+/** Read the renderer's escaped text without exposing link targets or controls. */
+export function helpSearchText(html: string): string {
+  return html
+    .replace(/<button\b[^>]*>[\s\S]*?<\/button>/g, "")
+    .replace(/<\/(?:p|li|td|th|pre|h[1-6])>/g, " ")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&(amp|lt|gt|quot|#39);/g, entity => textEntities.get(entity) ?? entity)
+    .replace(/\s+/g, " ").trim();
+}
 
 /** Strip internal engine-warrant sections from user-facing diagnostic explanations. */
 export const userDiagnosticMarkdown = (markdown: string): string =>
@@ -52,12 +64,12 @@ export function helpMarkdown(markdown: string, imageUri: (file: string) => strin
       case "paragraph": return `<p>${render(token.tokens)}</p>`;
       case "heading": return `<h${token.depth} id="${headingId(token.text)}">${render(token.tokens)}</h${token.depth}>`;
       case "strong": case "em": case "del": return `<${token.type}>${render(token.tokens)}</${token.type}>`;
-      case "br": return "<br>";
+      case "br": return " ";
       case "hr": return "<hr>";
       case "code": return `<div class="example"><button type="button" data-copy>Copy example</button><pre><code>${escapeHtml(token.text)}</code></pre></div>`;
       case "link": {
         const target = token.href.replace(/^([a-z][a-z-]+)\.md(?=#|$)/, "help:$1");
-        const allowed = /^(help:[a-z-]+(?:#[\w-]+)?|check:[A-Z]\d{3}|tool:dynare_\w+|option:\w+|settings:dynare\.(?:[\w.]+|MATLAB\/OctaveTint)|action:(output|restart|shortcuts)|https?:\/\/[^\s<>]+|#[\w-]+)$/.test(target);
+        const allowed = /^(help:[a-z-]+(?:#[\w-]+)?|check:[A-Z]\d{3}|tool:dynare_\w+|option:\w+|settings:dynare\.(?:[\w.]+|MATLAB\/OctaveTint)|action:(output|restart|settings|shortcuts)|https?:\/\/[^\s<>]+|#[\w-]+)$/.test(target);
         return allowed ? `<a href="#" data-link="${escapeHtml(target)}">${render(token.tokens)}</a>` : render(token.tokens);
       }
       case "image": {
@@ -78,6 +90,8 @@ export function helpMarkdown(markdown: string, imageUri: (file: string) => strin
 
 export function helpPages(bundle: HelpBundle): HelpTopic[] {
   const pages = bundle.topics.map(topic => ({ ...topic, keywords: [...topic.keywords] }));
+  const about = pages.find(topic => topic.id === "about");
+  if (about) about.markdown = `${about.markdown.trimEnd()}\n\nHelp edition ${bundle.version}\n`;
   const reference = pages.find(topic => topic.id === "reference");
   // A bracket in a check title must stay inside the link. Raw "]" ends it early.
   const codeIndexLink = (code: HelpCode): string => `- [${code.code} — ${code.title.replaceAll(/[[\]]/g, bracket => `\\${bracket}`)}](check:${code.code}) (${code.kind})`;
@@ -85,7 +99,26 @@ export function helpPages(bundle: HelpBundle): HelpTopic[] {
     const scope = command.command === "dygnosis.ignoreWorkspaceFolder" ? " (folder row action in Dynare Workspace)" : "";
     return `- [${command.category}: ${command.title}](help:${bundle.commandsTopics[command.command]})${scope}`;
   };
-  if (reference) reference.markdown += `\n## Commands\n\n${bundle.commands.map(commandLink).join("\n")}\n\n## Dygnosis shortcuts\n\n${bundle.keybindings.map(key => `- ${bundle.commands.find(command => command.command === key.command)?.title ?? key.command}: ${key.key}; macOS ${key.mac ?? key.key}`).join("\n")}\n\n## Diagnostic codes\n\n| Label | Meaning |\n|---|---|\n| Shared | Dynare reports this on the file you edit, and Dygnosis reports it too. |\n| Added | Extra guidance from Dygnosis. Dynare never reports it. |\n| Skipped | Documented only. Dynare's message depends on rewritten equations or on the MATLAB file it generates, so Dygnosis does not show the check. |\n\n${bundle.reference.codes.map(codeIndexLink).join("\n")}\n\n## Command options\n\n${bundle.reference.options.map(entry => `- [${entry.command}](option:${entry.command})`).join("\n")}\n`;
+  if (reference) {
+    const shortcuts = bundle.keybindings.map(key => {
+      const title = bundle.commands.find(command => command.command === key.command)?.title ?? key.command;
+      return `- ${title}: ${key.key}; macOS ${key.mac ?? key.key}`;
+    });
+    const diagnosticKinds = [
+      "| Label | Meaning |", "|---|---|",
+      "| Shared | Dynare reports this on the file you edit, and Dygnosis reports it too. |",
+      "| Added | Extra guidance from Dygnosis. Dynare never reports it. |",
+      "| Skipped | Documented only. Dynare's message depends on rewritten equations or on the MATLAB file it generates, so Dygnosis does not show the check. |",
+    ];
+    const sections = [
+      { title: "Commands", content: bundle.commands.map(commandLink).join("\n") },
+      { title: "Dygnosis shortcuts", content: `Open [Keyboard Shortcuts](action:shortcuts) to customize Dygnosis keybindings.\n\n${shortcuts.join("\n")}` },
+      { title: "Diagnostic codes", content: `${diagnosticKinds.join("\n")}\n\n${bundle.reference.codes.map(codeIndexLink).join("\n")}` },
+      { title: "Command options", content: bundle.reference.options.map(entry => `- [${entry.command}](option:${entry.command})`).join("\n") },
+    ];
+    const links = sections.map(({ title }) => `[${title}](#${headingId(title)})`).join(" · ");
+    reference.markdown = `${reference.markdown.trimEnd()}\n\n${links}\n\n${sections.map(({ title, content }) => `## ${title}\n\n${content}`).join("\n\n")}\n`;
+  }
   pages.push(...bundle.reference.options.map(entry => ({ id: `option:${entry.command}`, title: `${entry.command} options`, keywords: [entry.command, "options"], markdown: `# ${entry.command} options\n\n[Editing](help:edit-models) · [Command options](help:reference#command-options)\n\n| Option | Meaning |\n|---|---|\n${entry.options.map(option => `| \`${option.name}\` | ${option.description.replaceAll("|", "\\|").replaceAll("\n", " ")} |`).join("\n")}` })));
   pages.push(...bundle.reference.codes.map(code => ({ id: `check:${code.code}`, title: `${code.code}: ${code.title}`, keywords: [code.code, code.kind], markdown: `${userDiagnosticMarkdown(code.markdown)}\n\n[Use diagnostic actions](help:diagnostics) · [Diagnostic code index](help:reference#diagnostic-codes)` })));
   pages.push(...userToolPages(bundle.reference.tools, pages.find(topic => topic.id === "agents")));

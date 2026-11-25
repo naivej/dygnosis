@@ -1013,7 +1013,7 @@ export class DygnosisClient implements vscode.Disposable {
     if (action === "Show Output") this.output.show();
     else if (action === "Use bundled binary") await vscode.workspace.getConfiguration("dynare").update("serverPath", "", vscode.ConfigurationTarget.Global);
     else if (action === "Open Settings") await vscode.commands.executeCommand("workbench.action.openSettings", "@ext:CoconutWater.dygnosis dynare.serverPath");
-    else if (action === "Open Help") await vscode.commands.executeCommand("dygnosis.openHelp", "troubleshoot");
+    else if (action === "Open Help") await vscode.commands.executeCommand("dygnosis.openHelp", "about#support");
   }
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;

@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.12.5",
+  "version": "0.12.6",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -17,7 +17,16 @@
     "node": "^22.13.0 || >=24"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
+  "keywords": [
+    "Dynare",
+    "DSGE",
+    "macroeconomics",
+    "MATLAB",
+    "Octave"
   ],
   "extensionKind": [
     "workspace"
@@ -1757,14 +1766,47 @@
         "description": "Edit and check a Dynare model in VS Code.",
         "steps": [
           {
-            "id": "dygnosis.help",
-            "title": "Open Dygnosis Help",
-            "description": "Install, start a model and find each feature in one offline reference.\n[Open Help](command:dygnosis.openHelp)",
+            "id": "openModel",
+            "title": "Open a Dynare model",
+            "description": "Choose a model file such as baseline.mod.\n[Open File…](command:workbench.action.files.openFile)",
             "media": {
               "markdown": "media/welcome.md"
             },
             "completionEvents": [
-              "onCommand:dygnosis.openHelp"
+              "onContext:dygnosis.walkthroughModelOpened"
+            ]
+          },
+          {
+            "id": "checkModel",
+            "title": "Check the model",
+            "description": "Open Problems to inspect the model's checks.\n[Open Problems](command:workbench.actions.view.problems)",
+            "media": {
+              "markdown": "media/welcome-problems.md"
+            },
+            "completionEvents": [
+              "onView:workbench.panel.markers.view"
+            ]
+          },
+          {
+            "id": "checkWorkspace",
+            "title": "Check a workspace",
+            "description": "Open the folder that contains your models first.\n[Show workspace checks](command:dygnosis.workspaceStatus)",
+            "media": {
+              "markdown": "media/welcome-workspace.md"
+            },
+            "completionEvents": [
+              "onContext:workspaceFolderCount > 0 && focusedView == dygnosis.workspace"
+            ]
+          },
+          {
+            "id": "findWorkflow",
+            "title": "Find a workflow",
+            "description": "Find a topic, command, setting or check code in Help.\n[Open Help](command:dygnosis.openHelp)",
+            "media": {
+              "markdown": "media/welcome-help.md"
+            },
+            "completionEvents": [
+              "onContext:dygnosis.walkthroughHelpOpened"
             ]
           }
         ]

@@ -1,3 +1,2 @@
-# Start a Dynare model
-
-Open a `.mod` or `.dyn` file and select the **Dynare** language mode. Help is available from the Command Palette.
+The language mode in the status bar shows **Dynare** for a model. If it shows
+another language, select it and choose **Dynare**.
