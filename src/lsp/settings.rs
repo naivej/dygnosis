@@ -89,23 +89,12 @@ impl Default for PresentationSettings {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct ResourceSettings {
     pub macro_work_limit: MacroWorkLimit,
     pub search_paths: Vec<PathBuf>,
     pub presentation: PresentationSettings,
     pub workspace_exclude_paths: Vec<String>,
-}
-
-impl Default for ResourceSettings {
-    fn default() -> Self {
-        Self {
-            macro_work_limit: MacroWorkLimit::default(),
-            search_paths: Vec::new(),
-            presentation: PresentationSettings::default(),
-            workspace_exclude_paths: Vec::new(),
-        }
-    }
 }
 
 #[derive(Clone)]

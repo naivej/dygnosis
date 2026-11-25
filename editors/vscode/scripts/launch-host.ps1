@@ -9,22 +9,25 @@ $result = @{
     launcher_pid = $PID; powershell_version = $PSVersionTable.PSVersion.ToString()
     powershell_home = $PSHOME
 }
-function Write-Lifecycle {
-    $temporary = $Lifecycle + '.tmp'
+$lifecycleSequence = 0
+function Write-Lifecycle([switch]$Final) {
+    $destination = $Lifecycle
+    if (-not $Final) {
+        $script:lifecycleSequence++
+        $destination += '.{0:000}' -f $script:lifecycleSequence
+    }
+    # Publish each completed snapshot once. Readers can hold earlier files open.
+    $temporary = $destination + '.tmp'
     [System.IO.File]::WriteAllText($temporary, ($result | ConvertTo-Json), [System.Text.UTF8Encoding]::new($false))
     $retry = [System.Diagnostics.Stopwatch]::StartNew()
     while ($true) {
         try {
-            if ([System.IO.File]::Exists($Lifecycle)) {
-                [System.IO.File]::Replace($temporary, $Lifecycle, [NullString]::Value)
-            } else {
-                [System.IO.File]::Move($temporary, $Lifecycle)
-            }
+            [System.IO.File]::Move($temporary, $destination)
             return
         } catch [System.IO.IOException] {
             $code = $_.Exception.HResult -band 0xffff
             if ($code -notin @(32, 33) -or $retry.ElapsedMilliseconds -ge 500) {
-                throw "Cannot publish host lifecycle stage '$($result.stage)' at '$Lifecycle': $($_.Exception.Message)"
+                throw "Cannot publish host lifecycle stage '$($result.stage)' at '$destination' (Windows error ${code}): $($_.Exception.Message)"
             }
             Start-Sleep -Milliseconds 20
         }
@@ -78,5 +81,5 @@ try {
         # No native constructor ran, so there is no host tree to terminate.
         $result.cleanup_verified = $true
     }
-    Write-Lifecycle
+    Write-Lifecycle -Final
 }

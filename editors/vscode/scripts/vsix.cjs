@@ -100,14 +100,22 @@ async function inspectVsix(file, expected) {
     }
   }
   const help = json("help/bundle.json");
-  assert.equal(help.version, source.version); assert.equal(help.reference.version, source.version);
-  assert.deepEqual(help.reference.tools, JSON.parse(await require("node:fs/promises").readFile(path.join(productRoot, "help/reference.json"), "utf8")).tools);
+  assert.equal(hash(data("extension/help/bundle.json")), source.help_bundle_sha256, "Changed Help bundle");
+  assert.equal(help.version, source.version);
+  const reference = JSON.parse(await require("node:fs/promises").readFile(path.join(productRoot, "help/reference.json"), "utf8"));
+  const topics = new Map(help.topics.map(topic => [topic.id, topic]));
+  assert.equal(topics.size, help.topics.length);
+  for (const tool of reference.tools) assert.ok(topics.has(`tool:${tool.name}`), `Missing Help for ${tool.name}`);
   const images = new Set();
-  for (const topic of help.topics) for (const [, image] of topic.markdown.matchAll(/!\[[^\]]*\]\((assets\/[^)]+)\)/g)) {
-    const name = `extension/help/${image}`;
-    data(name); images.add(name);
+  for (const topic of help.topics) {
+    assert.ok(typeof topic.html === "string" && typeof topic.text === "string" && typeof topic.body === "string", `Missing prepared Help for ${topic.id}`);
+    for (const [, image] of topic.html.matchAll(/src="dygnosis-help-asset:(assets\/[a-zA-Z0-9/_-]+\.(?:png|jpg|svg))"/g)) {
+      data(`extension/help/${image}`);
+      images.add(image);
+    }
   }
-  assert.deepEqual([...entries.keys()].filter(name => name.startsWith("extension/help/assets/")).sort(), [...images].sort(), "Unused Help assets in VSIX");
+  assert.deepEqual(help.assets, [...images].sort(), "Help assets differ from the rendered articles");
+  assert.deepEqual([...entries.keys()].filter(name => name.startsWith("extension/help/assets/")).sort(), help.assets.map(image => `extension/help/${image}`), "Unused Help assets in VSIX");
   assert.ok(manifest.contributes.commands.some(command => command.command === "dygnosis.openHelp"));
   assert.ok(manifest.activationEvents.includes("onWebviewPanel:dygnosis.help"));
   assert.deepEqual(source.runtime_dependencies, []);

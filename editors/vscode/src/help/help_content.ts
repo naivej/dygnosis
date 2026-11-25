@@ -13,6 +13,36 @@ export interface HelpBundle {
   settingsTopics: Record<string, string>;
   commandsTopics: Record<string, string>;
 }
+export interface PreparedHelpBundle {
+  version: string;
+  topics: (Omit<HelpTopic, "markdown"> & { html: string; body: string; text: string })[];
+  settingsTopics: HelpBundle["settingsTopics"];
+  assets: string[];
+}
+
+export function prepareHelpBundle(bundle: HelpBundle): PreparedHelpBundle {
+  const assets = new Set<string>();
+  const topics = helpPages(bundle).map(({ id, title, keywords, markdown }) => {
+    const html = helpMarkdown(markdown, file => {
+      assets.add(file);
+      return `dygnosis-help-asset:${file}`;
+    });
+    return { id, title, keywords, html, body: markdown.toLowerCase(), text: helpSearchText(html) };
+  });
+  return { version: bundle.version, topics, settingsTopics: bundle.settingsTopics, assets: [...assets].sort() };
+}
+
+export function resolveHelpAssets(
+  { topics, assets }: PreparedHelpBundle,
+  imageUri: (file: string) => string,
+): PreparedHelpBundle["topics"] {
+  if (!assets.length) return topics;
+  const uris = new Map(assets.map(file => [`src="dygnosis-help-asset:${file}"`, `src="${escapeHtml(imageUri(file))}"`]));
+  return topics.map(topic => ({
+    ...topic,
+    html: topic.html.replace(/src="dygnosis-help-asset:assets\/[a-zA-Z0-9/_-]+\.(?:png|jpg|svg)"/g, attribute => uris.get(attribute) ?? attribute),
+  }));
+}
 const htmlEntities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const textEntities = new Map(Object.entries(htmlEntities).map(([char, entity]) => [entity, char]));
 export const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, char => htmlEntities[char as keyof typeof htmlEntities]);

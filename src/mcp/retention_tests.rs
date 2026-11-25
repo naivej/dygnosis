@@ -191,6 +191,122 @@ fn run_call(store: Option<&Arc<Store>>, tool: &str, arguments: Value) -> (Value,
     finish(prepare_call(store, tool, arguments))
 }
 
+fn text_comparison() -> Value {
+    json!({
+        "comparison": {
+            "kind": "sources",
+            "before": text_input("var x y z; model; x=1; y=2; z=3; end;"),
+            "after": text_input("var x y z; model; x=4; y=5; z=6; end;"),
+        },
+        "page_size": 1
+    })
+}
+
+fn next_comparison(mut arguments: Value, previous: &Value) -> Value {
+    assert!(previous["selection"]["continuation"].is_string());
+    arguments["continuation"] = previous["selection"]["continuation"].clone();
+    arguments["expected_revision_a"] = previous["inputs"][0]["revision"].clone();
+    arguments["expected_revision_b"] = previous["inputs"][1]["revision"].clone();
+    arguments
+}
+
+fn compare_call(store: Option<&Arc<Store>>, arguments: Value) -> (Value, u64) {
+    reset_timings(true);
+    let (response, _, _) = run_call(store, "dynare_compare_models", arguments);
+    (response, timings()["comparison"]["calls"].as_u64().unwrap())
+}
+
+#[test]
+fn text_pages_reuse_verified_facts_until_the_last_page() {
+    // Guards recomputing a valid next page and serving an old diff for an edited input.
+    let cache = store(Limits {
+        min_comparison_time: Duration::ZERO,
+        ..Limits::default()
+    });
+    let input = text_comparison();
+    let (first, calls) = compare_call(Some(&cache), input.clone());
+    assert_eq!(calls, 1);
+    assert!(cache.locked().entries[0].comparison.is_some());
+    let next = next_comparison(input.clone(), &first);
+    let (second, calls) = compare_call(Some(&cache), next.clone());
+    assert_eq!(calls, 0);
+    assert_eq!(second, compare_call(None, next.clone()).0);
+    assert_ne!(
+        first["data"]["semantic"]["rows"][0]["snapshot_pointer"],
+        second["data"]["semantic"]["rows"][0]["snapshot_pointer"]
+    );
+
+    let last = next_comparison(input.clone(), &second);
+    let (last_page, calls) = compare_call(Some(&cache), last.clone());
+    assert_eq!(calls, 0);
+    assert_eq!(last_page, compare_call(None, last).0);
+    assert!(last_page["selection"]["continuation"].is_null());
+    assert!(cache.locked().entries[0].comparison.is_none());
+
+    compare_call(Some(&cache), input);
+    let mut stale = next;
+    stale["comparison"]["after"] = json!(text_input("var x y z; model; x=4; y=5; z=7; end;"));
+    let (refused, calls) = compare_call(Some(&cache), stale);
+    assert_eq!(calls, 0);
+    assert!(refused["selection"].is_null());
+    assert!(reason_code(&refused, "INPUT_CHANGED"));
+    assert!(cache.locked().entries.is_empty());
+}
+
+#[test]
+fn comparison_admission_obeys_paging_work_and_connection_budget() {
+    // Guards retaining a one-page result, expensive comparison graphs bypassing the byte limit,
+    // discarding the source entry under pressure, and loss of continuation on a miss.
+    let input = text_comparison();
+    let eager_limits = Limits {
+        min_comparison_time: Duration::ZERO,
+        ..Limits::default()
+    };
+    let eager = store(eager_limits);
+    let mut summary = input.clone();
+    summary["sections"] = json!(["summary"]);
+    compare_call(Some(&eager), summary);
+    assert!(eager.locked().entries[0].comparison.is_none());
+    let mut single_page = input.clone();
+    single_page["page_size"] = json!(50);
+    compare_call(Some(&eager), single_page);
+    assert!(eager.locked().entries[0].comparison.is_none());
+
+    let with_graph = store(eager_limits);
+    let first = prepare_call(Some(&with_graph), "dynare_compare_models", input.clone());
+    let charged = first.session.as_ref().unwrap().locked().owner.bytes();
+    let first = finish(first).0;
+    let cold = store(Limits {
+        min_comparison_time: Duration::MAX,
+        ..eager_limits
+    });
+    let source_only = prepare_call(Some(&cold), "dynare_compare_models", input.clone());
+    let before_only = source_only.session.as_ref().unwrap().locked().owner.bytes();
+    finish(source_only);
+    assert!(cold.locked().entries[0].comparison.is_none());
+    assert!(charged > before_only);
+
+    let constrained = store(Limits {
+        bytes: eager.owner.bytes() + before_only + (charged - before_only) / 2,
+        ..eager_limits
+    });
+    let (under_budget, _) = compare_call(Some(&constrained), input.clone());
+    assert_eq!(under_budget, first);
+    {
+        let state = constrained.locked();
+        assert_eq!(state.entries.len(), 1);
+        assert!(state.entries[0].comparison.is_none());
+        assert!(constrained.charge(&state) <= constrained.limits.bytes);
+    }
+    let next = next_comparison(input, &under_budget);
+    reset_timings(true);
+    let (second, source_hit, _) =
+        run_call(Some(&constrained), "dynare_compare_models", next.clone());
+    assert!(source_hit);
+    assert_eq!(timings()["comparison"]["calls"].as_u64(), Some(1));
+    assert_eq!(second, compare_call(None, next).0);
+}
+
 fn info_args(input: SourceInput) -> Value {
     json!({"source":input})
 }
@@ -243,7 +359,7 @@ fn limits(bytes: usize, entries: usize) -> Limits {
     Limits {
         bytes,
         entries,
-        idle: Duration::from_secs(30),
+        ..Limits::default()
     }
 }
 
@@ -460,6 +576,7 @@ async fn idle_reaper_expires_without_a_request_and_close_rejects_late_publicatio
             bytes: 16 * 1024 * 1024,
             entries: 2,
             idle: Duration::from_millis(20),
+            ..Limits::default()
         },
         false,
     );

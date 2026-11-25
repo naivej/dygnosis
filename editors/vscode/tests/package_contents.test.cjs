@@ -22,12 +22,12 @@ test("Help copies only referenced images and removes assets from the previous bu
   await fs.mkdir(path.join(source, "assets/nested"), { recursive: true });
   await fs.writeFile(path.join(source, "assets/nested/used.svg"), "<svg>used</svg>");
   await fs.writeFile(path.join(source, "assets/unused.png"), "unused");
-  await copyHelpAssets([{ markdown: "![Image](assets/nested/used.svg)" }], source, output);
+  await copyHelpAssets(["assets/nested/used.svg"], source, output);
   assert.equal(await fs.readFile(path.join(output, "assets/nested/used.svg"), "utf8"), "<svg>used</svg>");
   await assert.rejects(fs.stat(path.join(output, "assets/unused.png")), { code: "ENOENT" });
-  await copyHelpAssets([{ markdown: "No images" }], source, output);
+  await copyHelpAssets([], source, output);
   await assert.rejects(fs.stat(path.join(output, "assets")), { code: "ENOENT" });
-  await assert.rejects(copyHelpAssets([{ markdown: "![Image](assets/missing.svg)" }], source, output), { code: "ENOENT" });
+  await assert.rejects(copyHelpAssets(["assets/missing.svg"], source, output), { code: "ENOENT" });
 });
 
 // Guard against losing attribution or changing bytes when two packages share a license.

@@ -207,9 +207,9 @@ pub(super) fn splits(
     for (index, owner) in owners.iter().enumerate() {
         let view = owner_splits(text, file, line_starts, &selection, owner);
         blocked_lines.extend(
-            view.iter().filter_map(|(gap, cut)| {
-                cut.is_none().then(|| offset_line(line_starts, gap.start))
-            }),
+            view.iter()
+                .filter(|(_, cut)| cut.is_none())
+                .map(|(gap, _)| offset_line(line_starts, gap.start)),
         );
         candidates.extend(
             view.keys()

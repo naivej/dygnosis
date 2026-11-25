@@ -19,6 +19,7 @@ use sha2::{Digest, Sha256};
 
 use super::source::{RequestControl, ReusableSource, SourceInput, SourceSnapshot};
 use crate::engine::analysis_configuration::AnalysisConfiguration;
+use crate::engine::comparison::compare_navigation::PreparedComparison;
 use crate::retained_memory::{self as memory, Owner, Scope};
 
 /// Inclusive durations of existing work. Identity, source and capture are
@@ -143,6 +144,7 @@ struct Limits {
     bytes: usize,
     entries: usize,
     idle: Duration,
+    min_comparison_time: Duration,
 }
 impl Default for Limits {
     fn default() -> Self {
@@ -150,6 +152,7 @@ impl Default for Limits {
             bytes: 128 * 1024 * 1024,
             entries: 4,
             idle: Duration::from_secs(30),
+            min_comparison_time: Duration::from_millis(20),
         }
     }
 }
@@ -157,8 +160,14 @@ impl Default for Limits {
 struct Entry {
     key: String,
     source: ReusableSource,
+    comparison: Option<RetainedComparison>,
     owner: Arc<Owner>,
     used: Instant,
+}
+
+struct RetainedComparison {
+    revisions: [String; 2],
+    value: PreparedComparison,
 }
 struct State {
     entries: Vec<Entry>,
@@ -228,7 +237,12 @@ impl Store {
         Some(state.entries.remove(index))
     }
 
-    fn publish(&self, entry: Entry) -> bool {
+    fn publish(&self, mut entry: Entry) -> bool {
+        // Preserve the ordinary source entry when the optional comparison exceeds
+        // the connection budget on its own. Drop the graph before taking the store lock.
+        if !self.entry_fits(&entry) {
+            drop(entry.comparison.take());
+        }
         let mut retired = Vec::new();
         let retirement;
         {
@@ -236,7 +250,7 @@ impl Store {
             if state.closed
                 || state.retiring > 0
                 || !memory::installed()
-                || entry.owner.bytes().saturating_add(self.owner.bytes()) > self.limits.bytes
+                || !self.entry_fits(&entry)
             {
                 return false;
             }
@@ -270,6 +284,10 @@ impl Store {
         }
         state.entries.push(entry);
         true
+    }
+
+    fn entry_fits(&self, entry: &Entry) -> bool {
+        entry.owner.bytes().saturating_add(self.owner.bytes()) <= self.limits.bytes
     }
 
     fn begin_retirement(state: &mut State, entries: Vec<Entry>) -> Retirement {
@@ -451,6 +469,38 @@ impl Session {
         })
     }
 
+    pub(super) fn take_comparison(&self, revisions: [&str; 2]) -> Option<PreparedComparison> {
+        let mut state = self.locked();
+        let entry = state.candidate.as_mut()?;
+        if entry
+            .comparison
+            .as_ref()?
+            .revisions
+            .each_ref()
+            .map(String::as_str)
+            != revisions
+        {
+            return None;
+        }
+        entry.comparison.take().map(|comparison| comparison.value)
+    }
+
+    pub(super) fn worth_retaining_comparison(&self, elapsed: Duration) -> bool {
+        elapsed >= self.store.limits.min_comparison_time
+    }
+
+    pub(super) fn retain_comparison(&self, revisions: [&str; 2], value: PreparedComparison) {
+        let mut comparison = Some(RetainedComparison {
+            revisions: revisions.map(str::to_owned),
+            value,
+        });
+        if let Some(entry) = self.locked().candidate.as_mut() {
+            std::mem::swap(&mut entry.comparison, &mut comparison);
+        }
+        // A comparison graph can be large. Destroy the replaced graph outside the lock.
+        drop(comparison);
+    }
+
     pub(super) fn finish(
         &self,
         result: &Result<CallToolResult, rmcp::ErrorData>,
@@ -511,10 +561,12 @@ impl Lease {
         // The key was prepared before selecting a hit's owner. Clone it now so
         // every allocation retained by this entry belongs to the selected owner.
         let key = self.key.clone();
+        let comparison = self.seed.and_then(|entry| entry.comparison);
         let mut state = self.session.locked();
         state.candidate = Some(Entry {
             key,
             source,
+            comparison,
             owner: Arc::clone(&state.owner),
             used: Instant::now(),
         });

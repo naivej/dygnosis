@@ -14,12 +14,10 @@ function productIntroduction(markdown) {
   return markdown.replace(/!\[[^\]]*\]\([^)]*logo[^)]*\)\s*/g, '');
 }
 
-async function copyHelpAssets(topics, sourceRoot, targetRoot) {
-  const images = new Set();
-  for (const topic of topics) for (const [, file] of topic.markdown.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)) {
+async function copyHelpAssets(images, sourceRoot, targetRoot) {
+  for (const file of images) {
     assert.match(file, /^assets\/[a-zA-Z0-9/_-]+\.(png|jpg|svg)$/);
     assert.ok((await fs.stat(path.join(sourceRoot, file))).isFile(), `Missing image ${file}`);
-    images.add(file);
   }
   const assets = path.resolve(targetRoot, 'assets');
   assert.equal(path.dirname(assets), path.resolve(targetRoot));
@@ -199,8 +197,21 @@ async function build() {
   for (const id of Object.values(commandsTopics)) assert.ok(ids.has(id), `Unknown command owner ${id}`);
   assert.deepEqual(Object.keys(settingsTopics).sort(), Object.keys(settings).sort(), 'Every setting needs a feature owner');
   for (const id of Object.values(settingsTopics)) assert.ok(ids.has(id), `Unknown setting owner ${id}`);
-  await fs.writeFile(path.join(target, 'bundle.json'), JSON.stringify({ version: manifest.version, topics, reference, commands: manifest.contributes.commands, keybindings: manifest.contributes.keybindings, settingsTopics, commandsTopics }) + '\n');
-  await copyHelpAssets(topics, source, target);
+  const contentFile = path.join(extensionRoot, 'out/help-build-content.cjs');
+  const esbuild = require('esbuild');
+  await esbuild.build({
+    entryPoints: [path.join(extensionRoot, 'src/help/help_content.ts')], outfile: contentFile,
+    platform: 'node', format: 'cjs', target: 'es2022',
+  });
+  const { prepareHelpBundle } = require(contentFile);
+  const input = {
+    version: manifest.version, topics, reference, commands: manifest.contributes.commands,
+    keybindings: manifest.contributes.keybindings, settingsTopics, commandsTopics,
+  };
+  const bundle = prepareHelpBundle(input);
+  await copyHelpAssets(bundle.assets, source, target);
+  await fs.writeFile(path.join(extensionRoot, 'out/help-source.json'), JSON.stringify(input) + '\n');
+  await fs.writeFile(path.join(target, 'bundle.json'), JSON.stringify(bundle) + '\n');
   await fs.writeFile(path.join(extensionRoot, 'README.md'), introduction);
   console.log(`Help: ${topics.length} topics, ${reference.codes.length} checks, ${reference.tools.length} tools, ${Object.keys(settingsTopics).length} native settings`);
 }

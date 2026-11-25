@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
-import { escapeHtml, HelpBundle, helpMarkdown, helpPages, helpSearchText, userDiagnosticMarkdown } from "./help_content";
+import { escapeHtml, helpMarkdown, PreparedHelpBundle, resolveHelpAssets, userDiagnosticMarkdown } from "./help_content";
 import { record } from "../client/protocol";
 import { changesViewType } from "../comparison/changes_resource";
 
@@ -22,9 +22,16 @@ export function registerHelp(context: vscode.ExtensionContext): vscode.Disposabl
   let ready = false;
   let walkthroughHelpOpened = false;
   let pending: HelpRequest | undefined;
+  let pendingBundle: PreparedHelpBundle | undefined;
   let subscriptions: vscode.Disposable[] = [];
-  const bundle = JSON.parse(readFileSync(path.join(root.fsPath, "bundle.json"), "utf8")) as HelpBundle;
-  const pages = helpPages(bundle);
+  let topicIds: Set<string> | undefined;
+  let settingsTopics: PreparedHelpBundle["settingsTopics"] = {};
+  const readBundle = (): PreparedHelpBundle => {
+    const bundle = JSON.parse(readFileSync(path.join(root.fsPath, "bundle.json"), "utf8")) as PreparedHelpBundle;
+    topicIds ??= new Set(bundle.topics.map(topic => topic.id));
+    settingsTopics = bundle.settingsTopics;
+    return bundle;
+  };
   const explanationPage = (request: HelpRequest) => request.code && request.markdown ? {
     id: `check:${request.code}`, title: `${request.code}: active engine explanation`,
     html: helpMarkdown(`${userDiagnosticMarkdown(request.markdown)}\n\n[Use diagnostic actions](help:diagnostics) · [Diagnostic code index](help:reference#diagnostic-codes)`, () => undefined),
@@ -34,9 +41,9 @@ export function registerHelp(context: vscode.ExtensionContext): vscode.Disposabl
   const send = (request: HelpRequest): void => {
     if (!panel || !ready) { pending = request; return; }
     const destination = request.code ? `check:${request.code}` : helpDestination(request.topic ?? "get-started");
-    const page = pages.find(topic => topic.id === destination.split("#")[0]);
+    const known = topicIds?.has(destination.split("#")[0]);
     const extra = explanationPage(request);
-    void panel.webview.postMessage({ type: "open", destination: page || extra ? destination : "reference", extra });
+    void panel.webview.postMessage({ type: "open", destination: known || extra ? destination : "reference", extra });
   };
   const attach = (next: vscode.WebviewPanel): void => {
     panel?.dispose();
@@ -88,14 +95,13 @@ export function registerHelp(context: vscode.ExtensionContext): vscode.Disposabl
 </html>`;
     subscriptions.push(next.onDidDispose(() => {
       if (panel !== next) return;
-      panel = undefined; ready = false; pending = undefined;
+      panel = undefined; ready = false; pending = undefined; pendingBundle = undefined;
       const listeners = subscriptions; subscriptions = [];
       listeners.forEach(listener => { listener.dispose(); });
     }), next.webview.onDidReceiveMessage(async (message: unknown) => {
       if (panel !== next || !record(message)) return;
       try {
       if (message.type === "ready") {
-        ready = true;
         const historyDetails = Array.isArray(message.history) ? message.history.slice(-100).map((entry: unknown) => {
           if (!record(entry) || typeof entry.destination !== "string") return undefined;
           const destination = helpDestination(entry.destination);
@@ -104,17 +110,18 @@ export function registerHelp(context: vscode.ExtensionContext): vscode.Disposabl
           const extra = explanationPage({ code: source.code, markdown: source.markdown, engineVersion: typeof source.engineVersion === "string" ? source.engineVersion.slice(0, 300) : undefined });
           return { destination, extra };
         }) : [];
-        const delivered = await next.webview.postMessage({ type: "bundle", historyDetails, topics: pages.map(({ id, title, keywords, markdown }) => {
-          const html = helpMarkdown(markdown, file => next.webview.asWebviewUri(vscode.Uri.joinPath(root, file)).toString());
-          return { id, title, keywords, html, body: markdown.toLowerCase(), text: helpSearchText(html) };
-        }) });
+        const bundle = pendingBundle ?? readBundle();
+        pendingBundle = undefined;
+        const topics = resolveHelpAssets(bundle, file => next.webview.asWebviewUri(vscode.Uri.joinPath(root, file)).toString());
+        const delivered = await next.webview.postMessage({ type: "bundle", historyDetails, topics });
         if (panel !== next) return;
+        ready = delivered;
         if (!walkthroughHelpOpened && delivered) {
           walkthroughHelpOpened = true;
           void vscode.commands.executeCommand("setContext", "dygnosis.walkthroughHelpOpened", true);
         }
         if (pending) { const request = pending; pending = undefined; send(request); }
-      } else if (message.type === "permalink" && typeof message.destination === "string" && pages.some(page => page.id === String(message.destination).split("#")[0])) {
+      } else if (message.type === "permalink" && typeof message.destination === "string" && topicIds?.has(message.destination.split("#")[0])) {
         await vscode.env.clipboard.writeText(`${vscode.env.uriScheme}://${context.extension.id}/help?topic=${encodeURIComponent(message.destination)}`);
         await next.webview.postMessage({ type: "notice", text: "Topic link copied." });
       } else if (message.type === "copy" && typeof message.text === "string" && message.text.length < 1024 * 1024) {
@@ -122,7 +129,7 @@ export function registerHelp(context: vscode.ExtensionContext): vscode.Disposabl
         await next.webview.postMessage({ type: "notice", text: "Example copied." });
       } else if (message.type === "link" && typeof message.target === "string") {
         const target = message.target;
-        if (target.startsWith("settings:") && Object.hasOwn(bundle.settingsTopics, target.slice(9))) await vscode.commands.executeCommand("workbench.action.openSettings", `@id:${target.slice(9)}`);
+        if (target.startsWith("settings:") && Object.hasOwn(settingsTopics, target.slice(9))) await vscode.commands.executeCommand("workbench.action.openSettings", `@id:${target.slice(9)}`);
         else if (target === "action:shortcuts") await vscode.commands.executeCommand("workbench.action.openGlobalKeybindings", "dygnosis");
         else if (target === "action:output") await vscode.commands.executeCommand("dygnosis.showOutput");
         else if (target === "action:restart") await vscode.commands.executeCommand("dygnosis.restartServer");
@@ -160,7 +167,11 @@ export function registerHelp(context: vscode.ExtensionContext): vscode.Disposabl
   const serializer = vscode.window.registerWebviewPanelSerializer("dygnosis.help", { deserializeWebviewPanel: next => { attach(next); return Promise.resolve(); } });
   const links = vscode.window.registerUriHandler({ handleUri: uri => {
     const topic = helpDestination(new URLSearchParams(uri.query).get("topic") ?? "");
-    if (uri.path === "/help" && topic && pages.some(page => page.id === topic.split("#")[0])) void vscode.commands.executeCommand("dygnosis.openHelp", topic);
+    if (uri.path !== "/help" || !topic) return;
+    const bundle = topicIds ? undefined : readBundle();
+    if (!topicIds?.has(topic.split("#")[0])) return;
+    pendingBundle ??= bundle;
+    void vscode.commands.executeCommand("dygnosis.openHelp", topic);
   } });
   return vscode.Disposable.from(command, serializer, links, new vscode.Disposable(() => { panel?.dispose(); subscriptions.forEach(subscription => { subscription.dispose(); }); }));
 }

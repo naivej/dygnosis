@@ -1576,15 +1576,13 @@ impl Parser<'_> {
                     && self.model.shape_refuses.len() == format_shapes_before
                 {
                     if statement.kind == crate::engine::language::model::StatementKind::Block {
-                        if let Some((end, after)) = self.completed_block_separator {
-                            if statement.opener_range.end > from
-                                && self.tokens[statement.opener_range.end - 1].kind
-                                    == TokenKind::Semi
-                            {
-                                self.model
-                                    .format_blocks
-                                    .push((statement.opener_range.clone(), end..after));
-                            }
+                        if let Some((end, after)) = self.completed_block_separator
+                            && statement.opener_range.end > from
+                            && self.tokens[statement.opener_range.end - 1].kind == TokenKind::Semi
+                        {
+                            self.model
+                                .format_blocks
+                                .push((statement.opener_range.clone(), end..after));
                         }
                     } else {
                         self.model.format_rows.push(from..self.i);

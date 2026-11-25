@@ -76,6 +76,7 @@ async function main() {
     binary_sha256: await sha256(binaries.lsp), mcp_binary_name: mcpBinaryName(target),
     mcp_binary_sha256: await sha256(binaries.mcp),
     mcp_binary_size: (await fs.stat(binaries.mcp)).size, logo_sha256: await sha256(path.join(productRoot, "media/logo_s.png")),
+    help_bundle_sha256: await sha256(path.join(extensionRoot, "help/bundle.json")),
     license: { spdx: "GPL-3.0-or-later", source_file: "LICENSE", source_sha256: await sha256(path.join(productRoot, "LICENSE")), vsix_path: "extension/LICENSE.txt", standalone_path: "LICENSE" },
     rustc: execute("rustc", ["--version"]).trim(), cargo_lock_sha256: cargoLock.committed, cargo_lock_checkout_sha256: cargoLock.checkout,
     build: values.binary ? "provided candidate binary pair" : "native cargo --locked --release", rustflags: values.binary ? null : rustFlags,

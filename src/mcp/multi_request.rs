@@ -694,6 +694,20 @@ fn comparison_mode(
             return Err(invalid("kinds contains an unsupported change kind"));
         }
     }
+    #[cfg(feature = "mcp-reuse")]
+    let comparison_cache = control.retention.as_ref().filter(|_| {
+        matches!(
+            &sources,
+            Some((SourceInput::Text { .. }, SourceInput::Text { .. }))
+        ) && (params.output.sections.is_empty()
+            || params
+                .output
+                .sections
+                .iter()
+                .any(|section| section != "summary"))
+    });
+    #[cfg(feature = "mcp-reuse")]
+    let mut retain_comparison = false;
     let (mut data, inputs, coverage, prepared, repository_sources) = if let Some(repository_path) =
         &params.base.repository_path
     {
@@ -885,8 +899,31 @@ fn comparison_mode(
                 None,
             )
         } else {
-            match compare_supplied(&mut before, &mut after, &control)? {
-                Ok(prepared) => (json!({}), Some(prepared)),
+            control.check().map_err(source_error)?;
+            #[cfg(feature = "mcp-reuse")]
+            let cached = comparison_cache
+                .filter(|_| params.output.continuation.is_some())
+                .and_then(|cache| cache.take_comparison([&before.revision, &after.revision]));
+            #[cfg(not(feature = "mcp-reuse"))]
+            let cached = None;
+            let prepared = if let Some(prepared) = cached {
+                #[cfg(feature = "mcp-reuse")]
+                {
+                    retain_comparison = true;
+                }
+                prepared
+            } else {
+                #[cfg(feature = "mcp-reuse")]
+                let started = comparison_cache.map(|_| std::time::Instant::now());
+                let prepared = prepare_supplied(&mut before, &mut after, &control)?;
+                #[cfg(feature = "mcp-reuse")]
+                if let Some((cache, started)) = comparison_cache.zip(started) {
+                    retain_comparison = cache.worth_retaining_comparison(started.elapsed());
+                }
+                prepared
+            };
+            match validate_supplied_comparison(&before, &after, &control)? {
+                Ok(()) => (json!({}), Some(prepared)),
                 Err(error) => (error, None),
             }
         };
@@ -967,9 +1004,23 @@ fn comparison_mode(
     drop(projection);
     result.data = data;
     control.check().map_err(source_error)?;
+    let wire = {
+        #[cfg(feature = "mcp-reuse")]
+        let _wire = super::retention::measure(super::retention::Phase::ComparisonWire);
+        result.wire()
+    };
     #[cfg(feature = "mcp-reuse")]
-    let _wire = super::retention::measure(super::retention::Phase::ComparisonWire);
-    Ok(result.wire())
+    if let Some(cache) = comparison_cache.filter(|_| retain_comparison)
+        && let Some(value) = wire.structured_content.as_ref()
+        && value["selection"]["continuation"].is_string()
+        && let (Some(before), Some(after)) = (
+            value.pointer("/inputs/0/revision").and_then(Value::as_str),
+            value.pointer("/inputs/1/revision").and_then(Value::as_str),
+        )
+    {
+        cache.retain_comparison([before, after], prepared);
+    }
+    Ok(wire)
 }
 
 fn comparison_recovery(code: &str, mut message: String) -> String {
@@ -1124,14 +1175,41 @@ fn supplied_analysis_summaries(
         "after":summary(after,params.analysis_after.as_ref(),after_cause)})
 }
 
-fn compare_supplied(
+fn validate_supplied_comparison(
+    before: &SourceSnapshot,
+    after: &SourceSnapshot,
+    control: &RequestControl,
+) -> Result<Result<(), Value>, rmcp::ErrorData> {
+    #[cfg(feature = "mcp-reuse")]
+    let _validation = super::retention::measure(super::retention::Phase::ComparisonInput);
+    control.check().map_err(source_error)?;
+    if !before.workspace.input_snapshot_is_current(&before.root)
+        || !after.workspace.input_snapshot_is_current(&after.root)
+    {
+        return Ok(Err(
+            json!({"error":"Comparison inputs changed while reading them.","code":"INPUT_CHANGED"}),
+        ));
+    }
+    if let Err(error) = before.workspace.validate_comparison_inputs(
+        &before.root,
+        &after.workspace,
+        &after.root,
+        before.inputs["source_policy"] == "disk" && after.inputs["source_policy"] == "disk",
+        (control.limits.max_files, control.limits.max_source_bytes),
+        Some((&before.guards, &after.guards)),
+    ) {
+        return Ok(Err(
+            json!({"error":error.message,"code":if error.code=="CAPTURE_LIMIT"{"SOURCE_LIMIT"}else{error.code}}),
+        ));
+    }
+    Ok(Ok(()))
+}
+
+fn prepare_supplied(
     before: &mut SourceSnapshot,
     after: &mut SourceSnapshot,
     control: &RequestControl,
-) -> Result<
-    Result<crate::engine::comparison::compare_navigation::PreparedComparison, Value>,
-    rmcp::ErrorData,
-> {
+) -> Result<crate::engine::comparison::compare_navigation::PreparedComparison, rmcp::ErrorData> {
     use crate::engine::comparison::compare_navigation::{
         self, ComparisonInput, PreparedComparison,
     };
@@ -1139,7 +1217,6 @@ fn compare_supplied(
     use crate::engine::comparison::{CompareSource, compare_captured_models};
     #[cfg(feature = "mcp-reuse")]
     let _comparison = super::retention::measure(super::retention::Phase::Comparison);
-    control.check().map_err(source_error)?;
     let mut diff = compare_captured_models(
         &before.model,
         &after.model,
@@ -1197,31 +1274,11 @@ fn compare_supplied(
         CaptureBoundary::SuppliedRootAndExecutedIncludes,
         &pairs,
     );
-    control.check().map_err(source_error)?;
-    if !before.workspace.input_snapshot_is_current(&before.root)
-        || !after.workspace.input_snapshot_is_current(&after.root)
-    {
-        return Ok(Err(
-            json!({"error":"Comparison inputs changed while reading them.","code":"INPUT_CHANGED"}),
-        ));
-    }
-    if let Err(error) = before.workspace.validate_comparison_inputs(
-        &before.root,
-        &after.workspace,
-        &after.root,
-        before.inputs["source_policy"] == "disk" && after.inputs["source_policy"] == "disk",
-        (control.limits.max_files, control.limits.max_source_bytes),
-        Some((&before.guards, &after.guards)),
-    ) {
-        return Ok(Err(
-            json!({"error":error.message,"code":if error.code=="CAPTURE_LIMIT"{"SOURCE_LIMIT"}else{error.code}}),
-        ));
-    }
-    Ok(Ok(PreparedComparison {
+    Ok(PreparedComparison {
         diff,
         before: old,
         after: new,
-    }))
+    })
 }
 #[cfg(test)]
 mod tests {

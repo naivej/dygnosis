@@ -277,10 +277,8 @@ fn push_fragment(
         edits[first..]
             .iter()
             .take_while(|&&(start, _, _)| start <= bytes.end)
-            .filter_map(|&(start, end, gap)| {
-                (start >= bytes.start && end <= bytes.end)
-                    .then(|| (start - bytes.start, end - bytes.start, gap))
-            })
+            .filter(|&&(start, end, _)| start >= bytes.start && end <= bytes.end)
+            .map(|&(start, end, gap)| (start - bytes.start, end - bytes.start, gap))
             .collect()
     });
     lines.push(SourceLine {

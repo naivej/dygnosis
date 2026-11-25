@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { helpMarkdown, helpPages, helpSearchText } = require(compiledModule("help_content"));
-const bundle = require('../help/bundle.json');
+const { helpMarkdown, helpPages, helpSearchText, prepareHelpBundle, resolveHelpAssets } = require(compiledModule("help_content"));
+const bundle = require('../out/help-source.json');
 
 test('Help uses every current command, check, option and setting feature owner without mutating its source', () => {
   const original = JSON.stringify(bundle);
@@ -49,6 +49,20 @@ test('untrusted engine explanations cannot execute HTML, links or remote images'
 test('search excerpts read visible text without including link targets or copy controls', () => {
   const html = helpMarkdown('[Search Paths](settings:dynare.searchPaths) & [Details](https://example.org/a_(b))\n\n```mod\nvar y;\n```', () => undefined);
   assert.equal(helpSearchText(html), 'Search Paths & Details var y;');
+});
+
+test('the packaged Help contains the prepared article, search body and excerpt for every topic', () => {
+  const deployed = require('../help/bundle.json');
+  const uri = file => `https://local/${file}?one=1&two=2`;
+  const source = JSON.parse(JSON.stringify(bundle));
+  source.topics[0].markdown += '\n\n![Diagram](assets/nested/diagram.svg)\n';
+  const rendered = resolveHelpAssets(prepareHelpBundle(source), uri);
+  const pages = helpPages(source);
+  assert.deepEqual(rendered, pages.map(({id, title, keywords, markdown}) => {
+    const html = helpMarkdown(markdown, uri);
+    return { id, title, keywords, html, body: markdown.toLowerCase(), text: helpSearchText(html) };
+  }));
+  assert.deepEqual(deployed, prepareHelpBundle(bundle));
 });
 
 test('Help prose can reflow while separate paragraphs and example lines stay intact', () => {

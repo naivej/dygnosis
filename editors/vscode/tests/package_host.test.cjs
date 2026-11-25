@@ -121,7 +121,7 @@ async function delayedLauncher(options, milliseconds, continueToHost) {
   const script = path.join(options.root, "delayed launcher.ps1");
   const realLauncher = path.resolve(__dirname, "../scripts/launch-host.ps1").replace(/'/g, "''");
   await fs.writeFile(script, `param([string]$LaunchFile, [string]$Lifecycle)
-[System.IO.File]::WriteAllText($Lifecycle, '{"stage":"compiling","host_ready":false,"cleanup_verified":false}')
+${continueToHost ? "" : `[System.IO.File]::WriteAllText($Lifecycle + '.001', '{"stage":"compiling","host_ready":false,"cleanup_verified":false}')`}
 Start-Sleep -Milliseconds ${milliseconds}
 ${continueToHost ? `& '${realLauncher}' -LaunchFile $LaunchFile -Lifecycle $Lifecycle` : "exit 9"}
 `);
@@ -174,30 +174,16 @@ test("Windows validation failure writes lifecycle evidence before any host exist
   assert.equal(await fs.readFile(path.join(evidence, "stdout.log"), "utf8"), "");
 });
 
-test("Windows lifecycle publication survives a reader holding the previous stage briefly", { skip: process.platform !== "win32" }, async t => {
+test("Windows launcher publishes cleanup while an earlier lifecycle record stays open", { skip: process.platform !== "win32" }, async t => {
   const options = await fixture(t, "pass");
-  const wrapper = path.join(options.root, "lock lifecycle.ps1");
+  const wrapper = path.join(options.root, "hold previous lifecycle.ps1");
   const launcher = path.resolve(__dirname, "../scripts/launch-host.ps1").replace(/'/g, "''");
   await fs.writeFile(wrapper, `param([string]$LaunchFile, [string]$Lifecycle)
-Add-Type -TypeDefinition @'
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
-public static class LifecycleReader {
-    public static Task Hold(string path) {
-        var handle = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        return Task.Run(() => {
-            using (handle) {
-                for (int i = 0; i < 300 && !File.Exists(path + ".tmp"); ++i) Thread.Sleep(10);
-                Thread.Sleep(120);
-            }
-        });
-    }
-}
-'@
-$reader = [LifecycleReader]::Hold($Lifecycle)
+$previous = $Lifecycle + '.000'
+if (-not [System.IO.File]::Exists($previous)) { $previous = $Lifecycle }
+$reader = [System.IO.File]::Open($previous, 'Open', 'Read', 'Read')
 try { & '${launcher}' -LaunchFile $LaunchFile -Lifecycle $Lifecycle }
-finally { $reader.Wait() }
+finally { $reader.Dispose() }
 `);
   await runHost({ ...options, launcherScript: wrapper });
   const record = await assertLogs(options.root);

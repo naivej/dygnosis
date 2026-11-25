@@ -873,20 +873,19 @@ fn display_runs_yield_before_exact_detail() {
     {
         side.display_runs = None;
     }
-    let bytes = |d: &crate::engine::comparison::ModelDiff| {
-        d.semantic
-            .rows
-            .iter()
-            .map(|r| serde_json::to_vec(r).unwrap().len())
-            .chain(
-                d.semantic
-                    .references
-                    .iter()
-                    .map(|r| serde_json::to_vec(r).unwrap().len()),
-            )
-            .sum::<usize>()
-    };
-    diff.semantic.budgets.serialized_output_bytes = bytes(&exact);
+    diff.semantic.budgets.serialized_output_bytes = exact
+        .semantic
+        .rows
+        .iter()
+        .map(|r| serde_json::to_vec(r).unwrap().len())
+        .chain(
+            exact
+                .semantic
+                .references
+                .iter()
+                .map(|r| serde_json::to_vec(r).unwrap().len()),
+        )
+        .sum::<usize>();
     enforce_output_budget(&mut diff);
     assert_eq!(diff.semantic.rows, exact.semantic.rows);
     assert_eq!(diff.semantic.references, exact.semantic.references);

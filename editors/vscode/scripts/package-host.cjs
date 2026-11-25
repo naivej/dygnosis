@@ -24,18 +24,34 @@ async function stopGroup(pid, kill = process.kill, timeoutMs = cleanupTimeoutMs)
   }
 }
 
+async function latestLauncherSnapshot(lifecycle) {
+  const directory = path.dirname(lifecycle);
+  const prefix = path.basename(lifecycle) + ".";
+  const snapshots = (await fs.readdir(directory)).filter(name =>
+    name.startsWith(prefix) && /^\d{3}$/.test(name.slice(prefix.length)));
+  return path.join(directory, snapshots.sort().at(-1) ?? `${prefix}000`);
+}
+
+async function readLauncherState(file) {
+  return JSON.parse((await fs.readFile(file, "utf8")).replace(/^\uFEFF/, ""));
+}
+
 async function waitForWindowsLauncher(exit, lifecycle, record, startupTimeoutMs, timeoutMs) {
   const started = performance.now();
   const startupDeadline = started + startupTimeoutMs;
-  let hostDeadline, completed;
+  let hostDeadline, completed, lastSnapshot;
   exit.then(result => { completed = result; }, error => { completed = { error }; });
   while (true) {
     try {
-      const state = JSON.parse((await fs.readFile(lifecycle, "utf8")).replace(/^\uFEFF/, ""));
-      record.launcher_stage = state.stage;
-      if (state.host_ready === true && hostDeadline === undefined) {
-        record.startup_ms = performance.now() - started;
-        hostDeadline = performance.now() + timeoutMs + cleanupTimeoutMs + 5000;
+      const snapshot = await latestLauncherSnapshot(lifecycle);
+      if (snapshot !== lastSnapshot) {
+        const state = await readLauncherState(snapshot);
+        lastSnapshot = snapshot;
+        record.launcher_stage = state.stage;
+        if (state.host_ready === true && hostDeadline === undefined) {
+          record.startup_ms = performance.now() - started;
+          hostDeadline = performance.now() + timeoutMs + cleanupTimeoutMs + 5000;
+        }
       }
     } catch (error) {
       if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) record.launcher_read_error = String(error);
@@ -59,17 +75,18 @@ async function runHost({ executable, args, env, root, profile, identity, timeout
   const evidenceRoot = path.join(root, "host-evidence");
   await fs.mkdir(evidenceRoot, { recursive: true });
   const stdout = path.join(evidenceRoot, "stdout.log"), stderr = path.join(evidenceRoot, "stderr.log");
-  const lifecycle = path.join(evidenceRoot, "launcher-result.json");
   const record = { ...identity, executable, args, started: new Date().toISOString(), timeout_ms: timeoutMs, passed: false };
   if (windows) record.startup_timeout_ms = startupTimeoutMs;
   await writeJson(path.join(evidenceRoot, "run.json"), record);
   const handles = [];
-  let child, failure;
+  let child, failure, lifecycle;
   try {
     const launchFile = path.join(root, "host-launch.json");
     if (windows) {
+      const lifecycleDirectory = await fs.mkdtemp(path.join(evidenceRoot, "launcher-status-"));
+      lifecycle = path.join(lifecycleDirectory, "launcher-result.json");
       await writeJson(launchFile, { executable, args, stdout, stderr, lifecycle, timeoutMs });
-      await writeJson(lifecycle, { stage: "launcher_starting", host_ready: false, cleanup_verified: false });
+      await writeJson(`${lifecycle}.000`, { stage: "launcher_starting", host_ready: false, cleanup_verified: false });
       await Promise.all([fs.writeFile(stdout, ""), fs.writeFile(stderr, "")]);
     }
     for (const file of windows ? ["launcher-stdout.log", "launcher-stderr.log"] : ["stdout.log", "stderr.log"]) {
@@ -117,7 +134,10 @@ async function runHost({ executable, args, env, root, profile, identity, timeout
     }
     if (windows) {
       try {
-        record.launcher = JSON.parse((await fs.readFile(lifecycle, "utf8")).replace(/^\uFEFF/, ""));
+        record.launcher = await readLauncherState(lifecycle).catch(async error => {
+          if (error.code !== "ENOENT" || !failure) throw error;
+          return readLauncherState(await latestLauncherSnapshot(lifecycle));
+        });
         if (!record.launcher.host_ready && record.launcher.error) {
           failure = new Error(`Windows host launcher failed during ${record.launcher.stage}: ${record.launcher.error}`);
         }

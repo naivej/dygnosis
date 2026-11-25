@@ -98,6 +98,25 @@ test('new Help opens beside a model, a macro expansion or a Changes editor', asy
   }
 });
 
+test('a cold topic link passes its bundle to the newly opened panel', async t => {
+  const fs = require('node:fs');
+  const readFileSync = fs.readFileSync;
+  const bundlePath = path.resolve(__dirname, '../help/bundle.json');
+  let reads = 0;
+  t.mock.method(fs, 'readFileSync', (file, ...args) => {
+    if (file === bundlePath) reads++;
+    return readFileSync(file, ...args);
+  });
+  const env = setup();
+  env.host.links.handleUri({ path: '/help', query: 'topic=diagnostics' });
+  assert.deepEqual(env.host.executed.pop(), ['dygnosis.openHelp', 'diagnostics']);
+  env.open('diagnostics');
+  await env.host.panels[0].receive({ type: 'ready' });
+  assert.equal(env.host.panels[0].messages.at(-1).destination, 'diagnostics');
+  assert.equal(reads, 1);
+  env.registration.dispose();
+});
+
 test('messages dispatch only known native actions and topic permalinks', async () => {
   const env = setup(); env.open(); const panel = env.host.panels[0]; await panel.receive({ type: 'ready' });
   env.host.executed.length = 0;

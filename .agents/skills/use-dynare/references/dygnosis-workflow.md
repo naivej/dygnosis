@@ -268,8 +268,11 @@ Read `written_directives` for the range of edits on each side. A source
 location is available on a side with a verified edited definition.
 Follow navigation with its side, input identity, captured source and commit.
 Use `snapshot_pointer` to identify the same owner across pages. Follow ordinary
-JSON pointers within the current page. If a page returns `INPUT_CHANGED`, start
-a fresh comparison from the current inputs without `continuation`,
+JSON pointers within the current page. With two supplied texts, the server
+can reuse an expensive comparison on the same connection. Use the returned
+continuation and both revisions as usual, including after reconnecting.
+If a page returns `INPUT_CHANGED`, start a fresh comparison from the current
+inputs without `continuation`,
 `expected_revision_a`, or `expected_revision_b`.
 When a parameter's evaluated value changes and its assigned expression stays
 the same, the optional `dependent_on` field can name the edited parameter

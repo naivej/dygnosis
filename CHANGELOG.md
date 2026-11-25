@@ -3,6 +3,15 @@
 Each entry describes the release at the time. Feature names and interfaces can
 change in later releases; see Dygnosis Help for current guidance.
 
+## v0.12.8
+
+**Dygnosis: Open Help** displays the first topic sooner. Open Help from the
+Command Palette to browse and search the bundled reference offline.
+
+MCP `dynare_compare_models` can return the next page sooner when an agent
+compares two supplied texts. Continue with the same inputs, both returned
+revisions and the continuation from the preceding page.
+
 ## v0.12.7
 
 **Dynare Workspace** sends fewer progress updates while it checks many

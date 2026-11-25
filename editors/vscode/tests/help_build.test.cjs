@@ -61,6 +61,22 @@ async function fixture(t) {
   return { root, state, reference: path.join(root, 'help/reference.json'), stamp: path.join(root, 'editors/vscode/out/help-reference-state.json') };
 }
 
+// Guards F5 staging and version sync before extension dependencies are installed.
+test('reference-only version sync works without extension dependencies', async t => {
+  const { root, state } = await fixture(t);
+  const productRoot = path.resolve(__dirname, '../../..');
+  for (const name of ['editors/vscode/scripts/help.cjs', 'editors/vscode/scripts/common.cjs',
+    'scripts/version.cjs', 'scripts/build-engine.cjs', 'scripts/package-common.cjs']) {
+    const destination = path.join(root, name);
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    await fs.copyFile(path.join(productRoot, name), destination);
+  }
+  await help.ensureReference({ root });
+  const { syncVersion } = require(path.join(root, 'scripts/version.cjs'));
+  assert.equal(await syncVersion(root), '0.1.0');
+  assert.equal(state.builds, 1);
+});
+
 // Guards first-run generation choosing an old bundled engine or guessing Cargo's target folder.
 test('Help builds the workspace engine reported by Cargo and reuses a verified local stamp', async t => {
   const { root, state, stamp } = await fixture(t);
