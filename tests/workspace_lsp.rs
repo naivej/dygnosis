@@ -1615,6 +1615,113 @@ async fn failed_discovery_is_not_complete_coverage_and_notifications_are_opt_in(
 }
 
 #[tokio::test]
+async fn workspace_progress_coalesces_full_snapshots_through_completion() {
+    let files = Files::new();
+    for index in 0..32 {
+        files.write(&format!("model{index:02}.mod"), MODEL);
+    }
+    let mut wire = Wire::new();
+    wire.request(
+        "initialize",
+        json!({"workspaceFolders":[files.folder("")],"capabilities":{"experimental":{"dygnosis":{
+        "workspaceStatusChanged":true,"workspaceDependenciesChanged":true}}}}),
+    )
+    .await;
+    wire.notify("initialized", json!({}));
+    let statuses = tokio::time::timeout(Duration::from_secs(15), async {
+        let mut statuses = Vec::new();
+        loop {
+            let message = wire.output.recv().await.expect("workspace progress");
+            if message["method"] != "dynare/workspaceStatusChanged" {
+                continue;
+            }
+            let status = message["params"].clone();
+            let complete = status["complete"] == true;
+            statuses.push(status);
+            if complete {
+                return statuses;
+            }
+        }
+    })
+    .await
+    .expect("terminal progress notification");
+    let terminal = statuses.last().unwrap();
+    assert_eq!(terminal["counts"]["checked"], 32);
+    let pass: Vec<_> = statuses
+        .iter()
+        .filter(|status| status["pass_revision"] == terminal["pass_revision"])
+        .collect();
+    assert!(
+        pass.iter()
+            .any(|status| status["discovery"] == "discovering")
+    );
+    assert!(pass.iter().any(|status| status["counts"]["checking"] == 1));
+    // Discovery, the first check and completion can publish immediately.
+    // Other full snapshots must fit within the elapsed 150 ms periods.
+    let elapsed = terminal["metrics"]["elapsed_ms"].as_f64().unwrap();
+    let allowed = 3 + (elapsed / 150.0).ceil() as usize;
+    assert!(
+        pass.len() <= allowed,
+        "published {} full snapshots in {elapsed:.1} ms (limit {allowed})",
+        pass.len()
+    );
+}
+
+#[tokio::test]
+async fn new_dependency_can_invalidate_a_root_between_progress_reports() {
+    let files = Files::new();
+    files.write("body.data", "y=0;\n");
+    files.write("root.mod", "var y; model;\n@#include \"body.data\"\nend;\n");
+    for index in 0..24 {
+        files.write(&format!("other{index:02}.mod"), MODEL);
+    }
+    let mut wire = Wire::new();
+    wire.request(
+        "initialize",
+        json!({"workspaceFolders":[files.folder("")], "capabilities":{"experimental":{"dygnosis":{
+        "workspaceStatusChanged":true,"workspaceDependenciesChanged":true}}}}),
+    )
+    .await;
+    let root_uri = files.uri("root.mod");
+    let dependency = files.uri("body.data");
+    wire.notify("dynare/activeModelChanged", json!({"root_uri":root_uri}));
+    wire.notify("initialized", json!({}));
+    let update = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let message = wire.output.recv().await.unwrap();
+            if message["method"] == "dynare/workspaceDependenciesChanged"
+                && message["params"]["root_uri"] == root_uri
+            {
+                break message["params"].clone();
+            }
+            assert!(
+                message["method"] != "dynare/workspaceStatusChanged"
+                    || message["params"]["complete"] != true,
+                "the dependency must be reported before the terminal snapshot"
+            );
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        update["dependency_candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|candidate| candidate == &dependency)
+    );
+    files.write("body.data", "y=unknown_name;\n");
+    wire.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes":[{"uri":dependency,"type":2}]}),
+    );
+    let status = wire.complete().await;
+    assert_ne!(root(&status, &root_uri)["errors"], 0);
+    let diagnostics = wire.pull(&dependency).await;
+    assert!(diagnostics.iter().any(|row| row["code"] == "E020"));
+}
+
+#[tokio::test]
 async fn chosen_active_root_is_first_and_checks_are_serial() {
     let files = Files::new();
     for name in ["a.mod", "b.mod", "chosen.mod"] {

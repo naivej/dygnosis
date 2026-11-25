@@ -42,9 +42,10 @@ function service(folder, limits) {
   return { sources: new GitSources(api, fileUri, limits), repository: repositories[0], api };
 }
 async function temporaryFolder(t) {
-  const folder = await fs.mkdtemp(path.join(os.tmpdir(), "dygnosis-git-source-"));
+  const temporaryRoot = await fs.realpath(os.tmpdir());
+  const folder = await fs.mkdtemp(path.join(temporaryRoot, "dygnosis-git-source-"));
   t.after(async () => {
-    assert.equal(path.dirname(folder), path.resolve(os.tmpdir()));
+    assert.equal(path.dirname(folder), temporaryRoot);
     assert.match(path.basename(folder), /^dygnosis-git-source-/);
     await fs.rm(folder, { recursive: true, force: true });
   });

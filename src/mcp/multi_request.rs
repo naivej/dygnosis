@@ -694,8 +694,14 @@ fn comparison_mode(
             return Err(invalid("kinds contains an unsupported change kind"));
         }
     }
-    let (mut data, inputs, coverage) = if let Some(repository_path) = &params.base.repository_path {
-        let data = super::repository_compare::compare_repository_bounded(
+    let (mut data, inputs, coverage, prepared, repository_sources) = if let Some(repository_path) =
+        &params.base.repository_path
+    {
+        let expected = [
+            params.expected_revision_a.as_deref(),
+            params.expected_revision_b.as_deref(),
+        ];
+        let repository = super::repository_compare::prepare_repository(
             super::repository_compare::RepositoryComparison {
                 repository_path: repository_path.clone(),
                 before: params.base.before.as_ref().unwrap().clone(),
@@ -705,18 +711,27 @@ fn comparison_mode(
                 analysis_after: params.analysis_after.clone(),
             },
             &control,
+            expected,
         );
         control.check().map_err(source_error)?;
+        let (data, prepared, sources) = match repository {
+            Ok(ready) => (
+                json!({"state":"result","inputs":ready.inputs}),
+                Some(ready.comparison),
+                Some(ready.sources),
+            ),
+            Err(error) => (error, None, None),
+        };
         let inputs = vec![
             data["inputs"]["before"].clone(),
             data["inputs"]["after"].clone(),
         ];
-        for (input, expected) in inputs.iter().zip([
-            params.expected_revision_a.as_deref(),
-            params.expected_revision_b.as_deref(),
-        ]) {
+        for (input, expected) in inputs.iter().zip(expected) {
             if expected.is_some_and(|expected| input["revision"].as_str() != Some(expected)) {
-                let message = "Comparison inputs no longer match their expected revisions; start a new comparison";
+                let message = comparison_recovery(
+                    "INPUT_CHANGED",
+                    "Comparison inputs no longer match their expected revisions.".into(),
+                );
                 let mut summaries = data["analysis_summaries"]
                     .as_object()
                     .cloned()
@@ -743,9 +758,11 @@ fn comparison_mode(
                 return Ok(refused.wire());
             }
         }
-        let coverage = data.get("coverage").cloned().unwrap_or_else(|| json!({"before":{"complete":inputs[0]["complete"]},"after":{"complete":inputs[1]["complete"]}}));
-        (data, inputs, coverage)
+        let coverage = json!({"before":{"complete":inputs[0]["complete"]},"after":{"complete":inputs[1]["complete"]}});
+        (data, inputs, coverage, prepared, sources)
     } else {
+        #[cfg(feature = "mcp-reuse")]
+        let acquisition = super::retention::measure(super::retention::Phase::ComparisonInput);
         let acquire = |before: bool, expected: Option<&str>, previous: Option<&SourceSnapshot>| {
             if let Some((a, b)) = &sources {
                 source::resolve_source_configured_reusing(
@@ -815,7 +832,7 @@ fn comparison_mode(
                 Some((code, &error.message)),
                 Some((code, &error.message)),
             );
-            let mut refused = ToolResult::refused(code, error.message);
+            let mut refused = ToolResult::refused(code, comparison_recovery(code, error.message));
             refused.data = json!({"analysis_summaries":summaries});
             if code == "SOURCE_LIMIT" {
                 refused.limits.push(json!({"code":"SOURCE_LIMIT","ceilings":control.limits,"affected":"comparison input capture","omitted":"comparison model facts and navigation"}));
@@ -858,11 +875,20 @@ fn comparison_mode(
         }
         let inputs = vec![before.inputs.clone(), after.inputs.clone()];
         let coverage = json!({"before":before.coverage,"after":after.coverage});
-        let mut data = if before.coverage["complete"] != true || after.coverage["complete"] != true
+        #[cfg(feature = "mcp-reuse")]
+        drop(acquisition);
+        let (mut data, prepared) = if before.coverage["complete"] != true
+            || after.coverage["complete"] != true
         {
-            json!({"status":"incomplete","message":"Comparison inputs are incomplete; model changes and source navigation are unavailable.","inputs":coverage})
+            (
+                json!({"status":"incomplete","message":"Comparison inputs are incomplete; model changes and source navigation are unavailable.","inputs":coverage}),
+                None,
+            )
         } else {
-            compare_supplied(&mut before, &mut after, &control)?
+            match compare_supplied(&mut before, &mut after, &control)? {
+                Ok(prepared) => (json!({}), Some(prepared)),
+                Err(error) => (error, None),
+            }
         };
         if data["status"] == "incomplete" || data["error"].is_string() {
             let cause = data["code"].as_str().zip(data["error"].as_str());
@@ -870,14 +896,16 @@ fn comparison_mode(
                 supplied_analysis_summaries(Some(&before), Some(&after), &params, cause, cause);
             data["analysis_summaries"] = summaries;
         }
-        (data, inputs, coverage)
+        (data, inputs, coverage, prepared, None)
     };
     control.check().map_err(source_error)?;
     let mut result = ToolResult::new(Value::Null);
     control.complete_phase("Compare models");
     result.inputs = inputs;
-    result.coverage = Some(json!({"inputs":coverage,"comparison":data.get("coverage")}));
-    if data["state"] == "failure" || data["error"].is_string() || data["status"] == "incomplete" {
+    result.coverage = Some(
+        json!({"inputs":coverage,"comparison":prepared.as_ref().map(|prepared| &prepared.diff.coverage)}),
+    );
+    let Some(prepared) = prepared else {
         let code = data["code"]
             .as_str()
             .unwrap_or("INCOMPLETE_INPUT")
@@ -887,13 +915,16 @@ fn comparison_mode(
             .or_else(|| data["error"].as_str())
             .unwrap_or("Comparison inputs are incomplete; model changes and source navigation are unavailable.")
             .to_owned();
-        result.cause("refused", &code, message);
+        result.cause("refused", &code, comparison_recovery(&code, message));
         if code == "CAPTURE_LIMIT" {
             result.limits.push(json!({"code":code,"source_ceilings":control.limits,"affected":"repository input capture","omitted":"comparison model facts and navigation"}));
         }
-        result.data = data.clone();
+        result.data = data;
         return Ok(result.wire());
-    }
+    };
+    data["comparison_versions"] = json!({"semantic":3,"source_changes":2,"coverage":1});
+    data["summary"] =
+        crate::engine::comparison::compare_navigation::comparison_summary(&prepared.diff);
     let mut reported = std::collections::BTreeSet::new();
     for issue in data["summary"]["issues"].as_array().into_iter().flatten() {
         let (Some(code), Some(reason)) = (issue["code"].as_str(), issue["reason"].as_str()) else {
@@ -908,16 +939,47 @@ fn comparison_mode(
     }
     let revision =
         source::sha256(serde_json::to_vec(&result.inputs).expect("comparison identities"));
-    if let Err(message) = project_comparison(&mut data, &params, &arguments, &revision, &mut result)
-    {
+    #[cfg(feature = "mcp-reuse")]
+    let projection = super::retention::measure(super::retention::Phase::ComparisonProjection);
+    if let Err(message) = super::comparison_projection::project(
+        &mut data,
+        &prepared,
+        repository_sources.as_ref(),
+        super::comparison_projection::Query {
+            output: &params.output,
+            families: &params.families,
+            kinds: &params.kinds,
+        },
+        &arguments,
+        &revision,
+        &mut result,
+    ) {
         if message.starts_with("INPUT_CHANGED") {
-            return Ok(ToolResult::refused("INPUT_CHANGED", message).wire());
+            return Ok(ToolResult::refused(
+                "INPUT_CHANGED",
+                comparison_recovery("INPUT_CHANGED", message),
+            )
+            .wire());
         }
         return Err(invalid(message));
     }
+    #[cfg(feature = "mcp-reuse")]
+    drop(projection);
     result.data = data;
     control.check().map_err(source_error)?;
+    #[cfg(feature = "mcp-reuse")]
+    let _wire = super::retention::measure(super::retention::Phase::ComparisonWire);
     Ok(result.wire())
+}
+
+fn comparison_recovery(code: &str, mut message: String) -> String {
+    if code == "INPUT_CHANGED" {
+        if !message.ends_with('.') {
+            message.push('.');
+        }
+        message.push_str(" Call dynare_compare_models with the current inputs and omit continuation, expected_revision_a, and expected_revision_b.");
+    }
+    message
 }
 
 fn comparison_source(
@@ -1009,7 +1071,8 @@ fn failed_comparison_source(
         (side == "before").then_some((error.code, error.message.as_str())),
         (side == "after").then_some((error.code, error.message.as_str())),
     );
-    let mut result = ToolResult::refused(error.code, error.message);
+    let mut result =
+        ToolResult::refused(error.code, comparison_recovery(error.code, error.message));
     if let Some(before) = before {
         result.inputs.push(before.inputs.clone());
     }
@@ -1065,10 +1128,17 @@ fn compare_supplied(
     before: &mut SourceSnapshot,
     after: &mut SourceSnapshot,
     control: &RequestControl,
-) -> Result<Value, rmcp::ErrorData> {
-    use crate::engine::comparison::compare_navigation::{self, ComparisonInput, Coordinates};
+) -> Result<
+    Result<crate::engine::comparison::compare_navigation::PreparedComparison, Value>,
+    rmcp::ErrorData,
+> {
+    use crate::engine::comparison::compare_navigation::{
+        self, ComparisonInput, PreparedComparison,
+    };
     use crate::engine::comparison::semantic_diff::{CaptureBoundary, Side};
     use crate::engine::comparison::{CompareSource, compare_captured_models};
+    #[cfg(feature = "mcp-reuse")]
+    let _comparison = super::retention::measure(super::retention::Phase::Comparison);
     control.check().map_err(source_error)?;
     let mut diff = compare_captured_models(
         &before.model,
@@ -1131,9 +1201,9 @@ fn compare_supplied(
     if !before.workspace.input_snapshot_is_current(&before.root)
         || !after.workspace.input_snapshot_is_current(&after.root)
     {
-        return Ok(
-            json!({"error":"Comparison inputs changed while reading them; repeat the request","code":"INPUT_CHANGED"}),
-        );
+        return Ok(Err(
+            json!({"error":"Comparison inputs changed while reading them.","code":"INPUT_CHANGED"}),
+        ));
     }
     if let Err(error) = before.workspace.validate_comparison_inputs(
         &before.root,
@@ -1143,35 +1213,15 @@ fn compare_supplied(
         (control.limits.max_files, control.limits.max_source_bytes),
         Some((&before.guards, &after.guards)),
     ) {
-        return Ok(
+        return Ok(Err(
             json!({"error":error.message,"code":if error.code=="CAPTURE_LIMIT"{"SOURCE_LIMIT"}else{error.code}}),
-        );
+        ));
     }
-    let (mut data, navigation) =
-        compare_navigation::semantic_wire(&diff, &old, &new, Coordinates::Mcp);
-    data["navigation"] = navigation;
-    data["sources"] = json!({"before":old.sources(),"after":new.sources()});
-    Ok(data)
-}
-
-fn project_comparison(
-    data: &mut Value,
-    params: &CompareParams,
-    arguments: &Value,
-    revision: &str,
-    result: &mut ToolResult,
-) -> Result<(), String> {
-    super::comparison_projection::project(
-        data,
-        super::comparison_projection::Query {
-            output: &params.output,
-            families: &params.families,
-            kinds: &params.kinds,
-        },
-        arguments,
-        revision,
-        result,
-    )
+    Ok(Ok(PreparedComparison {
+        diff,
+        before: old,
+        after: new,
+    }))
 }
 #[cfg(test)]
 mod tests {

@@ -25,7 +25,9 @@ use crate::lsp::settings::SettingsStore;
 
 pub(super) const SCHEMA_VERSION: u32 = 2;
 pub(super) const CHECK_LOCATION_COMMAND: &str = "dynare/workspaceCheckLocation";
+pub(super) const DEPENDENCY_NOTIFICATION: &str = "dynare/workspaceDependenciesChanged";
 const TYPING_PAUSE: Duration = Duration::from_millis(250);
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(150);
 pub(super) const RETAINED_REQUEST_ROOTS: usize = 8;
 
 #[derive(Default)]
@@ -33,6 +35,7 @@ pub(super) struct WorkspaceCheckState {
     roots: BTreeMap<Url, RootEntry>,
     include_files: BTreeSet<Url>,
     pub notifications: bool,
+    pub dependency_notifications: bool,
     pub worker_running: bool,
     pub(super) initialized: bool,
     pub shutdown: bool,
@@ -673,6 +676,7 @@ enum Work {
     },
     Check {
         epoch: u64,
+        pass_revision: u64,
         generation: u64,
         root: Url,
         workspace: Box<Workspace>,
@@ -688,6 +692,8 @@ async fn run_worker(backend: Backend) {
     let state = Arc::clone(&backend.inner);
     let wake = Arc::clone(&backend.workspace_wake);
     let output_gate = Arc::clone(&backend.output_gate);
+    let mut last_progress = None;
+    let mut announced_check_pass = None;
     loop {
         let work = {
             let mut inner = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -764,6 +770,7 @@ async fn run_worker(backend: Backend) {
                         .cancellation = Some(cancellation);
                     Work::Check {
                         epoch,
+                        pass_revision: inner.workspace_checks.pass_revision,
                         generation,
                         root,
                         workspace,
@@ -793,6 +800,7 @@ async fn run_worker(backend: Backend) {
             }
         };
         if matches!(work, Work::Stop) {
+            let _output = output_gate.lock().await;
             // Decide and release worker ownership in one critical section, so
             // an event cannot queue work between the decision and this release.
             let runnable = {
@@ -817,8 +825,17 @@ async fn run_worker(backend: Backend) {
             send_status(&client, &state).await;
             return;
         }
-        send_status(&client, &state).await;
-        match work {
+        let first_check = if let Work::Check { pass_revision, .. } = &work {
+            announced_check_pass.replace(*pass_revision) != Some(*pass_revision)
+        } else {
+            false
+        };
+        if first_check || matches!(work, Work::Discover { .. }) || progress_due(last_progress) {
+            let _output = output_gate.lock().await;
+            send_status(&client, &state).await;
+            last_progress = Some(Instant::now());
+        }
+        let full_dependency_update = match work {
             Work::Discover { epoch, settings } => {
                 let started = Instant::now();
                 let folder_uris: Vec<_> = settings
@@ -936,6 +953,7 @@ async fn run_worker(backend: Backend) {
                     inner.merge_diagnostics(None)
                 };
                 publish(&client, publications).await;
+                false
             }
             Work::Check {
                 epoch,
@@ -944,13 +962,14 @@ async fn run_worker(backend: Backend) {
                 workspace,
                 overlays,
                 prior,
+                ..
             } => {
                 let check_root = root.clone();
                 let result =
                     tokio::task::spawn_blocking(move || compute(&check_root, *workspace, prior))
                         .await;
                 let _output = output_gate.lock().await;
-                let publications = {
+                let (publications, dependencies_changed, dependency_update) = {
                     let mut inner = state.lock().unwrap_or_else(|e| e.into_inner());
                     if inner.workspace_checks.epoch != epoch
                         || inner.workspace_checks.cancelled
@@ -964,6 +983,8 @@ async fn run_worker(backend: Backend) {
                     {
                         continue;
                     }
+                    let mut dependencies_changed = false;
+                    let mut dependency_update = None;
                     match result {
                         Ok(Ok(mut checked)) => {
                             let current = checked.overlays_match(&inner, &overlays);
@@ -986,7 +1007,19 @@ async fn run_worker(backend: Backend) {
                             inner.workspace_checks.analysis_ms += checked.elapsed_ms;
                             inner.workspace_checks.completed_jobs += 1;
                             inner.workspace_checks.reused_jobs += u64::from(checked.reused);
+                            let pass = inner.workspace_checks.pass_revision;
+                            let notify_dependencies = inner.workspace_checks.notifications
+                                && inner.workspace_checks.dependency_notifications;
                             let entry = inner.workspace_checks.roots.get_mut(&root).unwrap();
+                            let added: Vec<_> = checked
+                                .dependency_uris
+                                .difference(&entry.dependency_uris)
+                                .collect();
+                            dependencies_changed = !added.is_empty();
+                            if dependencies_changed && notify_dependencies {
+                                dependency_update = Some(json!({"pass_revision":pass,
+                                    "root_uri":root, "dependency_candidates":added}));
+                            }
                             entry.cancellation = None;
                             entry.identity = normalize_uri(root.as_str());
                             entry.state = if checked.complete {
@@ -1038,18 +1071,45 @@ async fn run_worker(backend: Backend) {
                             }
                         }
                     }
-                    inner.merge_diagnostics(Some(&root))
+                    (
+                        inner.merge_diagnostics(Some(&root)),
+                        dependencies_changed,
+                        dependency_update,
+                    )
                 };
+                let full_update = dependencies_changed && dependency_update.is_none();
+                if let Some(update) = dependency_update {
+                    client
+                        .send_notification::<WorkspaceDependenciesChanged>(update)
+                        .await;
+                }
                 publish(&client, publications).await;
                 backend.kick_document_analysis();
+                full_update
             }
             Work::Delay(delay) => {
                 tokio::select! { _ = tokio::time::sleep(delay) => {}, _ = wake.notified() => {} }
+                false
             }
             Work::Stop => unreachable!(),
+        };
+        if full_dependency_update || progress_due(last_progress) {
+            let _output = output_gate.lock().await;
+            let finished = state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .workspace_checks
+                .finished();
+            if !finished {
+                send_status(&client, &state).await;
+                last_progress = Some(Instant::now());
+            }
         }
-        send_status(&client, &state).await;
     }
+}
+
+fn progress_due(last: Option<Instant>) -> bool {
+    last.is_none_or(|last| last.elapsed() >= PROGRESS_INTERVAL)
 }
 
 pub(super) struct Checked {
@@ -1407,6 +1467,12 @@ enum WorkspaceStatusChanged {}
 impl notification::Notification for WorkspaceStatusChanged {
     type Params = Value;
     const METHOD: &'static str = "dynare/workspaceStatusChanged";
+}
+
+enum WorkspaceDependenciesChanged {}
+impl notification::Notification for WorkspaceDependenciesChanged {
+    type Params = Value;
+    const METHOD: &'static str = DEPENDENCY_NOTIFICATION;
 }
 
 async fn send_status(client: &Client, state: &Mutex<Inner>) {

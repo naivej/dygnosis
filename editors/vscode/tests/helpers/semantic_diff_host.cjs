@@ -420,11 +420,39 @@ async function checkFrbDependencies(service, workspaceRoot, evidence, waitFor) {
 function measureFiltering(evaluate, query) {
   return evaluate(`(() => {
     const search=document.getElementById("search"), content=document.getElementById("reviewContent");
-    const run=value=>{const start=performance.now();search.value=value;search.dispatchEvent(new Event("input",{bubbles:true}));content.getBoundingClientRect();return performance.now()-start;};
+    const run=value=>{
+      const start=performance.now();
+      search.value=value;
+      search.dispatchEvent(new Event("input",{bubbles:true}));
+      const updated=performance.now();
+      content.getBoundingClientRect();
+      const laidOut=performance.now();
+      return {total:laidOut-start,update:updated-start,layout:laidOut-updated};
+    };
     const filter=[],clear=[];
     for(let i=0;i<17;i++){const f=run(${JSON.stringify(query)}),c=run("");if(i>=2){filter.push(f);clear.push(c);}}
-    const stats=values=>{values.sort((a,b)=>a-b);return {median:values[7],p90:values[13]};};
-    return {filter:stats(filter),clear:stats(clear)};
+    const stats=(values,field)=>{const sorted=values.map(value=>value[field]).sort((a,b)=>a-b);return {median:sorted[7],p90:sorted[13]};};
+    return {filter:stats(filter,"total"),clear:stats(clear,"total"),
+      filterUpdate:stats(filter,"update"),clearUpdate:stats(clear,"update"),
+      filterLayout:stats(filter,"layout"),clearLayout:stats(clear,"layout")};
+  })()`);
+}
+
+function measureGroupSwitches(evaluate) {
+  return evaluate(`(() => {
+    const groups=[...document.querySelectorAll(".group-button")].filter(group=>!group.disabled);
+    if(groups.length<2)return null;
+    const ids=[groups[0].id,groups.at(-1).id], content=document.getElementById("reviewContent");
+    const results=[];
+    for(let i=0;i<18;i++){
+      const start=performance.now();
+      document.getElementById(ids[i%2]).click();
+      content.getBoundingClientRect();
+      if(i>=2)results.push(performance.now()-start);
+    }
+    document.getElementById(ids[0]).click();
+    results.sort((a,b)=>a-b);
+    return {median:(results[7]+results[8])/2,p90:results[14]};
   })()`);
 }
 
@@ -452,22 +480,46 @@ async function checkComparisonScale(service, workspaceRoot, evidence, waitFor) {
     const resource = { schema_version: 1, before, after, anchor: after, context_uri: after.root_uri };
     const uri = vscode.Uri.from({ scheme: "dygnosis-changes", path: `/${resourceName(resource)}`, query: resourceQuery(resource) });
     const start = performance.now();
-    await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
-    await waitFor(async () => {
-      try { return await nativeChanges(({ evaluate }) => evaluate('document.getElementById("status").className === "ready" && Boolean(document.querySelector(".change-row"))')); }
-      catch (error) { if (error.code === "NATIVE_FRAME_PENDING") return false; throw error; }
-    }, `${name} comparison ready`);
-    const openToReady = performance.now() - start;
-    await nativeChanges(async ({ evaluate }) => {
+    let compareStart, compareEnd;
+    const execute = service.execute;
+    service.execute = async function (command, ...args) {
+      if (command !== "dynare/compareModelSnapshots") return execute.call(this, command, ...args);
+      compareStart = performance.now();
+      try { return await execute.call(this, command, ...args); }
+      finally { compareEnd = performance.now(); }
+    };
+    try {
+      await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
+      await waitFor(async () => {
+        try { return await nativeChanges(({ evaluate }) => evaluate('document.getElementById("status").className === "ready" && Boolean(document.querySelector(".change-row")?.getBoundingClientRect().height)')); }
+        catch (error) { if (error.code === "NATIVE_FRAME_PENDING") return false; throw error; }
+      }, `${name} comparison ready`);
+    } finally { service.execute = execute; }
+    const ready = performance.now();
+    assert.ok(compareStart >= start && compareEnd >= compareStart && ready >= compareEnd, "a fresh comparison completed before the first ready layout");
+    await nativeChanges(async ({ evaluate, collectHeap, measureRender }) => {
       await evaluate('(() => {const all=document.querySelector("[data-change-type=all]");if(!all.checked)all.click();})()');
       const counts = await evaluate('document.getElementById("counts").textContent');
-      const filter = await measureFiltering(evaluate, query);
+      const { result: filter, ...rendererMetrics } = await measureRender(() => measureFiltering(evaluate, query));
+      const groupSwitch = await measureGroupSwitches(evaluate);
+      let filteredHeap;
       if (name === "1200") {
         assert.equal(counts, "1200 changes");
         const matched = await evaluate(`(() => {const search=document.getElementById("search");search.value=${JSON.stringify(query)};search.dispatchEvent(new Event("input",{bubbles:true}));return [...document.querySelectorAll(".row-label")].map(row=>row.textContent);})()`);
         assert.deepEqual(matched, [query], "an exact label remains searchable in the large comparison");
+        if (process.env.DYGNOSIS_HOST_MEASURE_HEAP === "1") filteredHeap = await collectHeap();
+        assert.equal(await evaluate(`(() => {
+          const search = document.getElementById("search");
+          search.value = "";
+          search.dispatchEvent(new Event("input", { bubbles: true }));
+          const rows = [...document.querySelectorAll(".change-row")];
+          rows[0].focus();
+          rows[0].dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+          return document.activeElement === rows.at(-1) && rows.at(-1).tabIndex === 0;
+        })()`), true, "End reaches the final large-group row after clearing the filter");
       }
-      evidence.semantic_scale[name] = { counts, openToReady, filter };
+      evidence.semantic_scale[name] = { counts, openToReady: ready - start, beforeComparison: compareStart - start,
+        comparisonRoundTrip: compareEnd - compareStart, afterComparisonToReady: ready - compareEnd, filter, rendererMetrics, groupSwitch, filteredHeap };
     });
   }
 }

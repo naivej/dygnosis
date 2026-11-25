@@ -12,10 +12,22 @@ $result = @{
 function Write-Lifecycle {
     $temporary = $Lifecycle + '.tmp'
     [System.IO.File]::WriteAllText($temporary, ($result | ConvertTo-Json), [System.Text.UTF8Encoding]::new($false))
-    if ([System.IO.File]::Exists($Lifecycle)) {
-        [System.IO.File]::Replace($temporary, $Lifecycle, [NullString]::Value)
-    } else {
-        [System.IO.File]::Move($temporary, $Lifecycle)
+    $retry = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        try {
+            if ([System.IO.File]::Exists($Lifecycle)) {
+                [System.IO.File]::Replace($temporary, $Lifecycle, [NullString]::Value)
+            } else {
+                [System.IO.File]::Move($temporary, $Lifecycle)
+            }
+            return
+        } catch [System.IO.IOException] {
+            $code = $_.Exception.HResult -band 0xffff
+            if ($code -notin @(32, 33) -or $retry.ElapsedMilliseconds -ge 500) {
+                throw "Cannot publish host lifecycle stage '$($result.stage)' at '$Lifecycle': $($_.Exception.Message)"
+            }
+            Start-Sleep -Milliseconds 20
+        }
     }
 }
 $ownedHost = $null

@@ -1,6 +1,7 @@
 //! Additive navigation for the existing structural comparison. Pairing is owned
 //! by model_diff; every navigation id is a JSON pointer into that unchanged diff.
 
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
@@ -17,6 +18,7 @@ use crate::engine::workspace::Workspace;
 use crate::engine::workspace::include_resolver::normalize_uri;
 use crate::engine::workspace::model_map::{SourceOccurrence, WrittenSegment};
 
+#[derive(Clone, Copy)]
 pub(crate) enum Coordinates {
     Mcp,
     SnapshotMcp,
@@ -1306,28 +1308,54 @@ pub(crate) fn navigation_json(
     json!({"schema_version": if matches!(builder.coordinates, Coordinates::SnapshotLsp | Coordinates::SnapshotMcp) { 2 } else { 1 }, "before": before.envelope(), "after": after.envelope(), "rows": builder.rows})
 }
 
-/// Publish one comparison owner per retained semantic fact. The internal
-/// pairing results still supply exact occurrence targets where appropriate.
-pub(crate) fn semantic_wire(
-    diff: &ModelDiff,
-    before: &ComparisonInput,
-    after: &ComparisonInput,
+pub(crate) struct PreparedComparison {
+    pub diff: ModelDiff,
+    pub before: ComparisonInput,
+    pub after: ComparisonInput,
+}
+
+/// The snapshot indices include every retained row, even when only one page is returned.
+pub(crate) struct SemanticWire<'a> {
+    pub before: &'a ComparisonInput,
+    pub after: &'a ComparisonInput,
     coordinates: Coordinates,
-) -> (Value, Value) {
-    let pointers: HashMap<_, _> = diff
-        .semantic
-        .rows
-        .iter()
-        .enumerate()
-        .map(|(index, row)| (row.pointer.as_str(), format!("/semantic/rows/{index}")))
-        .collect();
-    let mut semantic = serde_json::to_value(&diff.semantic).expect("serializable comparison");
-    semantic["schema_version"] = json!(3);
-    let mut navigation =
-        Vec::with_capacity(diff.semantic.rows.len() + diff.semantic.references.len());
-    for (index, row) in diff.semantic.rows.iter().enumerate() {
-        let id = &pointers[row.pointer.as_str()];
-        let value = &mut semantic["rows"][index];
+    rows: &'a [SemanticRow],
+    pointers: OnceCell<HashMap<&'a str, String>>,
+}
+
+impl<'a> SemanticWire<'a> {
+    pub fn new(
+        diff: &'a ModelDiff,
+        before: &'a ComparisonInput,
+        after: &'a ComparisonInput,
+        coordinates: Coordinates,
+    ) -> Self {
+        Self {
+            before,
+            after,
+            coordinates,
+            rows: &diff.semantic.rows,
+            pointers: OnceCell::new(),
+        }
+    }
+
+    fn pointers(&self) -> &HashMap<&'a str, String> {
+        self.pointers.get_or_init(|| {
+            self.rows
+                .iter()
+                .enumerate()
+                .map(|(index, row)| (row.pointer.as_str(), format!("/semantic/rows/{index}")))
+                .collect()
+        })
+    }
+
+    pub fn row_pointer(&self, row: &SemanticRow) -> &str {
+        &self.pointers()[row.pointer.as_str()]
+    }
+
+    pub fn row(&self, row: &SemanticRow) -> Value {
+        let mut value = serde_json::to_value(row).expect("serializable comparison row");
+        let id = self.row_pointer(row);
         value["pointer"] = json!(id);
         value["statement_group"] = json!(command_group(row));
         for side in ["before", "after"] {
@@ -1337,14 +1365,29 @@ pub(crate) fn semantic_wire(
                 && let Some(pointer) = context.get_mut("pointer")
                 && let Some(owner) = pointer.as_str()
             {
-                *pointer = json!(pointers.get(owner));
+                *pointer = json!(self.pointers().get(owner));
             }
         }
-        let mut target = json!({
-            "id":id, "kind":"semantic", "family":row.family, "name":row.name,
-            "before":before.render(before.row_target(row, Side::Before).as_ref(), &coordinates),
-            "after":after.render(after.row_target(row, Side::After).as_ref(), &coordinates)
-        });
+        value
+    }
+
+    pub fn row_locations(&self, row: &SemanticRow) -> [Value; 2] {
+        [
+            self.before.render(
+                self.before.row_target(row, Side::Before).as_ref(),
+                &self.coordinates,
+            ),
+            self.after.render(
+                self.after.row_target(row, Side::After).as_ref(),
+                &self.coordinates,
+            ),
+        ]
+    }
+
+    pub fn row_navigation(&self, row: &SemanticRow, locations: [Value; 2]) -> Value {
+        let [before, after] = locations;
+        let mut target = json!({"id":self.row_pointer(row), "kind":"semantic",
+            "family":row.family,"name":row.name,"before":before,"after":after});
         let opener = |missing: bool,
                       present: Option<&super::semantic_diff::RowSide>,
                       input: &ComparisonInput| {
@@ -1355,43 +1398,97 @@ pub(crate) fn semantic_wire(
                     ..target.clone()
                 })
             });
-            input.render(mapped.as_ref(), &coordinates)
+            input.render(mapped.as_ref(), &self.coordinates)
         };
-        let old = opener(row.before.is_none(), row.after.as_ref(), before);
-        let new = opener(row.after.is_none(), row.before.as_ref(), after);
+        let old = opener(row.before.is_none(), row.after.as_ref(), self.before);
+        let new = opener(row.after.is_none(), row.before.as_ref(), self.after);
         if !old.is_null() || !new.is_null() {
             target["block_openers"] = json!({"before":old,"after":new});
         }
-        navigation.push(target);
+        target
     }
-    for (index, reference) in diff.semantic.references.iter().enumerate() {
-        let equation = pointers
+
+    fn equation_pointer<'b>(&'b self, reference: &'b EquationReference) -> &'b str {
+        self.pointers()
             .get(reference.equation_pointer.as_str())
-            .unwrap_or(&reference.pointer);
-        semantic["references"][index]["equation_pointer"] = json!(equation);
-        let proof = reference.provenance.as_ref();
-        navigation.push(json!({
-            "id":reference.pointer, "kind":"reference", "name":reference.symbol,
-            "equation_pointer":equation,
-            "before":before.render((reference.side == Side::Before).then(|| before.proven_target(proof)).flatten(), &coordinates),
-            "after":after.render((reference.side == Side::After).then(|| after.proven_target(proof)).flatten(), &coordinates)
-        }));
+            .unwrap_or(&reference.pointer)
     }
+
+    pub fn reference(&self, reference: &EquationReference) -> Value {
+        let mut value = serde_json::to_value(reference).expect("serializable reference");
+        value["equation_pointer"] = json!(self.equation_pointer(reference));
+        value
+    }
+
+    pub fn reference_navigation(&self, reference: &EquationReference) -> Value {
+        let proof = reference.provenance.as_ref();
+        json!({
+            "id":reference.pointer, "kind":"reference", "name":reference.symbol,
+            "equation_pointer":self.equation_pointer(reference),
+            "before":self.before.render((reference.side == Side::Before).then(|| self.before.proven_target(proof)).flatten(), &self.coordinates),
+            "after":self.after.render((reference.side == Side::After).then(|| self.after.proven_target(proof)).flatten(), &self.coordinates)
+        })
+    }
+
+    pub fn navigation(&self, rows: Vec<Value>) -> Value {
+        json!({"schema_version":if matches!(self.coordinates, Coordinates::SnapshotLsp | Coordinates::SnapshotMcp) { 2 } else { 1 },
+            "before":self.before.envelope(), "after":self.after.envelope(), "rows":rows})
+    }
+}
+
+/// Publish one comparison owner per retained semantic fact in the editor snapshot.
+pub(crate) fn semantic_wire(
+    diff: &ModelDiff,
+    before: &ComparisonInput,
+    after: &ComparisonInput,
+    coordinates: Coordinates,
+) -> (Value, Value) {
+    let wire = SemanticWire::new(diff, before, after, coordinates);
     let summary = comparison_summary(diff);
-    semantic["availability"] = summary["semantic_availability"].clone();
-    let mut source_changes =
-        serde_json::to_value(&diff.source_changes).expect("serializable captured source");
-    source_changes["schema_version"] = json!(2);
+    let rows: Vec<_> = diff.semantic.rows.iter().map(|row| wire.row(row)).collect();
+    let references: Vec<_> = diff
+        .semantic
+        .references
+        .iter()
+        .map(|reference| wire.reference(reference))
+        .collect();
+    let navigation = diff
+        .semantic
+        .rows
+        .iter()
+        .map(|row| wire.row_navigation(row, wire.row_locations(row)))
+        .chain(
+            diff.semantic
+                .references
+                .iter()
+                .map(|reference| wire.reference_navigation(reference)),
+        )
+        .collect();
     (
         json!({
             "comparison_versions":{"semantic":3,"source_changes":2,"coverage":1},
-            "semantic":semantic, "source_changes":source_changes, "coverage":diff.coverage, "summary":summary
+            "semantic": semantic_section(diff, &summary, rows, references),
+            "source_changes": source_section(diff, &diff.source_changes.files),
+            "coverage":diff.coverage, "summary":summary
         }),
-        json!({
-            "schema_version":if matches!(coordinates, Coordinates::SnapshotLsp | Coordinates::SnapshotMcp) { 2 } else { 1 },
-            "before":before.envelope(), "after":after.envelope(), "rows":navigation
-        }),
+        wire.navigation(navigation),
     )
+}
+
+pub(crate) fn semantic_section(
+    diff: &ModelDiff,
+    summary: &Value,
+    rows: Vec<Value>,
+    references: Vec<Value>,
+) -> Value {
+    json!({"schema_version":3,"availability":summary["semantic_availability"],
+        "budgets":diff.semantic.budgets,"limits":diff.semantic.limits,"rows":rows,"references":references})
+}
+
+pub(crate) fn source_section(diff: &ModelDiff, files: impl serde::Serialize) -> Value {
+    let source = &diff.source_changes;
+    json!({"schema_version":2,"availability":source.availability,"files":files,
+        "limits":source.limits,"root_text":source.root_text,"executed_includes":source.executed_includes})
 }
 
 fn command_occurrence(row: &SemanticRow) -> Option<[Option<usize>; 2]> {
@@ -1420,7 +1517,7 @@ fn command_group(row: &SemanticRow) -> Option<String> {
     Some(format!("{before}:{after}"))
 }
 
-fn comparison_summary(diff: &ModelDiff) -> Value {
+pub(crate) fn comparison_summary(diff: &ModelDiff) -> Value {
     use ComparisonEffect::*;
     let mut issues = Vec::new();
     for (family, limits) in diff

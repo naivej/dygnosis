@@ -4,6 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { setTimeout: delay } = require("node:timers/promises");
+const { spawn } = require("node:child_process");
 const { runHost, stopGroup } = require("../scripts/package-host.cjs");
 
 async function fixture(t, mode) {
@@ -171,6 +172,65 @@ test("Windows validation failure writes lifecycle evidence before any host exist
   assert.equal(record.cleanup_verified, true);
   assert.match(record.launcher.error, /absolute VS Code executable path/);
   assert.equal(await fs.readFile(path.join(evidence, "stdout.log"), "utf8"), "");
+});
+
+test("Windows lifecycle publication survives a reader holding the previous stage briefly", { skip: process.platform !== "win32" }, async t => {
+  const options = await fixture(t, "pass");
+  const wrapper = path.join(options.root, "lock lifecycle.ps1");
+  const launcher = path.resolve(__dirname, "../scripts/launch-host.ps1").replace(/'/g, "''");
+  await fs.writeFile(wrapper, `param([string]$LaunchFile, [string]$Lifecycle)
+Add-Type -TypeDefinition @'
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+public static class LifecycleReader {
+    public static Task Hold(string path) {
+        var handle = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return Task.Run(() => {
+            using (handle) {
+                for (int i = 0; i < 300 && !File.Exists(path + ".tmp"); ++i) Thread.Sleep(10);
+                Thread.Sleep(120);
+            }
+        });
+    }
+}
+'@
+$reader = [LifecycleReader]::Hold($Lifecycle)
+try { & '${launcher}' -LaunchFile $LaunchFile -Lifecycle $Lifecycle }
+finally { $reader.Wait() }
+`);
+  await runHost({ ...options, launcherScript: wrapper });
+  const record = await assertLogs(options.root);
+  assert.equal(record.launcher.stage, "complete");
+  assert.equal(record.cleanup_verified, true);
+});
+
+test("Windows candidate staging reuses identical locked bytes and reports a different locked engine", { skip: process.platform !== "win32" }, async t => {
+  const { stageEngine } = require("../scripts/package.cjs");
+  const { root } = await fixture(t, "pass");
+  const source = path.join(root, "build.exe"), destination = path.join(root, "staged.exe"), ready = path.join(root, "locked");
+  await fs.writeFile(source, "candidate bytes");
+  await stageEngine(source, destination, true);
+  assert.equal(await fs.readFile(destination, "utf8"), "candidate bytes");
+  const locker = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `
+    $lock = [IO.File]::Open($env:DYGNOSIS_TEST_LOCK_TARGET, 'Open', 'Read', 'Read')
+    try { [IO.File]::WriteAllText($env:DYGNOSIS_TEST_LOCK_READY, 'ready'); Start-Sleep -Seconds 10 }
+    finally { $lock.Dispose() }`], { windowsHide: true, env: { ...process.env, DYGNOSIS_TEST_LOCK_TARGET: destination, DYGNOSIS_TEST_LOCK_READY: ready } });
+  const stopped = new Promise((resolve, reject) => { locker.once("exit", resolve); locker.once("error", reject); });
+  try {
+    let locked = false;
+    for (let i = 0; i < 100 && !locked; ++i) {
+      locked = await fs.stat(ready).then(() => true, () => false);
+      if (!locked) await delay(20);
+    }
+    assert.equal(locked, true, "the destination is held before exercising the staging path");
+    await stageEngine(source, destination, true);
+    await fs.writeFile(source, "new candidate bytes");
+    await assert.rejects(stageEngine(source, destination, true), /Close the editor or MCP client/);
+    assert.equal(await fs.readFile(destination, "utf8"), "candidate bytes");
+  } finally {
+    locker.kill(); await stopped;
+  }
 });
 
 test("Unix cleanup retries post-kill EPERM until ESRCH proves group absence", async () => {

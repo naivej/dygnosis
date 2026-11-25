@@ -145,7 +145,22 @@ async function nativeChanges(callback, marker = "search") {
       assert.equal(result.exceptionDetails, undefined, `Native Changes evaluation failed: ${expression}`);
       return result.result?.value;
     };
-    return await callback({ send, evaluate, refreshContext: async () => { context = await findContext(); } });
+    const collectHeap = async () => {
+      await send("HeapProfiler.collectGarbage", {}, context.sessionId);
+      return send("Runtime.getHeapUsage", {}, context.sessionId);
+    };
+    const measureRender = async work => {
+      await send("Performance.enable", {}, context.sessionId);
+      const metrics = async () => Object.fromEntries((await send("Performance.getMetrics", {}, context.sessionId)).metrics
+        .map(({ name, value }) => [name, value]));
+      try {
+        const before = await metrics(), result = await work(), after = await metrics();
+        return { result, scriptMs: (after.ScriptDuration - before.ScriptDuration) * 1000,
+          layoutMs: (after.LayoutDuration - before.LayoutDuration) * 1000,
+          styleMs: (after.RecalcStyleDuration - before.RecalcStyleDuration) * 1000 };
+      } finally { await send("Performance.disable", {}, context.sessionId); }
+    };
+    return await callback({ send, evaluate, collectHeap, measureRender, refreshContext: async () => { context = await findContext(); } });
   });
 }
 

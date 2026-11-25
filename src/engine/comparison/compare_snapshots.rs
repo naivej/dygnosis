@@ -12,7 +12,7 @@ use crate::engine::analysis_configuration::{
     AnalysisConfiguration, AnalysisMetadata, ConfigurationError,
 };
 use crate::engine::comparison::compare_navigation::{
-    ComparisonInput, Coordinates, populate_source_comparison, semantic_wire,
+    ComparisonInput, Coordinates, PreparedComparison, populate_source_comparison, semantic_wire,
 };
 use crate::engine::comparison::semantic_diff::{
     CaptureBoundary, SourceFilePair, SourceIdentityProof,
@@ -1127,16 +1127,38 @@ pub fn compare_captured_snapshots_ref(
     after: &mut CapturedSnapshot,
     coordinates: SnapshotCoordinates,
 ) -> Value {
+    let prepared = match prepare_captured_comparison(before, after) {
+        Ok(prepared) => prepared,
+        Err(error) => return error,
+    };
+    let (wire, navigation) = semantic_wire(
+        &prepared.diff,
+        &prepared.before,
+        &prepared.after,
+        match coordinates {
+            SnapshotCoordinates::Lsp => Coordinates::SnapshotLsp,
+            SnapshotCoordinates::Mcp => Coordinates::SnapshotMcp,
+        },
+    );
+    json!({"state":"result", "inputs":{"schema_version":SNAPSHOT_SCHEMA_VERSION, "before":before.inputs, "after":after.inputs},
+        "diff":wire, "navigation":navigation,
+        "sources":{"before":before.sources, "after":after.sources}})
+}
+
+pub(crate) fn prepare_captured_comparison(
+    before: &mut CapturedSnapshot,
+    after: &mut CapturedSnapshot,
+) -> Result<PreparedComparison, Value> {
     if before.input_id == after.input_id {
-        return SnapshotFailure::new(
+        return Err(SnapshotFailure::new(
             "INVALID_ARGUMENTS",
             "Before and After need distinct input IDs",
             None,
         )
-        .response("before");
+        .response("before"));
     }
     if let Err(failure) = validate_working_pair(before, after, None) {
-        return failure.response("after");
+        return Err(failure.response("after"));
     }
     let mut diff = compare_captured_models(
         &before.model,
@@ -1204,24 +1226,17 @@ pub fn compare_captured_snapshots_ref(
     );
     for (side, input) in [("before", &before), ("after", &after)] {
         if !input.historical && !input.workspace.input_snapshot_is_current(&input.root) {
-            return input_changed().response(side);
+            return Err(input_changed().response(side));
         }
     }
     if let Err(failure) = validate_working_pair(before, after, None) {
-        return failure.response("after");
+        return Err(failure.response("after"));
     }
-    let (wire, navigation) = semantic_wire(
-        &diff,
-        &old,
-        &new,
-        match coordinates {
-            SnapshotCoordinates::Lsp => Coordinates::SnapshotLsp,
-            SnapshotCoordinates::Mcp => Coordinates::SnapshotMcp,
-        },
-    );
-    json!({"state":"result", "inputs":{"schema_version":SNAPSHOT_SCHEMA_VERSION, "before":before.inputs, "after":after.inputs},
-        "diff":wire, "navigation":navigation,
-        "sources":{"before":before.sources, "after":after.sources}})
+    Ok(PreparedComparison {
+        diff,
+        before: old,
+        after: new,
+    })
 }
 
 #[cfg(test)]

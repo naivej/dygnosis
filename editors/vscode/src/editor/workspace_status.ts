@@ -31,6 +31,7 @@ export interface WorkspaceCapability {
   schema_version: 2; status_command: "dynare/workspaceStatus"; recheck_command: "dynare/recheckWorkspace";
   cancel_command: "dynare/cancelWorkspace"; active_model_notification: "dynare/activeModelChanged";
   status_notification: "dynare/workspaceStatusChanged";
+  dependency_notification?: "dynare/workspaceDependenciesChanged";
   check_location_command: "dynare/workspaceCheckLocation";
 }
 interface WorkspaceConnection {
@@ -135,6 +136,7 @@ export function parseWorkspaceCapability(initializeResult: unknown): WorkspaceCa
   const commands = record(capabilities.executeCommandProvider) ? capabilities.executeCommandProvider.commands : undefined;
   if (Object.entries(expected).some(([key, value]) => capability[key] !== value) || !Array.isArray(commands) ||
       [expected.status_command, expected.recheck_command, expected.cancel_command, expected.check_location_command].some(command => !commands.includes(command))) return undefined;
+  if (capability.dependency_notification === "dynare/workspaceDependenciesChanged") expected.dependency_notification = capability.dependency_notification;
   return expected;
 }
 interface StatusContent { text: string; tooltip: vscode.MarkdownString; accessibilityLabel: string }
@@ -297,9 +299,11 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
   let disposed = false, connection: WorkspaceConnection | undefined, instance = -1;
   let capability: WorkspaceCapability | undefined, status: WorkspaceStatus | undefined, generation = 0, response = 0, minPass = 0;
   let barrier = false, activeRoot: string | null | undefined;
-  let bufferedNotification: { value: WorkspaceStatus; client: WorkspaceConnection; instance: number; generation: number; settings: string } | undefined;
+  let bufferedNotification: { value: WorkspaceStatus; client: WorkspaceConnection; instance: number; generation: number; settings: string; dependencyUpdates: number } | undefined;
   let startupFailed = false;
+  let dependencyUpdates = 0;
   let request: vscode.CancellationTokenSource | undefined, notification: vscode.Disposable | undefined;
+  let dependencyNotification: vscode.Disposable | undefined;
   let inputTimer: ReturnType<typeof setTimeout> | undefined;
   const watchers = new Map<string, vscode.Disposable>();
   const dependencies = new Map<string, vscode.Disposable>();
@@ -376,8 +380,8 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
   const current = (client: WorkspaceConnection, expectedInstance: number, expectedGeneration: number, expectedSnapshot: string): boolean =>
     !disposed && service.client === client && service.currentInstance === expectedInstance && connection === client &&
     generation === expectedGeneration && snapshot() === expectedSnapshot && (client.isRunning?.() ?? true);
-  const acceptStatus = (next: WorkspaceStatus): void => {
-    minPass = next.pass_revision; status = next; updateDependencyWatchers(); sendActiveRoot(); render();
+  const acceptStatus = (next: WorkspaceStatus, keepDependencyWatches = false): void => {
+    minPass = next.pass_revision; status = next; updateDependencyWatchers(keepDependencyWatches); sendActiveRoot(); render();
     const phase = !next.enabled ? "unavailable" : next.coverage_complete ? "complete" :
       next.complete || next.cancelled ? "incomplete" : "pending";
     service.workspaceOwnerPassChanged?.(next.pass_revision, phase);
@@ -404,6 +408,7 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
     }
     cancelRequest(); const cancellation = new vscode.CancellationTokenSource(); request = cancellation;
     const expectedGeneration = generation, expectedInstance = instance, expectedSnapshot = snapshot(), serial = ++response;
+    let knownDependencyUpdates = dependencyUpdates;
     try {
       const value = await service.execute(command ?? supported.status_command, [], cancellation.token);
       if (cancellation.token.isCancellationRequested || serial !== response || !current(client, expectedInstance, expectedGeneration, expectedSnapshot)) return;
@@ -416,9 +421,14 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
       // pass, so its reply defeats a same-pass notification from before Cancel.
       if (buffered && current(buffered.client, buffered.instance, buffered.generation, buffered.settings) &&
           buffered.value.pass_revision >= Math.max(minPass, next.pass_revision) && buffered.value.enabled === enabled() &&
-          (command !== supported.cancel_command || buffered.value.pass_revision > next.pass_revision || buffered.value.cancelled || !next.cancelled)) latest = buffered.value;
+          (command !== supported.cancel_command || buffered.value.pass_revision > next.pass_revision || buffered.value.cancelled || !next.cancelled)) {
+        latest = buffered.value;
+        knownDependencyUpdates = buffered.dependencyUpdates;
+      }
       if (!latest) return;
-      acceptStatus(latest);
+      // A command reply can carry an older snapshot than a dependency update
+      // received during the request. The next unsolicited status reconciles it.
+      acceptStatus(latest, knownDependencyUpdates !== dependencyUpdates);
     } catch (error) {
       if (!cancellation.token.isCancellationRequested && serial === response && current(client, expectedInstance, expectedGeneration, expectedSnapshot)) {
         barrier = false; bufferedNotification = undefined; status = undefined; clearWatchers(dependencies);
@@ -454,7 +464,7 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
     }
     return vscode.Disposable.from(...subscriptions);
   };
-  function updateDependencyWatchers(): void {
+  function updateDependencyWatchers(keepDependencyWatches: boolean): void {
     if (!enabled() || !status || !connection) { clearWatchers(dependencies); dependencyTargets.clear(); return; }
     const groups = new Map<string, { directory: vscode.Uri; targets: Set<string> }>();
     for (const root of status.roots) {
@@ -464,11 +474,33 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
         const group = groups.get(key) ?? { directory, targets: new Set<string>() }; group.targets.add(identity(uri)); groups.set(key, group);
       }
     }
-    for (const [key, watcher] of dependencies) if (!groups.has(key)) { watcher.dispose(); dependencies.delete(key); dependencyTargets.delete(key); }
+    if (!keepDependencyWatches) {
+      for (const [key, watcher] of dependencies) if (!groups.has(key)) { watcher.dispose(); dependencies.delete(key); dependencyTargets.delete(key); }
+    }
     for (const [key, group] of groups) {
+      if (keepDependencyWatches) for (const target of dependencyTargets.get(key) ?? []) group.targets.add(target);
       dependencyTargets.set(key, group.targets);
-      if (!dependencies.has(key)) dependencies.set(key, watch(new vscode.RelativePattern(group.directory, "*"), uri =>
-        !watchedWorkspaceFile(uri) && (dependencyTargets.get(key)?.has(identity(uri)) ?? false)));
+      watchDependencyDirectory(key, group.directory);
+    }
+  }
+  function watchDependencyDirectory(key: string, directory: vscode.Uri): void {
+    if (!dependencies.has(key)) dependencies.set(key, watch(new vscode.RelativePattern(directory, "*"), uri =>
+      !watchedWorkspaceFile(uri) && (dependencyTargets.get(key)?.has(identity(uri)) ?? false)));
+  }
+  function addDependencyCandidates(value: unknown): void {
+    if (!record(value) || typeof value.pass_revision !== "number" || !Number.isSafeInteger(value.pass_revision) ||
+        value.pass_revision < minPass || !fileUri(value.root_uri) || !Array.isArray(value.dependency_candidates)) return;
+    if (!containingFolder(vscode.Uri.parse(value.root_uri), folders())) return;
+    ++dependencyUpdates;
+    for (const candidate of value.dependency_candidates) {
+      if (!fileUri(candidate)) continue;
+      const uri = vscode.Uri.parse(candidate);
+      if (uri.scheme !== "file" || watchedWorkspaceFile(uri)) continue;
+      const directory = vscode.Uri.file(path.dirname(uri.fsPath)), key = identity(directory);
+      const targets = dependencyTargets.get(key) ?? new Set<string>();
+      targets.add(identity(uri));
+      dependencyTargets.set(key, targets);
+      watchDependencyDirectory(key, directory);
     }
   }
   const updateRootWatchers = (): void => {
@@ -498,6 +530,7 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
     if (connection === client && instance === service.currentInstance && (client?.isRunning?.() ?? true)) { sendActiveRoot(); return; }
     startupFailed = client && (client.isRunning?.() ?? true) ? false : startupFailed || !!connection;
     ++generation; ++response; cancelRequest(); notification?.dispose(); notification = undefined;
+    dependencyNotification?.dispose(); dependencyNotification = undefined;
     clearWatchers(watchers); clearWatchers(dependencies); status = undefined; retainedStatus = undefined; affectedRoots.clear();
     minPass = 0; barrier = false; bufferedNotification = undefined; activeRoot = undefined;
     dependencyTargets.clear();
@@ -505,6 +538,13 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
     capability = parseWorkspaceCapability(connection?.initializeResult);
     if (connection && capability) {
       const subscribedClient = connection, subscribedInstance = instance;
+      if (capability.dependency_notification) {
+        dependencyNotification = connection.onNotification(capability.dependency_notification, (value: unknown) => {
+          if (disposed || connection !== subscribedClient || service.client !== subscribedClient || instance !== subscribedInstance ||
+              service.currentInstance !== subscribedInstance || !(subscribedClient.isRunning?.() ?? true) || !enabled()) return;
+          addDependencyCandidates(value);
+        });
+      }
       notification = connection.onNotification(capability.status_notification, (value: unknown) => {
         if (disposed || connection !== subscribedClient || service.client !== subscribedClient || instance !== subscribedInstance ||
             service.currentInstance !== subscribedInstance || !(subscribedClient.isRunning?.() ?? true)) return;
@@ -514,7 +554,7 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
           if (barrier) {
             if (bufferedNotification?.value.pass_revision === next.pass_revision && bufferedNotification.value.cancelled && !next.cancelled) return;
             if (!bufferedNotification || next.pass_revision >= bufferedNotification.value.pass_revision)
-              bufferedNotification = { value: next, client: subscribedClient, instance: subscribedInstance, generation, settings: snapshot() };
+              bufferedNotification = { value: next, client: subscribedClient, instance: subscribedInstance, generation, settings: snapshot(), dependencyUpdates };
             return;
           }
           ++response; cancelRequest(); acceptStatus(next);
@@ -689,7 +729,7 @@ export function registerWorkspaceStatus(service: WorkspaceClientPort, workspaceS
   void vscode.commands.executeCommand("setContext", "dygnosis.workspaceNotFullyCheckedOnly", notFullyCheckedOnly);
   synchronize(); startFolders();
   return new vscode.Disposable(() => {
-    disposed = true; ++generation; ++response; cancelRequest(); notification?.dispose();
+    disposed = true; ++generation; ++response; cancelRequest(); notification?.dispose(); dependencyNotification?.dispose();
     bufferedNotification = undefined;
     if (inputTimer) clearTimeout(inputTimer);
     clearWatchers(watchers); clearWatchers(dependencies);

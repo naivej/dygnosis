@@ -32,13 +32,30 @@ pub(super) enum Phase {
     Dispatch,
     Capture,
     Publish,
+    ComparisonInput,
+    Comparison,
+    ComparisonProjection,
+    ComparisonWire,
 }
+
+const PHASES: [&str; 10] = [
+    "identity",
+    "source",
+    "proof",
+    "dispatch",
+    "capture",
+    "publish",
+    "comparison_input",
+    "comparison",
+    "comparison_projection",
+    "comparison_wire",
+];
 
 #[derive(Default)]
 struct Timings {
     enabled: bool,
-    elapsed: [Duration; 6],
-    calls: [usize; 6],
+    elapsed: [Duration; PHASES.len()],
+    calls: [usize; PHASES.len()],
 }
 
 thread_local! {
@@ -83,7 +100,7 @@ fn timings() -> Value {
     TIMINGS.with(|slot| {
         let timings = slot.borrow();
         let mut values = serde_json::Map::new();
-        for (index, name) in ["identity", "source", "proof", "dispatch", "capture", "publish"].iter().enumerate() {
+        for (index, name) in PHASES.iter().enumerate() {
             values.insert((*name).into(), json!({"microseconds":timings.elapsed[index].as_secs_f64()*1_000_000.0,"calls":timings.calls[index]}));
         }
         Value::Object(values)

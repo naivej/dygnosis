@@ -78,6 +78,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; tab-size: 4
 .group-button.selected .group-count { color: inherit; }
 .group-rows { min-width: 0; container-type: inline-size; }
 .change-item { min-width: 0; border-bottom: 1px solid var(--line); }
+.large-group > .change-item { content-visibility: auto; contain-intrinsic-block-size: auto 28px; }
 .change-line { display: flex; align-items: stretch; padding: 0 4px; gap: 2px; min-width: 0; }
 .row-heading { flex: 1 1 auto; min-width: 0; }
 .change-row { display: flex; align-items: baseline; gap: 7px; min-width: 0; width: 100%; padding: 3px 7px; text-align: left; }

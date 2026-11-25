@@ -464,6 +464,26 @@ test("grouped rows preserve filters and the selected group through reload", () =
   assert.equal(descendants(env.elements.results).find(element => element.attributes["data-group"]).attributes["aria-pressed"], "true");
 });
 
+test("filtering a scrolled group list reveals the first matching group at zero", () => {
+  const env = webview(), snapshot = parseCurrent(response()), first = snapshot.rows[0];
+  const second = { ...first, id: "/semantic/rows/1", group: "Other priors", label: "Other prior" };
+  first.label = "First prior";
+  snapshot.rows.push(second);
+  env.render({ ...snapshot, captureId: "group-scroll" });
+  const list = env.elements.results.querySelectorAll(".group-list")[0];
+  const [firstGroup, secondGroup] = list.children;
+  Object.assign(list, { clientWidth: 70, clientHeight: 40, scrollLeft: 0, scrollTop: 0 });
+  Object.assign(firstGroup, { offsetLeft: 0, offsetTop: 0, offsetWidth: 55, offsetHeight: 30 });
+  Object.assign(secondGroup, { offsetLeft: 90, offsetTop: 150, offsetWidth: 55, offsetHeight: 30 });
+  secondGroup.click();
+  assert.equal(secondGroup.getAttribute("aria-pressed"), "true");
+  assert.ok(list.scrollLeft > 0 && list.scrollTop > 0);
+  env.elements.search.value = "First prior"; env.elements.search.fire("input");
+  assert.equal(firstGroup.getAttribute("aria-pressed"), "true");
+  assert.equal(list.scrollLeft, 0);
+  assert.equal(list.scrollTop, 0);
+});
+
 test("expanded changes keep independent details and reference disclosures through filtering", () => {
   const env = webview(), snapshot = parseCurrent(response()), first = snapshot.rows[0];
   const second = structuredClone(first);
@@ -472,6 +492,7 @@ test("expanded changes keep independent details and reference disclosures throug
   snapshot.rows.push(second);
   env.render({ ...snapshot, captureId: "retained" });
   const cards = () => env.elements.results.querySelectorAll(".change-item");
+  const groupButton = env.elements.results.querySelectorAll(".group-button")[0];
   const detail = card => card.querySelectorAll(".detail")[0];
   const reference = card => card.querySelectorAll(".reference-toggle")[0];
   const open = card => card.querySelectorAll(".change-row")[0].fire("click");
@@ -488,6 +509,7 @@ test("expanded changes keep independent details and reference disclosures throug
   assert.notEqual(links[0].id, links[1].id, "two rows can link to the same reference with separate focus targets");
   env.elements.search.value = "Second prior"; env.elements.search.fire("input");
   assert.equal(cards().length, 1);
+  assert.equal(env.elements.results.querySelectorAll(".group-button")[0], groupButton, "the filter updates the existing group control");
   assert.equal(reference(cards()[0]).getAttribute("aria-expanded"), "true");
   env.elements.search.value = ""; env.elements.search.fire("input");
   assert.equal(cards().length, 2);

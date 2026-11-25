@@ -3,6 +3,22 @@
 Each entry describes the release at the time. Feature names and interfaces can
 change in later releases; see Dygnosis Help for current guidance.
 
+## v0.12.7
+
+**Dynare Workspace** sends fewer progress updates while it checks many
+models. Newly discovered dependencies are watched as soon as each check
+reports them. Update a custom engine set through `dynare.serverPath` with
+the extension to get the new progress behavior.
+
+In **Dygnosis Changes**, filtering and clearing search results do less
+work on large comparisons. Run **Dygnosis: Show model changes** to open a
+comparison.
+
+MCP `dynare_compare_models` builds optional detail for the requested
+sections and page. A stale repository comparison returns `INPUT_CHANGED`
+before building model changes. Agents that read `data.coverage` now read
+`coverage.comparison` in the result envelope.
+
 ## v0.12.6
 
 **Dygnosis: Open Help** opens beside a Dynare model, macro expansion or

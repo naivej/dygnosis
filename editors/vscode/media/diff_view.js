@@ -6,7 +6,7 @@
   const kinds = ["added", "removed", "changed"], marks = { added: "+", removed: "−", changed: "~" };
   const changeLabel = kind => titleCase(kind);
   const controls = Object.fromEntries(["models", "status", "search", "kinds", "kindToggles", "counts", "results"].map(id => [id, document.getElementById(id)]));
-  let payload, choices, groupList, references = new Map(), groups = new Map();
+  let payload, choices, groupList, groupRows, groupButtons, references = new Map(), groups = new Map();
   let kindCounts = {}, rowFocus, refreshFocus;
   let presentation = saved?.presentation ?? {};
   const scrollArea = document.getElementById("reviewContent");
@@ -730,25 +730,25 @@
     }
     return article;
   }
-  function appendRows(container, group, shown) {
+  function changeRows(group, shown) {
     if (group.section === "macroContext") {
       const primary = group.rows[0], kind = shown.every(row => row.kind === shown[0].kind) ? shown[0].kind : "changed";
       const includes = group.rows.some(row => row.includeFile), macros = group.rows.some(row => !row.includeFile);
       const label = includes && macros ? "Macro and include changes" : includes ? "Include changes" : "Macro code changes";
-      container.append(compactRow({ ...primary, label, kind, macroRows: shown }));
-      return;
+      return [compactRow({ ...primary, label, kind, macroRows: shown })];
     }
+    const rows = [];
     if (!group.parents.size) {
       const statements = new Set();
       for (const row of historyCards(shown)) {
         const key = row.semantic?.statement_group;
         const command = commandName(row) && group.commands.get(key);
-        if (!command) { container.append(compactRow(row)); continue; }
+        if (!command) { rows.push(compactRow(row)); continue; }
         if (statements.has(key)) continue;
         statements.add(key);
-        container.append(compactRow(command));
+        rows.push(compactRow(command));
       }
-      return;
+      return rows;
     }
     const matched = new Set(), children = new Map();
     for (const row of shown) {
@@ -761,16 +761,41 @@
     for (const row of group.rows) {
       if (group.parents.has(row.id)) continue;
       const context = !matched.has(row.id), dependents = children.get(row.id);
-      if (!context || dependents) container.append(compactRow(row, { context, dependents }));
+      if (!context || dependents) rows.push(compactRow(row, { context, dependents }));
     }
+    return rows;
   }
   function countText(count) { return count + (count === 1 ? " change" : " changes"); }
   function revealGroup(list, button, scrollLeft, scrollTop) {
     const { offsetLeft, offsetTop, offsetWidth, offsetHeight } = button;
     const left = Math.min(offsetLeft, Math.max(scrollLeft, offsetLeft + offsetWidth - list.clientWidth));
     const top = Math.min(offsetTop, Math.max(scrollTop, offsetTop + offsetHeight - list.clientHeight));
-    if (left) list.scrollLeft = left;
-    if (top) list.scrollTop = top;
+    if (list.scrollLeft !== left) list.scrollLeft = left;
+    if (list.scrollTop !== top) list.scrollTop = top;
+  }
+  function createGroupView() {
+    const grid = node("div", undefined, "grouped");
+    groupList = node("nav", undefined, "group-list");
+    groupList.setAttribute("aria-label", "Change groups");
+    groupRows = node("section", undefined, "group-rows");
+    groupButtons = new Map();
+    for (const [key, group] of groups) {
+      const button = node("button", undefined, "group-button");
+      button.type = "button";
+      button.id = "group-" + key;
+      const count = node("span", undefined, "group-count");
+      button.append(node("span", group.label), count);
+      button.setAttribute("data-group", key);
+      button.addEventListener("click", () => {
+        choices.group = key;
+        if (scrollArea) scrollArea.scrollTop = 0;
+        update(button.id);
+      });
+      groupButtons.set(key, { button, count });
+      groupList.append(button);
+    }
+    grid.append(groupList, groupRows);
+    controls.results.replaceChildren(grid);
   }
   function renderRows(focusId = document.activeElement?.id) {
     if (!payload || !choices) return;
@@ -785,9 +810,11 @@
     controls.counts.hidden = !available && !incompleteRows;
     controls.counts.textContent = incompleteRows ? countText(total) + " shown" : total === available ? countText(total) : total + " of " + available + " changes";
     const scrollLeft = groupList?.scrollLeft ?? 0, scrollTop = groupList?.scrollTop ?? 0;
-    groupList = null;
     controls.results.className = "results";
-    controls.results.replaceChildren();
+    if (!available || !total) {
+      groupList = groupRows = groupButtons = undefined;
+      controls.results.replaceChildren();
+    }
     if (!available) return;
     if (!total) {
       const empty = node("div", undefined, "empty"), reset = node("button", "Clear filters", "reset-filters");
@@ -804,34 +831,24 @@
       return;
     }
     if (!filtered.get(choices.group)?.length) choices.group = [...filtered].find(([, rows]) => rows.length)?.[0] ?? null;
-    const grid = node("div", undefined, "grouped"), list = node("nav", undefined, "group-list");
-    list.setAttribute("aria-label", "Change groups");
+    if (!groupList) createGroupView();
+    const list = groupList, rows = groupRows;
     let selectedButton;
     for (const [key, group] of groups) {
-      const count = filtered.get(key).length, selected = key === choices.group;
-      const button = node("button", undefined, "group-button" + (selected ? " selected" : ""));
-      button.type = "button";
-      button.id = "group-" + key;
-      button.disabled = !count;
+      const matches = filtered.get(key).length, selected = key === choices.group;
+      const { button, count } = groupButtons.get(key);
+      button.className = "group-button" + (selected ? " selected" : "");
+      button.disabled = !matches;
       button.tabIndex = selected ? 0 : -1;
-      button.append(node("span", group.label), node("span", String(count), "group-count"));
-      button.setAttribute("aria-label", group.label + ", " + countText(count));
+      count.textContent = String(matches);
+      button.setAttribute("aria-label", group.label + ", " + countText(matches));
       button.setAttribute("aria-pressed", String(selected));
-      button.setAttribute("data-group", key);
       if (selected) selectedButton = button;
-      button.addEventListener("click", () => {
-        choices.group = key;
-        if (scrollArea) scrollArea.scrollTop = 0;
-        update(button.id);
-      });
-      list.append(button);
     }
-    const selected = groups.get(choices.group), rows = node("section", undefined, "group-rows");
+    const selected = groups.get(choices.group), visible = changeRows(selected, filtered.get(choices.group));
     rows.setAttribute("aria-label", selected.label);
-    appendRows(rows, selected, filtered.get(choices.group));
-    grid.append(list, rows);
-    controls.results.append(grid);
-    groupList = list;
+    rows.className = visible.length >= 100 ? "group-rows large-group" : "group-rows";
+    rows.replaceChildren(...visible);
     const focus = focusId && document.getElementById(focusId);
     const buttons = [...rows.querySelectorAll(".change-row")];
     const row = buttons.find(button => button.id === focusId || button.id === rowFocus) ?? buttons[0];
@@ -1000,7 +1017,7 @@
     }
     if (!message.captureId || message.captureId !== presentation.captureId) {
       presentation = { captureId: message.captureId, expandedDetails: {}, openDependents: [], inputDetails: [], returnFocus: null };
-      groupList = null;
+      groupList = groupRows = groupButtons = undefined;
       if (scrollArea) scrollArea.scrollTop = 0;
     } else if (!presentation.expandedDetails) {
       const { detailId, referenceSides, ...rest } = presentation;

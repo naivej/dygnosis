@@ -620,6 +620,63 @@ test("unchanged dependency directories reuse watchers while candidate sets updat
   watcher.created.fire(uri(second)); await flush(); assert.equal(env.service.client.sent.at(-1).params.changes[0].uri, second);
   registration.dispose();
 });
+test("a newly reported dependency is watched before the next full Workspace snapshot", async () => {
+  const dependencyNotification = "dynare/workspaceDependenciesChanged";
+  const client = connection(initializeResult({ dependency_notification: dependencyNotification }));
+  const env = setup({ client, status: facts([root("pending")], { pass_revision: 2 }) });
+  const registration = registerWorkspaceStatus(env.service); await flush();
+  const updates = client.subscriptions.get(dependencyNotification);
+  const next = `${other}/new.data`;
+  const update = { pass_revision: 2, root_uri: root().root_uri, dependency_candidates: [next] };
+  updates.fire({ ...update, pass_revision: 1 });
+  assert.equal(liveWatchers(env, "*").length, 0);
+  let finishRefresh;
+  const execute = env.service.execute;
+  env.service.execute = () => new Promise(resolve => { finishRefresh = resolve; });
+  env.host.edited.fire({ document: document(), contentChanges: [{ text: "x" }] });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.ok(finishRefresh, "the older full status request is in flight");
+  const requests = env.service.queries.length;
+  updates.fire(update);
+  assert.equal(env.service.queries.length, requests, "a dependency update does not refresh the whole view");
+  finishRefresh(env.service.status); await flush();
+  const watcher = liveWatchers(env, "*")[0];
+  assert.ok(watcher, "an older full response cannot remove the new watch");
+  env.service.execute = execute;
+  watcher.created.fire(uri(next)); await flush();
+  assert.ok(client.sent.some(message => message.name === "workspace/didChangeWatchedFiles" && message.params.changes[0].uri === next));
+  client.notify(facts([root("excluded")], { pass_revision: 2 }));
+  assert.equal(watcher.disposed, true);
+  registration.dispose();
+  assert.equal(updates.listeners.size, 0);
+});
+test("a buffered terminal Workspace snapshot reconciles the dependency watches", async () => {
+  // The last full snapshot already accounts for the earlier delta. A slow
+  // command reply must not keep a retired watch after the pass completes.
+  const dependencyNotification = "dynare/workspaceDependenciesChanged";
+  const client = connection(initializeResult({ dependency_notification: dependencyNotification }));
+  const old = `${other}/retired/body.data`, next = `${other}/current/body.data`;
+  const env = setup({ client, status: facts([root("checked", { dependency_candidates: [old] })]) });
+  const registration = registerWorkspaceStatus(env.service);
+  try {
+    await flush();
+    const retired = liveWatchers(env, "*")[0];
+    assert.ok(retired);
+    const reply = deferred();
+    env.service.execute = () => reply.promise;
+    const command = env.host.commands.get("dygnosis.recheckWorkspace")();
+    await flush();
+    client.subscriptions.get(dependencyNotification).fire({
+      pass_revision: 2, root_uri: root().root_uri, dependency_candidates: [next],
+    });
+    assert.equal(liveWatchers(env, "*").length, 2);
+    client.notify(facts([root("checked", { dependency_candidates: [next] })], { pass_revision: 2 }));
+    reply.resolve(facts([root("pending")], { pass_revision: 2 }));
+    await command;
+    assert.equal(retired.disposed, true);
+    assert.equal(liveWatchers(env, "*").length, 1);
+  } finally { registration.dispose(); }
+});
 test("root creation and deletion are watched per folder; removed folders and exclusions clear watchers", async () => {
   const env = setup({ folders: [folder(), folder(other, "other")] }); const registration = registerWorkspaceStatus(env.service); await flush();
   assert.equal(liveWatchers(env, "**/*.{[mM][oO][dD],[dD][yY][nN],[iI][nN][cC]}").length, 2);

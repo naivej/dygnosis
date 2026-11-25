@@ -13,11 +13,17 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::engine::comparison::compare_navigation::PreparedComparison;
+#[cfg(test)]
+use crate::engine::comparison::compare_navigation::{Coordinates, semantic_wire};
 use crate::engine::comparison::compare_snapshots::{
     CapturedSnapshot, GitSnapshotInput, MAX_SNAPSHOT_FILES, MAX_SNAPSHOT_SOURCE_BYTES,
-    ManifestEntry, SnapshotCapture, SnapshotCoordinates, SnapshotFailure, SourceFact,
-    capture_git_snapshot_with_limit, capture_working_snapshot_configured,
-    compare_captured_snapshots, tree_path,
+    ManifestEntry, SnapshotCapture, SnapshotFailure, SourceFact, capture_git_snapshot_with_limit,
+    capture_working_snapshot_configured, prepare_captured_comparison, tree_path,
+};
+#[cfg(test)]
+use crate::engine::comparison::compare_snapshots::{
+    SnapshotCoordinates, compare_captured_snapshots,
 };
 use crate::engine::workspace::Workspace;
 
@@ -676,25 +682,67 @@ pub(crate) fn compare_repository(
     params: RepositoryComparison,
     cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Value {
-    compare_repository_control(params, cancelled, None)
+    full_repository_result(compare_repository_control(
+        params, cancelled, None, [None; 2],
+    ))
 }
 
+#[cfg(test)]
 pub(crate) fn compare_repository_bounded(
     params: RepositoryComparison,
     control: &super::source::RequestControl,
 ) -> Value {
+    full_repository_result(prepare_repository(params, control, [None; 2]))
+}
+
+pub(super) struct RepositoryDiff {
+    pub inputs: Value,
+    pub comparison: PreparedComparison,
+    pub sources: [BTreeMap<String, String>; 2],
+}
+
+pub(super) fn prepare_repository(
+    params: RepositoryComparison,
+    control: &super::source::RequestControl,
+    expected: [Option<&str>; 2],
+) -> Result<RepositoryDiff, Value> {
     compare_repository_control(
         params,
         &|| control.cancelled.load(Ordering::Relaxed),
         Some(control),
+        expected,
     )
+}
+
+#[cfg(test)]
+fn full_repository_result(result: Result<RepositoryDiff, Value>) -> Value {
+    let RepositoryDiff {
+        inputs,
+        comparison,
+        sources,
+    } = match result {
+        Ok(ready) => ready,
+        Err(failure) => return failure,
+    };
+    let (mut data, navigation) = semantic_wire(
+        &comparison.diff,
+        &comparison.before,
+        &comparison.after,
+        Coordinates::SnapshotMcp,
+    );
+    data["state"] = json!("result");
+    data["inputs"] = inputs;
+    data["navigation"] = navigation;
+    data["sources"] = json!({"before":sources[0],"after":sources[1]});
+    data
 }
 
 fn compare_repository_control(
     params: RepositoryComparison,
     cancelled: &(dyn Fn() -> bool + Sync),
     control: Option<&super::source::RequestControl>,
-) -> Value {
+    expected: [Option<&str>; 2],
+) -> Result<RepositoryDiff, Value> {
     let identify = |side: &str, selector: &RepositorySelector| {
         let mut identity = json!({"input_id":side, "root_file":selector.root_file(),
             "repository_path":params.repository_path, "repository_uri":repository_uri_for(Path::new(&params.repository_path)),
@@ -723,8 +771,7 @@ fn compare_repository_control(
     };
     let mut inputs = json!({"schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION,
         "before":identify("before", &params.before), "after":identify("after", &params.after)});
-    let mut result = compare_repository_inner(params, cancelled, &mut inputs, control);
-    if result["state"] != "result" {
+    compare_repository_inner(params, cancelled, &mut inputs, control, expected).map_err(|mut result| {
         let mut summaries = json!({});
         for side in ["before", "after"] {
             summaries[side] = if result["side"] == side && result["analysis_summary"].is_object() {
@@ -750,8 +797,8 @@ fn compare_repository_control(
             inputs[side]["complete"] = json!(false);
         }
         result["inputs"] = inputs;
-    }
-    result
+        result
+    })
 }
 
 fn compare_repository_inner(
@@ -759,16 +806,19 @@ fn compare_repository_inner(
     cancelled: &(dyn Fn() -> bool + Sync),
     inputs: &mut Value,
     control: Option<&super::source::RequestControl>,
-) -> Value {
+    expected: [Option<&str>; 2],
+) -> Result<RepositoryDiff, Value> {
+    #[cfg(feature = "mcp-reuse")]
+    let acquisition_timing = super::retention::measure(super::retention::Phase::ComparisonInput);
     let repository = match std::fs::canonicalize(&params.repository_path) {
         Ok(path) if path.is_dir() => path,
         _ => {
-            return SnapshotFailure::new(
+            return Err(SnapshotFailure::new(
                 "REPOSITORY_UNAVAILABLE",
                 "repository_path is not an accessible directory on this server host",
                 None,
             )
-            .response("before");
+            .response("before"));
         }
     };
     let mut acquisition = Acquisition {
@@ -793,28 +843,28 @@ fn compare_repository_inner(
     };
     let resolved_root = match acquisition.git(&["rev-parse", "--show-toplevel"], 32 * 1024) {
         Ok(bytes) => PathBuf::from(String::from_utf8_lossy(&bytes).trim()),
-        Err(failure) => return failure.response("before"),
+        Err(failure) => return Err(failure.response("before")),
     };
     match std::fs::canonicalize(resolved_root) {
         Ok(path) if path == acquisition.repository => {}
-        _ => return SnapshotFailure::new("REPOSITORY_UNAVAILABLE", "repository_path must name the repository root; use root_file for a model in a subfolder", None).response("before"),
+        _ => return Err(SnapshotFailure::new("REPOSITORY_UNAVAILABLE", "repository_path must name the repository root; use root_file for a model in a subfolder", None).response("before")),
     }
     // Pin every revision before acquiring the first root or include body.
     let before_commit = match acquisition.resolve(&params.before) {
         Ok(commit) => commit,
-        Err(failure) => return failure.response("before"),
+        Err(failure) => return Err(failure.response("before")),
     };
     if let Some(commit) = &before_commit {
         inputs["before"]["commit"] = json!(commit);
     }
     let after_commit = match acquisition.resolve(&params.after) {
         Ok(commit) => commit,
-        Err(failure) => return failure.response("after"),
+        Err(failure) => return Err(failure.response("after")),
     };
     if let Some(commit) = &after_commit {
         inputs["after"]["commit"] = json!(commit);
     }
-    let before = match acquisition.capture(
+    let mut before = match acquisition.capture(
         &params.before,
         before_commit,
         "before",
@@ -823,10 +873,10 @@ fn compare_repository_inner(
         None,
     ) {
         Ok(value) => value,
-        Err(failure) => return failure.response("before"),
+        Err(failure) => return Err(failure.response("before")),
     };
     inputs["before"] = before.inputs.clone();
-    let after = match acquisition.capture(
+    let mut after = match acquisition.capture(
         &params.after,
         after_commit,
         "after",
@@ -835,27 +885,36 @@ fn compare_repository_inner(
         Some(&before),
     ) {
         Ok(value) => value,
-        Err(failure) => return failure.response("after"),
+        Err(failure) => return Err(failure.response("after")),
     };
     inputs["after"] = after.inputs.clone();
-    if let Err(failure) = acquisition.check() {
-        return failure.response("after");
+    acquisition
+        .check()
+        .map_err(|failure| failure.response("after"))?;
+    for (side, expected) in ["before", "after"].into_iter().zip(expected) {
+        if expected.is_some_and(|expected| inputs[side]["revision"].as_str() != Some(expected)) {
+            return Err(SnapshotFailure::new(
+                "INPUT_CHANGED",
+                "Comparison inputs no longer match their expected revisions.",
+                None,
+            )
+            .response(side));
+        }
     }
-    let result = compare_captured_snapshots(before, after, SnapshotCoordinates::Mcp);
-    if let Err(failure) = acquisition.check() {
-        return failure.response("after");
-    }
-    // Publish the same comparison facts as the snapshot LSP response.
-    if result["state"] == "result" {
-        let mut output = result["diff"].clone();
-        output["state"] = json!("result");
-        output["inputs"] = result["inputs"].clone();
-        output["navigation"] = result["navigation"].clone();
-        output["sources"] = result["sources"].clone();
-        output
-    } else {
-        result
-    }
+    #[cfg(feature = "mcp-reuse")]
+    drop(acquisition_timing);
+    #[cfg(feature = "mcp-reuse")]
+    let _comparison_timing = super::retention::measure(super::retention::Phase::Comparison);
+    let comparison = prepare_captured_comparison(&mut before, &mut after);
+    acquisition
+        .check()
+        .map_err(|failure| failure.response("after"))?;
+    Ok(RepositoryDiff {
+        comparison: comparison?,
+        inputs: json!({"schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION,
+            "before":before.inputs,"after":after.inputs}),
+        sources: [before.sources, after.sources],
+    })
 }
 
 #[cfg(test)]

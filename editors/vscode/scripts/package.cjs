@@ -52,7 +52,7 @@ async function main() {
   await fs.mkdir(path.join(extensionRoot, "bin"), { recursive: true });
   for (const [kind, name] of [["lsp", binaryName(target)], ["mcp", mcpBinaryName(target)]]) {
     const destination = path.join(extensionRoot, "bin", name);
-    await fs.copyFile(binaries[kind], destination);
+    await stageEngine(binaries[kind], destination, values.candidate && info.platform === "win32");
     if (info.platform !== "win32") await fs.chmod(destination, 0o755);
   }
   for (const file of ["LICENSE", "CHANGELOG.md"]) await fs.copyFile(path.join(productRoot, file), path.join(extensionRoot, file));
@@ -109,4 +109,17 @@ async function main() {
   await writeJson(path.join(output, "artifacts.json"), { ...provenance, vsix: path.basename(vsix), standalone: path.basename(archive) });
   process.stdout.write(`${JSON.stringify({ output, vsix, archive, release: provenance.release })}\n`);
 }
-main().catch(error => { process.stderr.write(`${error.stack}\n`); process.exitCode = 1; });
+
+async function stageEngine(source, destination, reuseLocked) {
+  try {
+    await fs.copyFile(source, destination);
+  } catch (error) {
+    if (!reuseLocked || !["EBUSY", "EPERM", "EACCES"].includes(error.code)) throw error;
+    const existing = await sha256(destination).catch(() => undefined);
+    if (existing && existing === await sha256(source)) return;
+    throw new Error(`Cannot replace staged engine ${destination}. Close the editor or MCP client using it and rebuild the candidate.`, { cause: error });
+  }
+}
+
+if (require.main === module) main().catch(error => { process.stderr.write(`${error.stack}\n`); process.exitCode = 1; });
+module.exports = { stageEngine };

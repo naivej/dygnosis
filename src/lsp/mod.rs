@@ -3092,14 +3092,15 @@ impl LanguageServer for Backend {
                 .and_then(|value| value.get("schema_version"))
                 .and_then(Value::as_u64)
                 == Some(1);
-            inner.workspace_checks.notifications = params
+            let dygnosis_capabilities = params
                 .capabilities
                 .experimental
                 .as_ref()
-                .and_then(|value| value.get("dygnosis"))
-                .and_then(|value| value.get("workspaceStatusChanged"))
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
+                .and_then(|value| value.get("dygnosis"));
+            inner.workspace_checks.notifications =
+                dygnosis_capabilities.is_some_and(|value| value["workspaceStatusChanged"] == true);
+            inner.workspace_checks.dependency_notifications = dygnosis_capabilities
+                .is_some_and(|value| value["workspaceDependenciesChanged"] == true);
             let workspace = params.capabilities.workspace.as_ref();
             inner.token_refresh = workspace
                 .and_then(|cap| cap.semantic_tokens.as_ref())
@@ -3876,7 +3877,7 @@ pub fn initialize_result() -> InitializeResult {
                 "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES,"semantic_schema_version":3,"source_changes_schema_version":2,"coverage_schema_version":1},
                 "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::engine::preview::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::engine::preview::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true, "macro_messages":true, "document_symbols":true, "hover":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
-                ,"workspaceDiagnostics": {"schema_version":workspace_checks::SCHEMA_VERSION,"status_command":"dynare/workspaceStatus","recheck_command":"dynare/recheckWorkspace","cancel_command":"dynare/cancelWorkspace","check_location_command":workspace_checks::CHECK_LOCATION_COMMAND,"active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/workspaceStatusChanged","typing_pause_ms":250}
+                ,"workspaceDiagnostics": {"schema_version":workspace_checks::SCHEMA_VERSION,"status_command":"dynare/workspaceStatus","recheck_command":"dynare/recheckWorkspace","cancel_command":"dynare/cancelWorkspace","check_location_command":workspace_checks::CHECK_LOCATION_COMMAND,"active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/workspaceStatusChanged","dependency_notification":workspace_checks::DEPENDENCY_NOTIFICATION,"typing_pause_ms":250}
             }})),
             ..ServerCapabilities::default()
         },

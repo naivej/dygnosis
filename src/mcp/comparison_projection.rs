@@ -4,6 +4,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 
+use crate::engine::comparison::compare_navigation::{
+    Coordinates, PreparedComparison, SemanticWire, semantic_section, source_section,
+};
+use crate::engine::comparison::semantic_diff::{SemanticRow, SourceCorrespondence};
+
 use super::result::{Detail, Pages, ResultOptions, ToolResult};
 
 pub(super) struct Query<'a> {
@@ -25,56 +30,20 @@ impl Query<'_> {
         !self.families.is_empty() || !self.kinds.is_empty()
     }
 
-    fn matches(&self, row: &Value) -> bool {
-        (self.families.is_empty() || self.families.iter().any(|family| row["family"] == *family))
-            && (self.kinds.is_empty() || self.kinds.iter().any(|kind| row["change"] == *kind))
+    fn matches(&self, row: &SemanticRow) -> bool {
+        (self.families.is_empty() || self.families.contains(&name(row.family)))
+            && (self.kinds.is_empty() || self.kinds.contains(&name(row.change)))
+    }
+}
+
+fn name(value: impl serde::Serialize) -> String {
+    match json!(value) {
+        Value::String(name) => name,
+        _ => unreachable!("comparison discriminant is a string"),
     }
 }
 
 type LocalPointers = BTreeMap<String, String>;
-
-#[derive(Default)]
-struct Owners {
-    selected: BTreeSet<String>,
-    references: BTreeMap<String, BTreeSet<String>>,
-}
-
-impl Owners {
-    fn new(rows: &[Value]) -> Self {
-        let mut result = Self::default();
-        for row in rows {
-            let Some(pointer) = row["pointer"].as_str() else {
-                continue;
-            };
-            result.selected.insert(pointer.to_owned());
-            for reference in row["references"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-            {
-                result
-                    .references
-                    .entry(reference.to_owned())
-                    .or_default()
-                    .insert(pointer.to_owned());
-            }
-        }
-        result
-    }
-}
-
-fn array(value: &mut Value) -> Vec<Value> {
-    value
-        .take()
-        .as_array_mut()
-        .map(std::mem::take)
-        .unwrap_or_default()
-}
-
-fn map_pointer(pointers: &mut LocalPointers, old: &str, new: String) {
-    pointers.insert(old.to_owned(), new);
-}
 
 fn rebase_pointer(value: &mut Value, pointers: &LocalPointers) {
     let Some(old) = value.as_str() else { return };
@@ -111,22 +80,31 @@ fn rebase_equation(value: &mut Value, pointers: &LocalPointers) {
     }
 }
 
-fn source_context(nav: &[Value], owners: &Owners) -> [BTreeSet<Option<String>>; 2] {
+fn source_context(
+    wire: &SemanticWire<'_>,
+    rows: &[&SemanticRow],
+    page_start: usize,
+    page_locations: &[[Value; 2]],
+) -> [BTreeSet<Option<String>>; 2] {
     let mut files: [BTreeSet<Option<String>>; 2] = Default::default();
-    for row in nav {
-        if !row["id"]
-            .as_str()
-            .is_some_and(|id| owners.selected.contains(id))
+    for (index, row) in rows.iter().enumerate() {
+        let locations;
+        let sides = if let Some(page) = index
+            .checked_sub(page_start)
+            .and_then(|index| page_locations.get(index))
         {
-            continue;
-        }
-        for (index, side) in ["before", "after"].iter().enumerate() {
-            for location in row[side]["written_locations"]
+            page
+        } else {
+            locations = wire.row_locations(row);
+            &locations
+        };
+        for (locations, files) in sides.iter().zip(&mut files) {
+            for location in locations["written_locations"]
                 .as_array()
                 .into_iter()
                 .flatten()
             {
-                files[index].insert(
+                files.insert(
                     location["file_key"]
                         .as_str()
                         .or_else(|| location["file"].as_str())
@@ -138,25 +116,25 @@ fn source_context(nav: &[Value], owners: &Owners) -> [BTreeSet<Option<String>>; 
     files
 }
 
-fn filtered_markdown(rows: &[Value]) -> String {
+fn filtered_markdown(rows: &[&SemanticRow]) -> String {
+    use std::fmt::Write as _;
     let mut text = String::from("# Model changes\n");
     for row in rows {
-        let name = row["name"].as_str().unwrap_or_default().replace('`', "\\`");
-        let family = row["family"].as_str().unwrap_or("model");
-        let change = row["change"].as_str().unwrap_or("changed");
-        text.push_str(&format!("\n- {family}: {change} `{name}`"));
-        for field in row["fields"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|field| field["changed"] == true)
-        {
-            text.push_str(&format!(
+        let label = row.name.replace('`', "\\`");
+        let _ = write!(
+            text,
+            "\n- {}: {} `{label}`",
+            name(row.family),
+            name(row.change)
+        );
+        for field in row.fields.iter().filter(|field| field.changed) {
+            let _ = write!(
+                text,
                 "\n  - {}: {} → {}",
-                field["label"].as_str().unwrap_or("Value"),
-                field["before"]["value"],
-                field["after"]["value"]
-            ));
+                field.label,
+                json!(field.before.value),
+                json!(field.after.value)
+            );
         }
     }
     text.push('\n');
@@ -165,6 +143,8 @@ fn filtered_markdown(rows: &[Value]) -> String {
 
 pub(super) fn project(
     data: &mut Value,
+    comparison: &PreparedComparison,
+    sources: Option<&[BTreeMap<String, String>; 2]>,
     query: Query<'_>,
     arguments: &Value,
     revision: &str,
@@ -187,15 +167,15 @@ pub(super) fn project(
     {
         return Err("Unsupported comparison section. Use semantic for model changes.".into());
     }
-    if query.wants("navigation")
-        && !["semantic", "references"]
-            .into_iter()
-            .any(|section| query.wants(section))
-    {
+    let wants_rows = query.wants("semantic");
+    let wants_references = query.wants("references");
+    let wants_navigation = query.wants("navigation");
+    if wants_navigation && !wants_rows && !wants_references {
         result.cause("refused", "NAVIGATION_OWNER_REQUIRED", "Comparison navigation needs returned facts. Select semantic or references with navigation.");
         *data = Value::Null;
         return Ok(());
     }
+
     let mut pages = Pages::new(
         "v4:dynare_compare_models",
         revision,
@@ -203,185 +183,233 @@ pub(super) fn project(
         query.output,
     )?;
     pages.share_budget();
-    let semantic_complete = data["summary"]["semantic_rows"].is_u64();
-    let reference_complete = data["summary"]["reference_membership_complete"] == true;
-    let source_complete = data["summary"]["source_files"].is_u64();
+    let diff = &comparison.diff;
+    let mut summary = data
+        .as_object_mut()
+        .expect("comparison object")
+        .remove("summary")
+        .expect("comparison summary");
+    let semantic_complete = summary["semantic_rows"].is_u64();
+    let reference_complete = summary["reference_membership_complete"] == true;
+    let source_complete = summary["source_files"].is_u64();
     let source_selection_complete = source_complete && (!query.filtered() || semantic_complete);
-    let mut rows = array(&mut data["semantic"]["rows"]);
-    rows.retain(|row| query.matches(row));
-    let owners = Owners::new(&rows);
-    let available_rows = rows.len();
-    let navigation = array(&mut data["navigation"]["rows"]);
-    let source_files = source_context(&navigation, &owners);
-    if query.wants("markdown") {
-        data["markdown"] = json!(filtered_markdown(&rows));
-    }
-    if query.filtered() {
-        if query.wants("source_text") {
-            for (index, side) in ["before", "after"].iter().enumerate() {
-                let root = data["navigation"][side]["root_file"]
-                    .as_str()
-                    .or_else(|| data["navigation"][side]["root_uri"].as_str())
-                    .map(str::to_owned);
-                if let Some(files) = data["sources"][side].as_object_mut() {
-                    files.retain(|file, _| {
-                        source_files[index].contains(&Some(file.clone()))
-                            || (source_files[index].contains(&None)
-                                && root.as_ref().is_none_or(|root| root == file))
-                    });
-                }
-            }
-        }
-    }
-    let nav_index: BTreeMap<_, _> = navigation
+    let needs_source_context = query.filtered()
+        && ["source", "source_text", "summary"]
+            .into_iter()
+            .any(|section| query.wants(section));
+    let selected_rows: Vec<_> = diff
+        .semantic
+        .rows
         .iter()
-        .filter_map(|row| Some((row["id"].as_str()?, row)))
+        .filter(|row| query.matches(row))
         .collect();
+    let available_rows = selected_rows.len();
+    let coordinates = if sources.is_some() {
+        Coordinates::SnapshotMcp
+    } else {
+        Coordinates::Mcp
+    };
+    let wire = SemanticWire::new(diff, &comparison.before, &comparison.after, coordinates);
+    let row_range = if wants_rows {
+        pages.projection_range("semantic.rows", available_rows, semantic_complete)
+    } else {
+        0..0
+    };
+    let row_start = row_range.start;
+    let row_page = &selected_rows[row_range];
+    let locations: Vec<_> = row_page.iter().map(|row| wire.row_locations(row)).collect();
+
+    let mut owners: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    if wants_references {
+        for row in &selected_rows {
+            let pointer = wire.row_pointer(row);
+            for reference in &row.references {
+                owners.entry(reference).or_default().insert(pointer);
+            }
+        }
+    }
+    let selected_references: Vec<_> = if wants_references {
+        diff.semantic
+            .references
+            .iter()
+            .filter(|reference| owners.contains_key(reference.pointer.as_str()))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let reference_range = if wants_references {
+        pages.projection_range(
+            "semantic.references",
+            selected_references.len(),
+            reference_complete,
+        )
+    } else {
+        0..0
+    };
+    let reference_page = &selected_references[reference_range];
+
     let mut pointers = LocalPointers::new();
-    if query.wants("semantic") {
-        pages.collection_with_coverage("semantic.rows", &mut rows, semantic_complete);
-        for (index, row) in rows.iter_mut().enumerate() {
-            let old = row["pointer"].as_str().unwrap_or_default().to_owned();
-            let new = format!("/semantic/rows/{index}");
-            if let Some(nav) = nav_index.get(old.as_str()) {
-                for side in ["before", "after"] {
-                    if row[side].is_object() {
-                        row[side]["written_locations"] = nav[side]["written_locations"]
-                            .as_array()
-                            .map_or(json!([]), |locations| json!(locations));
-                    }
-                }
-            }
-            row["snapshot_pointer"] = json!(old);
-            row["pointer"] = json!(new);
-            map_pointer(&mut pointers, &old, new);
-            if query.output.detail == Detail::Compact {
-                strip_optional_detail(row);
-            }
-        }
-    } else {
-        rows.clear();
-    }
-    let mut references = array(&mut data["semantic"]["references"]);
-    references.retain(|reference| {
-        reference["pointer"]
-            .as_str()
-            .is_some_and(|id| owners.references.contains_key(id))
-    });
-    if query.wants("references") {
-        pages.collection_with_coverage("semantic.references", &mut references, reference_complete);
-        for (index, reference) in references.iter_mut().enumerate() {
-            let old = reference["pointer"].as_str().unwrap_or_default().to_owned();
-            reference["owners"] = json!(owners.references.get(&old));
-            reference["snapshot_pointer"] = json!(old);
-            let new = format!("/semantic/references/{index}");
-            reference["pointer"] = json!(new);
-            map_pointer(&mut pointers, &old, new);
-        }
-    } else {
-        references.clear();
-    }
-    let returned_references: BTreeMap<_, _> = references
+    let returned_references: BTreeMap<_, _> = reference_page
         .iter()
-        .filter_map(|reference| {
-            Some((
-                reference["snapshot_pointer"].as_str()?,
-                reference["pointer"].clone(),
-            ))
+        .enumerate()
+        .map(|(index, reference)| {
+            let pointer = format!("/semantic/references/{index}");
+            pointers.insert(reference.pointer.clone(), pointer.clone());
+            (reference.pointer.as_str(), pointer)
         })
         .collect();
-    for row in &mut rows {
-        let ids = row["references"].as_array().cloned().unwrap_or_default();
-        let local: Vec<_> = ids
-            .iter()
-            .filter_map(Value::as_str)
-            .filter_map(|id| returned_references.get(id).cloned())
-            .collect();
-        row["reference_counts"] = json!({"available_matches":ids.len(),"total_matches":reference_complete.then_some(ids.len()),"returned_count":local.len()});
-        row["references"] = json!(local);
+    let references = reference_page
+        .iter()
+        .map(|reference| {
+            let mut value = wire.reference(reference);
+            value["owners"] = json!(owners[reference.pointer.as_str()]);
+            value["snapshot_pointer"] = json!(reference.pointer);
+            value["pointer"] = json!(returned_references[reference.pointer.as_str()]);
+            value
+        })
+        .collect::<Vec<_>>();
+
+    let rows = row_page.iter().zip(&locations).enumerate().map(|(index, (row, locations))| {
+        let mut value = wire.row(row);
+        let old = wire.row_pointer(row);
+        let pointer = format!("/semantic/rows/{index}");
+        pointers.insert(old.to_owned(), pointer.clone());
+        value["snapshot_pointer"] = json!(old);
+        value["pointer"] = json!(pointer);
+        for (side, locations) in ["before", "after"].into_iter().zip(locations) {
+            if value[side].is_object() {
+                value[side]["written_locations"] = locations["written_locations"].as_array().map_or(json!([]), |locations| json!(locations));
+            }
+        }
+        if query.output.detail == Detail::Compact {
+            strip_optional_detail(&mut value);
+        }
+        let local: Vec<_> = row.references.iter().filter_map(|id| returned_references.get(id.as_str())).collect();
+        value["reference_counts"] = json!({"available_matches":row.references.len(),
+            "total_matches":reference_complete.then_some(row.references.len()), "returned_count":local.len()});
+        value["references"] = json!(local);
+        value
+    }).collect();
+
+    if wants_rows || wants_references {
+        data["semantic"] = semantic_section(diff, &summary, rows, references);
+        if let Some(references) = data["semantic"]["references"].as_array_mut() {
+            for reference in references {
+                rebase_equation(reference, &pointers);
+            }
+        }
     }
-    for reference in &mut references {
-        rebase_equation(reference, &pointers);
-    }
-    data["semantic"]["rows"] = json!(rows);
-    data["semantic"]["references"] = json!(references);
-    let mut available_files = 0;
-    let mut unpaired_files = 0;
-    if let Some(value) = data.pointer_mut("/source_changes/files") {
-        let mut files = array(value);
-        files.retain(|file| {
-            !query.filtered()
-                || ["before", "after"].iter().enumerate().any(|(index, side)| {
-                    let key = file[side]["file_key"].as_str().map(str::to_owned);
-                    key.as_ref()
-                        .is_some_and(|_| source_files[index].contains(&key))
-                        || (file["correspondence"] == "selected_roots"
-                            && source_files[index].contains(&None))
-                })
-        });
-        available_files = files.len();
-        unpaired_files = files
+
+    let source_files = if needs_source_context {
+        source_context(&wire, &selected_rows, row_start, &locations)
+    } else {
+        Default::default()
+    };
+    let selected_files: Vec<_> = if query.wants("source") || query.wants("summary") {
+        diff.source_changes
+            .files
             .iter()
-            .filter(|file| file["correspondence"] == "unpaired")
-            .count();
-        if query.wants("source") {
-            pages.collection_with_coverage(
-                "source_changes.files",
-                &mut files,
-                source_selection_complete,
-            );
-            for (index, file) in files.iter_mut().enumerate() {
-                let old = file["pointer"].as_str().unwrap_or_default().to_owned();
-                file["snapshot_pointer"] = json!(old);
+            .filter(|file| {
+                !query.filtered()
+                    || [&file.before, &file.after]
+                        .into_iter()
+                        .zip(&source_files)
+                        .any(|(side, files)| {
+                            side.as_ref()
+                                .is_some_and(|side| files.contains(&Some(side.file_key.clone())))
+                                || (file.correspondence == SourceCorrespondence::SelectedRoots
+                                    && files.contains(&None))
+                        })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let available_files = selected_files.len();
+    let unpaired_files = selected_files
+        .iter()
+        .filter(|file| file.correspondence == SourceCorrespondence::Unpaired)
+        .count();
+    if query.wants("source") {
+        let range = pages.projection_range(
+            "source_changes.files",
+            available_files,
+            source_selection_complete,
+        );
+        let files = selected_files[range]
+            .iter()
+            .enumerate()
+            .map(|(index, file)| {
+                let mut value = json!(file);
                 let new = format!("/source_changes/files/{index}");
-                file["pointer"] = json!(new);
-                map_pointer(&mut pointers, &old, new);
+                value["snapshot_pointer"] = json!(file.pointer);
+                value["pointer"] = json!(new);
+                pointers.insert(file.pointer.clone(), new);
+                value
+            })
+            .collect::<Vec<_>>();
+        data["source_changes"] = source_section(diff, files);
+    }
+
+    if wants_navigation {
+        let mut nav: Vec<_> = row_page
+            .iter()
+            .zip(locations)
+            .map(|(row, locations)| wire.row_navigation(row, locations))
+            .chain(
+                reference_page
+                    .iter()
+                    .map(|reference| wire.reference_navigation(reference)),
+            )
+            .collect();
+        for row in &mut nav {
+            let old = row["id"]
+                .as_str()
+                .expect("comparison navigation id")
+                .to_owned();
+            row["id"] = json!(pointers[&old]);
+            row["snapshot_pointer"] = json!(old);
+            rebase_equation(row, &pointers);
+        }
+        data["navigation"] = wire.navigation(nav);
+    }
+
+    if query.wants("source_text") {
+        let captured = sources.map_or([wire.before.sources(), wire.after.sources()], |sources| {
+            [&sources[0], &sources[1]]
+        });
+        if query.filtered() {
+            let inputs = wire.navigation(Vec::new());
+            for (index, side) in ["before", "after"].into_iter().enumerate() {
+                let root = inputs[side]["root_file"]
+                    .as_str()
+                    .or_else(|| inputs[side]["root_uri"].as_str());
+                let text: BTreeMap<_, _> = captured[index]
+                    .iter()
+                    .filter(|(file, _)| {
+                        source_files[index].contains(&Some((*file).clone()))
+                            || (source_files[index].contains(&None)
+                                && root.is_none_or(|root| root == *file))
+                    })
+                    .collect();
+                data["sources"][side] = json!(text);
             }
         } else {
-            files.clear();
-        }
-        *value = json!(files);
-    }
-    let mut nav_rows = Vec::new();
-    for original in navigation {
-        let Some(old) = original["id"].as_str() else {
-            continue;
-        };
-        if let Some(target) = pointers.get(old) {
-            let old = old.to_owned();
-            let mut row = original;
-            row["snapshot_pointer"] = json!(old);
-            row["id"] = json!(target);
-            rebase_equation(&mut row, &pointers);
-            nav_rows.push(row);
+            data["sources"] = json!({"before":captured[0],"after":captured[1]});
         }
     }
-    data["navigation"]["rows"] = json!(nav_rows);
-    repair_context(data, &pointers);
-    let object = data.as_object_mut().expect("comparison object");
-    for (section, field) in [
-        ("source", "source_changes"),
-        ("source_text", "sources"),
-        ("navigation", "navigation"),
-        ("markdown", "markdown"),
-    ] {
-        if !query.wants(section) {
-            object.remove(field);
-        }
-    }
-    if !query.wants("semantic") && !query.wants("references") {
-        object.remove("semantic");
+
+    if query.wants("markdown") {
+        data["markdown"] = json!(filtered_markdown(&selected_rows));
     }
     if query.wants("summary") {
-        let summary = object.get_mut("summary").expect("comparison summary");
         summary["semantic_rows"] = json!(semantic_complete.then_some(available_rows));
         summary["available_semantic_rows"] = json!(available_rows);
         summary["source_files"] = json!(source_selection_complete.then_some(available_files));
         summary["available_source_files"] = json!(available_files);
         summary["paired_file_changes"] = json!(available_files - unpaired_files);
         summary["unpaired_files"] = json!(unpaired_files);
-    } else {
-        object.remove("summary");
+        data["summary"] = summary;
     }
     if query.filtered()
         && !semantic_complete
@@ -391,6 +419,7 @@ pub(super) fn project(
             "The filter used the available model changes. Other matching file changes could not be determined.",
             json!({"effect":"model_rows"}));
     }
+    repair_context(data, &pointers);
     result.selection = pages.finish(query.output);
     Ok(())
 }
@@ -910,8 +939,48 @@ mod tests {
 
     #[test]
     fn partial_semantic_membership_cannot_supply_exact_filtered_source_totals() {
+        use crate::engine::comparison::compare_navigation::comparison_summary;
+        use crate::engine::comparison::compare_snapshots::{
+            SnapshotCapture, capture_working_snapshot, prepare_captured_comparison,
+        };
+        use crate::engine::comparison::semantic_diff::{
+            CaptureBoundary, CapturedSourceInput, ComparisonLimit, populate_captured_sources,
+        };
+        use crate::engine::workspace::Workspace;
+
         // Source capture can be complete while filtered change membership is limited.
-        let mut data = json!({"summary":{"semantic_rows":null,"source_files":1,"semantic_availability":"limit_exceeded","source_availability":"complete"},"semantic":{"availability":"limit_exceeded","rows":[{"pointer":"/semantic/rows/0","family":"parameters","change":"changed","name":"p","references":[]}],"references":[]},"source_changes":{"availability":"complete","files":[{"pointer":"/source_changes/files/0","correspondence":"proven_file_identity","before":{"file_key":"p.inc"}}]},"navigation":{"rows":[{"id":"/semantic/rows/0","before":{"written_locations":[{"file":"p.inc"}]}}]}});
+        let snapshot = |side, value| {
+            let workspace = Workspace::overlay_documents(&BTreeMap::from([(
+                "root.mod".into(),
+                format!("var y; parameters p; p={value}; model; y=p; end;"),
+            )]));
+            let SnapshotCapture::Ready(snapshot) =
+                capture_working_snapshot(workspace, "root.mod", side, "overlay")
+            else {
+                panic!("working capture is complete");
+            };
+            snapshot
+        };
+        let mut comparison =
+            prepare_captured_comparison(&mut snapshot("before", 1), &mut snapshot("after", 2))
+                .unwrap();
+        let source = |sources| CapturedSourceInput {
+            input_id: None,
+            root_key: "root.mod",
+            sources,
+            boundary: CaptureBoundary::SuppliedRootAndExecutedIncludes,
+        };
+        let before = BTreeMap::from([("root.mod".into(), "p=1;".into())]);
+        let after = BTreeMap::from([("root.mod".into(), "p=2;".into())]);
+        populate_captured_sources(&mut comparison.diff, source(&before), source(&after), &[])
+            .unwrap();
+        comparison.diff.semantic.limits.push(ComparisonLimit::new(
+            "serialized_output_limit",
+            "A model row was withheld",
+            "test",
+        ));
+        let mut data = json!({"summary":comparison_summary(&comparison.diff)});
+        assert_eq!(data["summary"]["source_files"], 1);
         let output = ResultOptions {
             sections: vec!["summary".into(), "source".into()],
             page_size: Some(1),
@@ -920,6 +989,8 @@ mod tests {
         let mut result = ToolResult::new(Value::Null);
         project(
             &mut data,
+            &comparison,
+            None,
             Query {
                 output: &output,
                 families: &["parameters".into()],
@@ -930,7 +1001,7 @@ mod tests {
             &mut result,
         )
         .unwrap();
-        assert_eq!(data["summary"]["semantic_availability"], "limit_exceeded");
+        assert_eq!(data["summary"]["semantic_availability"], "partial");
         assert_eq!(data["summary"]["source_availability"], "complete");
         assert!(data["summary"]["source_files"].is_null());
         assert!(
