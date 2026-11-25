@@ -285,10 +285,10 @@ async fn folder_snapshot_uses_deepest_folder_and_loose_defaults() {
     let nested = files.folder("outer/nested");
     let options = json!({"dynare":{"configuration":{
         "schemaVersion":1,
-        "loose":{"searchPaths":["lib"],"formatIndent":4,"nameDetails":{"longName":false}},
+        "loose":{"searchPaths":["lib"],"nameDetails":{"longName":false}},
         "folders":[
-            {"uri":outer.uri,"settings":{"searchPaths":["lib"],"formatIndent":2,"nameDetails":{"tex":false}}},
-            {"uri":nested.uri,"settings":{"searchPaths":["lib"],"formatIndent":3,"parameterValueHints":false}}
+            {"uri":outer.uri,"settings":{"searchPaths":["lib"],"format":{"splitStatements":true},"nameDetails":{"tex":false}}},
+            {"uri":nested.uri,"settings":{"searchPaths":["lib"],"format":{"alignAssignments":true},"parameterValueHints":false}}
         ]
     }}});
     let (service, _socket) = new_service();
@@ -297,7 +297,7 @@ async fn folder_snapshot_uses_deepest_folder_and_loose_defaults() {
         .initialize(initialize(vec![outer, nested], options))
         .await
         .unwrap();
-    let source = "@#include \"values.inc\"\nvar y;\nmodel;\ny=p;\nend;\n";
+    let source = "@#include \"values.inc\"\nvar y; parameters a abc;\na=1;\nabc=2;\nmodel;\ny=p+a+abc;\nend;\n";
     for name in ["outer/root.mod", "outer/nested/root.mod", "loose/root.mod"] {
         let uri = files.uri(name);
         open(backend, uri.clone(), source).await;
@@ -325,10 +325,14 @@ async fn folder_snapshot_uses_deepest_folder_and_loose_defaults() {
             .name_details
             .long_name
     );
-    for (name, count) in [
-        ("outer/root.mod", 2),
-        ("outer/nested/root.mod", 3),
-        ("loose/root.mod", 4),
+    // Guards formatting preferences leaking from the outer folder into nested or loose files.
+    for (name, expected_layout) in [
+        ("outer/root.mod", "var y;\nparameters a abc;\na = 1;"),
+        (
+            "outer/nested/root.mod",
+            "var y; parameters a abc;\na   = 1;",
+        ),
+        ("loose/root.mod", "var y; parameters a abc;\na = 1;"),
     ] {
         let uri = files.uri(name);
         let edits = backend
@@ -345,9 +349,8 @@ async fn folder_snapshot_uses_deepest_folder_and_loose_defaults() {
             .unwrap()
             .unwrap();
         assert!(
-            edits[0]
-                .new_text
-                .contains(&format!("\n{}y", " ".repeat(count)))
+            edits[0].new_text.contains(expected_layout),
+            "{name}: {edits:?}"
         );
     }
     let virtual_uri = Url::parse("untitled:Untitled-1.mod").unwrap();

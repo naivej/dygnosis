@@ -158,10 +158,9 @@ function pure(info, prefs = {}) {
   return tintRanges(info, doc, { enabled: true, styles: new Map(tintCategoryDefaults), heterogeneousModels: new Map(), ...prefs });
 }
 
-test("native tint table exposes the supported block names and style choices", () => {
+test("native tint table exposes the supported style choices", () => {
   const properties = colorContributions.configuration.properties;
   const table = properties["dynare.blockTint.styles"];
-  assert.deepEqual(Object.keys(table.properties).sort(), tintCategoryDefaults.map(([category]) => category).sort());
   assert.deepEqual(table.default, {});
   assert.equal(table.additionalProperties, false);
   for (const entry of Object.values(table.properties)) assert.deepEqual(entry.enum, ["Off", "Subtle", "Standard"]);

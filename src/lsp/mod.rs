@@ -2209,11 +2209,18 @@ impl Backend {
         let index = LineIndex::new(&crate::engine::language::parser::normalize_newlines(
             &doc.text,
         ));
-        let selection = range.map(|range| {
+        let selection = if let Some(range) = range {
+            if !index.has_line(range.start.line) {
+                return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                    "The formatting range starts outside the document.",
+                ));
+            }
             let start = index.offset_utf16(&doc.text, span_pos(range.start)) as usize;
             let end = index.offset_utf16(&doc.text, span_pos(range.end)) as usize;
-            start..end
-        });
+            Some(start..end)
+        } else {
+            None
+        };
         let mut roots = inner.context_roots(uri);
         roots.extend(inner.known_owner_roots(uri));
         let mut observed = HashSet::new();

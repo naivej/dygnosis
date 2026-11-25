@@ -575,6 +575,7 @@ fn only_executed_search_paths_choose_files_and_uncertain_paths_stay_incomplete()
 
 #[test]
 fn active_failures_keep_codes_and_written_locations() {
+    let directory = ROOT.rsplit_once('/').unwrap().0;
     for (source, code, line, child) in [
         (
             format!("@#if 1\n@#include \"absent.inc\"\n@#endif\n{MODEL}"),
@@ -586,7 +587,7 @@ fn active_failures_keep_codes_and_written_locations() {
             format!("@#include \"missing.inc\"\n{MODEL}"),
             "E061",
             1,
-            None,
+            Some("missing.inc"),
         ),
         (
             format!("{MODEL}@#include \"bad.inc\"\n"),
@@ -621,17 +622,11 @@ fn active_failures_keep_codes_and_written_locations() {
             .find(|d| d.code == code)
             .unwrap_or_else(|| panic!("{source}: {diagnostics:?}"));
         assert_eq!(diagnostic.line, line, "{diagnostic:?}");
-        if let Some(child) = child {
-            assert!(
-                diagnostic
-                    .file
-                    .as_deref()
-                    .is_some_and(|file| file.ends_with(child)),
-                "{diagnostic:?}"
-            );
-        } else {
-            assert_eq!(diagnostic.file, None);
-        }
+        assert_eq!(
+            diagnostic.file,
+            child.map(|name| format!("{directory}/{name}")),
+            "{diagnostic:?}"
+        );
     }
 }
 

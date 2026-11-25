@@ -51,6 +51,10 @@ impl LineIndex {
         self.starts.capacity() * size_of::<u32>()
     }
 
+    pub(crate) fn has_line(&self, line: u32) -> bool {
+        (line as usize) < self.starts.len()
+    }
+
     pub fn position(&self, src: &str, byte: u32) -> Position {
         let idx = self
             .starts
